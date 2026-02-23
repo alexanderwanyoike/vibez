@@ -56,10 +56,11 @@ pub struct UiTrack {
     pub effects: Vec<UiEffect>,
     pub note_clips: Vec<UiNoteClip>,
     pub kind: TrackKind,
+    pub color_index: u8,
 }
 
 impl UiTrack {
-    pub fn new(id: TrackId, name: String) -> Self {
+    pub fn new(id: TrackId, name: String, color_index: u8) -> Self {
         Self {
             id,
             name,
@@ -73,10 +74,11 @@ impl UiTrack {
             effects: Vec::new(),
             note_clips: Vec::new(),
             kind: TrackKind::Audio,
+            color_index,
         }
     }
 
-    pub fn new_instrument(id: TrackId, name: String, kind: TrackKind) -> Self {
+    pub fn new_instrument(id: TrackId, name: String, kind: TrackKind, color_index: u8) -> Self {
         Self {
             id,
             name,
@@ -90,6 +92,7 @@ impl UiTrack {
             effects: Vec::new(),
             note_clips: Vec::new(),
             kind,
+            color_index,
         }
     }
 }
@@ -98,7 +101,6 @@ impl UiTrack {
 pub enum Workspace {
     Arrange,
     Mix,
-    Piano,
 }
 
 pub struct AppState {
@@ -123,6 +125,9 @@ pub struct AppState {
     pub tracks: Vec<UiTrack>,
     pub selected_track: Option<TrackId>,
     pub next_track_number: u32,
+
+    // Detail panel: which note clip is selected for piano roll editing
+    pub selected_note_clip: Option<(TrackId, ClipId)>,
 }
 
 impl Default for AppState {
@@ -140,6 +145,7 @@ impl Default for AppState {
             tracks: Vec::new(),
             selected_track: None,
             next_track_number: 1,
+            selected_note_clip: None,
         }
     }
 }

@@ -3,7 +3,7 @@ use std::time::Instant;
 use iced::keyboard;
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
@@ -31,9 +31,11 @@ pub struct EffectKnobWidget {
     pub min: f32,
     pub max: f32,
     pub default: f32,
+    pub arc_color: Color,
 }
 
 impl EffectKnobWidget {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         track_id: TrackId,
         effect_id: EffectId,
@@ -42,6 +44,7 @@ impl EffectKnobWidget {
         min: f32,
         max: f32,
         default: f32,
+        arc_color: Color,
     ) -> Self {
         Self {
             track_id,
@@ -51,6 +54,7 @@ impl EffectKnobWidget {
             min,
             max,
             default,
+            arc_color,
         }
     }
 
@@ -113,14 +117,14 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 .with_width(3.0),
         );
 
-        // Value arc (filled portion)
+        // Value arc (filled portion) using track color
         let value_angle = ARC_START + norm * (ARC_END - ARC_START);
         if norm > 0.005 {
             let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
             frame.stroke(
                 &value_arc,
                 canvas::Stroke::default()
-                    .with_color(theme::KNOB_ARC)
+                    .with_color(self.arc_color)
                     .with_width(3.0),
             );
         }

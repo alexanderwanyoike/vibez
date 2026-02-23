@@ -1,47 +1,115 @@
 use iced::theme::Palette;
 use iced::{Color, Theme};
 
-/// Vibez accent blue: #6190FF
-pub const ACCENT: Color = Color {
-    r: 0.380,
-    g: 0.565,
-    b: 1.0,
-    a: 1.0,
-};
+// ── Main palette (dark charcoal) ──
 
-/// Dark background: #1A1A2E
+/// Near-black main background: #1a1a1a
 pub const BG_DARK: Color = Color {
     r: 0.102,
     g: 0.102,
-    b: 0.180,
+    b: 0.102,
     a: 1.0,
 };
 
-/// Surface/panel background: #22223A
+/// Panels, headers, strips: #242424
 pub const BG_SURFACE: Color = Color {
-    r: 0.133,
-    g: 0.133,
+    r: 0.141,
+    g: 0.141,
+    b: 0.141,
+    a: 1.0,
+};
+
+/// Cards, effect slots, raised elements: #2d2d2d
+pub const BG_ELEVATED: Color = Color {
+    r: 0.176,
+    g: 0.176,
+    b: 0.176,
+    a: 1.0,
+};
+
+/// Hover state for interactive elements: #363636
+#[allow(dead_code)]
+pub const BG_HOVER: Color = Color {
+    r: 0.212,
+    g: 0.212,
+    b: 0.212,
+    a: 1.0,
+};
+
+// ── Text ──
+
+/// Primary text: #e0e0e0
+pub const TEXT: Color = Color {
+    r: 0.878,
+    g: 0.878,
+    b: 0.878,
+    a: 1.0,
+};
+
+/// Secondary text, labels: #808080
+pub const TEXT_DIM: Color = Color {
+    r: 0.502,
+    g: 0.502,
+    b: 0.502,
+    a: 1.0,
+};
+
+/// Disabled, placeholder: #505050
+pub const TEXT_MUTED: Color = Color {
+    r: 0.314,
+    g: 0.314,
+    b: 0.314,
+    a: 1.0,
+};
+
+// ── Accent ──
+
+/// Orange accent — transport active, selected: #ff8c00
+pub const ACCENT: Color = Color {
+    r: 1.0,
+    g: 0.549,
+    b: 0.0,
+    a: 1.0,
+};
+
+/// Accent at lower intensity: #995400
+pub const ACCENT_DIM: Color = Color {
+    r: 0.600,
+    g: 0.329,
+    b: 0.0,
+    a: 1.0,
+};
+
+// ── Borders / dividers ──
+
+/// Subtle panel borders: #3a3a3a
+pub const BORDER: Color = Color {
+    r: 0.227,
+    g: 0.227,
     b: 0.227,
     a: 1.0,
 };
 
-/// Text color: #E0E0F0
-pub const TEXT: Color = Color {
-    r: 0.878,
-    g: 0.878,
-    b: 0.941,
+/// Stronger borders for cards: #4a4a4a
+#[allow(dead_code)]
+pub const BORDER_LIGHT: Color = Color {
+    r: 0.290,
+    g: 0.290,
+    b: 0.290,
     a: 1.0,
 };
 
-/// Dimmed text: #8888AA
-pub const TEXT_DIM: Color = Color {
-    r: 0.533,
-    g: 0.533,
-    b: 0.667,
+/// Section dividers: #2a2a2a
+pub const DIVIDER: Color = Color {
+    r: 0.165,
+    g: 0.165,
+    b: 0.165,
     a: 1.0,
 };
 
-/// Success/green for play: #4ADE80
+// ── Semantic colors ──
+
+/// Success/green for play: #4ade80
 pub const SUCCESS: Color = Color {
     r: 0.290,
     g: 0.871,
@@ -49,7 +117,7 @@ pub const SUCCESS: Color = Color {
     a: 1.0,
 };
 
-/// Danger/red for stop: #F87171
+/// Danger/red: #f87171
 pub const DANGER: Color = Color {
     r: 0.973,
     g: 0.443,
@@ -57,23 +125,17 @@ pub const DANGER: Color = Color {
     a: 1.0,
 };
 
-/// Waveform color
-pub const WAVEFORM: Color = Color {
-    r: 0.380,
-    g: 0.565,
-    b: 1.0,
-    a: 0.8,
-};
-
-/// Playhead color
+/// Playhead: white at 80% opacity
 pub const PLAYHEAD: Color = Color {
     r: 1.0,
     g: 1.0,
     b: 1.0,
-    a: 0.9,
+    a: 0.8,
 };
 
-/// VU meter green
+// ── Meter colors ──
+
+/// VU meter green: #4ade80
 pub const METER_GREEN: Color = Color {
     r: 0.290,
     g: 0.871,
@@ -81,7 +143,7 @@ pub const METER_GREEN: Color = Color {
     a: 1.0,
 };
 
-/// VU meter yellow
+/// VU meter yellow: #ffd700
 pub const METER_YELLOW: Color = Color {
     r: 1.0,
     g: 0.843,
@@ -89,7 +151,7 @@ pub const METER_YELLOW: Color = Color {
     a: 1.0,
 };
 
-/// VU meter red
+/// VU meter red: #f87171
 pub const METER_RED: Color = Color {
     r: 0.973,
     g: 0.443,
@@ -97,25 +159,130 @@ pub const METER_RED: Color = Color {
     a: 1.0,
 };
 
-// -- Phase 2 colors --
+// ── Button state colors ──
+
+/// Mute active: #f87171 (red)
+pub const MUTE_ACTIVE: Color = DANGER;
+
+/// Solo active: #ffd700 (yellow)
+pub const SOLO_ACTIVE: Color = METER_YELLOW;
+
+// ── Knob / fader colors ──
+
+/// Knob background: BG_ELEVATED
+pub const KNOB_BG: Color = BG_ELEVATED;
+
+/// Default knob arc color (overridden by track color): #888888
+#[allow(dead_code)]
+pub const KNOB_ARC: Color = Color {
+    r: 0.533,
+    g: 0.533,
+    b: 0.533,
+    a: 1.0,
+};
+
+/// Fader track color: BG_ELEVATED
+pub const FADER_TRACK: Color = BG_ELEVATED;
+
+/// Fader handle color: #888888
+pub const FADER_HANDLE: Color = Color {
+    r: 0.533,
+    g: 0.533,
+    b: 0.533,
+    a: 1.0,
+};
+
+// ── Track colors (auto-assigned per track) ──
+
+pub const TRACK_COLORS: [Color; 8] = [
+    // Red: #e06060
+    Color {
+        r: 0.878,
+        g: 0.376,
+        b: 0.376,
+        a: 1.0,
+    },
+    // Orange: #e09040
+    Color {
+        r: 0.878,
+        g: 0.565,
+        b: 0.251,
+        a: 1.0,
+    },
+    // Yellow: #d0c040
+    Color {
+        r: 0.816,
+        g: 0.753,
+        b: 0.251,
+        a: 1.0,
+    },
+    // Green: #50b060
+    Color {
+        r: 0.314,
+        g: 0.690,
+        b: 0.376,
+        a: 1.0,
+    },
+    // Cyan: #40a0b0
+    Color {
+        r: 0.251,
+        g: 0.627,
+        b: 0.690,
+        a: 1.0,
+    },
+    // Blue: #6080d0
+    Color {
+        r: 0.376,
+        g: 0.502,
+        b: 0.816,
+        a: 1.0,
+    },
+    // Purple: #9060c0
+    Color {
+        r: 0.565,
+        g: 0.376,
+        b: 0.753,
+        a: 1.0,
+    },
+    // Pink: #c060a0
+    Color {
+        r: 0.753,
+        g: 0.376,
+        b: 0.627,
+        a: 1.0,
+    },
+];
+
+/// Get a track color by index (wraps around).
+pub fn track_color(index: u8) -> Color {
+    TRACK_COLORS[index as usize % TRACK_COLORS.len()]
+}
+
+/// Darken a color by a factor (for borders, etc.)
+pub fn darken(color: Color, factor: f32) -> Color {
+    Color {
+        r: color.r * factor,
+        g: color.g * factor,
+        b: color.b * factor,
+        a: color.a,
+    }
+}
+
+/// Apply alpha to a color.
+pub fn with_alpha(color: Color, alpha: f32) -> Color {
+    Color { a: alpha, ..color }
+}
+
+// ── Aliases for backward compatibility in widgets ──
 
 /// Track lane background
-pub const TRACK_BG: Color = Color {
-    r: 0.118,
-    g: 0.118,
-    b: 0.200,
-    a: 1.0,
-};
+pub const TRACK_BG: Color = BG_DARK;
 
 /// Selected track background
-pub const TRACK_BG_SELECTED: Color = Color {
-    r: 0.160,
-    g: 0.160,
-    b: 0.260,
-    a: 1.0,
-};
+pub const TRACK_BG_SELECTED: Color = BG_ELEVATED;
 
-/// Clip body color
+/// Clip body color (default, overridden by track color)
+#[allow(dead_code)]
 pub const CLIP_BODY: Color = Color {
     r: 0.300,
     g: 0.480,
@@ -123,7 +290,8 @@ pub const CLIP_BODY: Color = Color {
     a: 0.6,
 };
 
-/// Clip border color
+/// Clip border color (default, overridden by track color)
+#[allow(dead_code)]
 pub const CLIP_BORDER: Color = Color {
     r: 0.380,
     g: 0.565,
@@ -131,75 +299,26 @@ pub const CLIP_BORDER: Color = Color {
     a: 0.9,
 };
 
-/// Fader track color
-pub const FADER_TRACK: Color = Color {
-    r: 0.180,
-    g: 0.180,
-    b: 0.280,
-    a: 1.0,
-};
-
-/// Fader handle color
-pub const FADER_HANDLE: Color = Color {
-    r: 0.700,
-    g: 0.700,
-    b: 0.800,
-    a: 1.0,
-};
-
-/// Knob background
-pub const KNOB_BG: Color = Color {
-    r: 0.160,
-    g: 0.160,
-    b: 0.250,
-    a: 1.0,
-};
-
-/// Knob arc color
-pub const KNOB_ARC: Color = Color {
+/// Waveform display color (default, overridden by track color)
+pub const WAVEFORM: Color = Color {
     r: 0.380,
     g: 0.565,
     b: 1.0,
-    a: 1.0,
+    a: 0.6,
 };
 
-/// Mute button active color
-pub const MUTE_ACTIVE: Color = Color {
-    r: 0.973,
-    g: 0.443,
-    b: 0.443,
-    a: 1.0,
-};
+/// Ruler background
+pub const RULER_BG: Color = BG_SURFACE;
 
-/// Solo button active color
-pub const SOLO_ACTIVE: Color = Color {
-    r: 1.0,
-    g: 0.843,
-    b: 0.0,
-    a: 1.0,
-};
+/// Ruler text
+pub const RULER_TEXT: Color = TEXT_DIM;
 
-/// Time ruler background
-pub const RULER_BG: Color = Color {
-    r: 0.110,
-    g: 0.110,
-    b: 0.190,
-    a: 1.0,
-};
-
-/// Time ruler text
-pub const RULER_TEXT: Color = Color {
-    r: 0.533,
-    g: 0.533,
-    b: 0.667,
-    a: 1.0,
-};
-
-/// Time ruler line
+/// Ruler line
+#[allow(dead_code)]
 pub const RULER_LINE: Color = Color {
-    r: 0.300,
-    g: 0.300,
-    b: 0.420,
+    r: 0.227,
+    g: 0.227,
+    b: 0.227,
     a: 0.5,
 };
 

@@ -1,4 +1,5 @@
 mod app;
+pub mod icons;
 mod message;
 mod state;
 mod theme;

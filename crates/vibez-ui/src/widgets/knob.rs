@@ -3,7 +3,7 @@ use std::time::Instant;
 use iced::keyboard;
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
@@ -29,11 +29,17 @@ pub struct KnobWidget {
     pub track_id: TrackId,
     /// Current pan value (0.0 = left, 0.5 = center, 1.0 = right).
     pub value: f32,
+    /// Arc color (track color).
+    pub arc_color: Color,
 }
 
 impl KnobWidget {
-    pub fn new(track_id: TrackId, value: f32) -> Self {
-        Self { track_id, value }
+    pub fn new(track_id: TrackId, value: f32, arc_color: Color) -> Self {
+        Self {
+            track_id,
+            value,
+            arc_color,
+        }
     }
 }
 
@@ -90,14 +96,14 @@ impl canvas::Program<Message> for KnobWidget {
                 .with_width(3.0),
         );
 
-        // Value arc (filled portion)
+        // Value arc (filled portion) using track color
         let value_angle = ARC_START + self.value * (ARC_END - ARC_START);
         if self.value > 0.005 {
             let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
             frame.stroke(
                 &value_arc,
                 canvas::Stroke::default()
-                    .with_color(theme::KNOB_ARC)
+                    .with_color(self.arc_color)
                     .with_width(3.0),
             );
         }

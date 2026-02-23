@@ -67,8 +67,9 @@ pub enum Message {
     AddInstrumentTrack,
     SetSynthParam(TrackId, usize, f32),
 
-    // Piano roll
+    // Piano roll / note clips
     AddNoteClipToTrack(TrackId),
+    SelectNoteClip(TrackId, ClipId),
     AddNote {
         track_id: TrackId,
         clip_id: ClipId,

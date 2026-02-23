@@ -4,22 +4,23 @@ use std::sync::Arc;
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, row, scrollable, text, text_input,
 };
-use iced::{Element, Length, Subscription, Task, Theme};
+use iced::{Color, Element, Length, Subscription, Task, Theme};
 
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
 use vibez_core::effect::EffectType;
-use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
 
+use crate::icons;
 use crate::message::Message;
 use crate::state::{AppState, UiClip, UiEffect, UiNoteClip, UiTrack, Workspace};
-use crate::theme as vibez_theme;
+use crate::theme as th;
 use crate::widgets::effect_slot::view_effect_slot;
 use crate::widgets::mixer_strip::view_mixer_strip;
 use crate::widgets::piano_roll::PianoRollWidget;
@@ -39,6 +40,7 @@ pub fn run() -> iced::Result {
         .theme(App::theme)
         .subscription(App::subscription)
         .window_size((1400.0, 900.0))
+        .font(icons::ICON_FONT_BYTES)
         .run_with(App::new)
 }
 
@@ -149,12 +151,13 @@ impl App {
             // -- Multi-track messages --
             Message::AddTrack => {
                 let track_num = self.state.next_track_number;
+                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
                 self.state.next_track_number += 1;
                 let id = TrackId::new();
                 let name = format!("Track {track_num}");
 
                 self.send_command(EngineCommand::AddTrack(id, name.clone()));
-                self.state.tracks.push(UiTrack::new(id, name));
+                self.state.tracks.push(UiTrack::new(id, name, color_index));
                 self.state.selected_track = Some(id);
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
@@ -163,6 +166,12 @@ impl App {
                 self.state.tracks.retain(|t| t.id != track_id);
                 if self.state.selected_track == Some(track_id) {
                     self.state.selected_track = self.state.tracks.first().map(|t| t.id);
+                }
+                // Clear note clip selection if track removed
+                if let Some((tid, _)) = self.state.selected_note_clip {
+                    if tid == track_id {
+                        self.state.selected_note_clip = None;
+                    }
                 }
                 if self.state.tracks.is_empty() {
                     self.state.status_text = "Ready — Add a track to get started".to_string();
@@ -174,6 +183,14 @@ impl App {
                 self.state.selected_track = Some(track_id);
             }
             Message::AddClipToTrack(track_id) => {
+                // Guard: only audio tracks can have audio clips
+                if let Some(track) = self.state.find_track(track_id) {
+                    if matches!(track.kind, TrackKind::Instrument(_)) {
+                        self.state.status_text =
+                            "Instrument tracks use note clips, not audio".to_string();
+                        return Task::none();
+                    }
+                }
                 return Task::perform(
                     async {
                         let handle = rfd::AsyncFileDialog::new()
@@ -293,7 +310,7 @@ impl App {
 
             // -- Effects --
             Message::AddEffect(track_id, effect_type) => {
-                let effect_id = EffectId::new();
+                let effect_id = vibez_core::id::EffectId::new();
                 let fx =
                     vibez_dsp::factory::create_effect(effect_type, self.state.sample_rate as f32);
                 let descriptors = fx.param_descriptors();
@@ -355,6 +372,7 @@ impl App {
             // -- Instrument tracks --
             Message::AddInstrumentTrack => {
                 let track_num = self.state.next_track_number;
+                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
                 self.state.next_track_number += 1;
                 let id = TrackId::new();
                 let name = format!("Synth {track_num}");
@@ -363,17 +381,16 @@ impl App {
                 self.send_command(EngineCommand::AddTrack(id, name.clone()));
                 self.state
                     .tracks
-                    .push(UiTrack::new_instrument(id, name, kind));
+                    .push(UiTrack::new_instrument(id, name, kind, color_index));
                 self.state.selected_track = Some(id);
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
             Message::SetSynthParam(track_id, param_index, value) => {
-                // Synth params would be stored per-track; for now, update status
                 let _ = (track_id, param_index, value);
                 self.state.status_text = format!("Synth param {param_index} = {value:.2}");
             }
 
-            // -- Piano roll --
+            // -- Piano roll / note clips --
             Message::AddNoteClipToTrack(track_id) => {
                 let clip_id = ClipId::new();
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -386,7 +403,12 @@ impl App {
                         selected_note: None,
                     });
                 }
+                // Auto-select the new note clip for piano roll editing
+                self.state.selected_note_clip = Some((track_id, clip_id));
                 self.state.status_text = "Added note clip".to_string();
+            }
+            Message::SelectNoteClip(track_id, clip_id) => {
+                self.state.selected_note_clip = Some((track_id, clip_id));
             }
             Message::AddNote {
                 track_id,
@@ -476,7 +498,6 @@ impl App {
         let content = match self.state.workspace {
             Workspace::Arrange => self.view_arrangement(),
             Workspace::Mix => self.view_mixer(),
-            Workspace::Piano => self.view_piano(),
         };
 
         let detail_panel = self.view_detail_panel();
@@ -492,51 +513,118 @@ impl App {
     }
 
     fn view_header(&self) -> Element<'_, Message> {
-        let title = text("vibez").size(24).color(vibez_theme::ACCENT);
+        let title = text("vibez").size(22).color(th::ACCENT);
 
         // Workspace tabs
         let arrange_tab = {
-            let color = if self.state.workspace == Workspace::Arrange {
-                vibez_theme::ACCENT
+            let active = self.state.workspace == Workspace::Arrange;
+            let (bg, text_color, border_color) = if active {
+                (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
             } else {
-                vibez_theme::TEXT_DIM
+                (
+                    iced::Color::TRANSPARENT,
+                    th::TEXT_DIM,
+                    iced::Color::TRANSPARENT,
+                )
             };
-            button(text("Arrange").size(13).color(color))
-                .on_press(Message::SwitchWorkspace(Workspace::Arrange))
-                .padding([6, 14])
+            button(
+                row![
+                    icons::icon(icons::LAYOUT_LIST).size(13).color(text_color),
+                    text("Arrange").size(13).color(text_color)
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::SwitchWorkspace(Workspace::Arrange))
+            .padding([6, 14])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(bg.into()),
+                text_color,
+                border: iced::Border {
+                    color: border_color,
+                    width: if active { 1.0 } else { 0.0 },
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
         };
 
         let mix_tab = {
-            let color = if self.state.workspace == Workspace::Mix {
-                vibez_theme::ACCENT
+            let active = self.state.workspace == Workspace::Mix;
+            let (bg, text_color, border_color) = if active {
+                (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
             } else {
-                vibez_theme::TEXT_DIM
+                (
+                    iced::Color::TRANSPARENT,
+                    th::TEXT_DIM,
+                    iced::Color::TRANSPARENT,
+                )
             };
-            button(text("Mix").size(13).color(color))
-                .on_press(Message::SwitchWorkspace(Workspace::Mix))
-                .padding([6, 14])
+            button(
+                row![
+                    icons::icon(icons::SLIDERS_VERTICAL)
+                        .size(13)
+                        .color(text_color),
+                    text("Mix").size(13).color(text_color)
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::SwitchWorkspace(Workspace::Mix))
+            .padding([6, 14])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(bg.into()),
+                text_color,
+                border: iced::Border {
+                    color: border_color,
+                    width: if active { 1.0 } else { 0.0 },
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
         };
 
-        let piano_tab = {
-            let color = if self.state.workspace == Workspace::Piano {
-                vibez_theme::ACCENT
-            } else {
-                vibez_theme::TEXT_DIM
-            };
-            button(text("Piano").size(13).color(color))
-                .on_press(Message::SwitchWorkspace(Workspace::Piano))
-                .padding([6, 14])
-        };
+        let tabs = row![arrange_tab, mix_tab].spacing(4);
 
-        let tabs = row![arrange_tab, mix_tab, piano_tab].spacing(2);
+        // Add track buttons with icons
+        let add_audio_btn = button(
+            row![
+                icons::icon(icons::AUDIO_WAVEFORM).size(13),
+                text("Audio").size(13)
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::AddTrack)
+        .padding([6, 14])
+        .style(|_theme: &Theme, _status| button::Style {
+            background: Some(th::BG_ELEVATED.into()),
+            text_color: th::TEXT,
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
 
-        let add_audio_btn = button(text("+ Audio").size(14))
-            .on_press(Message::AddTrack)
-            .padding([6, 16]);
-
-        let add_synth_btn = button(text("+ Synth").size(14))
-            .on_press(Message::AddInstrumentTrack)
-            .padding([6, 16]);
+        let add_synth_btn = button(
+            row![icons::icon(icons::MUSIC).size(13), text("Synth").size(13)]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::AddInstrumentTrack)
+        .padding([6, 14])
+        .style(|_theme: &Theme, _status| button::Style {
+            background: Some(th::BG_ELEVATED.into()),
+            text_color: th::TEXT,
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
 
         let mut header_row = row![
             title,
@@ -548,18 +636,40 @@ impl App {
         .spacing(8);
 
         if let Some(selected_id) = self.state.selected_track {
-            let remove_btn = button(text("Remove Track").size(14))
-                .on_press(Message::RemoveTrack(selected_id))
-                .padding([6, 16]);
+            let remove_btn = button(
+                row![
+                    icons::icon(icons::TRASH_2).size(13),
+                    text("Remove").size(13)
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::RemoveTrack(selected_id))
+            .padding([6, 14])
+            .style(|_theme: &Theme, _status| button::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                text_color: th::DANGER,
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
             header_row = header_row.push(remove_btn);
         }
 
-        let header = header_row.padding(12).align_y(iced::Alignment::Center);
+        let header = header_row.padding(10).align_y(iced::Alignment::Center);
 
         container(header)
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_SURFACE.into()),
+                background: Some(th::BG_SURFACE.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .into()
@@ -571,7 +681,7 @@ impl App {
         if self.state.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
-                .color(vibez_theme::TEXT_DIM);
+                .color(th::TEXT_DIM);
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
@@ -579,7 +689,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(vibez_theme::BG_DARK.into()),
+                    background: Some(th::BG_DARK.into()),
                     ..Default::default()
                 })
                 .into();
@@ -588,15 +698,17 @@ impl App {
         let playhead = self.state.position_normalized();
         let duration = self.state.duration_seconds();
         let sample_rate = self.state.sample_rate;
+        let bpm = self.state.bpm;
 
-        // Time ruler across the top (offset by track header width)
+        // Beat-based ruler across the top (offset by track header width)
         let ruler = RulerWidget {
             playhead_position: playhead,
             duration_seconds: duration,
+            bpm,
         };
-        let ruler_canvas: Element<Message> = canvas(ruler)
+        let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
-            .height(Length::Fixed(24.0))
+            .height(Length::Fixed(28.0))
             .into();
 
         // Spacer matching header width for the ruler row
@@ -604,7 +716,7 @@ impl App {
             .width(Length::Fixed(
                 crate::widgets::track_header::TRACK_HEADER_WIDTH,
             ))
-            .height(Length::Fixed(24.0));
+            .height(Length::Fixed(28.0));
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -613,19 +725,27 @@ impl App {
 
         for track in &self.state.tracks {
             let selected = self.state.selected_track == Some(track.id);
+            let track_color = th::track_color(track.color_index);
 
             // Track header (iced widgets)
             let header = view_track_header(track);
 
             // Clip canvas for this track
-            let clip_canvas_widget =
-                TrackClipCanvas::from_track(track, playhead, duration, sample_rate, selected);
-            let clip_canvas: Element<Message> = canvas(clip_canvas_widget)
+            let clip_canvas_widget = TrackClipCanvas::from_track(
+                track,
+                playhead,
+                duration,
+                sample_rate,
+                selected,
+                track_color,
+                bpm,
+            );
+            let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
                 .width(Length::Fill)
-                .height(Length::Fixed(80.0))
+                .height(Length::Fixed(70.0))
                 .into();
 
-            let track_row = row![header, clip_canvas].height(Length::Fixed(80.0));
+            let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
 
             track_rows = track_rows.push(track_row);
         }
@@ -640,7 +760,7 @@ impl App {
             .width(Length::Fill)
             .height(Length::FillPortion(5))
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_DARK.into()),
+                background: Some(th::BG_DARK.into()),
                 ..Default::default()
             })
             .into()
@@ -652,7 +772,7 @@ impl App {
         if self.state.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
-                .color(vibez_theme::TEXT_DIM);
+                .color(th::TEXT_DIM);
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
@@ -660,7 +780,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(vibez_theme::BG_DARK.into()),
+                    background: Some(th::BG_DARK.into()),
                     ..Default::default()
                 })
                 .into();
@@ -674,21 +794,21 @@ impl App {
             strips = strips.push(strip);
         }
 
-        // Master strip — pinned to far right, fills height
-        let master_label = text("Master").size(11).color(vibez_theme::TEXT);
+        // Master strip — pinned to far right
+        let master_label = text("Master").size(12).color(th::TEXT);
         let master_meter = VuMeterWidget {
             peak_l: self.state.peak_l,
             peak_r: self.state.peak_r,
         };
-        let master_meter_canvas: Element<Message> = canvas(master_meter)
-            .width(Length::Fixed(28.0))
+        let master_meter_canvas: Element<'_, Message> = canvas(master_meter)
+            .width(Length::Fixed(32.0))
             .height(Length::Fill)
             .into();
 
         let master_col = column![master_label, master_meter_canvas]
             .spacing(4)
-            .padding(6)
-            .width(Length::Fixed(60.0))
+            .padding(8)
+            .width(Length::Fixed(100.0))
             .height(Length::Fill)
             .align_x(iced::Alignment::Center);
 
@@ -696,9 +816,9 @@ impl App {
             container(master_col)
                 .height(Length::Fill)
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(vibez_theme::BG_SURFACE.into()),
+                    background: Some(th::BG_ELEVATED.into()),
                     border: iced::Border {
-                        color: vibez_theme::ACCENT,
+                        color: th::BORDER,
                         width: 1.0,
                         radius: 2.0.into(),
                     },
@@ -714,135 +834,49 @@ impl App {
             .width(Length::Fill)
             .height(Length::FillPortion(5))
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_SURFACE.into()),
+                background: Some(th::BG_DARK.into()),
                 ..Default::default()
             })
             .into()
     }
 
-    // ── Piano roll view ──
-
-    fn view_piano(&self) -> Element<'_, Message> {
-        let selected = self
-            .state
-            .selected_track
-            .and_then(|id| self.state.find_track(id));
-
-        let playhead_beats = self.state.position_beats();
-
-        let piano_widget = if let Some(track) = selected {
-            if let Some(clip) = track.note_clips.first() {
-                PianoRollWidget::from_clip(track.id, clip, playhead_beats, clip.duration_beats)
-            } else {
-                PianoRollWidget::empty(track.id, playhead_beats)
-            }
-        } else {
-            PianoRollWidget::empty(TrackId::new(), playhead_beats)
-        };
-
-        let piano_canvas: Element<Message> = canvas(piano_widget)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
-
-        // Header row with add-pattern button if an instrument track is selected
-        let mut piano_header = row![].spacing(8).padding([4, 8]);
-
-        if let Some(track) = selected {
-            let track_label = text(format!("Piano Roll: {}", track.name))
-                .size(13)
-                .color(vibez_theme::TEXT);
-            piano_header = piano_header.push(track_label);
-
-            if matches!(track.kind, TrackKind::Instrument(_)) {
-                let add_pattern = button(text("+ Pattern").size(12))
-                    .on_press(Message::AddNoteClipToTrack(track.id))
-                    .padding([4, 10]);
-                piano_header = piano_header.push(add_pattern);
-            }
-        } else {
-            let label = text("Select an instrument track")
-                .size(13)
-                .color(vibez_theme::TEXT_DIM);
-            piano_header = piano_header.push(label);
-        }
-
-        let content = column![piano_header, piano_canvas];
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::FillPortion(5))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_DARK.into()),
-                ..Default::default()
-            })
-            .into()
-    }
-
-    // ── Detail panel (global — effects/instruments for selected track) ──
+    // ── Detail panel (Ableton-style device chain) ──
 
     fn view_detail_panel(&self) -> Element<'_, Message> {
-        let detail_content: Element<Message> = if let Some(track) = self
+        let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
             .selected_track
             .and_then(|id| self.state.find_track(id))
         {
             let track_id = track.id;
+            let track_color = th::track_color(track.color_index);
+            let is_instrument = matches!(track.kind, TrackKind::Instrument(_));
 
-            // Effect chain section
-            let mut effects_row = row![].spacing(6);
+            // Check if there's a note clip selected for piano roll display
+            let show_piano_roll = is_instrument
+                && self
+                    .state
+                    .selected_note_clip
+                    .is_some_and(|(tid, _)| tid == track_id);
 
-            for effect in &track.effects {
-                let slot = view_effect_slot(track_id, effect);
-                effects_row = effects_row.push(slot);
-            }
+            // Build the device chain (synth params + effects)
+            let device_chain = self.view_device_chain(track_id, track, track_color);
 
-            // Add effect buttons
-            let mut add_effects_col =
-                column![text("Add Effect").size(10).color(vibez_theme::TEXT_DIM),].spacing(2);
+            if show_piano_roll {
+                // Split view: piano roll on left, device chain on right
+                let piano_roll = self.view_piano_roll_panel(track_id, track_color);
 
-            for &et in EffectType::all() {
-                let btn = button(text(et.name()).size(10))
-                    .on_press(Message::AddEffect(track_id, et))
-                    .padding([3, 8]);
-                add_effects_col = add_effects_col.push(btn);
-            }
-
-            effects_row = effects_row.push(add_effects_col);
-
-            // Synth params section for instrument tracks
-            let synth_section: Element<Message> = if matches!(track.kind, TrackKind::Instrument(_))
-            {
-                let label = text("Synth Parameters")
-                    .size(11)
-                    .color(vibez_theme::TEXT_DIM);
-                let placeholder = text("(synth UI coming in Phase 4)")
-                    .size(10)
-                    .color(vibez_theme::TEXT_DIM);
-                column![label, placeholder]
+                row![piano_roll, device_chain]
                     .spacing(4)
-                    .padding([0, 8])
+                    .height(Length::Fill)
                     .into()
             } else {
-                text("").into()
-            };
-
-            let label = text(format!("{} — Effects", track.name))
-                .size(14)
-                .color(vibez_theme::TEXT);
-
-            let scrollable_effects = scrollable(effects_row).direction(
-                scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
-            );
-
-            column![label, scrollable_effects, synth_section]
-                .spacing(6)
-                .padding(8)
-                .into()
+                device_chain
+            }
         } else {
-            let label = text("Select a track to view effects / instruments")
+            let label = text("Select a track to view devices")
                 .size(14)
-                .color(vibez_theme::TEXT_DIM);
+                .color(th::TEXT_DIM);
             center(label)
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -853,12 +887,189 @@ impl App {
             .width(Length::Fill)
             .height(Length::FillPortion(2))
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_DARK.into()),
+                background: Some(th::BG_DARK.into()),
                 border: iced::Border {
-                    color: iced::Color {
-                        a: 0.2,
-                        ..vibez_theme::TEXT_DIM
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Build the device chain for the detail panel.
+    fn view_device_chain<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        let is_instrument = matches!(track.kind, TrackKind::Instrument(_));
+
+        // Header: track name + "+ Effect" button
+        let track_label = text(format!("{} — Devices", track.name))
+            .size(13)
+            .color(th::TEXT);
+
+        // "+ Effect" dropdown as buttons
+        let mut add_effects_row = row![].spacing(4);
+        for &et in EffectType::all() {
+            let btn = button(text(et.name()).size(10).color(th::TEXT_DIM))
+                .on_press(Message::AddEffect(track_id, et))
+                .padding([3, 8])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
                     },
+                    ..Default::default()
+                });
+            add_effects_row = add_effects_row.push(btn);
+        }
+
+        let add_effect_label = text("+ Effect").size(11).color(th::ACCENT);
+        let header = row![
+            track_label,
+            horizontal_space(),
+            add_effect_label,
+            add_effects_row
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        // Device cards
+        let mut devices_row = row![].spacing(6);
+
+        // Synth device card for instrument tracks
+        if is_instrument {
+            let synth_card = self.view_synth_device(track_id, track_color);
+            devices_row = devices_row.push(synth_card);
+        }
+
+        // Effect cards
+        for effect in &track.effects {
+            let slot = view_effect_slot(track_id, effect, track_color);
+            devices_row = devices_row.push(slot);
+        }
+
+        // Note clip selectors for instrument tracks
+        let note_clips_section: Element<'a, Message> =
+            if is_instrument && !track.note_clips.is_empty() {
+                let mut clip_btns = row![].spacing(4);
+                for clip in &track.note_clips {
+                    let is_selected = self
+                        .state
+                        .selected_note_clip
+                        .is_some_and(|(tid, cid)| tid == track_id && cid == clip.id);
+                    let color = if is_selected {
+                        th::ACCENT
+                    } else {
+                        th::TEXT_DIM
+                    };
+                    let btn = button(text(&clip.name).size(10).color(color))
+                        .on_press(Message::SelectNoteClip(track_id, clip.id))
+                        .padding([2, 6]);
+                    clip_btns = clip_btns.push(btn);
+                }
+                let label = text("Patterns:").size(10).color(th::TEXT_DIM);
+                row![label, clip_btns]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+            } else {
+                text("").into()
+            };
+
+        let scrollable_devices = scrollable(devices_row).direction(
+            scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
+        );
+
+        column![header, note_clips_section, scrollable_devices]
+            .spacing(6)
+            .padding(8)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// Synth device card for instrument tracks.
+    fn view_synth_device(&self, _track_id: TrackId, track_color: Color) -> Element<'_, Message> {
+        let dot = text("\u{25CF}").size(10).color(track_color);
+        let name = text("Synth").size(11).color(th::TEXT);
+        let header = row![dot, name].spacing(4).align_y(iced::Alignment::Center);
+
+        // Basic synth param labels (placeholder knobs)
+        let param_names = ["Attack", "Decay", "Sustain", "Release"];
+        let mut params_col = column![].spacing(4);
+        for param_name in &param_names {
+            let label = text(*param_name).size(10).color(th::TEXT_DIM);
+            let value = text("0.50").size(9).color(th::TEXT_MUTED);
+            let param_row = column![label, value].spacing(1);
+            params_col = params_col.push(param_row);
+        }
+
+        let card = column![header, params_col]
+            .spacing(6)
+            .padding(8)
+            .width(Length::Fixed(120.0));
+
+        container(card)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Piano roll panel for the detail panel split view.
+    fn view_piano_roll_panel(&self, track_id: TrackId, track_color: Color) -> Element<'_, Message> {
+        let playhead_beats = self.state.position_beats();
+
+        let track = self.state.find_track(track_id);
+        let selected_clip = self.state.selected_note_clip.and_then(|(tid, cid)| {
+            if tid == track_id {
+                track.and_then(|t| t.note_clips.iter().find(|c| c.id == cid))
+            } else {
+                None
+            }
+        });
+
+        let piano_widget = if let Some(clip) = selected_clip {
+            PianoRollWidget::from_clip(
+                track_id,
+                clip,
+                playhead_beats,
+                clip.duration_beats,
+                track_color,
+            )
+        } else {
+            PianoRollWidget::empty(track_id, playhead_beats, track_color)
+        };
+
+        let piano_canvas: Element<'_, Message> = canvas(piano_widget)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+
+        let label = text("Piano Roll").size(11).color(th::TEXT_DIM);
+
+        let content = column![label, piano_canvas].spacing(4).padding(4);
+
+        container(content)
+            .width(Length::FillPortion(1))
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_DARK.into()),
+                border: iced::Border {
+                    color: th::BORDER,
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -870,86 +1081,127 @@ impl App {
     // ── Transport bar ──
 
     fn view_transport(&self) -> Element<'_, Message> {
-        let play_btn = if self.state.playing {
-            button(text("Stop").size(14))
+        // Skip back button
+        let skip_back_btn = button(icons::icon(icons::SKIP_BACK).size(16).color(th::TEXT))
+            .on_press(Message::Stop)
+            .padding([8, 12])
+            .style(|_theme: &Theme, _status| button::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                text_color: th::TEXT,
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
+
+        // Play/Pause button
+        let play_pause_btn = if self.state.playing {
+            button(icons::icon(icons::PAUSE).size(16).color(th::ACCENT))
                 .on_press(Message::Stop)
-                .padding([8, 20])
+                .padding([8, 14])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::ACCENT,
+                    border: iced::Border {
+                        color: th::ACCENT_DIM,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
         } else {
-            button(text("Play").size(14))
+            button(icons::icon(icons::PLAY).size(16).color(th::SUCCESS))
                 .on_press(Message::Play)
-                .padding([8, 20])
+                .padding([8, 14])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::SUCCESS,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
         };
 
+        let transport_buttons = row![skip_back_btn, play_pause_btn].spacing(4);
+
+        // Time display
         let time_text = text(format!(
             "{} / {}",
             AppState::format_time(self.state.position_seconds()),
             AppState::format_time(self.state.duration_seconds()),
         ))
-        .size(16)
-        .color(vibez_theme::TEXT);
+        .size(14)
+        .color(th::TEXT);
 
+        // BPM
         let bpm_input = text_input("BPM", &self.state.bpm_text)
             .on_input(Message::BpmChanged)
             .on_submit(Message::BpmSubmit)
-            .width(Length::Fixed(60.0))
+            .width(Length::Fixed(55.0))
             .size(14);
 
-        let bpm_label = text("BPM").size(12).color(vibez_theme::TEXT_DIM);
+        let bpm_label = text("BPM").size(12).color(th::TEXT_DIM);
 
-        let track_count = if !self.state.tracks.is_empty() {
-            text(format!("{} tracks", self.state.tracks.len()))
-                .size(12)
-                .color(vibez_theme::TEXT_DIM)
-        } else {
-            text("").size(12).color(vibez_theme::TEXT_DIM)
-        };
-
-        // Master VU meter in the transport bar
+        // Master VU meter
         let master_meter = VuMeterWidget {
             peak_l: self.state.peak_l,
             peak_r: self.state.peak_r,
         };
-        let master_meter_canvas: Element<Message> = canvas(master_meter)
+        let master_meter_canvas: Element<'_, Message> = canvas(master_meter)
             .width(Length::Fixed(24.0))
             .height(Length::Fixed(28.0))
             .into();
 
+        let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::TEXT_DIM);
+
         let transport = row![
-            play_btn,
+            transport_buttons,
             horizontal_space(),
             time_text,
             horizontal_space(),
+            volume_icon,
             master_meter_canvas,
-            track_count,
             bpm_input,
             bpm_label,
         ]
         .spacing(12)
-        .padding(12)
+        .padding(10)
         .align_y(iced::Alignment::Center);
 
         container(transport)
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_SURFACE.into()),
+                background: Some(th::BG_SURFACE.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .into()
     }
 
     fn view_status(&self) -> Element<'_, Message> {
-        let status = text(&self.state.status_text)
-            .size(12)
-            .color(vibez_theme::TEXT_DIM);
+        let status = text(&self.state.status_text).size(11).color(th::TEXT_DIM);
 
         container(status)
             .width(Length::Fill)
-            .padding([4, 12])
+            .padding([3, 12])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_DARK.into()),
+                ..Default::default()
+            })
             .into()
     }
 
     fn theme(&self) -> Theme {
-        vibez_theme::vibez_theme()
+        th::vibez_theme()
     }
 
     fn subscription(&self) -> Subscription<Message> {

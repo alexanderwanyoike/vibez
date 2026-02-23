@@ -19,6 +19,8 @@ pub struct TrackInfo {
     pub effects: Vec<EffectInfo>,
     #[serde(default)]
     pub kind: TrackKind,
+    #[serde(default)]
+    pub color_index: u8,
 }
 
 impl TrackInfo {
@@ -32,6 +34,7 @@ impl TrackInfo {
             solo: false,
             effects: Vec::new(),
             kind: TrackKind::default(),
+            color_index: 0,
         }
     }
 }

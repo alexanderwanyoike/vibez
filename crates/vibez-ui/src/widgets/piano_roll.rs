@@ -12,9 +12,6 @@ use vibez_core::midi::MidiNote;
 const KEY_WIDTH: f32 = 40.0;
 /// Height of each piano key row.
 const KEY_HEIGHT: f32 = 14.0;
-/// Pixels per beat on the horizontal axis (used for absolute-size rendering).
-#[allow(dead_code)]
-const PIXELS_PER_BEAT: f32 = 80.0;
 
 /// Lowest MIDI note displayed (C2 = 36).
 const LOW_NOTE: u8 = 36;
@@ -26,28 +23,13 @@ const NUM_ROWS: u8 = HIGH_NOTE - LOW_NOTE;
 /// Default duration for newly placed notes (in beats).
 const DEFAULT_NOTE_DURATION: f64 = 0.5;
 
-/// Color for note rectangles.
-const NOTE_COLOR: Color = Color {
-    r: 0.380,
-    g: 0.565,
-    b: 1.0,
-    a: 0.85,
-};
-
-/// Color for selected note.
-const NOTE_SELECTED_COLOR: Color = Color {
-    r: 1.0,
-    g: 0.843,
-    b: 0.0,
-    a: 0.9,
-};
-
 /// Piano roll canvas widget.
 pub struct PianoRollWidget {
     pub track_id: TrackId,
     pub clip: Option<PianoRollClipData>,
     pub playhead_beats: f64,
     pub total_beats: f64,
+    pub track_color: Color,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -64,6 +46,7 @@ impl PianoRollWidget {
         clip: &UiNoteClip,
         playhead_beats: f64,
         total_beats: f64,
+        track_color: Color,
     ) -> Self {
         Self {
             track_id,
@@ -74,15 +57,17 @@ impl PianoRollWidget {
             }),
             playhead_beats,
             total_beats,
+            track_color,
         }
     }
 
-    pub fn empty(track_id: TrackId, playhead_beats: f64) -> Self {
+    pub fn empty(track_id: TrackId, playhead_beats: f64, track_color: Color) -> Self {
         Self {
             track_id,
             clip: None,
             playhead_beats,
             total_beats: 16.0,
+            track_color,
         }
     }
 
@@ -132,19 +117,9 @@ impl canvas::Program<Message> for PianoRollWidget {
             let is_black = is_black_key(pitch);
 
             let key_color = if is_black {
-                Color {
-                    r: 0.12,
-                    g: 0.12,
-                    b: 0.18,
-                    a: 1.0,
-                }
+                theme::BG_DARK
             } else {
-                Color {
-                    r: 0.22,
-                    g: 0.22,
-                    b: 0.30,
-                    a: 1.0,
-                }
+                theme::BG_SURFACE
             };
 
             frame.fill_rectangle(
@@ -161,10 +136,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             frame.stroke(
                 &border,
                 canvas::Stroke::default()
-                    .with_color(Color {
-                        a: 0.2,
-                        ..theme::TEXT_DIM
-                    })
+                    .with_color(theme::DIVIDER)
                     .with_width(0.5),
             );
 
@@ -184,16 +156,16 @@ impl canvas::Program<Message> for PianoRollWidget {
             // Grid row background (alternating for black keys)
             let row_bg = if is_black {
                 Color {
-                    r: 0.09,
-                    g: 0.09,
-                    b: 0.15,
+                    r: 0.08,
+                    g: 0.08,
+                    b: 0.08,
                     a: 1.0,
                 }
             } else {
                 Color {
                     r: 0.11,
                     g: 0.11,
-                    b: 0.18,
+                    b: 0.11,
                     a: 1.0,
                 }
             };
@@ -211,10 +183,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             frame.stroke(
                 &hline,
                 canvas::Stroke::default()
-                    .with_color(Color {
-                        a: 0.1,
-                        ..theme::TEXT_DIM
-                    })
+                    .with_color(theme::DIVIDER)
                     .with_width(0.5),
             );
         }
@@ -226,15 +195,9 @@ impl canvas::Program<Message> for PianoRollWidget {
             let x = KEY_WIDTH + (beat as f32 / total as f32) * grid_width;
             let is_bar = beat % 4 == 0;
             let line_color = if is_bar {
-                Color {
-                    a: 0.4,
-                    ..theme::TEXT_DIM
-                }
+                theme::BORDER
             } else {
-                Color {
-                    a: 0.15,
-                    ..theme::TEXT_DIM
-                }
+                theme::DIVIDER
             };
             let line_width = if is_bar { 1.0 } else { 0.5 };
 
@@ -255,18 +218,18 @@ impl canvas::Program<Message> for PianoRollWidget {
                 frame.fill_text(canvas::Text {
                     content: format!("{bar_num}"),
                     position: iced::Point::new(x + 2.0, 1.0),
-                    color: Color {
-                        a: 0.5,
-                        ..theme::TEXT_DIM
-                    },
+                    color: theme::TEXT_MUTED,
                     size: iced::Pixels(9.0),
                     ..Default::default()
                 });
             }
         }
 
-        // Draw notes
+        // Draw notes using track color
         if let Some(ref clip_data) = self.clip {
+            let note_color = theme::with_alpha(self.track_color, 0.85);
+            let selected_color = theme::SOLO_ACTIVE;
+
             for (idx, note) in clip_data.notes.iter().enumerate() {
                 if !(LOW_NOTE..HIGH_NOTE).contains(&note.pitch) {
                     continue;
@@ -279,9 +242,9 @@ impl canvas::Program<Message> for PianoRollWidget {
 
                 let is_selected = clip_data.selected_note == Some(idx);
                 let color = if is_selected {
-                    NOTE_SELECTED_COLOR
+                    selected_color
                 } else {
-                    NOTE_COLOR
+                    note_color
                 };
 
                 frame.fill_rectangle(
@@ -298,10 +261,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 frame.stroke(
                     &note_border,
                     canvas::Stroke::default()
-                        .with_color(Color {
-                            a: 0.5,
-                            ..theme::TEXT
-                        })
+                        .with_color(theme::darken(self.track_color, 0.6))
                         .with_width(0.5),
                 );
             }
@@ -330,7 +290,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         frame.stroke(
             &sep,
             canvas::Stroke::default()
-                .with_color(theme::TEXT_DIM)
+                .with_color(theme::BORDER)
                 .with_width(1.0),
         );
 

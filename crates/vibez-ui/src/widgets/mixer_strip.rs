@@ -1,76 +1,133 @@
 use iced::widget::{button, canvas, column, container, row, text};
 use iced::{Element, Length, Theme};
 
+use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
-use crate::theme as vibez_theme;
+use crate::theme as th;
 use crate::widgets::fader::FaderWidget;
 use crate::widgets::knob::KnobWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
+use vibez_core::midi::TrackKind;
 
 /// Render a single mixer channel strip for a track.
 pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
-    // Track name
+    let track_color = th::track_color(track.color_index);
+
+    // Track name + type icon
+    let type_icon = match track.kind {
+        TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
+            .size(10)
+            .color(track_color),
+        TrackKind::Instrument(_) => icons::icon(icons::MUSIC).size(10).color(track_color),
+    };
+
     let name = text(&track.name)
-        .size(11)
-        .color(vibez_theme::TEXT)
+        .size(12)
+        .color(th::TEXT)
         .width(Length::Fill);
 
-    // Pan knob
-    let knob = KnobWidget::new(track.id, track.pan);
-    let knob_canvas: Element<Message> = canvas(knob)
-        .width(Length::Fixed(32.0))
-        .height(Length::Fixed(32.0))
+    let name_row = row![type_icon, name]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+    // Pan knob (bigger)
+    let knob = KnobWidget::new(track.id, track.pan, track_color);
+    let knob_canvas: Element<'_, Message> = canvas(knob)
+        .width(Length::Fixed(36.0))
+        .height(Length::Fixed(36.0))
         .into();
 
-    let pan_label = text(format_pan(track.pan))
-        .size(9)
-        .color(vibez_theme::TEXT_DIM);
+    let pan_label = text(format_pan(track.pan)).size(10).color(th::TEXT_DIM);
 
-    // Fader
-    let fader = FaderWidget::new(track.id, track.gain);
-    let fader_canvas: Element<Message> = canvas(fader)
-        .width(Length::Fixed(28.0))
+    // Fader (wider)
+    let fader = FaderWidget::new(track.id, track.gain, track_color);
+    let fader_canvas: Element<'_, Message> = canvas(fader)
+        .width(Length::Fixed(32.0))
         .height(Length::Fill)
         .into();
 
     let gain_label = text(format_gain_db(track.gain))
-        .size(9)
-        .color(vibez_theme::TEXT_DIM);
+        .size(11)
+        .color(th::TEXT_DIM);
 
-    // VU meter for this track
+    // VU meter (wider)
     let meter = VuMeterWidget {
         peak_l: track.peak_l,
         peak_r: track.peak_r,
     };
-    let meter_canvas: Element<Message> = canvas(meter)
-        .width(Length::Fixed(20.0))
+    let meter_canvas: Element<'_, Message> = canvas(meter)
+        .width(Length::Fixed(24.0))
         .height(Length::Fill)
         .into();
 
-    // Mute button
-    let mute_btn = if track.mute {
-        button(text("M").size(11).color(vibez_theme::MUTE_ACTIVE))
-            .on_press(Message::SetTrackMute(track.id))
-            .padding([4, 8])
-    } else {
-        button(text("M").size(11).color(vibez_theme::TEXT_DIM))
-            .on_press(Message::SetTrackMute(track.id))
-            .padding([4, 8])
+    // Mute button with filled background when active
+    let mute_btn = {
+        let label = text("M").size(11);
+        if track.mute {
+            button(label.color(th::BG_DARK))
+                .on_press(Message::SetTrackMute(track.id))
+                .padding([4, 8])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(th::MUTE_ACTIVE.into()),
+                    text_color: th::BG_DARK,
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+        } else {
+            button(label.color(th::TEXT_DIM))
+                .on_press(Message::SetTrackMute(track.id))
+                .padding([4, 8])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                })
+        }
     };
 
-    // Solo button
-    let solo_btn = if track.solo {
-        button(text("S").size(11).color(vibez_theme::SOLO_ACTIVE))
-            .on_press(Message::SetTrackSolo(track.id))
-            .padding([4, 8])
-    } else {
-        button(text("S").size(11).color(vibez_theme::TEXT_DIM))
-            .on_press(Message::SetTrackSolo(track.id))
-            .padding([4, 8])
+    // Solo button with filled background when active
+    let solo_btn = {
+        let label = text("S").size(11);
+        if track.solo {
+            button(label.color(th::BG_DARK))
+                .on_press(Message::SetTrackSolo(track.id))
+                .padding([4, 8])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(th::SOLO_ACTIVE.into()),
+                    text_color: th::BG_DARK,
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+        } else {
+            button(label.color(th::TEXT_DIM))
+                .on_press(Message::SetTrackSolo(track.id))
+                .padding([4, 8])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                })
+        }
     };
 
-    let mute_solo_row = row![mute_btn, solo_btn].spacing(2);
+    let mute_solo_row = row![mute_btn, solo_btn].spacing(4);
 
     // Fader + meter side by side
     let fader_meter = row![fader_canvas, meter_canvas]
@@ -78,7 +135,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
         .height(Length::Fill);
 
     let strip = column![
-        name,
+        name_row,
         knob_canvas,
         pan_label,
         fader_meter,
@@ -86,18 +143,18 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
         mute_solo_row,
     ]
     .spacing(4)
-    .padding(6)
-    .width(Length::Fixed(72.0))
+    .padding(8)
+    .width(Length::Fixed(90.0))
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
     container(strip)
         .height(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(vibez_theme::BG_SURFACE.into()),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
             border: iced::Border {
-                color: vibez_theme::TEXT_DIM,
-                width: 0.5,
+                color: th::BORDER,
+                width: 1.0,
                 radius: 2.0.into(),
             },
             ..Default::default()
