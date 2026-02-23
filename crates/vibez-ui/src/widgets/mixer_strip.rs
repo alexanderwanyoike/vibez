@@ -9,7 +9,7 @@ use crate::widgets::knob::KnobWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
 
 /// Render a single mixer channel strip for a track.
-pub fn view_mixer_strip(track: &UiTrack) -> Element<Message> {
+pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
     // Track name
     let name = text(&track.name)
         .size(11)

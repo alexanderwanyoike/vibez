@@ -322,7 +322,7 @@ impl App {
 
     // ── View ──
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let header = self.view_header();
 
         let content = match self.state.workspace {
@@ -342,7 +342,7 @@ impl App {
             .into()
     }
 
-    fn view_header(&self) -> Element<Message> {
+    fn view_header(&self) -> Element<'_, Message> {
         let title = text("vibez").size(24).color(vibez_theme::ACCENT);
 
         // Workspace tabs
@@ -394,7 +394,7 @@ impl App {
 
     // ── Arrangement view ──
 
-    fn view_arrangement(&self) -> Element<Message> {
+    fn view_arrangement(&self) -> Element<'_, Message> {
         if self.state.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
@@ -475,7 +475,7 @@ impl App {
 
     // ── Mixer view ──
 
-    fn view_mixer(&self) -> Element<Message> {
+    fn view_mixer(&self) -> Element<'_, Message> {
         if self.state.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
@@ -549,7 +549,7 @@ impl App {
 
     // ── Detail panel (global — effects/instruments for selected track) ──
 
-    fn view_detail_panel(&self) -> Element<Message> {
+    fn view_detail_panel(&self) -> Element<'_, Message> {
         let detail_content: Element<Message> = if let Some(track) = self
             .state
             .selected_track
@@ -592,7 +592,7 @@ impl App {
 
     // ── Transport bar ──
 
-    fn view_transport(&self) -> Element<Message> {
+    fn view_transport(&self) -> Element<'_, Message> {
         let play_btn = if self.state.playing {
             button(text("Stop").size(14))
                 .on_press(Message::Stop)
@@ -660,7 +660,7 @@ impl App {
             .into()
     }
 
-    fn view_status(&self) -> Element<Message> {
+    fn view_status(&self) -> Element<'_, Message> {
         let status = text(&self.state.status_text)
             .size(12)
             .color(vibez_theme::TEXT_DIM);

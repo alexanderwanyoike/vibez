@@ -12,7 +12,7 @@ pub const TRACK_HEADER_WIDTH: f32 = 180.0;
 
 /// Render the track header for the arrangement view.
 /// Compact layout: name + "+" | [M] [S] | horizontal gain fader + VU meter.
-pub fn view_track_header(track: &UiTrack) -> Element<Message> {
+pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
     // Row 1: Track name + "+" add clip button
     let name = text(&track.name).size(12).color(if track.mute {
         vibez_theme::TEXT_DIM
