@@ -8,6 +8,8 @@ license.workspace = true
 vibez-core = { workspace = true }
 vibez-engine = { workspace = true }
 vibez-audio-io = { workspace = true }
+vibez-dsp = { workspace = true }
+vibez-instruments = { workspace = true }
 iced = { workspace = true }
 rtrb = { workspace = true }
 rfd = "0.15"

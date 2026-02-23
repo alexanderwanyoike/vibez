@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::effect::{EffectType, ParamDescriptor};
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::{MidiNote, TrackKind};
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -18,6 +20,27 @@ pub struct UiClip {
     pub duration: u64,
 }
 
+/// An effect instance as represented in the UI.
+#[derive(Debug, Clone)]
+pub struct UiEffect {
+    pub id: EffectId,
+    pub effect_type: EffectType,
+    pub bypass: bool,
+    pub params: Vec<f32>,
+    pub descriptors: &'static [ParamDescriptor],
+}
+
+/// A note clip (MIDI pattern) as represented in the UI.
+#[derive(Debug, Clone)]
+pub struct UiNoteClip {
+    pub id: ClipId,
+    pub name: String,
+    pub position_beats: f64,
+    pub duration_beats: f64,
+    pub notes: Vec<MidiNote>,
+    pub selected_note: Option<usize>,
+}
+
 /// A track as represented in the UI.
 #[derive(Debug, Clone)]
 pub struct UiTrack {
@@ -30,6 +53,9 @@ pub struct UiTrack {
     pub solo: bool,
     pub peak_l: f32,
     pub peak_r: f32,
+    pub effects: Vec<UiEffect>,
+    pub note_clips: Vec<UiNoteClip>,
+    pub kind: TrackKind,
 }
 
 impl UiTrack {
@@ -44,6 +70,26 @@ impl UiTrack {
             solo: false,
             peak_l: 0.0,
             peak_r: 0.0,
+            effects: Vec::new(),
+            note_clips: Vec::new(),
+            kind: TrackKind::Audio,
+        }
+    }
+
+    pub fn new_instrument(id: TrackId, name: String, kind: TrackKind) -> Self {
+        Self {
+            id,
+            name,
+            clips: Vec::new(),
+            gain: 1.0,
+            pan: 0.5,
+            mute: false,
+            solo: false,
+            peak_l: 0.0,
+            peak_r: 0.0,
+            effects: Vec::new(),
+            note_clips: Vec::new(),
+            kind,
         }
     }
 }
@@ -52,6 +98,7 @@ impl UiTrack {
 pub enum Workspace {
     Arrange,
     Mix,
+    Piano,
 }
 
 pub struct AppState {
@@ -100,6 +147,10 @@ impl Default for AppState {
 impl AppState {
     pub fn position_seconds(&self) -> f64 {
         self.position_samples as f64 / self.sample_rate as f64
+    }
+
+    pub fn position_beats(&self) -> f64 {
+        self.position_seconds() * self.bpm / 60.0
     }
 
     pub fn duration_seconds(&self) -> f64 {

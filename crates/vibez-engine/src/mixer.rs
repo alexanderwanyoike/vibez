@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::MidiNote;
+use vibez_core::time::TempoMap;
+use vibez_dsp::effect::AudioEffect;
+use vibez_instruments::synth::SubtractiveSynth;
 
 /// A clip as it exists at runtime in the engine (on the audio thread).
 pub struct EngineClip {
@@ -31,6 +35,19 @@ impl EngineClip {
     }
 }
 
+pub struct EffectSlot {
+    pub id: EffectId,
+    pub effect: Box<dyn AudioEffect>,
+    pub bypass: bool,
+}
+
+pub struct EngineNoteClip {
+    pub id: ClipId,
+    pub position_beats: f64,
+    pub duration_beats: f64,
+    pub notes: Vec<MidiNote>,
+}
+
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
     pub id: TrackId,
@@ -41,6 +58,9 @@ pub struct EngineTrack {
     pub solo: bool,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
+    pub effects: Vec<EffectSlot>,
+    pub note_clips: Vec<EngineNoteClip>,
+    pub synth: Option<Box<SubtractiveSynth>>,
 }
 
 impl EngineTrack {
@@ -53,6 +73,9 @@ impl EngineTrack {
             mute: false,
             solo: false,
             mix_buffer: Vec::new(),
+            effects: Vec::new(),
+            note_clips: Vec::new(),
+            synth: None,
         }
     }
 
@@ -114,6 +137,94 @@ impl EngineTrack {
         }
 
         rendered_any
+    }
+
+    pub fn process_effects(&mut self, frames: usize, channels: usize) {
+        let buf_size = frames * channels;
+        if buf_size == 0 {
+            return;
+        }
+        for slot in &mut self.effects {
+            if !slot.bypass {
+                slot.effect
+                    .process(&mut self.mix_buffer[..buf_size], channels);
+            }
+        }
+    }
+
+    pub fn render_instrument(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        tempo_map: &TempoMap,
+    ) -> bool {
+        if self.synth.is_none() {
+            return false;
+        }
+
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
+        }
+
+        let spb = tempo_map.samples_per_beat();
+        if spb <= 0.0 {
+            return false;
+        }
+
+        let mut rendered = false;
+        let mut note_ons: Vec<(u8, u8)> = Vec::new();
+        let mut note_offs: Vec<u8> = Vec::new();
+
+        for frame in 0..frames {
+            let sample_pos = pos + frame as u64;
+
+            note_ons.clear();
+            note_offs.clear();
+
+            for clip in &self.note_clips {
+                let clip_start_beat = clip.position_beats;
+                let clip_end_beat = clip.position_beats + clip.duration_beats;
+                let current_beat = sample_pos as f64 / spb;
+
+                if current_beat < clip_start_beat || current_beat >= clip_end_beat {
+                    continue;
+                }
+
+                for note in &clip.notes {
+                    let note_start_sample = ((clip_start_beat + note.start_beat) * spb) as u64;
+                    let note_end_sample = ((clip_start_beat + note.end_beat()) * spb) as u64;
+
+                    if sample_pos == note_start_sample {
+                        note_ons.push((note.pitch, note.velocity));
+                    }
+                    if sample_pos == note_end_sample {
+                        note_offs.push(note.pitch);
+                    }
+                }
+            }
+
+            let synth = self.synth.as_mut().unwrap();
+            for (pitch, vel) in &note_ons {
+                synth.note_on(*pitch, *vel);
+                rendered = true;
+            }
+            for pitch in &note_offs {
+                synth.note_off(*pitch);
+            }
+
+            let start = frame * channels;
+            let end = start + channels;
+            synth.render(&mut self.mix_buffer[start..end], channels);
+        }
+
+        if !rendered {
+            rendered = self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0);
+        }
+
+        rendered
     }
 }
 

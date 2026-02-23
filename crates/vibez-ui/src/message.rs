@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::effect::EffectType;
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::MidiNote;
 
 use crate::state::Workspace;
 
@@ -12,7 +14,7 @@ pub enum Message {
     Play,
     Stop,
     TogglePlayback,
-    Seek(f64), // 0.0..1.0 normalized position
+    Seek(f64),
 
     // BPM
     BpmChanged(String),
@@ -21,7 +23,7 @@ pub enum Message {
     // Workspace
     SwitchWorkspace(Workspace),
 
-    // Engine events (polled at 60fps)
+    // Engine events
     Tick,
     EnginePosition(u64),
     EngineMetering {
@@ -52,4 +54,29 @@ pub enum Message {
         peak_l: f32,
         peak_r: f32,
     },
+
+    // Effects
+    AddEffect(TrackId, EffectType),
+    RemoveEffect(TrackId, EffectId),
+    SetEffectParam(TrackId, EffectId, usize, f32),
+    ToggleEffectBypass(TrackId, EffectId),
+    MoveEffectUp(TrackId, EffectId),
+    MoveEffectDown(TrackId, EffectId),
+
+    // Instrument tracks
+    AddInstrumentTrack,
+    SetSynthParam(TrackId, usize, f32),
+
+    // Piano roll
+    AddNoteClipToTrack(TrackId),
+    AddNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        pitch: u8,
+        start_beat: f64,
+        duration_beats: f64,
+    },
+    RemoveNote(TrackId, ClipId, usize),
+    EditNote(TrackId, ClipId, usize, MidiNote),
+    SelectNote(TrackId, ClipId, Option<usize>),
 }

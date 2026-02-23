@@ -4,10 +4,17 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
 
+use vibez_core::time::TempoMap;
+use vibez_dsp::factory::create_effect;
+use vibez_instruments::synth::SubtractiveSynth;
+
 use crate::commands::EngineCommand;
 use crate::events::EngineEvent;
 use crate::metering;
-use crate::mixer::{any_solo, calculate_total_length, equal_power_pan, EngineClip, EngineTrack};
+use crate::mixer::{
+    any_solo, calculate_total_length, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip,
+    EngineTrack,
+};
 use crate::transport::Transport;
 
 /// The real-time audio engine.
@@ -32,6 +39,7 @@ pub struct AudioEngine {
     audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
     tracks: Vec<EngineTrack>,
+    sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
 }
@@ -50,6 +58,7 @@ impl AudioEngine {
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
+            sample_rate: 44100,
             cmd_rx,
             event_tx,
         };
@@ -157,7 +166,17 @@ impl AudioEngine {
                 continue;
             }
 
-            let rendered = track.render(pos, frames, channels);
+            let rendered = if track.synth.is_some() {
+                let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
+                track.render_instrument(pos, frames, channels, &tempo_map)
+            } else {
+                track.render(pos, frames, channels)
+            };
+
+            if rendered {
+                track.process_effects(frames, channels);
+            }
+
             if !rendered {
                 let _ = self.event_tx.push(EngineEvent::TrackMeter {
                     track_id: track.id,
@@ -334,6 +353,153 @@ impl AudioEngine {
                 EngineCommand::SetTrackSolo(id, solo) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
                         track.solo = solo;
+                    }
+                }
+
+                // -- Infrastructure --
+                EngineCommand::SetSampleRate(sr) => {
+                    self.sample_rate = sr;
+                }
+
+                // -- Effects --
+                EngineCommand::AddEffect {
+                    track_id,
+                    effect_id,
+                    effect_type,
+                    position,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        let effect = create_effect(effect_type, self.sample_rate as f32);
+                        let slot = EffectSlot {
+                            id: effect_id,
+                            effect,
+                            bypass: false,
+                        };
+                        if let Some(pos) = position {
+                            let idx = pos.min(track.effects.len());
+                            track.effects.insert(idx, slot);
+                        } else {
+                            track.effects.push(slot);
+                        }
+                    }
+                }
+                EngineCommand::RemoveEffect(track_id, effect_id) => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.effects.retain(|e| e.id != effect_id);
+                    }
+                }
+                EngineCommand::SetEffectParam {
+                    track_id,
+                    effect_id,
+                    param_index,
+                    value,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
+                            slot.effect.set_param(param_index, value);
+                        }
+                    }
+                }
+                EngineCommand::SetEffectBypass {
+                    track_id,
+                    effect_id,
+                    bypass,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
+                            slot.bypass = bypass;
+                        }
+                    }
+                }
+                EngineCommand::MoveEffect {
+                    track_id,
+                    effect_id,
+                    new_index,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(old_idx) = track.effects.iter().position(|e| e.id == effect_id)
+                        {
+                            let slot = track.effects.remove(old_idx);
+                            let idx = new_index.min(track.effects.len());
+                            track.effects.insert(idx, slot);
+                        }
+                    }
+                }
+
+                // -- Instrument tracks --
+                EngineCommand::AddInstrumentTrack(id, _name, _kind) => {
+                    let mut track = EngineTrack::new(id);
+                    track.synth = Some(Box::new(SubtractiveSynth::new(self.sample_rate as f32)));
+                    self.tracks.push(track);
+                    self.recalculate_audio_length();
+                }
+                EngineCommand::AddNoteClip {
+                    track_id,
+                    clip_id,
+                    position_beats,
+                    duration_beats,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.note_clips.push(EngineNoteClip {
+                            id: clip_id,
+                            position_beats,
+                            duration_beats,
+                            notes: Vec::new(),
+                        });
+                    }
+                }
+                EngineCommand::RemoveNoteClip(track_id, clip_id) => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.note_clips.retain(|c| c.id != clip_id);
+                    }
+                }
+                EngineCommand::AddNote {
+                    track_id,
+                    clip_id,
+                    note,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.notes.push(note);
+                        }
+                    }
+                }
+                EngineCommand::RemoveNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            if note_index < clip.notes.len() {
+                                clip.notes.remove(note_index);
+                            }
+                        }
+                    }
+                }
+                EngineCommand::EditNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                    note,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            if note_index < clip.notes.len() {
+                                clip.notes[note_index] = note;
+                            }
+                        }
+                    }
+                }
+                EngineCommand::SetSynthParam {
+                    track_id,
+                    param_index,
+                    value,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(ref mut synth) = track.synth {
+                            synth.set_param(param_index, value);
+                        }
                     }
                 }
             }

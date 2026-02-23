@@ -4187,6 +4187,8 @@ version = "0.1.0"
 dependencies = [
  "rtrb",
  "vibez-core",
+ "vibez-dsp",
+ "vibez-instruments",
 ]
 
 [[package]]
@@ -4216,7 +4218,9 @@ dependencies = [
  "tokio",
  "vibez-audio-io",
  "vibez-core",
+ "vibez-dsp",
  "vibez-engine",
+ "vibez-instruments",
 ]
 
 [[package]]

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
+use crate::midi::TrackKind;
 
 /// Serializable track metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +15,10 @@ pub struct TrackInfo {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    #[serde(default)]
+    pub effects: Vec<EffectInfo>,
+    #[serde(default)]
+    pub kind: TrackKind,
 }
 
 impl TrackInfo {
@@ -24,6 +30,8 @@ impl TrackInfo {
             pan: crate::constants::DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            effects: Vec::new(),
+            kind: TrackKind::default(),
         }
     }
 }

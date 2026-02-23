@@ -38,6 +38,7 @@ macro_rules! typed_id {
 
 typed_id!(TrackId);
 typed_id!(ClipId);
+typed_id!(EffectId);
 
 #[cfg(test)]
 mod tests {

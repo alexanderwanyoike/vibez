@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::effect::EffectType;
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::{InstrumentKind, MidiNote};
 
 /// Commands sent from the UI thread to the audio engine (via rtrb).
 ///
@@ -52,6 +54,65 @@ pub enum EngineCommand {
     SetTrackMute(TrackId, bool),
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
+
+    // -- Infrastructure --
+    SetSampleRate(u32),
+
+    // -- Effects --
+    AddEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect_type: EffectType,
+        position: Option<usize>,
+    },
+    RemoveEffect(TrackId, EffectId),
+    SetEffectParam {
+        track_id: TrackId,
+        effect_id: EffectId,
+        param_index: usize,
+        value: f32,
+    },
+    SetEffectBypass {
+        track_id: TrackId,
+        effect_id: EffectId,
+        bypass: bool,
+    },
+    MoveEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        new_index: usize,
+    },
+
+    // -- Instrument tracks --
+    AddInstrumentTrack(TrackId, String, InstrumentKind),
+    AddNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        position_beats: f64,
+        duration_beats: f64,
+    },
+    RemoveNoteClip(TrackId, ClipId),
+    AddNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note: MidiNote,
+    },
+    RemoveNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note_index: usize,
+    },
+    EditNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note_index: usize,
+        note: MidiNote,
+    },
+    SetSynthParam {
+        track_id: TrackId,
+        param_index: usize,
+        value: f32,
+    },
 }
 
 #[cfg(test)]

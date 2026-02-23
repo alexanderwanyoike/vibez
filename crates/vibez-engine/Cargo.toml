@@ -6,4 +6,6 @@ license.workspace = true
 
 [dependencies]
 vibez-core = { workspace = true }
+vibez-dsp = { workspace = true }
+vibez-instruments = { workspace = true }
 rtrb = { workspace = true }
