@@ -325,12 +325,19 @@ impl App {
                         descriptors,
                     });
                 }
+                self.send_command(EngineCommand::AddEffect {
+                    track_id,
+                    effect_id,
+                    effect_type,
+                    position: None,
+                });
                 self.state.status_text = format!("Added {} effect", effect_type.name());
             }
             Message::RemoveEffect(track_id, effect_id) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.effects.retain(|e| e.id != effect_id);
                 }
+                self.send_command(EngineCommand::RemoveEffect(track_id, effect_id));
                 self.state.status_text = "Removed effect".to_string();
             }
             Message::SetEffectParam(track_id, effect_id, param_index, value) => {
@@ -338,7 +345,14 @@ impl App {
                     if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                         if param_index < effect.params.len() {
                             let desc = &effect.descriptors[param_index];
-                            effect.params[param_index] = value.clamp(desc.min, desc.max);
+                            let clamped = value.clamp(desc.min, desc.max);
+                            effect.params[param_index] = clamped;
+                            self.send_command(EngineCommand::SetEffectParam {
+                                track_id,
+                                effect_id,
+                                param_index,
+                                value: clamped,
+                            });
                         }
                     }
                 }
@@ -347,6 +361,12 @@ impl App {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                         effect.bypass = !effect.bypass;
+                        let bypass = effect.bypass;
+                        self.send_command(EngineCommand::SetEffectBypass {
+                            track_id,
+                            effect_id,
+                            bypass,
+                        });
                     }
                 }
             }
@@ -355,6 +375,11 @@ impl App {
                     if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
                         if idx > 0 {
                             track.effects.swap(idx, idx - 1);
+                            self.send_command(EngineCommand::MoveEffect {
+                                track_id,
+                                effect_id,
+                                new_index: idx - 1,
+                            });
                         }
                     }
                 }
@@ -364,6 +389,11 @@ impl App {
                     if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
                         if idx + 1 < track.effects.len() {
                             track.effects.swap(idx, idx + 1);
+                            self.send_command(EngineCommand::MoveEffect {
+                                track_id,
+                                effect_id,
+                                new_index: idx + 1,
+                            });
                         }
                     }
                 }
@@ -378,7 +408,11 @@ impl App {
                 let name = format!("Synth {track_num}");
                 let kind = TrackKind::Instrument(InstrumentKind::SubtractiveSynth);
 
-                self.send_command(EngineCommand::AddTrack(id, name.clone()));
+                self.send_command(EngineCommand::AddInstrumentTrack(
+                    id,
+                    name.clone(),
+                    InstrumentKind::SubtractiveSynth,
+                ));
                 self.state
                     .tracks
                     .push(UiTrack::new_instrument(id, name, kind, color_index));
@@ -386,23 +420,35 @@ impl App {
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
             Message::SetSynthParam(track_id, param_index, value) => {
-                let _ = (track_id, param_index, value);
+                self.send_command(EngineCommand::SetSynthParam {
+                    track_id,
+                    param_index,
+                    value,
+                });
                 self.state.status_text = format!("Synth param {param_index} = {value:.2}");
             }
 
             // -- Piano roll / note clips --
             Message::AddNoteClipToTrack(track_id) => {
                 let clip_id = ClipId::new();
+                let position_beats = 0.0;
+                let duration_beats = 16.0;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.note_clips.push(UiNoteClip {
                         id: clip_id,
                         name: format!("Pattern {}", track.note_clips.len() + 1),
-                        position_beats: 0.0,
-                        duration_beats: 16.0,
+                        position_beats,
+                        duration_beats,
                         notes: Vec::new(),
                         selected_note: None,
                     });
                 }
+                self.send_command(EngineCommand::AddNoteClip {
+                    track_id,
+                    clip_id,
+                    position_beats,
+                    duration_beats,
+                });
                 // Auto-select the new note clip for piano roll editing
                 self.state.selected_note_clip = Some((track_id, clip_id));
                 self.state.status_text = "Added note clip".to_string();
@@ -417,16 +463,22 @@ impl App {
                 start_beat,
                 duration_beats,
             } => {
+                let note = MidiNote {
+                    pitch,
+                    velocity: 100,
+                    start_beat,
+                    duration_beats,
+                };
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.notes.push(MidiNote {
-                            pitch,
-                            velocity: 100,
-                            start_beat,
-                            duration_beats,
-                        });
+                        clip.notes.push(note);
                     }
                 }
+                self.send_command(EngineCommand::AddNote {
+                    track_id,
+                    clip_id,
+                    note,
+                });
             }
             Message::RemoveNote(track_id, clip_id, note_index) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -437,6 +489,11 @@ impl App {
                         }
                     }
                 }
+                self.send_command(EngineCommand::RemoveNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                });
             }
             Message::EditNote(track_id, clip_id, note_index, new_note) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -446,6 +503,12 @@ impl App {
                         }
                     }
                 }
+                self.send_command(EngineCommand::EditNote {
+                    track_id,
+                    clip_id,
+                    note_index,
+                    note: new_note,
+                });
             }
             Message::SelectNote(track_id, clip_id, note_index) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {

@@ -30,6 +30,11 @@ static REVERB_PARAMS: &[ParamDescriptor] = &[
 const COMB_LENGTHS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
 const ALLPASS_LENGTHS: [usize; 4] = [556, 441, 341, 225];
 
+// Freeverb tuning constants
+const FIXED_GAIN: f32 = 0.015;
+const SCALE_WET: f32 = 3.0;
+const STEREO_WIDTH: f32 = 1.0;
+
 struct CombFilter {
     buffer: Vec<f32>,
     pos: usize,
@@ -192,6 +197,11 @@ impl AudioEffect for ReverbEffect {
         let ch = channels.clamp(1, 2);
         let frames = buffer.len() / ch;
 
+        // Freeverb wet gain with stereo width cross-feed
+        let wet1 = self.mix * SCALE_WET * (STEREO_WIDTH * 0.5 + 0.5);
+        let wet2 = self.mix * SCALE_WET * ((1.0 - STEREO_WIDTH) * 0.5);
+        let dry = 1.0 - self.mix;
+
         for frame in 0..frames {
             let dry_l = buffer[frame * ch];
             let dry_r = if ch >= 2 {
@@ -200,7 +210,8 @@ impl AudioEffect for ReverbEffect {
                 dry_l
             };
 
-            let input = (dry_l + dry_r) * 0.5;
+            // Attenuate input before comb filters (critical Freeverb tuning)
+            let input = (dry_l + dry_r) * FIXED_GAIN;
 
             let mut wet_l = 0.0_f32;
             let mut wet_r = 0.0_f32;
@@ -219,9 +230,9 @@ impl AudioEffect for ReverbEffect {
                 wet_r = ap.process(wet_r);
             }
 
-            buffer[frame * ch] = dry_l * (1.0 - self.mix) + wet_l * self.mix;
+            buffer[frame * ch] = dry_l * dry + wet_l * wet1 + wet_r * wet2;
             if ch >= 2 {
-                buffer[frame * ch + 1] = dry_r * (1.0 - self.mix) + wet_r * self.mix;
+                buffer[frame * ch + 1] = dry_r * dry + wet_r * wet1 + wet_l * wet2;
             }
         }
     }
