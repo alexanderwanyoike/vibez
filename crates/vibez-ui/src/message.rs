@@ -16,11 +16,11 @@ pub enum Message {
     BpmChanged(String),
     BpmSubmit,
 
-    // File (legacy single-file)
-    OpenFile,
-    FileSelected(Option<PathBuf>),
-    AudioDecoded(Arc<DecodedAudio>),
-    DecodeError(String),
+    // Open file → creates audio track + clip
+    OpenFileToNewTrack,
+    NewTrackFileSelected(Option<PathBuf>),
+    NewTrackAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String),
+    NewTrackDecodeError(String),
 
     // Engine events (polled at 60fps)
     Tick,

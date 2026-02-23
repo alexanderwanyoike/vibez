@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, row, scrollable, text, text_input,
+    button, canvas, center, column, container, horizontal_space, row, scrollable, text, text_input,
 };
 use iced::{Element, Length, Subscription, Task, Theme};
 
@@ -21,12 +21,9 @@ use crate::theme as vibez_theme;
 use crate::widgets::mixer_strip::view_mixer_strip;
 use crate::widgets::timeline::TimelineWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
-use crate::widgets::waveform::WaveformWidget;
 
 struct App {
     state: AppState,
-    waveform: WaveformWidget,
-    vu_meter: VuMeterWidget,
     timeline: TimelineWidget,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
@@ -67,8 +64,6 @@ impl App {
         (
             Self {
                 state,
-                waveform: WaveformWidget::new(),
-                vu_meter: VuMeterWidget::new(),
                 timeline: TimelineWidget::new(),
                 cmd_tx: Some(cmd_tx),
                 event_rx: Some(event_rx),
@@ -95,7 +90,6 @@ impl App {
                 self.state.position_samples = 0;
                 self.send_command(EngineCommand::Stop);
                 self.send_command(EngineCommand::Seek(0));
-                self.waveform.set_playhead(0.0);
                 self.timeline.set_playhead(0.0);
             }
             Message::TogglePlayback => {
@@ -106,23 +100,11 @@ impl App {
                 }
             }
             Message::Seek(normalized) => {
-                let duration_samples = self.state.total_duration_samples();
-                let legacy_frames = self
-                    .state
-                    .audio
-                    .as_ref()
-                    .map_or(0, |a| a.num_frames() as u64);
-                let total = if duration_samples > 0 {
-                    duration_samples
-                } else {
-                    legacy_frames
-                };
-
+                let total = self.state.total_duration_samples();
                 if total > 0 {
                     let sample_pos = (normalized * total as f64) as u64;
                     self.state.position_samples = sample_pos;
                     self.send_command(EngineCommand::Seek(sample_pos));
-                    self.waveform.set_playhead(normalized);
                     self.timeline.set_playhead(normalized);
                 }
             }
@@ -140,7 +122,9 @@ impl App {
                     self.state.bpm_text = format!("{bpm:.0}");
                 }
             }
-            Message::OpenFile => {
+
+            // -- Open file → new audio track + clip --
+            Message::OpenFileToNewTrack => {
                 return Task::perform(
                     async {
                         let handle = rfd::AsyncFileDialog::new()
@@ -150,54 +134,74 @@ impl App {
                             .await;
                         handle.map(|h| h.path().to_path_buf())
                     },
-                    Message::FileSelected,
+                    Message::NewTrackFileSelected,
                 );
             }
-            Message::FileSelected(path) => {
+            Message::NewTrackFileSelected(path) => {
                 if let Some(path) = path {
                     let file_name = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    self.state.loading = true;
                     self.state.status_text = format!("Loading {file_name}...");
-                    self.state.file_name = Some(file_name);
 
-                    return Task::perform(decode_file_async(path), |result| match result {
-                        Ok(audio) => Message::AudioDecoded(Arc::new(audio)),
-                        Err(e) => Message::DecodeError(e),
+                    let track_id = TrackId::new();
+                    let clip_id = ClipId::new();
+
+                    return Task::perform(decode_file_async(path), move |result| match result {
+                        Ok(audio) => Message::NewTrackAudioDecoded(
+                            track_id,
+                            clip_id,
+                            Arc::new(audio),
+                            file_name.clone(),
+                        ),
+                        Err(e) => Message::NewTrackDecodeError(e),
                     });
                 }
             }
-            Message::AudioDecoded(audio) => {
-                self.state.loading = false;
-                self.state.sample_rate = audio.sample_rate;
-                let name = self.state.file_name.as_deref().unwrap_or("audio");
+            Message::NewTrackAudioDecoded(track_id, clip_id, audio, file_name) => {
+                let track_num = self.state.next_track_number;
+                self.state.next_track_number += 1;
+                let track_name = format!("Track {track_num}");
+                let duration = audio.num_frames() as u64;
+
+                // Create track in engine
+                self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
+                // Add clip to track in engine
+                self.send_command(EngineCommand::AddClip {
+                    track_id,
+                    clip_id,
+                    audio: Arc::clone(&audio),
+                    position: 0,
+                    source_offset: 0,
+                    duration,
+                });
+
+                // Update UI state
+                let mut track = UiTrack::new(track_id, track_name);
+                track.clips.push(UiClip {
+                    id: clip_id,
+                    name: file_name.clone(),
+                    audio,
+                    position: 0,
+                    source_offset: 0,
+                    duration,
+                });
+                self.state.tracks.push(track);
+                self.state.selected_track = Some(track_id);
+
                 self.state.status_text = format!(
-                    "{} — {:.1}s, {}ch, {}Hz",
-                    name,
-                    audio.duration_seconds(),
-                    audio.num_channels(),
-                    audio.sample_rate,
+                    "Track {track_num}: {file_name} — {:.1}s",
+                    duration as f64 / self.state.sample_rate as f64
                 );
-
-                self.waveform.set_audio(Some(Arc::clone(&audio)));
-                self.waveform.set_playhead(0.0);
-                self.state.position_samples = 0;
-                self.state.playing = false;
-
-                self.send_command(EngineCommand::Stop);
-                self.send_command(EngineCommand::Seek(0));
-                self.send_command(EngineCommand::LoadAudio(audio));
-                self.state.audio = self.waveform.audio.clone();
             }
-            Message::DecodeError(err) => {
-                self.state.loading = false;
+            Message::NewTrackDecodeError(err) => {
                 self.state.status_text = format!("Error: {err}");
             }
+
+            // -- Engine events --
             Message::Tick => {
                 self.poll_engine_events();
-                // Sync timeline
                 let selected_idx = self
                     .state
                     .selected_track
@@ -212,14 +216,11 @@ impl App {
             }
             Message::EnginePosition(pos) => {
                 self.state.position_samples = pos;
-                self.waveform.set_playhead(self.state.position_normalized());
                 self.timeline.set_playhead(self.state.position_normalized());
             }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
                 self.state.peak_r = peak_r;
-                self.vu_meter.peak_l = peak_l;
-                self.vu_meter.peak_r = peak_r;
             }
             Message::EngineStopped => {
                 self.state.playing = false;
@@ -243,7 +244,11 @@ impl App {
                 if self.state.selected_track == Some(track_id) {
                     self.state.selected_track = self.state.tracks.first().map(|t| t.id);
                 }
-                self.state.status_text = format!("{} tracks", self.state.tracks.len());
+                if self.state.tracks.is_empty() {
+                    self.state.status_text = "Ready — Open a file or add a track".to_string();
+                } else {
+                    self.state.status_text = format!("{} tracks", self.state.tracks.len());
+                }
             }
             Message::SelectTrack(track_id) => {
                 self.state.selected_track = Some(track_id);
@@ -282,7 +287,6 @@ impl App {
                 }
             }
             Message::ClipAudioDecoded(track_id, clip_id, audio, name) => {
-                // Place clip at the end of existing clips on this track
                 let existing_end = self
                     .state
                     .find_track(track_id)
@@ -297,7 +301,6 @@ impl App {
 
                 let duration = audio.num_frames() as u64;
 
-                // Send to engine
                 self.send_command(EngineCommand::AddClip {
                     track_id,
                     clip_id,
@@ -307,7 +310,6 @@ impl App {
                     duration,
                 });
 
-                // Update UI state
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.clips.push(UiClip {
                         id: clip_id,
@@ -378,13 +380,10 @@ impl App {
                 match event {
                     EngineEvent::PlaybackPosition(pos) => {
                         self.state.position_samples = pos;
-                        self.waveform.set_playhead(self.state.position_normalized());
                     }
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
-                        self.vu_meter.peak_l = self.state.peak_l;
-                        self.vu_meter.peak_r = self.state.peak_r;
                     }
                     EngineEvent::PlaybackStopped => {
                         self.state.playing = false;
@@ -409,22 +408,12 @@ impl App {
 
     fn view(&self) -> Element<Message> {
         let header = self.view_header();
-
-        let main_content = if self.state.tracks.is_empty() {
-            // Legacy view: waveform + meter
-            self.view_waveform()
-        } else {
-            // Multi-track view: timeline + mixer
-            let timeline = self.view_timeline();
-            let mixer = self.view_mixer();
-
-            column![timeline, mixer].spacing(2).into()
-        };
-
+        let timeline = self.view_timeline();
+        let mixer = self.view_mixer();
         let transport_bar = self.view_transport();
         let status_bar = self.view_status();
 
-        let layout = column![header, main_content, transport_bar, status_bar];
+        let layout = column![header, timeline, mixer, transport_bar, status_bar];
 
         container(layout)
             .width(Length::Fill)
@@ -435,8 +424,8 @@ impl App {
     fn view_header(&self) -> Element<Message> {
         let title = text("vibez").size(24).color(vibez_theme::ACCENT);
 
-        let open_btn = button(text("Open").size(14))
-            .on_press(Message::OpenFile)
+        let open_btn = button(text("Open File").size(14))
+            .on_press(Message::OpenFileToNewTrack)
             .padding([6, 16]);
 
         let add_track_btn = button(text("Add Track").size(14))
@@ -445,7 +434,6 @@ impl App {
 
         let mut header_row = row![title, horizontal_space(), add_track_btn].spacing(8);
 
-        // Show remove track button if a track is selected
         if let Some(selected_id) = self.state.selected_track {
             let remove_btn = button(text("Remove Track").size(14))
                 .on_press(Message::RemoveTrack(selected_id))
@@ -466,27 +454,25 @@ impl App {
             .into()
     }
 
-    fn view_waveform(&self) -> Element<Message> {
-        let waveform_canvas: Element<Message> = canvas(&self.waveform)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
-
-        let meter_canvas: Element<Message> = canvas(&self.vu_meter)
-            .width(Length::Fixed(40.0))
-            .height(Length::Fill)
-            .into();
-
-        let content = row![waveform_canvas, meter_canvas].spacing(4);
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(8)
-            .into()
-    }
-
     fn view_timeline(&self) -> Element<Message> {
+        if self.state.tracks.is_empty() {
+            // Empty state
+            let prompt = text("Open a file or add a track to get started")
+                .size(16)
+                .color(vibez_theme::TEXT_DIM);
+
+            let centered = center(prompt).width(Length::Fill).height(Length::Fill);
+
+            return container(centered)
+                .width(Length::Fill)
+                .height(Length::FillPortion(6))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(vibez_theme::BG_DARK.into()),
+                    ..Default::default()
+                })
+                .into();
+        }
+
         let timeline_canvas: Element<Message> = canvas(&self.timeline)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -500,6 +486,13 @@ impl App {
     }
 
     fn view_mixer(&self) -> Element<Message> {
+        if self.state.tracks.is_empty() {
+            return container(text(""))
+                .width(Length::Fill)
+                .height(Length::FillPortion(3))
+                .into();
+        }
+
         let mut strips = row![].spacing(4).padding(8);
 
         for track in &self.state.tracks {
@@ -630,7 +623,6 @@ impl App {
 async fn decode_file_async(
     path: PathBuf,
 ) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    // Run decoding on a blocking thread
     tokio::task::spawn_blocking(move || {
         file_io::decode_audio_file(&path).map_err(|e| e.to_string())
     })

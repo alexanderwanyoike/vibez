@@ -49,10 +49,6 @@ impl UiTrack {
 }
 
 pub struct AppState {
-    // Audio data (legacy single-file)
-    pub audio: Option<Arc<DecodedAudio>>,
-    pub file_name: Option<String>,
-
     // Transport
     pub playing: bool,
     pub position_samples: u64,
@@ -67,7 +63,6 @@ pub struct AppState {
     pub peak_r: f32,
 
     // UI
-    pub loading: bool,
     pub status_text: String,
 
     // Multi-track
@@ -79,8 +74,6 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            audio: None,
-            file_name: None,
             playing: false,
             position_samples: 0,
             sample_rate: 44_100,
@@ -88,7 +81,6 @@ impl Default for AppState {
             bpm_text: format!("{DEFAULT_BPM:.0}"),
             peak_l: 0.0,
             peak_r: 0.0,
-            loading: false,
             status_text: "Ready — Open a file or add a track".to_string(),
             tracks: Vec::new(),
             selected_track: None,
@@ -103,12 +95,11 @@ impl AppState {
     }
 
     pub fn duration_seconds(&self) -> f64 {
-        // Prefer multi-track duration if tracks exist
-        let track_dur = self.total_duration_samples();
-        if track_dur > 0 {
-            track_dur as f64 / self.sample_rate as f64
+        let samples = self.total_duration_samples();
+        if samples > 0 {
+            samples as f64 / self.sample_rate as f64
         } else {
-            self.audio.as_ref().map_or(0.0, |a| a.duration_seconds())
+            0.0
         }
     }
 
