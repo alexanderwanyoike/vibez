@@ -1,0 +1,12 @@
+/target
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.wav
+*.mp3
+*.flac
+*.ogg
+!assets/**
+.env

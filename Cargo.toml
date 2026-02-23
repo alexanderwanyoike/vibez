@@ -1,0 +1,50 @@
+[workspace]
+members = [
+    "crates/vibez-core",
+    "crates/vibez-engine",
+    "crates/vibez-audio-io",
+    "crates/vibez-dsp",
+    "crates/vibez-instruments",
+    "crates/vibez-project",
+    "crates/vibez-ui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/vibez-daw/vibez"
+
+[workspace.dependencies]
+vibez-core = { path = "crates/vibez-core" }
+vibez-engine = { path = "crates/vibez-engine" }
+vibez-audio-io = { path = "crates/vibez-audio-io" }
+vibez-dsp = { path = "crates/vibez-dsp" }
+vibez-instruments = { path = "crates/vibez-instruments" }
+vibez-project = { path = "crates/vibez-project" }
+vibez-ui = { path = "crates/vibez-ui" }
+
+# Audio
+cpal = "0.16"
+symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "aac", "pcm"] }
+rubato = "0.16"
+rtrb = "0.3"
+audio_thread_priority = "0.32"
+
+# GUI
+iced = { version = "0.13", features = ["canvas", "tokio"] }
+
+# Shared
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package]
+name = "vibez"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+vibez-ui = { workspace = true }
+iced = { workspace = true }

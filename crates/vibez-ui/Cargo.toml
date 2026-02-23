@@ -1,0 +1,14 @@
+[package]
+name = "vibez-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+vibez-core = { workspace = true }
+vibez-engine = { workspace = true }
+vibez-audio-io = { workspace = true }
+iced = { workspace = true }
+rtrb = { workspace = true }
+rfd = "0.15"
+tokio = { version = "1", features = ["rt-multi-thread"] }

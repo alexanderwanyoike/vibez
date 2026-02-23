@@ -1,0 +1,15 @@
+[package]
+name = "vibez-audio-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+vibez-core = { workspace = true }
+vibez-engine = { workspace = true }
+cpal = { workspace = true }
+symphonia = { workspace = true }
+rubato = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
