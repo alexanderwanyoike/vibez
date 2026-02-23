@@ -1,3 +1,6 @@
+use std::time::Instant;
+
+use iced::keyboard;
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer, Theme};
@@ -5,6 +8,21 @@ use iced::{Rectangle, Renderer, Theme};
 use crate::message::Message;
 use crate::theme;
 use vibez_core::id::TrackId;
+
+/// 270° arc sweep matching DAW standards.
+/// Start at 135° (bottom-left), end at 405° (bottom-right).
+const ARC_START: f32 = std::f32::consts::FRAC_PI_4 * 3.0; // 135° = 3π/4
+const ARC_END: f32 = ARC_START + std::f32::consts::FRAC_PI_2 * 3.0; // 135° + 270° = 405° = 9π/4
+const ARC_CENTER: f32 = (ARC_START + ARC_END) / 2.0; // 270° = 3π/2
+
+/// Sensitivity: full 0→1 range over ~150px of vertical drag.
+const BASE_SENSITIVITY: f32 = 1.0 / 150.0;
+/// Shift modifier makes it 5x finer.
+const FINE_DIVISOR: f32 = 5.0;
+/// Scroll step per line tick.
+const SCROLL_STEP: f32 = 0.02;
+/// Double-click window in milliseconds.
+const DOUBLE_CLICK_MS: u64 = 300;
 
 /// Rotary knob widget for track pan control.
 pub struct KnobWidget {
@@ -19,11 +37,24 @@ impl KnobWidget {
     }
 }
 
-/// State for mouse dragging.
-#[derive(Debug, Default)]
+/// State for mouse interaction.
+#[derive(Debug)]
 pub struct KnobState {
     dragging: bool,
     last_y: f32,
+    shift_held: bool,
+    last_click: Option<Instant>,
+}
+
+impl Default for KnobState {
+    fn default() -> Self {
+        Self {
+            dragging: false,
+            last_y: 0.0,
+            shift_held: false,
+            last_click: None,
+        }
+    }
 }
 
 impl canvas::Program<Message> for KnobWidget {
@@ -47,57 +78,65 @@ impl canvas::Program<Message> for KnobWidget {
         let bg_circle = canvas::Path::circle(center, radius);
         frame.fill(&bg_circle, theme::KNOB_BG);
 
-        // Arc showing the value
-        // Range: from ~225° (left) through 270° (bottom/center) to ~315° (right)
-        // Using standard math angles: 225° = 5π/4 (start), 315° = 7π/4 (end)
-        let start_angle = std::f32::consts::FRAC_PI_4 * 5.0; // 225°
-        let end_angle = std::f32::consts::FRAC_PI_4 * 7.0; // 315°
-        let value_angle = start_angle + self.value * (end_angle - start_angle);
-
-        // Draw the arc as line segments
         let arc_radius = radius - 2.0;
-        let segments = 32;
+        let segments = 40;
 
-        // Background arc (full range)
-        let bg_arc = build_arc(center, arc_radius, start_angle, end_angle, segments);
+        // Background arc (full 270° range)
+        let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END, segments);
         frame.stroke(
             &bg_arc,
             canvas::Stroke::default()
                 .with_color(theme::FADER_TRACK)
-                .with_width(2.5),
+                .with_width(3.0),
         );
 
-        // Value arc
-        let value_arc = build_arc(center, arc_radius, start_angle, value_angle, segments);
+        // Value arc (filled portion)
+        let value_angle = ARC_START + self.value * (ARC_END - ARC_START);
+        if self.value > 0.005 {
+            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
+            frame.stroke(
+                &value_arc,
+                canvas::Stroke::default()
+                    .with_color(theme::KNOB_ARC)
+                    .with_width(3.0),
+            );
+        }
+
+        // Pointer line from center toward current value angle
+        let pointer_inner = radius * 0.25;
+        let pointer_outer = radius - 3.0;
+        let pointer = canvas::Path::line(
+            iced::Point::new(
+                center.x + pointer_inner * value_angle.cos(),
+                center.y + pointer_inner * value_angle.sin(),
+            ),
+            iced::Point::new(
+                center.x + pointer_outer * value_angle.cos(),
+                center.y + pointer_outer * value_angle.sin(),
+            ),
+        );
         frame.stroke(
-            &value_arc,
+            &pointer,
             canvas::Stroke::default()
-                .with_color(theme::KNOB_ARC)
-                .with_width(2.5),
+                .with_color(theme::TEXT)
+                .with_width(2.0),
         );
 
-        // Indicator dot at the value position
-        let dot_x = center.x + arc_radius * value_angle.cos();
-        let dot_y = center.y + arc_radius * value_angle.sin();
-        let dot = canvas::Path::circle(iced::Point::new(dot_x, dot_y), 2.5);
-        frame.fill(&dot, theme::TEXT);
-
-        // Center marker line
-        let center_angle = (start_angle + end_angle) / 2.0;
-        let mark_inner = radius - 6.0;
-        let mark_outer = radius - 1.0;
-        let mark = canvas::Path::line(
+        // Center tick mark at bottom (270° / 3π/2)
+        let tick_inner = radius - 1.0;
+        let tick_outer = radius + 2.0;
+        let tick = canvas::Path::line(
             iced::Point::new(
-                center.x + mark_inner * center_angle.cos(),
-                center.y + mark_inner * center_angle.sin(),
+                center.x + tick_inner * ARC_CENTER.cos(),
+                center.y + tick_inner * ARC_CENTER.sin(),
             ),
             iced::Point::new(
-                center.x + mark_outer * center_angle.cos(),
-                center.y + mark_outer * center_angle.sin(),
+                center.x + tick_outer * ARC_CENTER.cos(),
+                center.y + tick_outer * ARC_CENTER.sin(),
             ),
         );
         frame.stroke(
-            &mark,
+            &tick,
             canvas::Stroke::default()
                 .with_color(theme::TEXT_DIM)
                 .with_width(1.0),
@@ -112,8 +151,10 @@ impl canvas::Program<Message> for KnobWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging || cursor.is_over(bounds) {
-            mouse::Interaction::ResizingVertically
+        if state.dragging {
+            mouse::Interaction::Grabbing
+        } else if cursor.is_over(bounds) {
+            mouse::Interaction::Grab
         } else {
             mouse::Interaction::default()
         }
@@ -127,28 +168,59 @@ impl canvas::Program<Message> for KnobWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
-            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
+            // Track modifier keys
+            canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.shift_held = modifiers.shift();
+                return (canvas::event::Status::Ignored, None);
+            }
+
+            // Click: start drag or double-click to reset
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if cursor.is_over(bounds) {
+                    let now = Instant::now();
+
+                    // Double-click detection
+                    if let Some(last) = state.last_click {
+                        if now.duration_since(last).as_millis() < DOUBLE_CLICK_MS as u128 {
+                            state.last_click = None;
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::SetTrackPan(self.track_id, 0.5)),
+                            );
+                        }
+                    }
+                    state.last_click = Some(now);
+
                     state.dragging = true;
-                    if let Some(pos) = cursor.position_in(bounds) {
+                    if let Some(pos) = cursor.position() {
                         state.last_y = pos.y;
                     }
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+
+            // Release
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.dragging {
                     state.dragging = false;
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+
+            // Drag: vertical movement adjusts value (use absolute position
+            // so dragging outside the small knob bounds still tracks)
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if state.dragging {
-                    if let Some(pos) = cursor.position_in(bounds) {
-                        let delta = state.last_y - pos.y;
+                    if let Some(pos) = cursor.position() {
+                        let delta = state.last_y - pos.y; // up = positive
                         state.last_y = pos.y;
 
-                        let sensitivity = 0.005;
+                        let sensitivity = if state.shift_held {
+                            BASE_SENSITIVITY / FINE_DIVISOR
+                        } else {
+                            BASE_SENSITIVITY
+                        };
+
                         let new_pan = (self.value + delta * sensitivity).clamp(0.0, 1.0);
 
                         return (
@@ -158,6 +230,30 @@ impl canvas::Program<Message> for KnobWidget {
                     }
                 }
             }
+
+            // Scroll wheel
+            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                if cursor.is_over(bounds) {
+                    let scroll_y = match delta {
+                        mouse::ScrollDelta::Lines { y, .. } => y,
+                        mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
+                    };
+
+                    let step = if state.shift_held {
+                        SCROLL_STEP / FINE_DIVISOR
+                    } else {
+                        SCROLL_STEP
+                    };
+
+                    let new_pan = (self.value + scroll_y * step).clamp(0.0, 1.0);
+
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::SetTrackPan(self.track_id, new_pan)),
+                    );
+                }
+            }
+
             _ => {}
         }
 
