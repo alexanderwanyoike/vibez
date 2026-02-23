@@ -2,6 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::id::{ClipId, TrackId};
+
+use crate::state::Workspace;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -15,15 +18,38 @@ pub enum Message {
     BpmChanged(String),
     BpmSubmit,
 
-    // File
-    OpenFile,
-    FileSelected(Option<PathBuf>),
-    AudioDecoded(Arc<DecodedAudio>),
-    DecodeError(String),
+    // Workspace
+    SwitchWorkspace(Workspace),
 
     // Engine events (polled at 60fps)
     Tick,
     EnginePosition(u64),
-    EngineMetering { peak_l: f32, peak_r: f32 },
+    EngineMetering {
+        peak_l: f32,
+        peak_r: f32,
+    },
     EngineStopped,
+
+    // Multi-track
+    AddTrack,
+    RemoveTrack(TrackId),
+    SelectTrack(TrackId),
+    AddClipToTrack(TrackId),
+    ClipFileSelected(TrackId, Option<PathBuf>),
+    ClipAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String),
+    ClipDecodeError(TrackId, String),
+    RemoveClip(TrackId, ClipId),
+
+    // Track controls
+    SetTrackGain(TrackId, f32),
+    SetTrackPan(TrackId, f32),
+    SetTrackMute(TrackId),
+    SetTrackSolo(TrackId),
+
+    // Per-track metering
+    EngineTrackMeter {
+        track_id: TrackId,
+        peak_l: f32,
+        peak_r: f32,
+    },
 }

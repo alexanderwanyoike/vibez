@@ -1,3 +1,5 @@
+use vibez_core::id::TrackId;
+
 /// Events sent from the audio engine back to the UI thread (via rtrb).
 ///
 /// These are pushed by the engine inside the real-time audio callback and
@@ -15,6 +17,13 @@ pub enum EngineEvent {
         peak_r: f32,
         rms_l: f32,
         rms_r: f32,
+    },
+
+    /// Per-track peak meter readings.
+    TrackMeter {
+        track_id: TrackId,
+        peak_l: f32,
+        peak_r: f32,
     },
 
     /// Playback has started (transport entered playing state).
@@ -36,6 +45,11 @@ mod tests {
             peak_r: 0.75,
             rms_l: 0.5,
             rms_r: 0.45,
+        };
+        let _track_meter = EngineEvent::TrackMeter {
+            track_id: TrackId::new(),
+            peak_l: 0.5,
+            peak_r: 0.4,
         };
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;
@@ -76,6 +90,33 @@ mod tests {
         }
 
         assert_eq!(consumer.pop().unwrap(), EngineEvent::PlaybackStopped);
+    }
+
+    #[test]
+    fn track_meter_can_be_sent_through_rtrb() {
+        let (mut producer, mut consumer) = rtrb::RingBuffer::<EngineEvent>::new(16);
+        let tid = TrackId::new();
+
+        producer
+            .push(EngineEvent::TrackMeter {
+                track_id: tid,
+                peak_l: 0.7,
+                peak_r: 0.6,
+            })
+            .unwrap();
+
+        match consumer.pop().unwrap() {
+            EngineEvent::TrackMeter {
+                track_id,
+                peak_l,
+                peak_r,
+            } => {
+                assert_eq!(track_id, tid);
+                assert!((peak_l - 0.7).abs() < f32::EPSILON);
+                assert!((peak_r - 0.6).abs() < f32::EPSILON);
+            }
+            other => panic!("expected TrackMeter, got {:?}", other),
+        }
     }
 
     #[test]
