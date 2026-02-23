@@ -16,15 +16,15 @@ use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
 
 use crate::message::Message;
-use crate::state::{AppState, UiClip, UiTrack};
+use crate::state::{AppState, UiClip, UiTrack, Workspace};
 use crate::theme as vibez_theme;
 use crate::widgets::mixer_strip::view_mixer_strip;
-use crate::widgets::timeline::TimelineWidget;
+use crate::widgets::timeline::{RulerWidget, TrackClipCanvas};
+use crate::widgets::track_header::view_track_header;
 use crate::widgets::vu_meter::VuMeterWidget;
 
 struct App {
     state: AppState,
-    timeline: TimelineWidget,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
     _stream: Option<AudioOutputStream>,
@@ -64,7 +64,6 @@ impl App {
         (
             Self {
                 state,
-                timeline: TimelineWidget::new(),
                 cmd_tx: Some(cmd_tx),
                 event_rx: Some(event_rx),
                 _stream: stream,
@@ -90,7 +89,6 @@ impl App {
                 self.state.position_samples = 0;
                 self.send_command(EngineCommand::Stop);
                 self.send_command(EngineCommand::Seek(0));
-                self.timeline.set_playhead(0.0);
             }
             Message::TogglePlayback => {
                 if self.state.playing {
@@ -105,7 +103,6 @@ impl App {
                     let sample_pos = (normalized * total as f64) as u64;
                     self.state.position_samples = sample_pos;
                     self.send_command(EngineCommand::Seek(sample_pos));
-                    self.timeline.set_playhead(normalized);
                 }
             }
             Message::BpmChanged(val) => {
@@ -123,100 +120,17 @@ impl App {
                 }
             }
 
-            // -- Open file → new audio track + clip --
-            Message::OpenFileToNewTrack => {
-                return Task::perform(
-                    async {
-                        let handle = rfd::AsyncFileDialog::new()
-                            .set_title("Open Audio File")
-                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
-                            .pick_file()
-                            .await;
-                        handle.map(|h| h.path().to_path_buf())
-                    },
-                    Message::NewTrackFileSelected,
-                );
-            }
-            Message::NewTrackFileSelected(path) => {
-                if let Some(path) = path {
-                    let file_name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    self.state.status_text = format!("Loading {file_name}...");
-
-                    let track_id = TrackId::new();
-                    let clip_id = ClipId::new();
-
-                    return Task::perform(decode_file_async(path), move |result| match result {
-                        Ok(audio) => Message::NewTrackAudioDecoded(
-                            track_id,
-                            clip_id,
-                            Arc::new(audio),
-                            file_name.clone(),
-                        ),
-                        Err(e) => Message::NewTrackDecodeError(e),
-                    });
-                }
-            }
-            Message::NewTrackAudioDecoded(track_id, clip_id, audio, file_name) => {
-                let track_num = self.state.next_track_number;
-                self.state.next_track_number += 1;
-                let track_name = format!("Track {track_num}");
-                let duration = audio.num_frames() as u64;
-
-                // Create track in engine
-                self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
-                // Add clip to track in engine
-                self.send_command(EngineCommand::AddClip {
-                    track_id,
-                    clip_id,
-                    audio: Arc::clone(&audio),
-                    position: 0,
-                    source_offset: 0,
-                    duration,
-                });
-
-                // Update UI state
-                let mut track = UiTrack::new(track_id, track_name);
-                track.clips.push(UiClip {
-                    id: clip_id,
-                    name: file_name.clone(),
-                    audio,
-                    position: 0,
-                    source_offset: 0,
-                    duration,
-                });
-                self.state.tracks.push(track);
-                self.state.selected_track = Some(track_id);
-
-                self.state.status_text = format!(
-                    "Track {track_num}: {file_name} — {:.1}s",
-                    duration as f64 / self.state.sample_rate as f64
-                );
-            }
-            Message::NewTrackDecodeError(err) => {
-                self.state.status_text = format!("Error: {err}");
+            // -- Workspace --
+            Message::SwitchWorkspace(ws) => {
+                self.state.workspace = ws;
             }
 
             // -- Engine events --
             Message::Tick => {
                 self.poll_engine_events();
-                let selected_idx = self
-                    .state
-                    .selected_track
-                    .and_then(|id| self.state.tracks.iter().position(|t| t.id == id));
-                self.timeline.sync_from_tracks(
-                    &self.state.tracks,
-                    selected_idx,
-                    self.state.duration_seconds(),
-                    self.state.sample_rate,
-                );
-                self.timeline.set_playhead(self.state.position_normalized());
             }
             Message::EnginePosition(pos) => {
                 self.state.position_samples = pos;
-                self.timeline.set_playhead(self.state.position_normalized());
             }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
@@ -245,7 +159,7 @@ impl App {
                     self.state.selected_track = self.state.tracks.first().map(|t| t.id);
                 }
                 if self.state.tracks.is_empty() {
-                    self.state.status_text = "Ready — Open a file or add a track".to_string();
+                    self.state.status_text = "Ready — Add a track to get started".to_string();
                 } else {
                     self.state.status_text = format!("{} tracks", self.state.tracks.len());
                 }
@@ -406,14 +320,21 @@ impl App {
         }
     }
 
+    // ── View ──
+
     fn view(&self) -> Element<Message> {
         let header = self.view_header();
-        let timeline = self.view_timeline();
-        let mixer = self.view_mixer();
+
+        let content = match self.state.workspace {
+            Workspace::Arrange => self.view_arrangement(),
+            Workspace::Mix => self.view_mixer(),
+        };
+
+        let detail_panel = self.view_detail_panel();
         let transport_bar = self.view_transport();
         let status_bar = self.view_status();
 
-        let layout = column![header, timeline, mixer, transport_bar, status_bar];
+        let layout = column![header, content, detail_panel, transport_bar, status_bar];
 
         container(layout)
             .width(Length::Fill)
@@ -424,15 +345,34 @@ impl App {
     fn view_header(&self) -> Element<Message> {
         let title = text("vibez").size(24).color(vibez_theme::ACCENT);
 
-        let open_btn = button(text("Open File").size(14))
-            .on_press(Message::OpenFileToNewTrack)
-            .padding([6, 16]);
+        // Workspace tabs
+        let arrange_tab = if self.state.workspace == Workspace::Arrange {
+            button(text("Arrange").size(13).color(vibez_theme::ACCENT))
+                .on_press(Message::SwitchWorkspace(Workspace::Arrange))
+                .padding([6, 14])
+        } else {
+            button(text("Arrange").size(13).color(vibez_theme::TEXT_DIM))
+                .on_press(Message::SwitchWorkspace(Workspace::Arrange))
+                .padding([6, 14])
+        };
+
+        let mix_tab = if self.state.workspace == Workspace::Mix {
+            button(text("Mix").size(13).color(vibez_theme::ACCENT))
+                .on_press(Message::SwitchWorkspace(Workspace::Mix))
+                .padding([6, 14])
+        } else {
+            button(text("Mix").size(13).color(vibez_theme::TEXT_DIM))
+                .on_press(Message::SwitchWorkspace(Workspace::Mix))
+                .padding([6, 14])
+        };
+
+        let tabs = row![arrange_tab, mix_tab].spacing(2);
 
         let add_track_btn = button(text("Add Track").size(14))
             .on_press(Message::AddTrack)
             .padding([6, 16]);
 
-        let mut header_row = row![title, horizontal_space(), add_track_btn].spacing(8);
+        let mut header_row = row![title, tabs, horizontal_space(), add_track_btn].spacing(8);
 
         if let Some(selected_id) = self.state.selected_track {
             let remove_btn = button(text("Remove Track").size(14))
@@ -440,8 +380,6 @@ impl App {
                 .padding([6, 16]);
             header_row = header_row.push(remove_btn);
         }
-
-        header_row = header_row.push(open_btn);
 
         let header = header_row.padding(12).align_y(iced::Alignment::Center);
 
@@ -454,10 +392,11 @@ impl App {
             .into()
     }
 
-    fn view_timeline(&self) -> Element<Message> {
+    // ── Arrangement view ──
+
+    fn view_arrangement(&self) -> Element<Message> {
         if self.state.tracks.is_empty() {
-            // Empty state
-            let prompt = text("Open a file or add a track to get started")
+            let prompt = text("Add a track to get started")
                 .size(16)
                 .color(vibez_theme::TEXT_DIM);
 
@@ -465,7 +404,7 @@ impl App {
 
             return container(centered)
                 .width(Length::Fill)
-                .height(Length::FillPortion(6))
+                .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
                     background: Some(vibez_theme::BG_DARK.into()),
                     ..Default::default()
@@ -473,34 +412,96 @@ impl App {
                 .into();
         }
 
-        let timeline_canvas: Element<Message> = canvas(&self.timeline)
+        let playhead = self.state.position_normalized();
+        let duration = self.state.duration_seconds();
+        let sample_rate = self.state.sample_rate;
+
+        // Time ruler across the top (offset by track header width)
+        let ruler = RulerWidget {
+            playhead_position: playhead,
+            duration_seconds: duration,
+        };
+        let ruler_canvas: Element<Message> = canvas(ruler)
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fixed(24.0))
             .into();
 
-        container(timeline_canvas)
+        // Spacer matching header width for the ruler row
+        let ruler_spacer = container(text(""))
+            .width(Length::Fixed(
+                crate::widgets::track_header::TRACK_HEADER_WIDTH,
+            ))
+            .height(Length::Fixed(24.0));
+
+        let ruler_row = row![ruler_spacer, ruler_canvas];
+
+        // Track rows: header widgets + clip canvas
+        let mut track_rows = column![].spacing(0);
+
+        for track in &self.state.tracks {
+            let selected = self.state.selected_track == Some(track.id);
+
+            // Track header (iced widgets)
+            let header = view_track_header(track);
+
+            // Clip canvas for this track
+            let clip_canvas_widget =
+                TrackClipCanvas::from_track(track, playhead, duration, sample_rate, selected);
+            let clip_canvas: Element<Message> = canvas(clip_canvas_widget)
+                .width(Length::Fill)
+                .height(Length::Fixed(80.0))
+                .into();
+
+            let track_row = row![header, clip_canvas].height(Length::Fixed(80.0));
+
+            track_rows = track_rows.push(track_row);
+        }
+
+        let content = column![ruler_row, track_rows];
+
+        let scrollable_content = scrollable(content).direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::default(),
+        ));
+
+        container(scrollable_content)
             .width(Length::Fill)
-            .height(Length::FillPortion(6))
-            .padding([0, 8])
+            .height(Length::FillPortion(5))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(vibez_theme::BG_DARK.into()),
+                ..Default::default()
+            })
             .into()
     }
 
+    // ── Mixer view ──
+
     fn view_mixer(&self) -> Element<Message> {
         if self.state.tracks.is_empty() {
-            return container(text(""))
+            let prompt = text("Add a track to get started")
+                .size(16)
+                .color(vibez_theme::TEXT_DIM);
+
+            let centered = center(prompt).width(Length::Fill).height(Length::Fill);
+
+            return container(centered)
                 .width(Length::Fill)
-                .height(Length::FillPortion(3))
+                .height(Length::FillPortion(5))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(vibez_theme::BG_DARK.into()),
+                    ..Default::default()
+                })
                 .into();
         }
 
-        let mut strips = row![].spacing(4).padding(8);
+        // ── Channel strips + pinned master ──
+        let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.tracks {
             let strip = view_mixer_strip(track);
             strips = strips.push(strip);
         }
 
-        // Master strip
+        // Master strip — pinned to far right, fills height
         let master_label = text("Master").size(11).color(vibez_theme::TEXT);
         let master_meter = VuMeterWidget {
             peak_l: self.state.peak_l,
@@ -508,40 +509,88 @@ impl App {
         };
         let master_meter_canvas: Element<Message> = canvas(master_meter)
             .width(Length::Fixed(28.0))
-            .height(Length::Fixed(100.0))
+            .height(Length::Fill)
             .into();
 
-        let master_strip = column![master_label, master_meter_canvas]
+        let master_col = column![master_label, master_meter_canvas]
             .spacing(4)
             .padding(6)
             .width(Length::Fixed(60.0))
+            .height(Length::Fill)
             .align_x(iced::Alignment::Center);
 
-        let master_container = container(master_strip).style(|_theme: &Theme| container::Style {
-            background: Some(vibez_theme::BG_SURFACE.into()),
-            border: iced::Border {
-                color: vibez_theme::ACCENT,
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        });
+        let master_container =
+            container(master_col)
+                .height(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(vibez_theme::BG_SURFACE.into()),
+                    border: iced::Border {
+                        color: vibez_theme::ACCENT,
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                });
 
-        strips = strips.push(master_container);
+        let mixer_row = row![strips, horizontal_space(), master_container]
+            .spacing(4)
+            .padding([8, 4])
+            .height(Length::Fill);
 
-        let scrollable_mixer = scrollable(strips).direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::default(),
-        ));
-
-        container(scrollable_mixer)
+        container(mixer_row)
             .width(Length::Fill)
-            .height(Length::FillPortion(3))
+            .height(Length::FillPortion(5))
             .style(|_theme: &Theme| container::Style {
-                background: Some(vibez_theme::BG_DARK.into()),
+                background: Some(vibez_theme::BG_SURFACE.into()),
                 ..Default::default()
             })
             .into()
     }
+
+    // ── Detail panel (global — effects/instruments for selected track) ──
+
+    fn view_detail_panel(&self) -> Element<Message> {
+        let detail_content: Element<Message> = if let Some(track) = self
+            .state
+            .selected_track
+            .and_then(|id| self.state.find_track(id))
+        {
+            let label = text(format!("{} — Effects / Instruments", track.name))
+                .size(14)
+                .color(vibez_theme::TEXT_DIM);
+            center(label)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            let label = text("Select a track to view effects / instruments")
+                .size(14)
+                .color(vibez_theme::TEXT_DIM);
+            center(label)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
+
+        container(detail_content)
+            .width(Length::Fill)
+            .height(Length::FillPortion(2))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(vibez_theme::BG_DARK.into()),
+                border: iced::Border {
+                    color: iced::Color {
+                        a: 0.2,
+                        ..vibez_theme::TEXT_DIM
+                    },
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    // ── Transport bar ──
 
     fn view_transport(&self) -> Element<Message> {
         let play_btn = if self.state.playing {
@@ -578,11 +627,22 @@ impl App {
             text("").size(12).color(vibez_theme::TEXT_DIM)
         };
 
+        // Master VU meter in the transport bar
+        let master_meter = VuMeterWidget {
+            peak_l: self.state.peak_l,
+            peak_r: self.state.peak_r,
+        };
+        let master_meter_canvas: Element<Message> = canvas(master_meter)
+            .width(Length::Fixed(24.0))
+            .height(Length::Fixed(28.0))
+            .into();
+
         let transport = row![
             play_btn,
             horizontal_space(),
             time_text,
             horizontal_space(),
+            master_meter_canvas,
             track_count,
             bpm_input,
             bpm_label,

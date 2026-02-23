@@ -31,7 +31,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<Message> {
     let fader = FaderWidget::new(track.id, track.gain);
     let fader_canvas: Element<Message> = canvas(fader)
         .width(Length::Fixed(28.0))
-        .height(Length::Fixed(100.0))
+        .height(Length::Fill)
         .into();
 
     let gain_label = text(format_gain_db(track.gain))
@@ -45,7 +45,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<Message> {
     };
     let meter_canvas: Element<Message> = canvas(meter)
         .width(Length::Fixed(20.0))
-        .height(Length::Fixed(100.0))
+        .height(Length::Fill)
         .into();
 
     // Mute button
@@ -72,13 +72,10 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<Message> {
 
     let mute_solo_row = row![mute_btn, solo_btn].spacing(2);
 
-    // Add clip button
-    let add_clip_btn = button(text("+").size(11))
-        .on_press(Message::AddClipToTrack(track.id))
-        .padding([2, 6]);
-
     // Fader + meter side by side
-    let fader_meter = row![fader_canvas, meter_canvas].spacing(2);
+    let fader_meter = row![fader_canvas, meter_canvas]
+        .spacing(2)
+        .height(Length::Fill);
 
     let strip = column![
         name,
@@ -87,14 +84,15 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<Message> {
         fader_meter,
         gain_label,
         mute_solo_row,
-        add_clip_btn,
     ]
     .spacing(4)
     .padding(6)
     .width(Length::Fixed(72.0))
+    .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
     container(strip)
+        .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(vibez_theme::BG_SURFACE.into()),
             border: iced::Border {

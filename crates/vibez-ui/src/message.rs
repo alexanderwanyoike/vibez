@@ -4,6 +4,8 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 
+use crate::state::Workspace;
+
 #[derive(Debug, Clone)]
 pub enum Message {
     // Transport
@@ -16,11 +18,8 @@ pub enum Message {
     BpmChanged(String),
     BpmSubmit,
 
-    // Open file → creates audio track + clip
-    OpenFileToNewTrack,
-    NewTrackFileSelected(Option<PathBuf>),
-    NewTrackAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String),
-    NewTrackDecodeError(String),
+    // Workspace
+    SwitchWorkspace(Workspace),
 
     // Engine events (polled at 60fps)
     Tick,

@@ -48,6 +48,12 @@ impl UiTrack {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Workspace {
+    Arrange,
+    Mix,
+}
+
 pub struct AppState {
     // Transport
     pub playing: bool,
@@ -64,6 +70,7 @@ pub struct AppState {
 
     // UI
     pub status_text: String,
+    pub workspace: Workspace,
 
     // Multi-track
     pub tracks: Vec<UiTrack>,
@@ -81,7 +88,8 @@ impl Default for AppState {
             bpm_text: format!("{DEFAULT_BPM:.0}"),
             peak_l: 0.0,
             peak_r: 0.0,
-            status_text: "Ready — Open a file or add a track".to_string(),
+            status_text: "Ready — Add a track to get started".to_string(),
+            workspace: Workspace::Arrange,
             tracks: Vec::new(),
             selected_track: None,
             next_track_number: 1,
