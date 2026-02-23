@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::id::{ClipId, TrackId};
 
 /// Commands sent from the UI thread to the audio engine (via rtrb).
 ///
@@ -16,10 +17,41 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
-    /// Load decoded audio into the engine for playback.
+    /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
-    /// Remove any loaded audio from the engine.
+    /// Remove any loaded audio from the engine (legacy single-file).
     UnloadAudio,
+
+    // -- Multi-track commands --
+    /// Add a new track with the given ID and name.
+    AddTrack(TrackId, String),
+    /// Remove a track by ID.
+    RemoveTrack(TrackId),
+    /// Add a clip to a track.
+    AddClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        audio: Arc<DecodedAudio>,
+        position: u64,
+        source_offset: u64,
+        duration: u64,
+    },
+    /// Remove a clip from a track.
+    RemoveClip(TrackId, ClipId),
+    /// Move a clip to a new position on the timeline.
+    MoveClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_position: u64,
+    },
+    /// Set the gain for a track.
+    SetTrackGain(TrackId, f32),
+    /// Set the pan for a track (0.0 = left, 0.5 = center, 1.0 = right).
+    SetTrackPan(TrackId, f32),
+    /// Set the mute state for a track.
+    SetTrackMute(TrackId, bool),
+    /// Set the solo state for a track.
+    SetTrackSolo(TrackId, bool),
 }
 
 #[cfg(test)]
@@ -39,6 +71,37 @@ mod tests {
         });
         let _load = EngineCommand::LoadAudio(audio);
         let _unload = EngineCommand::UnloadAudio;
+    }
+
+    #[test]
+    fn multitrack_command_variants() {
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![0.0; 100]],
+            sample_rate: 44_100,
+        });
+
+        let _add_track = EngineCommand::AddTrack(tid, "Track 1".into());
+        let _remove_track = EngineCommand::RemoveTrack(tid);
+        let _add_clip = EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 100,
+        };
+        let _remove_clip = EngineCommand::RemoveClip(tid, cid);
+        let _move_clip = EngineCommand::MoveClip {
+            track_id: tid,
+            clip_id: cid,
+            new_position: 500,
+        };
+        let _gain = EngineCommand::SetTrackGain(tid, 0.8);
+        let _pan = EngineCommand::SetTrackPan(tid, 0.3);
+        let _mute = EngineCommand::SetTrackMute(tid, true);
+        let _solo = EngineCommand::SetTrackSolo(tid, true);
     }
 
     #[test]
