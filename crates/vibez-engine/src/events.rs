@@ -86,7 +86,7 @@ mod tests {
                 assert!((rms_l - 0.6).abs() < f32::EPSILON);
                 assert!((rms_r - 0.55).abs() < f32::EPSILON);
             }
-            other => panic!("expected Metering, got {:?}", other),
+            other => panic!("expected Metering, got {other:?}"),
         }
 
         assert_eq!(consumer.pop().unwrap(), EngineEvent::PlaybackStopped);
@@ -115,7 +115,7 @@ mod tests {
                 assert!((peak_l - 0.7).abs() < f32::EPSILON);
                 assert!((peak_r - 0.6).abs() < f32::EPSILON);
             }
-            other => panic!("expected TrackMeter, got {:?}", other),
+            other => panic!("expected TrackMeter, got {other:?}"),
         }
     }
 
@@ -130,7 +130,7 @@ mod tests {
         let cloned = event.clone();
         assert_eq!(event, cloned);
 
-        let debug = format!("{:?}", event);
+        let debug = format!("{event:?}");
         assert!(debug.contains("Metering"));
     }
 }

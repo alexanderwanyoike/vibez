@@ -216,7 +216,7 @@ mod tests {
             }],
         };
 
-        let debug = format!("{:?}", info);
+        let debug = format!("{info:?}");
         assert!(debug.contains("Test Device"));
         assert!(debug.contains("44100"));
     }
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn error_display() {
         let err = AudioHostError::NoDefaultOutputDevice;
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("no default"));
     }
 }

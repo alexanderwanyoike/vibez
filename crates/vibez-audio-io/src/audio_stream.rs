@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn error_display() {
         let err = AudioStreamError::NoOutputDevice;
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("no default"));
     }
 

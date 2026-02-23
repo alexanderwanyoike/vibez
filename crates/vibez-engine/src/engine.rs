@@ -622,17 +622,11 @@ mod tests {
             let actual_r = buf[frame * 2 + 1];
             assert!(
                 (actual_l - expected_l).abs() < 1e-6,
-                "frame {} L: expected {} got {}",
-                frame,
-                expected_l,
-                actual_l
+                "frame {frame} L: expected {expected_l} got {actual_l}"
             );
             assert!(
                 (actual_r - expected_r).abs() < 1e-6,
-                "frame {} R: expected {} got {}",
-                frame,
-                expected_r,
-                actual_r
+                "frame {frame} R: expected {expected_r} got {actual_r}"
             );
         }
 
@@ -758,8 +752,8 @@ mod tests {
         // returns 0 for out-of-bounds).
         // Frames 16..31 should be silence.
         for frame in 16..32 {
-            assert_eq!(buf[frame * 2], 0.0, "frame {} L should be 0", frame);
-            assert_eq!(buf[frame * 2 + 1], 0.0, "frame {} R should be 0", frame);
+            assert_eq!(buf[frame * 2], 0.0, "frame {frame} L should be 0");
+            assert_eq!(buf[frame * 2 + 1], 0.0, "frame {frame} R should be 0");
         }
     }
 
