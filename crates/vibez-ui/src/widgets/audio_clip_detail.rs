@@ -102,51 +102,66 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 );
             }
 
+            // Helper: get peak across all channels for a contiguous source range
+            let peak_for_range = |src_start: usize, src_end: usize| -> (f32, f32) {
+                let mut mn = 0.0f32;
+                let mut mx = 0.0f32;
+                for ch in 0..channels {
+                    let (ch_min, ch_max) = self.audio.peak_in_range(ch, src_start, src_end);
+                    mn = mn.min(ch_min);
+                    mx = mx.max(ch_max);
+                }
+                (mn, mx)
+            };
+
+            // When looping, the entire looped waveform is just the source region
+            // [loop_start..loop_end) repeated. For any pixel spanning N source frames,
+            // if N >= loop_len we know the peak is just the peak of the whole loop region.
+            // Otherwise we break into at most 2 contiguous segments.
+            let full_loop_peak = if looping {
+                Some(peak_for_range(loop_start, loop_end))
+            } else {
+                None
+            };
+
             for px in 0..pixels {
-                // Map pixel to clip-local frame range
                 let clip_frame_start = px * num_frames / pixels.max(1);
                 let clip_frame_end = (px + 1) * num_frames / pixels.max(1);
+                let span = clip_frame_end.saturating_sub(clip_frame_start).max(1);
 
-                let mut min_val = 0.0f32;
-                let mut max_val = 0.0f32;
-
-                // Sample each clip frame in this pixel's range, resolving loop wrapping
-                let sample_count = (clip_frame_end - clip_frame_start).max(1);
-                for cf in clip_frame_start..clip_frame_end.max(clip_frame_start + 1) {
-                    let source_frame = if looping {
-                        let raw = self.source_offset as usize + cf;
-                        if raw >= loop_end {
-                            loop_start + (raw - loop_start) % loop_len
-                        } else {
-                            raw
-                        }
+                let (min_val, max_val) = if !looping {
+                    // Non-looped: direct contiguous range
+                    let src_start = self.source_offset as usize + clip_frame_start;
+                    let src_end = self.source_offset as usize + clip_frame_end;
+                    peak_for_range(src_start, src_end)
+                } else if span >= loop_len {
+                    // Pixel covers at least one full loop cycle — use cached full peak
+                    full_loop_peak.unwrap()
+                } else {
+                    // Map start/end into source positions within the loop
+                    let raw_start = self.source_offset as usize + clip_frame_start;
+                    let raw_end = self.source_offset as usize + clip_frame_end;
+                    let src_start = if raw_start >= loop_end {
+                        loop_start + (raw_start - loop_start) % loop_len
                     } else {
-                        self.source_offset as usize + cf
+                        raw_start
+                    };
+                    let src_end = if raw_end >= loop_end {
+                        loop_start + (raw_end - loop_start) % loop_len
+                    } else {
+                        raw_end
                     };
 
-                    for ch in 0..channels {
-                        let s = self.audio.sample(ch, source_frame);
-                        min_val = min_val.min(s);
-                        max_val = max_val.max(s);
+                    if src_start <= src_end {
+                        // Contiguous segment
+                        peak_for_range(src_start, src_end.max(src_start + 1))
+                    } else {
+                        // Wraps around loop boundary: two segments
+                        let (mn1, mx1) = peak_for_range(src_start, loop_end);
+                        let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
+                        (mn1.min(mn2), mx1.max(mx2))
                     }
-                }
-
-                // For wider pixel ranges, use peak_in_range for efficiency on non-looped sections
-                if !looping && sample_count > 2 {
-                    let range_start = self.source_offset as usize + clip_frame_start;
-                    let range_end = self.source_offset as usize + clip_frame_end;
-                    min_val = 0.0;
-                    max_val = 0.0;
-                    for ch in 0..channels {
-                        let (ch_min, ch_max) = self.audio.peak_in_range(ch, range_start, range_end);
-                        min_val += ch_min;
-                        max_val += ch_max;
-                    }
-                    if channels > 0 {
-                        min_val /= channels as f32;
-                        max_val /= channels as f32;
-                    }
-                }
+                };
 
                 let y_top = center_y - (max_val * half_h);
                 let y_bottom = center_y - (min_val * half_h);

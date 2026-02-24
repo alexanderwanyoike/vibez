@@ -36,60 +36,70 @@ pub struct TimelineNoteClip {
 }
 
 /// Compute waveform peaks for a clip, with loop-aware wrapping.
+/// Uses `peak_in_range` on contiguous segments for O(pixels) cost regardless of clip length.
 pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Vec<(f32, f32)> {
     let num_peaks = (clip.duration as usize / 100).clamp(1, 1000);
     let looping = clip.loop_enabled && clip.loop_end > clip.loop_start;
     let loop_start = clip.loop_start as usize;
     let loop_end = clip.loop_end as usize;
     let loop_len = if looping { loop_end - loop_start } else { 0 };
+    let channels = clip.audio.num_channels();
+    if channels == 0 {
+        return vec![(0.0, 0.0); num_peaks];
+    }
+
+    let peak_for_range = |src_start: usize, src_end: usize| -> (f32, f32) {
+        let mut mn = 0.0f32;
+        let mut mx = 0.0f32;
+        for ch in 0..channels {
+            let (ch_min, ch_max) = clip.audio.peak_in_range(ch, src_start, src_end);
+            mn = mn.min(ch_min);
+            mx = mx.max(ch_max);
+        }
+        (mn, mx)
+    };
+
+    // Cache full loop region peak for spans >= loop_len
+    let full_loop_peak = if looping {
+        Some(peak_for_range(loop_start, loop_end))
+    } else {
+        None
+    };
 
     (0..num_peaks)
         .map(|i| {
-            let clip_frame_start = i * clip.duration as usize / num_peaks;
-            let clip_frame_end = (i + 1) * clip.duration as usize / num_peaks;
-            let channels = clip.audio.num_channels();
-            if channels == 0 {
-                return (0.0, 0.0);
-            }
+            let cf_start = i * clip.duration as usize / num_peaks;
+            let cf_end = (i + 1) * clip.duration as usize / num_peaks;
+            let span = cf_end.saturating_sub(cf_start).max(1);
 
-            let resolve_frame = |cf: usize| -> usize {
-                let raw = clip.source_offset as usize + cf;
-                if looping && raw >= loop_end {
-                    loop_start + (raw - loop_start) % loop_len
-                } else {
-                    raw
-                }
-            };
-
-            let start = resolve_frame(clip_frame_start);
-            let end = resolve_frame(clip_frame_end);
-
-            // If both resolve to the same contiguous region, use efficient peak_in_range
-            if !looping || (start < end && end <= loop_end) {
-                let mut min_val = 0.0f32;
-                let mut max_val = 0.0f32;
-                for ch in 0..channels {
-                    let (ch_min, ch_max) = clip.audio.peak_in_range(ch, start, end);
-                    min_val += ch_min;
-                    max_val += ch_max;
-                }
-                (min_val / channels as f32, max_val / channels as f32)
+            if !looping {
+                let src_start = clip.source_offset as usize + cf_start;
+                let src_end = clip.source_offset as usize + cf_end;
+                peak_for_range(src_start, src_end)
+            } else if span >= loop_len {
+                full_loop_peak.unwrap()
             } else {
-                // Straddles a loop boundary — sample individual frames
-                let mut min_val = 0.0f32;
-                let mut max_val = 0.0f32;
-                let step = ((clip_frame_end - clip_frame_start) / 8).max(1);
-                let mut cf = clip_frame_start;
-                while cf < clip_frame_end {
-                    let sf = resolve_frame(cf);
-                    for ch in 0..channels {
-                        let s = clip.audio.sample(ch, sf);
-                        min_val = min_val.min(s);
-                        max_val = max_val.max(s);
-                    }
-                    cf += step;
+                let raw_start = clip.source_offset as usize + cf_start;
+                let raw_end = clip.source_offset as usize + cf_end;
+                let src_start = if raw_start >= loop_end {
+                    loop_start + (raw_start - loop_start) % loop_len
+                } else {
+                    raw_start
+                };
+                let src_end = if raw_end >= loop_end {
+                    loop_start + (raw_end - loop_start) % loop_len
+                } else {
+                    raw_end
+                };
+
+                if src_start <= src_end {
+                    peak_for_range(src_start, src_end.max(src_start + 1))
+                } else {
+                    // Wraps around loop boundary
+                    let (mn1, mx1) = peak_for_range(src_start, loop_end);
+                    let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
+                    (mn1.min(mn2), mx1.max(mx2))
                 }
-                (min_val, max_val)
             }
         })
         .collect()
