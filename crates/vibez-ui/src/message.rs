@@ -6,7 +6,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::MidiNote;
 
-use crate::state::{SnapGrid, Workspace};
+use crate::state::{ArrangementSelection, DetailPanelTab, SnapGrid, Workspace};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -105,4 +105,56 @@ pub enum Message {
     RemoveNote(TrackId, ClipId, usize),
     EditNote(TrackId, ClipId, usize, MidiNote),
     SelectNote(TrackId, ClipId, Option<usize>),
+
+    // Clip operations
+    DuplicateNoteClip(TrackId, ClipId),
+    DoubleNoteClip(TrackId, ClipId),
+    CropNoteClip(TrackId, ClipId),
+
+    // Piano roll scroll
+    PianoRollScrollY(f32),
+
+    // Arrangement clip interaction
+    SelectArrangementClip(ArrangementSelection),
+    MoveAudioClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_position: u64,
+    },
+    MoveNoteClipPosition {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_position_beats: f64,
+    },
+    ResizeAudioClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_duration: u64,
+    },
+    ResizeNoteClipDuration {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_duration_beats: f64,
+    },
+    MoveClipToTrack {
+        source_track: TrackId,
+        target_track: TrackId,
+        clip_id: ClipId,
+        is_note_clip: bool,
+    },
+    SplitAudioClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        split_position: u64,
+    },
+    SplitNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        split_beat: f64,
+    },
+    DeleteSelectedClip,
+    DuplicateSelectedClip,
+
+    // Detail panel tabs
+    SwitchDetailTab(DetailPanelTab),
 }

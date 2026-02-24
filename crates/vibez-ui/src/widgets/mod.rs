@@ -1,3 +1,4 @@
+pub mod audio_clip_detail;
 pub mod effect_knob;
 pub mod effect_slot;
 pub mod fader;

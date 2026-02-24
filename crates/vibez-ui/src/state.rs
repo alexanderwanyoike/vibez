@@ -106,9 +106,21 @@ impl UiTrack {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrangementSelection {
+    AudioClip { track_id: TrackId, clip_id: ClipId },
+    NoteClip { track_id: TrackId, clip_id: ClipId },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Arrange,
     Mix,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailPanelTab {
+    Clip,
+    Devices,
 }
 
 /// Snap grid for piano roll quantization.
@@ -180,6 +192,7 @@ pub struct AppState {
 
     // Piano roll
     pub snap_grid: SnapGrid,
+    pub piano_roll_scroll_y: f32,
 
     // Multi-track
     pub tracks: Vec<UiTrack>,
@@ -188,6 +201,12 @@ pub struct AppState {
 
     // Detail panel: which note clip is selected for piano roll editing
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+
+    // Arrangement clip selection
+    pub selected_arrangement_clip: Option<ArrangementSelection>,
+
+    // Detail panel tab
+    pub detail_panel_tab: DetailPanelTab,
 }
 
 impl Default for AppState {
@@ -205,10 +224,13 @@ impl Default for AppState {
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::Eighth,
+            piano_roll_scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
             tracks: Vec::new(),
             selected_track: None,
             next_track_number: 1,
             selected_note_clip: None,
+            selected_arrangement_clip: None,
+            detail_panel_tab: DetailPanelTab::Clip,
         }
     }
 }
@@ -292,11 +314,31 @@ impl AppState {
 
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
-        self.tracks
+        let audio_max = self
+            .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
             .map(|c| c.position.saturating_add(c.duration))
             .max()
-            .unwrap_or(0)
+            .unwrap_or(0);
+
+        // Include note clips: convert beat positions to samples
+        let spb = if self.bpm > 0.0 {
+            self.sample_rate as f64 * 60.0 / self.bpm
+        } else {
+            0.0
+        };
+        let note_max = if spb > 0.0 {
+            self.tracks
+                .iter()
+                .flat_map(|t| t.note_clips.iter())
+                .map(|c| ((c.position_beats + c.duration_beats) * spb) as u64)
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        audio_max.max(note_max)
     }
 }

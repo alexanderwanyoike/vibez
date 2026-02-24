@@ -768,6 +768,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 if note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats {
                     let loop_len = note_clip.loop_end_beats - note_clip.loop_start_beats;
                     let repeat_color = theme::with_alpha(self.track_color, 0.2);
+                    let ghost_block_color = theme::with_alpha(self.track_color, 0.5);
                     let mut repeat_beat = note_clip.position_beats + note_clip.loop_end_beats;
                     while repeat_beat < note_clip.position_beats + note_clip.duration_beats {
                         let rx = self.beat_to_x(repeat_beat);
@@ -779,6 +780,43 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 repeat_color,
                             );
                         }
+
+                        // Draw ghost note blocks in this repeat
+                        if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                            let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
+                            let gmin = *pitches.iter().min().unwrap_or(&60);
+                            let gmax = *pitches.iter().max().unwrap_or(&72);
+                            let gpitch_range = (gmax - gmin + 1).max(12) as f32;
+                            let offset = repeat_beat - note_clip.position_beats;
+
+                            for &(pitch, start_beat, duration_beats) in &note_clip.notes {
+                                // Only repeat notes within the loop region
+                                if start_beat < note_clip.loop_start_beats
+                                    || start_beat >= note_clip.loop_end_beats
+                                {
+                                    continue;
+                                }
+                                let gx = clip_x
+                                    + ((start_beat + offset) / note_clip.duration_beats
+                                        * clip_w as f64)
+                                        as f32;
+                                let gnw = (duration_beats / note_clip.duration_beats
+                                    * clip_w as f64)
+                                    as f32;
+                                let gy_frac = (gmax.saturating_sub(pitch)) as f32 / gpitch_range;
+                                let gy = clip_y + 2.0 + gy_frac * (clip_h - 6.0);
+                                let gnh = ((clip_h - 6.0) / gpitch_range).clamp(2.0, 6.0);
+
+                                if gx < clip_x + clip_w && gx + gnw > 0.0 {
+                                    frame.fill_rectangle(
+                                        iced::Point::new(gx, gy),
+                                        iced::Size::new(gnw.max(2.0), gnh),
+                                        ghost_block_color,
+                                    );
+                                }
+                            }
+                        }
+
                         repeat_beat += loop_len;
                     }
 

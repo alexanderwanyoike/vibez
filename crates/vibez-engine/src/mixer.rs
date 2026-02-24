@@ -195,9 +195,16 @@ impl EngineTrack {
         let mut rendered = false;
         let mut note_ons: Vec<(u8, u8)> = Vec::new();
         let mut note_offs: Vec<u8> = Vec::new();
+        let beat_step = 1.0 / spb; // beats per sample
 
         for frame in 0..frames {
             let sample_pos = pos + frame as u64;
+            let current_beat = sample_pos as f64 / spb;
+            let prev_beat = if sample_pos > 0 {
+                (sample_pos - 1) as f64 / spb
+            } else {
+                -1.0
+            };
 
             note_ons.clear();
             note_offs.clear();
@@ -205,52 +212,88 @@ impl EngineTrack {
             for clip in &self.note_clips {
                 let clip_start_beat = clip.position_beats;
                 let clip_end_beat = clip.position_beats + clip.duration_beats;
-                let current_beat = sample_pos as f64 / spb;
 
-                if current_beat < clip_start_beat || current_beat >= clip_end_beat {
+                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
+                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
+
+                // Clip just ended — send note_offs for all notes
+                if was_in_clip && !in_clip {
+                    for note in &clip.notes {
+                        note_offs.push(note.pitch);
+                    }
                     continue;
                 }
 
-                // Local beat position within the clip
+                if !in_clip {
+                    continue;
+                }
+
                 let local_beat = current_beat - clip_start_beat;
+                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+                let loop_len = if looping {
+                    clip.loop_end_beats - clip.loop_start_beats
+                } else {
+                    0.0
+                };
 
                 // Apply looping: wrap local_beat within the loop region
-                let effective_local =
-                    if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
-                        let loop_len = clip.loop_end_beats - clip.loop_start_beats;
-                        if local_beat >= clip.loop_end_beats {
-                            clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
-                        } else {
-                            local_beat
-                        }
+                let effective_local = if looping && local_beat >= clip.loop_end_beats {
+                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
+                } else {
+                    local_beat
+                };
+
+                // Compute previous effective local for wrap detection
+                let prev_effective_local = if !was_in_clip {
+                    -1.0 // clip just started
+                } else {
+                    let prev_local = prev_beat - clip_start_beat;
+                    if looping && prev_local >= clip.loop_end_beats {
+                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
                     } else {
-                        local_beat
-                    };
-
-                // Reconstruct global beat for note matching
-                let effective_global = clip_start_beat + effective_local;
-                let effective_sample = (effective_global * spb) as u64;
-
-                for note in &clip.notes {
-                    let note_start_sample = ((clip_start_beat + note.start_beat) * spb) as u64;
-                    let note_end_sample = ((clip_start_beat + note.end_beat()) * spb) as u64;
-
-                    if effective_sample == note_start_sample {
-                        note_ons.push((note.pitch, note.velocity));
+                        prev_local
                     }
-                    if effective_sample == note_end_sample {
+                };
+
+                // Detect loop wrap (effective position jumped backward)
+                let wrapped = looping
+                    && was_in_clip
+                    && prev_effective_local > effective_local + beat_step * 0.5;
+
+                if wrapped {
+                    // At wrap: all notes off, then check for note_ons at new position
+                    for note in &clip.notes {
                         note_offs.push(note.pitch);
+                    }
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            note_ons.push((note.pitch, note.velocity));
+                        }
+                    }
+                } else {
+                    // Range-based event detection
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            note_ons.push((note.pitch, note.velocity));
+                        }
+                        let end_diff = effective_local - note.end_beat();
+                        if end_diff >= 0.0 && end_diff < beat_step {
+                            note_offs.push(note.pitch);
+                        }
                     }
                 }
             }
 
             let synth = self.synth.as_mut().unwrap();
+            // Process note_offs before note_ons for clean re-triggers
+            for pitch in &note_offs {
+                synth.note_off(*pitch);
+            }
             for (pitch, vel) in &note_ons {
                 synth.note_on(*pitch, *vel);
                 rendered = true;
-            }
-            for pitch in &note_offs {
-                synth.note_off(*pitch);
             }
 
             let start = frame * channels;

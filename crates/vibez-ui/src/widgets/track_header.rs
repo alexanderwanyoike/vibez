@@ -12,6 +12,9 @@ use vibez_core::midi::TrackKind;
 /// Width of the track header panel in the arrangement view.
 pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 
+/// Total width including the 3px color bar on the left edge.
+pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
+
 /// Render the track header for the arrangement view.
 pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
     let track_color = th::track_color(track.color_index);
