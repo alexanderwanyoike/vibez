@@ -747,9 +747,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let pitch_range = (max_pitch - min_pitch + 1).max(12) as f32;
 
                     for &(pitch, start_beat, duration_beats) in &note_clip.notes {
-                        let note_x = clip_x
-                            + ((start_beat - note_clip.position_beats) / note_clip.duration_beats
-                                * clip_w as f64) as f32;
+                        // start_beat is clip-local (0.0 = clip start)
+                        let note_x =
+                            clip_x + (start_beat / note_clip.duration_beats * clip_w as f64) as f32;
                         let note_w =
                             (duration_beats / note_clip.duration_beats * clip_w as f64) as f32;
                         let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;

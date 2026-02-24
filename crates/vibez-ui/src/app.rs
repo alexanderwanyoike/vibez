@@ -924,27 +924,21 @@ impl App {
                 let mut sync_data = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        // Determine content length from note extent
-                        let content_end = clip
-                            .notes
-                            .iter()
-                            .map(|n| n.start_beat + n.duration_beats)
-                            .fold(0.0_f64, f64::max)
-                            .max(clip.loop_end_beats);
-                        // Use the old duration as the content boundary if no notes
-                        let content_len = if content_end > 0.0 {
-                            content_end
-                        } else {
-                            clip.duration_beats
-                        };
-
                         clip.duration_beats = new_duration_beats;
 
-                        // Auto-enable loop when extending past content
-                        if new_duration_beats > content_len && !clip.loop_enabled {
-                            clip.loop_enabled = true;
-                            clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats = content_len;
+                        // Auto-enable loop when extending past note content
+                        // Only if the clip actually has notes — empty clips don't loop
+                        if !clip.notes.is_empty() && !clip.loop_enabled {
+                            let content_end = clip
+                                .notes
+                                .iter()
+                                .map(|n| n.start_beat + n.duration_beats)
+                                .fold(0.0_f64, f64::max);
+                            if content_end > 0.0 && new_duration_beats > content_end {
+                                clip.loop_enabled = true;
+                                clip.loop_start_beats = 0.0;
+                                clip.loop_end_beats = content_end;
+                            }
                         }
 
                         sync_data = Some((
