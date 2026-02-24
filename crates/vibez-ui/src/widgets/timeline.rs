@@ -3,14 +3,16 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
-use crate::state::UiTrack;
+use crate::state::{ArrangementSelection, UiTrack};
 use crate::theme;
+use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
 
 // ── Lightweight data types for rendering ──
 
 /// Lightweight copy of clip data for rendering.
 pub struct TimelineClip {
+    pub clip_id: ClipId,
     pub position: u64,
     pub duration: u64,
     pub name: String,
@@ -23,6 +25,7 @@ pub struct TimelineClip {
 
 /// Lightweight copy of a note clip for timeline rendering.
 pub struct TimelineNoteClip {
+    pub clip_id: ClipId,
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,
@@ -32,25 +35,62 @@ pub struct TimelineNoteClip {
     pub loop_end_beats: f64,
 }
 
-/// Compute waveform peaks for a clip.
+/// Compute waveform peaks for a clip, with loop-aware wrapping.
 pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Vec<(f32, f32)> {
     let num_peaks = (clip.duration as usize / 100).clamp(1, 1000);
+    let looping = clip.loop_enabled && clip.loop_end > clip.loop_start;
+    let loop_start = clip.loop_start as usize;
+    let loop_end = clip.loop_end as usize;
+    let loop_len = if looping { loop_end - loop_start } else { 0 };
+
     (0..num_peaks)
         .map(|i| {
-            let start = clip.source_offset as usize + i * clip.duration as usize / num_peaks;
-            let end = clip.source_offset as usize + (i + 1) * clip.duration as usize / num_peaks;
+            let clip_frame_start = i * clip.duration as usize / num_peaks;
+            let clip_frame_end = (i + 1) * clip.duration as usize / num_peaks;
             let channels = clip.audio.num_channels();
             if channels == 0 {
                 return (0.0, 0.0);
             }
-            let mut min_val = 0.0f32;
-            let mut max_val = 0.0f32;
-            for ch in 0..channels {
-                let (ch_min, ch_max) = clip.audio.peak_in_range(ch, start, end);
-                min_val += ch_min;
-                max_val += ch_max;
+
+            let resolve_frame = |cf: usize| -> usize {
+                let raw = clip.source_offset as usize + cf;
+                if looping && raw >= loop_end {
+                    loop_start + (raw - loop_start) % loop_len
+                } else {
+                    raw
+                }
+            };
+
+            let start = resolve_frame(clip_frame_start);
+            let end = resolve_frame(clip_frame_end);
+
+            // If both resolve to the same contiguous region, use efficient peak_in_range
+            if !looping || (start < end && end <= loop_end) {
+                let mut min_val = 0.0f32;
+                let mut max_val = 0.0f32;
+                for ch in 0..channels {
+                    let (ch_min, ch_max) = clip.audio.peak_in_range(ch, start, end);
+                    min_val += ch_min;
+                    max_val += ch_max;
+                }
+                (min_val / channels as f32, max_val / channels as f32)
+            } else {
+                // Straddles a loop boundary — sample individual frames
+                let mut min_val = 0.0f32;
+                let mut max_val = 0.0f32;
+                let step = ((clip_frame_end - clip_frame_start) / 8).max(1);
+                let mut cf = clip_frame_start;
+                while cf < clip_frame_end {
+                    let sf = resolve_frame(cf);
+                    for ch in 0..channels {
+                        let s = clip.audio.sample(ch, sf);
+                        min_val = min_val.min(s);
+                        max_val = max_val.max(s);
+                    }
+                    cf += step;
+                }
+                (min_val, max_val)
             }
-            (min_val / channels as f32, max_val / channels as f32)
         })
         .collect()
 }
@@ -130,9 +170,9 @@ impl canvas::Program<Message> for RulerWidget {
                             .with_width(1.5),
                     );
 
-                    // Bar label
-                    if ppb < 10.0 {
-                        // Low zoom: bar numbers only
+                    // Bar label — always show bar number
+                    if ppb < 40.0 {
+                        // Low zoom: bar numbers only ("1", "2", "3")
                         let label = format!("{}", bar_index + 1);
                         frame.fill_text(canvas::Text {
                             content: label,
@@ -142,7 +182,7 @@ impl canvas::Program<Message> for RulerWidget {
                             ..Default::default()
                         });
                     } else {
-                        // Medium/high zoom: bar.beat
+                        // Medium/high zoom: bar.beat ("1.1", "2.1")
                         let label = format!("{}.1", bar_index + 1);
                         frame.fill_text(canvas::Text {
                             content: label,
@@ -152,8 +192,8 @@ impl canvas::Program<Message> for RulerWidget {
                             ..Default::default()
                         });
                     }
-                } else {
-                    // Beat line (thin)
+                } else if ppb >= 40.0 {
+                    // Beat ticks only at medium+ zoom
                     let tick =
                         canvas::Path::line(iced::Point::new(x, h * 0.65), iced::Point::new(x, h));
                     frame.stroke(
@@ -163,8 +203,8 @@ impl canvas::Program<Message> for RulerWidget {
                             .with_width(0.5),
                     );
 
-                    // Beat label at medium zoom
-                    if ppb >= 10.0 {
+                    // Beat labels only at high zoom (≥80 ppb)
+                    if ppb >= 80.0 {
                         let label = format!("{}.{}", bar_index + 1, beat_in_bar + 1);
                         frame.fill_text(canvas::Text {
                             content: label,
@@ -176,8 +216,8 @@ impl canvas::Program<Message> for RulerWidget {
                     }
                 }
 
-                // Sub-beat ticks at high zoom
-                if ppb > 40.0 {
+                // Sub-beat ticks at very high zoom (>120 ppb)
+                if ppb > 120.0 {
                     for sub in 1..4 {
                         let sub_beat = beat + sub as f64 * 0.25;
                         let sub_x = self.beat_to_x(sub_beat, w);
@@ -196,6 +236,16 @@ impl canvas::Program<Message> for RulerWidget {
                     }
                 }
             }
+
+            // Ruler bottom border
+            let bottom_border =
+                canvas::Path::line(iced::Point::new(0.0, h - 1.0), iced::Point::new(w, h - 1.0));
+            frame.stroke(
+                &bottom_border,
+                canvas::Stroke::default()
+                    .with_color(theme::BORDER)
+                    .with_width(1.0),
+            );
         }
 
         // Playhead
@@ -259,8 +309,41 @@ impl canvas::Program<Message> for RulerWidget {
 
 // ── TrackClipCanvas ──
 
+/// Pixel threshold for resize handle on right edge of clip.
+const RESIZE_EDGE_PX: f32 = 8.0;
+
+/// Drag action in progress on the clip canvas.
+#[derive(Debug, Clone)]
+pub enum ClipDragAction {
+    MoveClip {
+        clip_id: ClipId,
+        is_note_clip: bool,
+        start_beat: f64,
+        original_position_beats: f64,
+        start_y: f32,
+    },
+    ResizeClip {
+        clip_id: ClipId,
+        is_note_clip: bool,
+        start_x: f32,
+        original_duration_beats: f64,
+    },
+}
+
+/// Interaction state for clip canvas.
+#[derive(Debug, Default)]
+pub struct ClipInteractionState {
+    pub drag: Option<ClipDragAction>,
+}
+
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
 pub struct TrackClipCanvas {
+    pub track_id: TrackId,
+    pub track_index: usize,
+    pub total_tracks: usize,
+    pub track_ids: Vec<TrackId>,
+    pub track_kinds: Vec<bool>, // is_instrument flags
+    pub selected_clip: Option<ClipId>,
     pub clips: Vec<TimelineClip>,
     pub note_clips: Vec<TimelineNoteClip>,
     pub playhead_beats: f64,
@@ -286,11 +369,18 @@ impl TrackClipCanvas {
         selected: bool,
         track_color: Color,
         bpm: f64,
+        track_id: TrackId,
+        track_index: usize,
+        total_tracks: usize,
+        track_ids: Vec<TrackId>,
+        track_kinds: Vec<bool>,
+        selected_clip: Option<ClipId>,
     ) -> Self {
         let clips = track
             .clips
             .iter()
             .map(|c| TimelineClip {
+                clip_id: c.id,
                 position: c.position,
                 duration: c.duration,
                 name: c.name.clone(),
@@ -304,6 +394,7 @@ impl TrackClipCanvas {
             .note_clips
             .iter()
             .map(|c| TimelineNoteClip {
+                clip_id: c.id,
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
@@ -318,6 +409,12 @@ impl TrackClipCanvas {
             })
             .collect();
         Self {
+            track_id,
+            track_index,
+            total_tracks,
+            track_ids,
+            track_kinds,
+            selected_clip,
             clips,
             note_clips,
             playhead_beats,
@@ -339,10 +436,68 @@ impl TrackClipCanvas {
     fn beat_to_x(&self, beat: f64) -> f32 {
         ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
     }
+
+    fn x_to_beat(&self, x: f32) -> f64 {
+        x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
+    }
+
+    /// Samples per beat.
+    fn spb(&self) -> f64 {
+        if self.bpm > 0.0 {
+            self.sample_rate as f64 * 60.0 / self.bpm
+        } else {
+            1.0
+        }
+    }
+
+    /// Hit test: find a clip at the given pixel x position.
+    /// Returns (clip_id, is_note_clip, near_right_edge, position_beats, duration_beats).
+    fn hit_test(&self, pos_x: f32) -> Option<(ClipId, bool, bool, f64, f64)> {
+        let ppb = self.pixels_per_beat();
+        let spb = self.spb();
+
+        // Check audio clips
+        for clip in &self.clips {
+            let clip_start_beat = clip.position as f64 / spb;
+            let clip_dur_beats = clip.duration as f64 / spb;
+            let clip_x = self.beat_to_x(clip_start_beat);
+            let clip_w = (clip_dur_beats * ppb as f64) as f32;
+
+            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
+                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
+                return Some((
+                    clip.clip_id,
+                    false,
+                    near_right,
+                    clip_start_beat,
+                    clip_dur_beats,
+                ));
+            }
+        }
+
+        // Check note clips
+        for note_clip in &self.note_clips {
+            let clip_x = self.beat_to_x(note_clip.position_beats);
+            let clip_w = (note_clip.duration_beats * ppb as f64) as f32;
+
+            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
+                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
+                return Some((
+                    note_clip.clip_id,
+                    true,
+                    near_right,
+                    note_clip.position_beats,
+                    note_clip.duration_beats,
+                ));
+            }
+        }
+
+        None
+    }
 }
 
 impl canvas::Program<Message> for TrackClipCanvas {
-    type State = ();
+    type State = ClipInteractionState;
 
     fn draw(
         &self,
@@ -365,7 +520,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
         };
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
 
-        // Grid lines (only visible beats)
+        // Grid lines — adaptive density matching ruler
         if self.bpm > 0.0 {
             let visible = w as f64 / ppb as f64;
             let start = self.scroll_offset_beats.floor().max(0.0) as i64;
@@ -377,18 +532,53 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     continue;
                 }
                 let is_bar = beat_i % 4 == 0;
-                let line_color = if is_bar {
-                    theme::BORDER
-                } else {
-                    theme::DIVIDER
-                };
-                let vline = canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                frame.stroke(
-                    &vline,
-                    canvas::Stroke::default()
-                        .with_color(line_color)
-                        .with_width(if is_bar { 1.0 } else { 0.5 }),
-                );
+
+                if is_bar {
+                    // Bar lines always visible
+                    let vline =
+                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
+                    frame.stroke(
+                        &vline,
+                        canvas::Stroke::default()
+                            .with_color(theme::BORDER)
+                            .with_width(1.0),
+                    );
+                } else if ppb >= 40.0 {
+                    // Beat lines only at medium+ zoom
+                    let vline =
+                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
+                    frame.stroke(
+                        &vline,
+                        canvas::Stroke::default()
+                            .with_color(theme::DIVIDER)
+                            .with_width(0.5),
+                    );
+                }
+
+                // Sub-beat lines at high zoom (≥80 ppb)
+                if ppb >= 80.0 {
+                    for sub in 1..4 {
+                        let sub_beat = beat_i as f64 + sub as f64 * 0.25;
+                        let sub_x = self.beat_to_x(sub_beat);
+                        if sub_x > 0.0 && sub_x < w {
+                            let sub_line = canvas::Path::line(
+                                iced::Point::new(sub_x, 0.0),
+                                iced::Point::new(sub_x, h),
+                            );
+                            frame.stroke(
+                                &sub_line,
+                                canvas::Stroke::default()
+                                    .with_color(Color {
+                                        r: 0.13,
+                                        g: 0.13,
+                                        b: 0.13,
+                                        a: 1.0,
+                                    })
+                                    .with_width(0.3),
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -481,6 +671,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 }
 
+                // Selection highlight
+                let is_selected = self.selected_clip == Some(clip.clip_id);
+                let border_color = if is_selected {
+                    theme::ACCENT
+                } else {
+                    clip_border_color
+                };
+                let border_width = if is_selected { 2.0 } else { 1.0 };
+
                 // Clip border
                 let border = canvas::Path::rectangle(
                     iced::Point::new(clip_x, clip_y),
@@ -489,8 +688,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
-                        .with_color(clip_border_color)
-                        .with_width(1.0),
+                        .with_color(border_color)
+                        .with_width(border_width),
                 );
 
                 // Clip name label
@@ -584,6 +783,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 }
 
+                // Selection highlight
+                let is_selected = self.selected_clip == Some(note_clip.clip_id);
+                let border_color = if is_selected {
+                    theme::ACCENT
+                } else {
+                    theme::darken(self.track_color, 0.7)
+                };
+                let border_width = if is_selected { 2.0 } else { 1.0 };
+
                 // Clip border
                 let border = canvas::Path::rectangle(
                     iced::Point::new(clip_x, clip_y),
@@ -592,8 +800,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
-                        .with_color(theme::darken(self.track_color, 0.7))
-                        .with_width(1.0),
+                        .with_color(border_color)
+                        .with_width(border_width),
                 );
 
                 // Clip name label
@@ -638,27 +846,84 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
     fn mouse_interaction(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if cursor.is_over(bounds) {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
+        if let Some(ref drag) = state.drag {
+            return match drag {
+                ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
+                ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
+            };
         }
+
+        if let Some(pos) = cursor.position_in(bounds) {
+            if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
+                if near_right {
+                    return mouse::Interaction::ResizingHorizontally;
+                }
+                return mouse::Interaction::Grab;
+            }
+            return mouse::Interaction::Pointer;
+        }
+
+        mouse::Interaction::default()
     }
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: canvas::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
+        let track_id = self.track_id;
+
         match event {
+            // -- Left click: select clip, start drag, or seek --
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
+                    if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
+                        self.hit_test(pos.x)
+                    {
+                        // Build selection message
+                        let selection = if is_note_clip {
+                            ArrangementSelection::NoteClip { track_id, clip_id }
+                        } else {
+                            ArrangementSelection::AudioClip { track_id, clip_id }
+                        };
+
+                        // Alt+click = split
+                        // (iced canvas doesn't expose modifiers directly,
+                        //  so we use keyboard events for alt; for now, right-edge = resize)
+
+                        if near_right {
+                            // Start resize drag
+                            state.drag = Some(ClipDragAction::ResizeClip {
+                                clip_id,
+                                is_note_clip,
+                                start_x: pos.x,
+                                original_duration_beats: dur_beats,
+                            });
+                        } else {
+                            // Start move drag
+                            let click_beat = self.x_to_beat(pos.x);
+                            state.drag = Some(ClipDragAction::MoveClip {
+                                clip_id,
+                                is_note_clip,
+                                start_beat: click_beat,
+                                original_position_beats: pos_beats,
+                                start_y: pos.y,
+                            });
+                        }
+
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::SelectArrangementClip(selection)),
+                        );
+                    }
+
+                    // No clip hit — seek (preserve existing behavior) + select track
                     if bounds.width > 0.0 {
                         let ppb = self.pixels_per_beat();
                         let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
@@ -672,6 +937,132 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 }
             }
+
+            // -- Drag: move or resize clip --
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                if let Some(ref drag) = state.drag {
+                    if let Some(pos) = cursor.position() {
+                        let local_x = pos.x - bounds.x;
+                        let ppb = self.pixels_per_beat();
+
+                        match drag {
+                            ClipDragAction::MoveClip {
+                                clip_id,
+                                is_note_clip,
+                                start_beat,
+                                original_position_beats,
+                                start_y,
+                            } => {
+                                let current_beat = self.x_to_beat(local_x);
+                                let delta_beats = current_beat - start_beat;
+                                let new_pos = (original_position_beats + delta_beats).max(0.0);
+
+                                // Snap to nearest beat
+                                let snapped = (new_pos * 4.0).round() / 4.0;
+
+                                // Check for cross-track drag
+                                let local_y = pos.y - bounds.y;
+                                let dy = local_y - start_y;
+                                let track_height = 70.0_f32;
+
+                                if dy.abs() > track_height * 0.6 {
+                                    let track_offset = (dy / track_height).round() as i32;
+                                    let target_idx = (self.track_index as i32 + track_offset)
+                                        .clamp(0, self.total_tracks as i32 - 1)
+                                        as usize;
+
+                                    if target_idx != self.track_index
+                                        && target_idx < self.track_ids.len()
+                                    {
+                                        let target_track = self.track_ids[target_idx];
+                                        let target_is_instrument = self.track_kinds[target_idx];
+
+                                        // Type compatibility: note clips to instrument tracks,
+                                        // audio clips to audio tracks
+                                        if *is_note_clip == target_is_instrument {
+                                            return (
+                                                canvas::event::Status::Captured,
+                                                Some(Message::MoveClipToTrack {
+                                                    source_track: track_id,
+                                                    target_track,
+                                                    clip_id: *clip_id,
+                                                    is_note_clip: *is_note_clip,
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+
+                                if *is_note_clip {
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::MoveNoteClipPosition {
+                                            track_id,
+                                            clip_id: *clip_id,
+                                            new_position_beats: snapped,
+                                        }),
+                                    );
+                                } else {
+                                    let spb = self.spb();
+                                    let new_sample_pos = (snapped * spb) as u64;
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::MoveAudioClip {
+                                            track_id,
+                                            clip_id: *clip_id,
+                                            new_position: new_sample_pos,
+                                        }),
+                                    );
+                                }
+                            }
+                            ClipDragAction::ResizeClip {
+                                clip_id,
+                                is_note_clip,
+                                start_x,
+                                original_duration_beats,
+                            } => {
+                                let dx = local_x - start_x;
+                                let delta_beats = dx as f64 / ppb as f64;
+                                let new_dur = (original_duration_beats + delta_beats).max(0.25);
+                                // Snap to quarter beat
+                                let snapped = (new_dur * 4.0).round() / 4.0;
+
+                                if *is_note_clip {
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::ResizeNoteClipDuration {
+                                            track_id,
+                                            clip_id: *clip_id,
+                                            new_duration_beats: snapped,
+                                        }),
+                                    );
+                                } else {
+                                    let spb = self.spb();
+                                    let new_dur_samples = (snapped * spb) as u64;
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::ResizeAudioClip {
+                                            track_id,
+                                            clip_id: *clip_id,
+                                            new_duration: new_dur_samples.max(1),
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -- Release: end drag --
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                if state.drag.is_some() {
+                    state.drag = None;
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+
+            // -- Scroll: zoom/pan (preserve existing) --
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
                     let (dx, dy) = match delta {
@@ -693,6 +1084,38 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                 }
             }
+
+            // -- Keyboard: Delete/Backspace for selected clip --
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
+                ..
+            })
+            | canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+                ..
+            }) => {
+                if self.selected_clip.is_some() {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::DeleteSelectedClip),
+                    );
+                }
+            }
+
+            // -- Keyboard: Ctrl+D for duplicate --
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Character(ref c),
+                modifiers,
+                ..
+            }) => {
+                if modifiers.control() && c.as_str() == "d" && self.selected_clip.is_some() {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::DuplicateSelectedClip),
+                    );
+                }
+            }
+
             _ => {}
         }
 

@@ -2227,6 +2227,9 @@ impl App {
             sample_rate: self.state.sample_rate,
             track_color,
             playhead_normalized,
+            loop_enabled: clip.loop_enabled,
+            loop_start: clip.loop_start,
+            loop_end: clip.loop_end,
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
