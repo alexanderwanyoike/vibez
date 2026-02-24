@@ -6,7 +6,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::MidiNote;
 
-use crate::state::Workspace;
+use crate::state::{SnapGrid, Workspace};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -66,6 +66,31 @@ pub enum Message {
     // Instrument tracks
     AddInstrumentTrack,
     SetSynthParam(TrackId, usize, f32),
+
+    // Zoom / scroll
+    ZoomIn,
+    ZoomOut,
+    SetZoom(f32),
+    ScrollArrangement(f64),
+
+    // Snap grid
+    SetSnapGrid(SnapGrid),
+
+    // Clip looping
+    ToggleClipLoop(TrackId, ClipId),
+    SetClipLoopRegion {
+        track_id: TrackId,
+        clip_id: ClipId,
+        loop_start: u64,
+        loop_end: u64,
+    },
+    ToggleNoteClipLoop(TrackId, ClipId),
+    SetNoteClipLoopRegion {
+        track_id: TrackId,
+        clip_id: ClipId,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
 
     // Piano roll / note clips
     AddNoteClipToTrack(TrackId),

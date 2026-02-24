@@ -28,6 +28,12 @@ pub struct NoteClipInfo {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
+    #[serde(default)]
+    pub loop_enabled: bool,
+    #[serde(default)]
+    pub loop_start_beats: f64,
+    #[serde(default)]
+    pub loop_end_beats: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +106,9 @@ mod tests {
             name: "Pattern 1".into(),
             position_beats: 0.0,
             duration_beats: 4.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
             notes: vec![
                 MidiNote {
                     pitch: 60,

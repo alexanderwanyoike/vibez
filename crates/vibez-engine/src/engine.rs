@@ -313,6 +313,9 @@ impl AudioEngine {
                             position,
                             source_offset,
                             duration,
+                            loop_enabled: false,
+                            loop_start: 0,
+                            loop_end: 0,
                         });
                     }
                     self.recalculate_audio_length();
@@ -445,6 +448,9 @@ impl AudioEngine {
                             position_beats,
                             duration_beats,
                             notes: Vec::new(),
+                            loop_enabled: false,
+                            loop_start_beats: 0.0,
+                            loop_end_beats: 0.0,
                         });
                     }
                 }
@@ -499,6 +505,38 @@ impl AudioEngine {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         if let Some(ref mut synth) = track.synth {
                             synth.set_param(param_index, value);
+                        }
+                    }
+                }
+
+                // -- Clip looping --
+                EngineCommand::SetClipLoop {
+                    track_id,
+                    clip_id,
+                    enabled,
+                    loop_start,
+                    loop_end,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.loop_enabled = enabled;
+                            clip.loop_start = loop_start;
+                            clip.loop_end = loop_end;
+                        }
+                    }
+                }
+                EngineCommand::SetNoteClipLoop {
+                    track_id,
+                    clip_id,
+                    enabled,
+                    loop_start_beats,
+                    loop_end_beats,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.loop_enabled = enabled;
+                            clip.loop_start_beats = loop_start_beats;
+                            clip.loop_end_beats = loop_end_beats;
                         }
                     }
                 }

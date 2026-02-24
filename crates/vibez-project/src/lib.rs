@@ -108,6 +108,9 @@ mod tests {
                 source_offset: 0,
                 duration: 44100,
                 file_path: PathBuf::from("audio/loop.wav"),
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             }],
             note_clips: Vec::new(),
         };
@@ -203,6 +206,9 @@ mod tests {
                 name: "Pattern 1".into(),
                 position_beats: 0.0,
                 duration_beats: 4.0,
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
                 notes: vec![
                     MidiNote {
                         pitch: 60,

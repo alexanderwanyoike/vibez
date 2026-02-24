@@ -18,6 +18,10 @@ pub struct UiClip {
     pub source_offset: u64,
     /// Duration in samples.
     pub duration: u64,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start: u64,
+    pub loop_end: u64,
 }
 
 /// An effect instance as represented in the UI.
@@ -39,6 +43,10 @@ pub struct UiNoteClip {
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
     pub selected_note: Option<usize>,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
 }
 
 /// A track as represented in the UI.
@@ -103,6 +111,51 @@ pub enum Workspace {
     Mix,
 }
 
+/// Snap grid for piano roll quantization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapGrid {
+    Quarter,
+    Eighth,
+    Sixteenth,
+    ThirtySecond,
+}
+
+impl SnapGrid {
+    /// Duration of one grid unit in beats.
+    pub fn beat_size(self) -> f64 {
+        match self {
+            SnapGrid::Quarter => 1.0,
+            SnapGrid::Eighth => 0.5,
+            SnapGrid::Sixteenth => 0.25,
+            SnapGrid::ThirtySecond => 0.125,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SnapGrid::Quarter => "1/4",
+            SnapGrid::Eighth => "1/8",
+            SnapGrid::Sixteenth => "1/16",
+            SnapGrid::ThirtySecond => "1/32",
+        }
+    }
+
+    pub fn all() -> &'static [SnapGrid] {
+        &[
+            SnapGrid::Quarter,
+            SnapGrid::Eighth,
+            SnapGrid::Sixteenth,
+            SnapGrid::ThirtySecond,
+        ]
+    }
+
+    /// Snap a beat value to the nearest grid position.
+    pub fn snap_beat(self, beat: f64) -> f64 {
+        let size = self.beat_size();
+        (beat / size).round() * size
+    }
+}
+
 pub struct AppState {
     // Transport
     pub playing: bool,
@@ -120,6 +173,13 @@ pub struct AppState {
     // UI
     pub status_text: String,
     pub workspace: Workspace,
+
+    // Zoom / scroll (arrangement timeline)
+    pub zoom_level: f32,
+    pub scroll_offset_beats: f64,
+
+    // Piano roll
+    pub snap_grid: SnapGrid,
 
     // Multi-track
     pub tracks: Vec<UiTrack>,
@@ -142,6 +202,9 @@ impl Default for AppState {
             peak_r: 0.0,
             status_text: "Ready — Add a track to get started".to_string(),
             workspace: Workspace::Arrange,
+            zoom_level: 1.0,
+            scroll_offset_beats: 0.0,
+            snap_grid: SnapGrid::Eighth,
             tracks: Vec::new(),
             selected_track: None,
             next_track_number: 1,
@@ -168,6 +231,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn position_normalized(&self) -> f64 {
         let dur = self.duration_seconds();
         if dur <= 0.0 {
@@ -181,6 +245,41 @@ impl AppState {
         let mins = (seconds / 60.0) as u32;
         let secs = seconds % 60.0;
         format!("{mins:02}:{secs:05.2}")
+    }
+
+    /// Pixels per beat at the current zoom level.
+    #[allow(dead_code)]
+    pub fn pixels_per_beat(&self) -> f32 {
+        20.0 * self.zoom_level
+    }
+
+    /// Number of beats visible in a canvas of the given width.
+    #[allow(dead_code)]
+    pub fn visible_beats(&self, canvas_width: f32) -> f64 {
+        canvas_width as f64 / self.pixels_per_beat() as f64
+    }
+
+    /// Convert a beat value to a pixel x coordinate in the viewport.
+    #[allow(dead_code)]
+    pub fn beat_to_x(&self, beat: f64) -> f32 {
+        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+    }
+
+    /// Convert a pixel x coordinate in the viewport to a beat value.
+    #[allow(dead_code)]
+    pub fn x_to_beat(&self, x: f32) -> f64 {
+        x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
+    }
+
+    /// Total duration in beats across all tracks.
+    pub fn total_beats(&self) -> f64 {
+        let dur = self.duration_seconds();
+        if dur > 0.0 && self.bpm > 0.0 {
+            dur * self.bpm / 60.0
+        } else {
+            // Minimum 16 beats to always show something useful
+            16.0
+        }
     }
 
     pub fn find_track(&self, id: TrackId) -> Option<&UiTrack> {

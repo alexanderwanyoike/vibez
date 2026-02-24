@@ -113,6 +113,22 @@ pub enum EngineCommand {
         param_index: usize,
         value: f32,
     },
+
+    // -- Clip looping --
+    SetClipLoop {
+        track_id: TrackId,
+        clip_id: ClipId,
+        enabled: bool,
+        loop_start: u64,
+        loop_end: u64,
+    },
+    SetNoteClipLoop {
+        track_id: TrackId,
+        clip_id: ClipId,
+        enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
 }
 
 #[cfg(test)]

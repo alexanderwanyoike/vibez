@@ -18,6 +18,10 @@ pub struct EngineClip {
     pub source_offset: u64,
     /// Duration in samples.
     pub duration: u64,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start: u64,
+    pub loop_end: u64,
 }
 
 impl EngineClip {
@@ -46,6 +50,10 @@ pub struct EngineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
 }
 
 /// A track as it exists at runtime in the engine.
@@ -121,7 +129,17 @@ impl EngineTrack {
 
                 // Calculate the sample index into the source audio
                 let clip_frame = global_frame - clip.position as usize;
-                let source_frame = clip.source_offset as usize + clip_frame;
+                let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
+                    let raw = clip.source_offset as usize + clip_frame;
+                    let loop_len = (clip.loop_end - clip.loop_start) as usize;
+                    if raw >= clip.loop_end as usize {
+                        clip.loop_start as usize + (raw - clip.loop_start as usize) % loop_len
+                    } else {
+                        raw
+                    }
+                } else {
+                    clip.source_offset as usize + clip_frame
+                };
 
                 for ch in 0..channels {
                     let sample = if ch < audio_channels {
@@ -193,14 +211,34 @@ impl EngineTrack {
                     continue;
                 }
 
+                // Local beat position within the clip
+                let local_beat = current_beat - clip_start_beat;
+
+                // Apply looping: wrap local_beat within the loop region
+                let effective_local =
+                    if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
+                        let loop_len = clip.loop_end_beats - clip.loop_start_beats;
+                        if local_beat >= clip.loop_end_beats {
+                            clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
+                        } else {
+                            local_beat
+                        }
+                    } else {
+                        local_beat
+                    };
+
+                // Reconstruct global beat for note matching
+                let effective_global = clip_start_beat + effective_local;
+                let effective_sample = (effective_global * spb) as u64;
+
                 for note in &clip.notes {
                     let note_start_sample = ((clip_start_beat + note.start_beat) * spb) as u64;
                     let note_end_sample = ((clip_start_beat + note.end_beat()) * spb) as u64;
 
-                    if sample_pos == note_start_sample {
+                    if effective_sample == note_start_sample {
                         note_ons.push((note.pitch, note.velocity));
                     }
-                    if sample_pos == note_end_sample {
+                    if effective_sample == note_end_sample {
                         note_offs.push(note.pitch);
                     }
                 }
@@ -307,6 +345,9 @@ mod tests {
             position: 0,
             source_offset: 0,
             duration: 64,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         let rendered = track.render(0, 8, 2);
@@ -335,6 +376,9 @@ mod tests {
             position: 0,
             source_offset: 10,
             duration: 20,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         let rendered = track.render(0, 4, 2);
@@ -362,6 +406,9 @@ mod tests {
             position: 50,
             source_offset: 0,
             duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         assert_eq!(calculate_total_length(&tracks), 150);
@@ -394,6 +441,9 @@ mod tests {
             position: 100,
             source_offset: 0,
             duration: 50,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         // Requesting frames 0..50 — clip starts at 100, not active
         assert!(!clip.is_active(0, 50));
@@ -408,6 +458,9 @@ mod tests {
             position: 40,
             source_offset: 0,
             duration: 50,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         // Requesting frames 30..60 — clip is at 40..90, overlaps
         assert!(clip.is_active(30, 30));

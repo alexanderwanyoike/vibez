@@ -133,6 +133,27 @@ impl App {
                 self.state.workspace = ws;
             }
 
+            // -- Zoom / scroll --
+            Message::ZoomIn => {
+                self.state.zoom_level = (self.state.zoom_level * 1.25).min(16.0);
+            }
+            Message::ZoomOut => {
+                self.state.zoom_level = (self.state.zoom_level / 1.25).max(0.25);
+            }
+            Message::SetZoom(level) => {
+                self.state.zoom_level = level.clamp(0.25, 16.0);
+            }
+            Message::ScrollArrangement(delta) => {
+                let total = self.state.total_beats();
+                self.state.scroll_offset_beats =
+                    (self.state.scroll_offset_beats + delta).clamp(0.0, total);
+            }
+
+            // -- Snap grid --
+            Message::SetSnapGrid(grid) => {
+                self.state.snap_grid = grid;
+            }
+
             // -- Engine events --
             Message::Tick => {
                 self.poll_engine_events();
@@ -255,6 +276,9 @@ impl App {
                         position: existing_end,
                         source_offset: 0,
                         duration,
+                        loop_enabled: false,
+                        loop_start: 0,
+                        loop_end: 0,
                     });
                 }
 
@@ -428,6 +452,100 @@ impl App {
                 self.state.status_text = format!("Synth param {param_index} = {value:.2}");
             }
 
+            // -- Clip looping --
+            Message::ToggleClipLoop(track_id, clip_id) => {
+                let mut cmd_data = None;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.loop_enabled = !clip.loop_enabled;
+                        if clip.loop_enabled && clip.loop_end == 0 {
+                            clip.loop_start = clip.source_offset;
+                            clip.loop_end = clip.source_offset + clip.duration;
+                        }
+                        cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
+                    }
+                }
+                if let Some((enabled, loop_start, loop_end)) = cmd_data {
+                    self.send_command(EngineCommand::SetClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start,
+                        loop_end,
+                    });
+                }
+            }
+            Message::SetClipLoopRegion {
+                track_id,
+                clip_id,
+                loop_start,
+                loop_end,
+            } => {
+                let mut enabled = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.loop_start = loop_start;
+                        clip.loop_end = loop_end;
+                        enabled = clip.loop_enabled;
+                    }
+                }
+                self.send_command(EngineCommand::SetClipLoop {
+                    track_id,
+                    clip_id,
+                    enabled,
+                    loop_start,
+                    loop_end,
+                });
+            }
+            Message::ToggleNoteClipLoop(track_id, clip_id) => {
+                let mut cmd_data = None;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.loop_enabled = !clip.loop_enabled;
+                        if clip.loop_enabled && clip.loop_end_beats == 0.0 {
+                            clip.loop_start_beats = 0.0;
+                            clip.loop_end_beats = clip.duration_beats;
+                        }
+                        cmd_data = Some((
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
+                        ));
+                    }
+                }
+                if let Some((enabled, loop_start_beats, loop_end_beats)) = cmd_data {
+                    self.send_command(EngineCommand::SetNoteClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start_beats,
+                        loop_end_beats,
+                    });
+                }
+            }
+            Message::SetNoteClipLoopRegion {
+                track_id,
+                clip_id,
+                loop_start_beats,
+                loop_end_beats,
+            } => {
+                let mut enabled = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.loop_start_beats = loop_start_beats;
+                        clip.loop_end_beats = loop_end_beats;
+                        enabled = clip.loop_enabled;
+                    }
+                }
+                self.send_command(EngineCommand::SetNoteClipLoop {
+                    track_id,
+                    clip_id,
+                    enabled,
+                    loop_start_beats,
+                    loop_end_beats,
+                });
+            }
+
             // -- Piano roll / note clips --
             Message::AddNoteClipToTrack(track_id) => {
                 let clip_id = ClipId::new();
@@ -441,6 +559,9 @@ impl App {
                         duration_beats,
                         notes: Vec::new(),
                         selected_note: None,
+                        loop_enabled: false,
+                        loop_start_beats: 0.0,
+                        loop_end_beats: 0.0,
                     });
                 }
                 self.send_command(EngineCommand::AddNoteClip {
@@ -758,16 +879,20 @@ impl App {
                 .into();
         }
 
-        let playhead = self.state.position_normalized();
-        let duration = self.state.duration_seconds();
+        let playhead_beats = self.state.position_beats();
         let sample_rate = self.state.sample_rate;
         let bpm = self.state.bpm;
+        let zoom_level = self.state.zoom_level;
+        let scroll_offset = self.state.scroll_offset_beats;
+        let total_beats = self.state.total_beats();
 
         // Beat-based ruler across the top (offset by track header width)
         let ruler = RulerWidget {
-            playhead_position: playhead,
-            duration_seconds: duration,
+            playhead_beats,
             bpm,
+            zoom_level,
+            scroll_offset_beats: scroll_offset,
+            total_beats,
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -796,8 +921,10 @@ impl App {
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
-                playhead,
-                duration,
+                playhead_beats,
+                zoom_level,
+                scroll_offset,
+                total_beats,
                 sample_rate,
                 selected,
                 track_color,
@@ -1112,6 +1239,7 @@ impl App {
                 playhead_beats,
                 clip.duration_beats,
                 track_color,
+                self.state.snap_grid,
             )
         } else {
             PianoRollWidget::empty(track_id, playhead_beats, track_color)
@@ -1124,7 +1252,41 @@ impl App {
 
         let label = text("Piano Roll").size(11).color(th::TEXT_DIM);
 
-        let content = column![label, piano_canvas].spacing(4).padding(4);
+        // Snap grid selector
+        use crate::state::SnapGrid;
+        let mut snap_row = row![].spacing(2);
+        for &grid in SnapGrid::all() {
+            let is_active = self.state.snap_grid == grid;
+            let (bg, text_color) = if is_active {
+                (th::ACCENT_DIM, th::ACCENT)
+            } else {
+                (th::BG_ELEVATED, th::TEXT_DIM)
+            };
+            let btn = button(text(grid.label()).size(10).color(text_color))
+                .on_press(Message::SetSnapGrid(grid))
+                .padding([2, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(bg.into()),
+                    text_color,
+                    border: iced::Border {
+                        color: if is_active {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+            snap_row = snap_row.push(btn);
+        }
+        let snap_label = text("Snap:").size(10).color(th::TEXT_DIM);
+        let header_row = row![label, horizontal_space(), snap_label, snap_row]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+
+        let content = column![header_row, piano_canvas].spacing(4).padding(4);
 
         container(content)
             .width(Length::FillPortion(1))
