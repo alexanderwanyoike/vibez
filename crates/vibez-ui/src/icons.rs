@@ -29,6 +29,7 @@ pub const CIRCLE: char = '\u{E076}';
 pub const CIRCLE_DOT: char = '\u{E345}';
 pub const COPY: char = '\u{E091}';
 pub const SCISSORS: char = '\u{E152}';
+pub const REPEAT: char = '\u{E146}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {
