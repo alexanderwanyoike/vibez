@@ -527,6 +527,12 @@ impl AudioEngine {
                 }
 
                 // -- Clip looping --
+                EngineCommand::SetArrangementLoop(enabled) => {
+                    self.transport.set_loop_enabled(enabled);
+                }
+                EngineCommand::SetArrangementLoopRegion { start, end } => {
+                    self.transport.set_loop_region(start, end);
+                }
                 EngineCommand::SetClipLoop {
                     track_id,
                     clip_id,

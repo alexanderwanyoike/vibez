@@ -126,6 +126,13 @@ pub enum EngineCommand {
         value: f32,
     },
 
+    // -- Arrangement loop --
+    SetArrangementLoop(bool),
+    SetArrangementLoopRegion {
+        start: u64,
+        end: u64,
+    },
+
     // -- Clip looping --
     SetClipLoop {
         track_id: TrackId,

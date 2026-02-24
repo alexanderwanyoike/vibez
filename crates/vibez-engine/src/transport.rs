@@ -16,6 +16,12 @@ pub struct Transport {
     /// Total length of the loaded audio in samples.  `None` means no audio is
     /// loaded, so `advance()` increments without clamping.
     audio_length: Option<u64>,
+    /// Whether arrangement-level looping is active.
+    loop_enabled: bool,
+    /// Loop region start in samples.
+    loop_start: u64,
+    /// Loop region end in samples.
+    loop_end: u64,
 }
 
 impl Transport {
@@ -26,6 +32,9 @@ impl Transport {
             position: 0,
             bpm: DEFAULT_BPM,
             audio_length: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         }
     }
 
@@ -83,6 +92,32 @@ impl Transport {
         self.audio_length
     }
 
+    /// Whether arrangement-level looping is enabled.
+    pub fn loop_enabled(&self) -> bool {
+        self.loop_enabled
+    }
+
+    /// Loop region start in samples.
+    pub fn loop_start(&self) -> u64 {
+        self.loop_start
+    }
+
+    /// Loop region end in samples.
+    pub fn loop_end(&self) -> u64 {
+        self.loop_end
+    }
+
+    /// Enable or disable arrangement-level looping.
+    pub fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+    }
+
+    /// Set the loop region (start and end in samples).
+    pub fn set_loop_region(&mut self, start: u64, end: u64) {
+        self.loop_start = start;
+        self.loop_end = end;
+    }
+
     /// Advance the transport by `frames` samples and return the new position.
     ///
     /// If the transport is stopped, the position is unchanged.  If
@@ -94,6 +129,14 @@ impl Transport {
         }
 
         self.position = self.position.saturating_add(frames);
+
+        // Arrangement loop takes priority over audio_length auto-stop
+        if self.loop_enabled && self.loop_end > self.loop_start && self.position >= self.loop_end {
+            let overshoot = self.position - self.loop_end;
+            let loop_len = self.loop_end - self.loop_start;
+            self.position = self.loop_start + (overshoot % loop_len);
+            return self.position;
+        }
 
         if let Some(len) = self.audio_length {
             if self.position >= len {
@@ -244,5 +287,68 @@ mod tests {
         assert_eq!(a.position(), b.position());
         assert_eq!(a.is_playing(), b.is_playing());
         assert!((a.bpm() - b.bpm()).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn loop_wraps_at_end() {
+        let mut t = Transport::new();
+        t.set_loop_enabled(true);
+        t.set_loop_region(1000, 2000);
+        t.seek(1900);
+        t.play();
+        let pos = t.advance(200); // 1900 + 200 = 2100 → wraps to 1000 + 100 = 1100
+        assert_eq!(pos, 1100);
+        assert!(t.is_playing());
+    }
+
+    #[test]
+    fn loop_no_wrap_when_disabled() {
+        let mut t = Transport::new();
+        t.set_loop_enabled(false);
+        t.set_loop_region(1000, 2000);
+        t.seek(1900);
+        t.play();
+        let pos = t.advance(200);
+        assert_eq!(pos, 2100); // no wrap
+    }
+
+    #[test]
+    fn loop_overshoot_modulo() {
+        let mut t = Transport::new();
+        t.set_loop_enabled(true);
+        t.set_loop_region(0, 100);
+        t.seek(50);
+        t.play();
+        // 50 + 300 = 350, overshoot = 250, 250 % 100 = 50 → position = 50
+        let pos = t.advance(300);
+        assert_eq!(pos, 50);
+    }
+
+    #[test]
+    fn loop_priority_over_audio_length() {
+        let mut t = Transport::new();
+        t.set_audio_length(Some(2000));
+        t.set_loop_enabled(true);
+        t.set_loop_region(500, 1500);
+        t.seek(1400);
+        t.play();
+        // Would auto-stop at 2000 without loop, but loop wraps first
+        let pos = t.advance(200); // 1400 + 200 = 1600 → wraps to 500 + 100 = 600
+        assert_eq!(pos, 600);
+        assert!(t.is_playing()); // did NOT auto-stop
+    }
+
+    #[test]
+    fn loop_accessors() {
+        let mut t = Transport::new();
+        assert!(!t.loop_enabled());
+        assert_eq!(t.loop_start(), 0);
+        assert_eq!(t.loop_end(), 0);
+
+        t.set_loop_enabled(true);
+        t.set_loop_region(100, 500);
+        assert!(t.loop_enabled());
+        assert_eq!(t.loop_start(), 100);
+        assert_eq!(t.loop_end(), 500);
     }
 }
