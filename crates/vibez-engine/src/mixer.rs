@@ -465,4 +465,152 @@ mod tests {
         // Requesting frames 30..60 — clip is at 40..90, overlaps
         assert!(clip.is_active(30, 30));
     }
+
+    #[test]
+    fn clip_loop_renders_audio_past_source() {
+        let audio = make_test_audio(100, 0.5);
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 100,
+        });
+
+        // Render frames 100..108 (in looped region, past source length)
+        let rendered = track.render(100, 8, 2);
+        assert!(rendered);
+
+        // Output should be source audio (0.5), not silence
+        for i in 0..16 {
+            assert!(
+                (track.mix_buffer[i] - 0.5).abs() < 1e-6,
+                "sample {i}: expected 0.5, got {}",
+                track.mix_buffer[i]
+            );
+        }
+    }
+
+    #[test]
+    fn clip_loop_wraps_correctly() {
+        // Source: 100 frames with ascending values 0.0..0.99
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio: audio.clone(),
+            position: 0,
+            source_offset: 0,
+            duration: 250,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 100,
+        });
+
+        // Render all 250 frames
+        let rendered = track.render(0, 250, 2);
+        assert!(rendered);
+
+        // frame 150 should wrap to source frame 50 (150 % 100 = 50)
+        let val_150 = track.mix_buffer[150 * 2]; // left channel
+        let expected_50 = audio.sample(0, 50);
+        assert!(
+            (val_150 - expected_50).abs() < 1e-6,
+            "frame 150: expected {expected_50} (same as frame 50), got {val_150}",
+        );
+
+        // frame 200 should wrap to source frame 0 (200 % 100 = 0)
+        let val_200 = track.mix_buffer[200 * 2];
+        let expected_0 = audio.sample(0, 0);
+        assert!(
+            (val_200 - expected_0).abs() < 1e-6,
+            "frame 200: expected {expected_0} (same as frame 0), got {val_200}",
+        );
+    }
+
+    #[test]
+    fn clip_loop_with_source_offset() {
+        // Source: 100 frames ascending
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio: audio.clone(),
+            position: 0,
+            source_offset: 20,
+            duration: 200,
+            loop_enabled: true,
+            loop_start: 20,
+            loop_end: 100,
+        });
+
+        let rendered = track.render(0, 200, 2);
+        assert!(rendered);
+
+        // First frame maps to source frame 20
+        let val_0 = track.mix_buffer[0];
+        assert!(
+            (val_0 - audio.sample(0, 20)).abs() < 1e-6,
+            "frame 0: expected source[20]={}, got {}",
+            audio.sample(0, 20),
+            val_0
+        );
+
+        // frame 80: source_offset + 80 = 100 which is >= loop_end (100)
+        // wraps: loop_start + (100 - loop_start) % loop_len = 20 + (100 - 20) % 80 = 20 + 0 = 20
+        let val_80 = track.mix_buffer[80 * 2];
+        assert!(
+            (val_80 - audio.sample(0, 20)).abs() < 1e-6,
+            "frame 80: expected source[20]={}, got {}",
+            audio.sample(0, 20),
+            val_80
+        );
+    }
+
+    #[test]
+    fn clip_no_loop_silence_past_source() {
+        let audio = make_test_audio(100, 0.5);
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+
+        // Render frames 100..108 (past source, no loop)
+        let rendered = track.render(100, 8, 2);
+        assert!(rendered); // clip is still "active" (duration=200)
+
+        // Output should be silence since DecodedAudio returns 0.0 for out-of-bounds
+        for i in 0..16 {
+            assert!(
+                track.mix_buffer[i].abs() < 1e-6,
+                "sample {i}: expected silence, got {}",
+                track.mix_buffer[i]
+            );
+        }
+    }
 }

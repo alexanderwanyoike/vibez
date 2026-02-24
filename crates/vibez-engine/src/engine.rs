@@ -305,6 +305,9 @@ impl AudioEngine {
                     position,
                     source_offset,
                     duration,
+                    loop_enabled,
+                    loop_start,
+                    loop_end,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.clips.push(EngineClip {
@@ -313,9 +316,9 @@ impl AudioEngine {
                             position,
                             source_offset,
                             duration,
-                            loop_enabled: false,
-                            loop_start: 0,
-                            loop_end: 0,
+                            loop_enabled,
+                            loop_start,
+                            loop_end,
                         });
                     }
                     self.recalculate_audio_length();
@@ -441,6 +444,9 @@ impl AudioEngine {
                     clip_id,
                     position_beats,
                     duration_beats,
+                    loop_enabled,
+                    loop_start_beats,
+                    loop_end_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.note_clips.push(EngineNoteClip {
@@ -448,15 +454,26 @@ impl AudioEngine {
                             position_beats,
                             duration_beats,
                             notes: Vec::new(),
-                            loop_enabled: false,
-                            loop_start_beats: 0.0,
-                            loop_end_beats: 0.0,
+                            loop_enabled,
+                            loop_start_beats,
+                            loop_end_beats,
                         });
                     }
                 }
                 EngineCommand::RemoveNoteClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.note_clips.retain(|c| c.id != clip_id);
+                    }
+                }
+                EngineCommand::MoveNoteClip {
+                    track_id,
+                    clip_id,
+                    new_position_beats,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.position_beats = new_position_beats;
+                        }
                     }
                 }
                 EngineCommand::AddNote {
@@ -886,6 +903,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::Play).unwrap();
@@ -931,6 +951,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::SetTrackMute(tid, true)).unwrap();
@@ -967,6 +990,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx
@@ -977,6 +1003,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         // Solo track 1 only
@@ -1019,6 +1048,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::SetTrackGain(tid, 0.5)).unwrap();
@@ -1049,6 +1081,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::SetTrackPan(tid, 0.0)).unwrap();
@@ -1087,6 +1122,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx
@@ -1097,6 +1135,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1152,6 +1193,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1195,6 +1239,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 16,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx.push(EngineCommand::Play).unwrap();
@@ -1225,6 +1272,9 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             })
             .unwrap();
         cmd_tx
@@ -1240,5 +1290,177 @@ mod tests {
 
         // Clip is now at position 50, engine should recognize this
         assert_eq!(engine.tracks()[0].clips[0].position, 50);
+    }
+
+    #[test]
+    fn add_clip_with_loop_plays_looped_audio() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        let audio = make_constant_audio(100, 0.5);
+
+        cmd_tx
+            .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddClip {
+                track_id: tid,
+                clip_id: cid,
+                audio,
+                position: 0,
+                source_offset: 0,
+                duration: 200,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 100,
+            })
+            .unwrap();
+        cmd_tx.push(EngineCommand::Play).unwrap();
+
+        // Process 200 frames (source is only 100 frames, but loop should fill)
+        let mut buf = vec![0.0f32; 400]; // 200 frames stereo
+        engine.process(&mut buf, 2);
+
+        // Frame 150 should have non-zero audio (looped region)
+        let pan_gain = std::f32::consts::FRAC_1_SQRT_2;
+        let expected = 0.5 * pan_gain;
+        assert!(
+            (buf[150 * 2] - expected).abs() < 1e-4,
+            "frame 150 L: expected ~{expected}, got {}",
+            buf[150 * 2]
+        );
+    }
+
+    #[test]
+    fn resize_clip_preserves_loop_state() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        let audio = make_constant_audio(100, 0.5);
+
+        cmd_tx
+            .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+            .unwrap();
+        // Add clip without loop
+        cmd_tx
+            .push(EngineCommand::AddClip {
+                track_id: tid,
+                clip_id: cid,
+                audio: audio.clone(),
+                position: 0,
+                source_offset: 0,
+                duration: 100,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+            })
+            .unwrap();
+        // Enable loop via SetClipLoop
+        cmd_tx
+            .push(EngineCommand::SetClipLoop {
+                track_id: tid,
+                clip_id: cid,
+                enabled: true,
+                loop_start: 0,
+                loop_end: 100,
+            })
+            .unwrap();
+        // Process to apply commands
+        let mut buf = vec![0.0f32; 8];
+        engine.process(&mut buf, 2);
+
+        // Simulate resize: Remove + Add with loop fields
+        cmd_tx.push(EngineCommand::RemoveClip(tid, cid)).unwrap();
+        cmd_tx
+            .push(EngineCommand::AddClip {
+                track_id: tid,
+                clip_id: cid,
+                audio,
+                position: 0,
+                source_offset: 0,
+                duration: 200,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 100,
+            })
+            .unwrap();
+        cmd_tx.push(EngineCommand::Seek(0)).unwrap();
+        cmd_tx.push(EngineCommand::Play).unwrap();
+
+        let mut buf = vec![0.0f32; 400]; // 200 frames
+        engine.process(&mut buf, 2);
+
+        // Frame 150 (in looped region) should have audio
+        let pan_gain = std::f32::consts::FRAC_1_SQRT_2;
+        let expected = 0.5 * pan_gain;
+        assert!(
+            (buf[150 * 2] - expected).abs() < 1e-4,
+            "frame 150 L after resize: expected ~{expected}, got {}",
+            buf[150 * 2]
+        );
+    }
+
+    #[test]
+    fn note_clip_loop_renders() {
+        use vibez_core::midi::{InstrumentKind, MidiNote};
+
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+
+        // Set sample rate first so synth is initialized properly
+        cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
+        cmd_tx
+            .push(EngineCommand::AddInstrumentTrack(
+                tid,
+                "Synth 1".into(),
+                InstrumentKind::SubtractiveSynth,
+            ))
+            .unwrap();
+        // Add note clip: 2 beats, looped over [0, 2) with total duration 4 beats
+        cmd_tx
+            .push(EngineCommand::AddNoteClip {
+                track_id: tid,
+                clip_id: cid,
+                position_beats: 0.0,
+                duration_beats: 4.0,
+                loop_enabled: true,
+                loop_start_beats: 0.0,
+                loop_end_beats: 2.0,
+            })
+            .unwrap();
+        // Add a note at beat 0, 1 beat long
+        cmd_tx
+            .push(EngineCommand::AddNote {
+                track_id: tid,
+                clip_id: cid,
+                note: MidiNote {
+                    pitch: 60,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 1.0,
+                },
+            })
+            .unwrap();
+        cmd_tx.push(EngineCommand::Play).unwrap();
+
+        // At 120 BPM, 1 beat = 22050 samples (44100 / 2)
+        // Process enough frames to reach beat 3 (in the looped region)
+        // 3 beats = 66150 samples
+        let frames = 66_150;
+        let mut buf = vec![0.0f32; frames * 2];
+        engine.process(&mut buf, 2);
+
+        // Check that there's audio in the looped region (around beat 2-3)
+        // At beat 2.5 = sample 55125, the looped note should trigger again
+        let looped_region_start = 44_100; // beat 2.0
+        let looped_region_end = 66_150; // beat 3.0
+        let has_audio_in_loop = buf[looped_region_start * 2..looped_region_end * 2]
+            .iter()
+            .any(|&s| s.abs() > 1e-6);
+        assert!(
+            has_audio_in_loop,
+            "Expected synth audio in looped region (beat 2-3)"
+        );
     }
 }

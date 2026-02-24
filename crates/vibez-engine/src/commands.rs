@@ -37,6 +37,9 @@ pub enum EngineCommand {
         position: u64,
         source_offset: u64,
         duration: u64,
+        loop_enabled: bool,
+        loop_start: u64,
+        loop_end: u64,
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
@@ -90,8 +93,17 @@ pub enum EngineCommand {
         clip_id: ClipId,
         position_beats: f64,
         duration_beats: f64,
+        loop_enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
     },
     RemoveNoteClip(TrackId, ClipId),
+    /// Move a note clip to a new beat position on the timeline.
+    MoveNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_position_beats: f64,
+    },
     AddNote {
         track_id: TrackId,
         clip_id: ClipId,
@@ -168,6 +180,9 @@ mod tests {
             position: 0,
             source_offset: 0,
             duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         let _remove_clip = EngineCommand::RemoveClip(tid, cid);
         let _move_clip = EngineCommand::MoveClip {
