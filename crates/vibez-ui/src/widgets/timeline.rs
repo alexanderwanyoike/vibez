@@ -3,7 +3,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
-use crate::state::{ArrangementSelection, UiTrack};
+use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
 use crate::theme;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
@@ -114,6 +114,25 @@ pub struct RulerWidget {
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub total_beats: f64,
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+    pub time_selection_active: bool,
+    pub selection_start_beats: f64,
+    pub selection_end_beats: f64,
+}
+
+/// Active drag action on the ruler.
+#[derive(Debug, Clone)]
+enum RulerDragAction {
+    PendingSeek { beat: f64, start_x: f32 },
+    RegionSelect { anchor_beat: f64 },
+}
+
+/// Interaction state for the ruler widget.
+#[derive(Debug, Default)]
+pub struct RulerInteractionState {
+    drag: Option<RulerDragAction>,
 }
 
 impl RulerWidget {
@@ -131,7 +150,7 @@ impl RulerWidget {
 }
 
 impl canvas::Program<Message> for RulerWidget {
-    type State = ();
+    type State = RulerInteractionState;
 
     fn draw(
         &self,
@@ -258,6 +277,97 @@ impl canvas::Program<Message> for RulerWidget {
             );
         }
 
+        // Loop region overlay
+        if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
+            let loop_x1 = self.beat_to_x(self.loop_start_beats, w);
+            let loop_x2 = self.beat_to_x(self.loop_end_beats, w);
+
+            let fill_x = loop_x1.max(0.0);
+            let fill_w = loop_x2.min(w) - fill_x;
+            if fill_w > 0.0 {
+                frame.fill_rectangle(
+                    iced::Point::new(fill_x, 0.0),
+                    iced::Size::new(fill_w, h),
+                    theme::with_alpha(theme::ACCENT, 0.15),
+                );
+
+                // REPEAT icon centered in the loop region
+                let center_x = fill_x + fill_w / 2.0;
+                frame.fill_text(canvas::Text {
+                    content: crate::icons::REPEAT.to_string(),
+                    position: iced::Point::new(center_x - 6.0, (h - 12.0) / 2.0),
+                    color: theme::with_alpha(theme::ACCENT, 0.7),
+                    size: iced::Pixels(12.0),
+                    font: crate::icons::ICON_FONT,
+                    ..Default::default()
+                });
+            }
+
+            // Bracket lines at boundaries
+            if loop_x1 >= 0.0 && loop_x1 <= w {
+                let bracket = canvas::Path::line(
+                    iced::Point::new(loop_x1, 0.0),
+                    iced::Point::new(loop_x1, h),
+                );
+                frame.stroke(
+                    &bracket,
+                    canvas::Stroke::default()
+                        .with_color(theme::ACCENT)
+                        .with_width(2.0),
+                );
+            }
+            if loop_x2 >= 0.0 && loop_x2 <= w {
+                let bracket = canvas::Path::line(
+                    iced::Point::new(loop_x2, 0.0),
+                    iced::Point::new(loop_x2, h),
+                );
+                frame.stroke(
+                    &bracket,
+                    canvas::Stroke::default()
+                        .with_color(theme::ACCENT)
+                        .with_width(2.0),
+                );
+            }
+        }
+
+        // Selection region overlay (separate from loop)
+        if self.time_selection_active && self.selection_end_beats > self.selection_start_beats {
+            let sel_x1 = self.beat_to_x(self.selection_start_beats, w);
+            let sel_x2 = self.beat_to_x(self.selection_end_beats, w);
+
+            let fill_x = sel_x1.max(0.0);
+            let fill_w = sel_x2.min(w) - fill_x;
+            if fill_w > 0.0 {
+                frame.fill_rectangle(
+                    iced::Point::new(fill_x, 0.0),
+                    iced::Size::new(fill_w, h),
+                    theme::with_alpha(theme::ACCENT, 0.10),
+                );
+            }
+
+            // Thinner bracket lines
+            if sel_x1 >= 0.0 && sel_x1 <= w {
+                let bracket =
+                    canvas::Path::line(iced::Point::new(sel_x1, 0.0), iced::Point::new(sel_x1, h));
+                frame.stroke(
+                    &bracket,
+                    canvas::Stroke::default()
+                        .with_color(theme::ACCENT)
+                        .with_width(1.0),
+                );
+            }
+            if sel_x2 >= 0.0 && sel_x2 <= w {
+                let bracket =
+                    canvas::Path::line(iced::Point::new(sel_x2, 0.0), iced::Point::new(sel_x2, h));
+                frame.stroke(
+                    &bracket,
+                    canvas::Stroke::default()
+                        .with_color(theme::ACCENT)
+                        .with_width(1.0),
+                );
+            }
+        }
+
         // Playhead
         let playhead_x = self.beat_to_x(self.playhead_beats, w);
         if playhead_x >= 0.0 && playhead_x <= w {
@@ -278,24 +388,95 @@ impl canvas::Program<Message> for RulerWidget {
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         event: canvas::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
+            // Left-click: PendingSeek (may become RegionSelect on drag)
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    // Click to seek: convert pixel x → beat → normalized
                     let ppb = self.pixels_per_beat();
                     let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
-                    if self.total_beats > 0.0 {
-                        let normalized = (beat / self.total_beats).clamp(0.0, 1.0);
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::Seek(normalized)),
-                        );
+                    state.drag = Some(RulerDragAction::PendingSeek {
+                        beat,
+                        start_x: pos.x,
+                    });
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+            // Mouse move: transition PendingSeek→RegionSelect, or update region
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                if let Some(ref drag) = state.drag {
+                    if let Some(pos) = cursor.position() {
+                        let local_x = pos.x - bounds.x;
+                        let ppb = self.pixels_per_beat();
+                        let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+
+                        match drag {
+                            RulerDragAction::PendingSeek {
+                                beat: anchor,
+                                start_x,
+                            } => {
+                                let dx = (local_x - start_x).abs();
+                                if dx > 4.0 {
+                                    let anchor = anchor.round();
+                                    let current = beat.round();
+                                    let start = anchor.min(current);
+                                    let end = anchor.max(current);
+                                    state.drag = Some(RulerDragAction::RegionSelect {
+                                        anchor_beat: anchor,
+                                    });
+                                    if end > start {
+                                        return (
+                                            canvas::event::Status::Captured,
+                                            Some(Message::SetTimeSelection {
+                                                start_beats: start,
+                                                end_beats: end,
+                                            }),
+                                        );
+                                    }
+                                }
+                            }
+                            RulerDragAction::RegionSelect { anchor_beat } => {
+                                let current = beat.round();
+                                let start = anchor_beat.min(current);
+                                let end = anchor_beat.max(current);
+                                if end > start {
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::SetTimeSelection {
+                                            start_beats: start,
+                                            end_beats: end,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
                     }
+                }
+            }
+            // Mouse release
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                if let Some(ref drag) = state.drag {
+                    let msg = match drag {
+                        RulerDragAction::PendingSeek { beat, .. } => {
+                            // Short click → seek + clear selection
+                            if self.total_beats > 0.0 {
+                                let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
+                                Some(Message::Seek(normalized))
+                            } else {
+                                None
+                            }
+                        }
+                        RulerDragAction::RegionSelect { .. } => {
+                            // Completed region select
+                            Some(Message::SetTimeSelectionActive(true))
+                        }
+                    };
+                    state.drag = None;
+                    return (canvas::event::Status::Captured, msg);
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
@@ -314,6 +495,24 @@ impl canvas::Program<Message> for RulerWidget {
             _ => {}
         }
         (canvas::event::Status::Ignored, None)
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Self::State,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if let Some(ref drag) = state.drag {
+            return match drag {
+                RulerDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
+                RulerDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+            };
+        }
+        if cursor.is_over(bounds) {
+            return mouse::Interaction::Pointer;
+        }
+        mouse::Interaction::default()
     }
 }
 
@@ -337,6 +536,13 @@ pub enum ClipDragAction {
         is_note_clip: bool,
         start_x: f32,
         original_duration_beats: f64,
+    },
+    PendingSeek {
+        beat: f64,
+        start_x: f32,
+    },
+    RegionSelect {
+        anchor_beat: f64,
     },
 }
 
@@ -365,6 +571,12 @@ pub struct TrackClipCanvas {
     pub selected: bool,
     pub track_color: Color,
     pub is_instrument: bool,
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+    pub time_selection_active: bool,
+    pub selection_start_beats: f64,
+    pub selection_end_beats: f64,
 }
 
 impl TrackClipCanvas {
@@ -385,6 +597,12 @@ impl TrackClipCanvas {
         track_ids: Vec<TrackId>,
         track_kinds: Vec<bool>,
         selected_clip: Option<ClipId>,
+        loop_enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+        time_selection_active: bool,
+        selection_start_beats: f64,
+        selection_end_beats: f64,
     ) -> Self {
         let clips = track
             .clips
@@ -436,6 +654,12 @@ impl TrackClipCanvas {
             selected,
             track_color,
             is_instrument: matches!(track.kind, TrackKind::Instrument(_)),
+            loop_enabled,
+            loop_start_beats,
+            loop_end_beats,
+            time_selection_active,
+            selection_start_beats,
+            selection_end_beats,
         }
     }
 
@@ -865,6 +1089,36 @@ impl canvas::Program<Message> for TrackClipCanvas {
             }
         }
 
+        // Loop region tint
+        if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
+            let loop_x1 = self.beat_to_x(self.loop_start_beats);
+            let loop_x2 = self.beat_to_x(self.loop_end_beats);
+            let fill_x = loop_x1.max(0.0);
+            let fill_w = loop_x2.min(w) - fill_x;
+            if fill_w > 0.0 {
+                frame.fill_rectangle(
+                    iced::Point::new(fill_x, 0.0),
+                    iced::Size::new(fill_w, h),
+                    theme::with_alpha(theme::ACCENT, 0.06),
+                );
+            }
+        }
+
+        // Selection region tint (separate from loop)
+        if self.time_selection_active && self.selection_end_beats > self.selection_start_beats {
+            let sel_x1 = self.beat_to_x(self.selection_start_beats);
+            let sel_x2 = self.beat_to_x(self.selection_end_beats);
+            let fill_x = sel_x1.max(0.0);
+            let fill_w = sel_x2.min(w) - fill_x;
+            if fill_w > 0.0 {
+                frame.fill_rectangle(
+                    iced::Point::new(fill_x, 0.0),
+                    iced::Size::new(fill_w, h),
+                    theme::with_alpha(theme::ACCENT, 0.04),
+                );
+            }
+        }
+
         // Playhead overlay
         let playhead_x = self.beat_to_x(self.playhead_beats);
         if playhead_x >= 0.0 && playhead_x <= w {
@@ -902,6 +1156,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
             return match drag {
                 ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
+                ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
+                ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
             };
         }
 
@@ -971,22 +1227,67 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         );
                     }
 
-                    // No clip hit — seek (preserve existing behavior) + select track
+                    // No clip hit — PendingSeek (may become RegionSelect on drag)
                     if bounds.width > 0.0 {
                         let ppb = self.pixels_per_beat();
                         let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
-                        if self.total_beats > 0.0 {
-                            let normalized = (beat / self.total_beats).clamp(0.0, 1.0);
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::Seek(normalized)),
-                            );
-                        }
+                        state.drag = Some(ClipDragAction::PendingSeek {
+                            beat,
+                            start_x: pos.x,
+                        });
+                        return (canvas::event::Status::Captured, None);
                     }
                 }
             }
 
-            // -- Drag: move or resize clip --
+            // -- Right-click: context menu --
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Right)) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    let screen_x = bounds.x + pos.x;
+                    let screen_y = bounds.y + pos.y;
+
+                    // Hit test for clip
+                    if let Some((clip_id, is_note_clip, _, _, _)) = self.hit_test(pos.x) {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::ShowContextMenu {
+                                x: screen_x,
+                                y: screen_y,
+                                target: ContextMenuTarget::Clip {
+                                    track_id,
+                                    clip_id,
+                                    is_note_clip,
+                                },
+                            }),
+                        );
+                    }
+
+                    // No clip hit — check if within active time selection
+                    if self.time_selection_active
+                        && self.selection_end_beats > self.selection_start_beats
+                    {
+                        let ppb = self.pixels_per_beat();
+                        let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
+                        if beat >= self.selection_start_beats && beat <= self.selection_end_beats {
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::ShowContextMenu {
+                                    x: screen_x,
+                                    y: screen_y,
+                                    target: ContextMenuTarget::TimeSelection {
+                                        start_beats: self.selection_start_beats,
+                                        end_beats: self.selection_end_beats,
+                                    },
+                                }),
+                            );
+                        }
+                    }
+
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+
+            // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
                 if let Some(ref drag) = state.drag {
                     if let Some(pos) = cursor.position() {
@@ -994,6 +1295,49 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         let ppb = self.pixels_per_beat();
 
                         match drag {
+                            ClipDragAction::PendingSeek {
+                                beat: anchor,
+                                start_x,
+                            } => {
+                                let dx = (local_x - start_x).abs();
+                                if dx > 4.0 {
+                                    let anchor_snapped = anchor.round();
+                                    let beat =
+                                        local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+                                    let current = beat.round();
+                                    let start = anchor_snapped.min(current);
+                                    let end = anchor_snapped.max(current);
+                                    state.drag = Some(ClipDragAction::RegionSelect {
+                                        anchor_beat: anchor_snapped,
+                                    });
+                                    if end > start {
+                                        return (
+                                            canvas::event::Status::Captured,
+                                            Some(Message::SetTimeSelection {
+                                                start_beats: start,
+                                                end_beats: end,
+                                            }),
+                                        );
+                                    }
+                                }
+                                return (canvas::event::Status::Captured, None);
+                            }
+                            ClipDragAction::RegionSelect { anchor_beat } => {
+                                let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+                                let current = beat.round();
+                                let start = anchor_beat.min(current);
+                                let end = anchor_beat.max(current);
+                                if end > start {
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(Message::SetTimeSelection {
+                                            start_beats: start,
+                                            end_beats: end,
+                                        }),
+                                    );
+                                }
+                                return (canvas::event::Status::Captured, None);
+                            }
                             ClipDragAction::MoveClip {
                                 clip_id,
                                 is_note_clip,
@@ -1104,9 +1448,24 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Release: end drag --
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if state.drag.is_some() {
+                if let Some(ref drag) = state.drag {
+                    let msg = match drag {
+                        ClipDragAction::PendingSeek { beat, .. } => {
+                            // Short click → seek + clear selection
+                            if self.total_beats > 0.0 {
+                                let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
+                                Some(Message::Seek(normalized))
+                            } else {
+                                None
+                            }
+                        }
+                        ClipDragAction::RegionSelect { .. } => {
+                            Some(Message::SetTimeSelectionActive(true))
+                        }
+                        _ => None,
+                    };
                     state.drag = None;
-                    return (canvas::event::Status::Captured, None);
+                    return (canvas::event::Status::Captured, msg);
                 }
             }
 

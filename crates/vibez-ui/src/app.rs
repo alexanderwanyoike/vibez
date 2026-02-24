@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, row, scrollable, text, text_input,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
+    stack, text, text_input, vertical_space,
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
@@ -20,8 +21,8 @@ use vibez_engine::events::EngineEvent;
 use crate::icons;
 use crate::message::Message;
 use crate::state::{
-    AppState, ArrangementSelection, DetailPanelTab, UiClip, UiEffect, UiNoteClip, UiTrack,
-    Workspace,
+    AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, UiClip, UiEffect,
+    UiNoteClip, UiTrack, Workspace,
 };
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
@@ -91,6 +92,29 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // Auto-dismiss context menu on any action except tick/engine/menu events
+        if self.state.context_menu.is_some() {
+            let keep_menu = matches!(
+                message,
+                Message::Tick
+                    | Message::EnginePosition(_)
+                    | Message::EngineMetering { .. }
+                    | Message::EngineStopped
+                    | Message::EngineTrackMeter { .. }
+                    | Message::ShowContextMenu { .. }
+                    | Message::DismissContextMenu
+                    | Message::DeleteClipsInRegion { .. }
+                    | Message::SetSelectionAsLoop
+                    | Message::DeleteSelectedClip
+                    | Message::DuplicateSelectedClip
+                    | Message::SplitAudioClip { .. }
+                    | Message::SplitNoteClip { .. }
+            );
+            if !keep_menu {
+                self.state.context_menu = None;
+            }
+        }
+
         match message {
             Message::Play => {
                 self.state.playing = true;
@@ -116,6 +140,8 @@ impl App {
                     self.state.position_samples = sample_pos;
                     self.send_command(EngineCommand::Seek(sample_pos));
                 }
+                // Simple click clears the time selection
+                self.state.time_selection_active = false;
             }
             Message::BpmChanged(val) => {
                 self.state.bpm_text = val;
@@ -126,6 +152,12 @@ impl App {
                     self.state.bpm = bpm;
                     self.state.bpm_text = format!("{bpm:.0}");
                     self.send_command(EngineCommand::SetBpm(bpm));
+                    // Re-send loop region since beat→sample mapping changed
+                    if self.state.loop_enabled {
+                        let start = self.state.beats_to_samples(self.state.loop_start_beats);
+                        let end = self.state.beats_to_samples(self.state.loop_end_beats);
+                        self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+                    }
                 } else {
                     let bpm = self.state.bpm;
                     self.state.bpm_text = format!("{bpm:.0}");
@@ -1383,6 +1415,134 @@ impl App {
                     }
                 }
             }
+
+            // -- Arrangement loop --
+            Message::ToggleArrangementLoop => {
+                self.state.loop_enabled = !self.state.loop_enabled;
+                self.send_command(EngineCommand::SetArrangementLoop(self.state.loop_enabled));
+                if self.state.loop_enabled {
+                    // Copy selection to loop region when enabling loop with active selection
+                    if self.state.time_selection_active
+                        && self.state.selection_end_beats > self.state.selection_start_beats
+                    {
+                        self.state.loop_start_beats = self.state.selection_start_beats;
+                        self.state.loop_end_beats = self.state.selection_end_beats;
+                    }
+                    let start = self.state.beats_to_samples(self.state.loop_start_beats);
+                    let end = self.state.beats_to_samples(self.state.loop_end_beats);
+                    self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+                }
+            }
+            Message::SetArrangementLoopRegion {
+                start_beats,
+                end_beats,
+            } => {
+                self.state.loop_start_beats = start_beats;
+                self.state.loop_end_beats = end_beats;
+                let start = self.state.beats_to_samples(start_beats);
+                let end = self.state.beats_to_samples(end_beats);
+                self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+            }
+
+            // -- Time selection + context menu --
+            Message::SetTimeSelection {
+                start_beats,
+                end_beats,
+            } => {
+                self.state.selection_start_beats = start_beats;
+                self.state.selection_end_beats = end_beats;
+                self.state.time_selection_active = true;
+            }
+            Message::SetSelectionAsLoop => {
+                self.state.context_menu = None;
+                self.state.loop_start_beats = self.state.selection_start_beats;
+                self.state.loop_end_beats = self.state.selection_end_beats;
+                let start = self.state.beats_to_samples(self.state.loop_start_beats);
+                let end = self.state.beats_to_samples(self.state.loop_end_beats);
+                self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+                if !self.state.loop_enabled {
+                    self.state.loop_enabled = true;
+                    self.send_command(EngineCommand::SetArrangementLoop(true));
+                }
+            }
+            Message::SetTimeSelectionActive(active) => {
+                self.state.time_selection_active = active;
+            }
+            Message::ShowContextMenu { x, y, target } => {
+                // Also select the clip if targeting one
+                if let ContextMenuTarget::Clip {
+                    track_id,
+                    clip_id,
+                    is_note_clip,
+                } = &target
+                {
+                    let selection = if *is_note_clip {
+                        ArrangementSelection::NoteClip {
+                            track_id: *track_id,
+                            clip_id: *clip_id,
+                        }
+                    } else {
+                        ArrangementSelection::AudioClip {
+                            track_id: *track_id,
+                            clip_id: *clip_id,
+                        }
+                    };
+                    self.state.selected_arrangement_clip = Some(selection);
+                    self.state.selected_track = Some(*track_id);
+                }
+                self.state.context_menu = Some(crate::state::ContextMenu { x, y, target });
+            }
+            Message::DismissContextMenu => {
+                self.state.context_menu = None;
+            }
+            Message::DeleteClipsInRegion {
+                start_beats,
+                end_beats,
+            } => {
+                self.state.context_menu = None;
+                let spb = if self.state.bpm > 0.0 {
+                    self.state.sample_rate as f64 * 60.0 / self.state.bpm
+                } else {
+                    0.0
+                };
+                // Collect clip IDs to remove
+                let mut audio_removals: Vec<(TrackId, ClipId)> = Vec::new();
+                let mut note_removals: Vec<(TrackId, ClipId)> = Vec::new();
+                for track in &self.state.tracks {
+                    if spb > 0.0 {
+                        for clip in &track.clips {
+                            let clip_start = clip.position as f64 / spb;
+                            let clip_end = (clip.position + clip.duration) as f64 / spb;
+                            if clip_start < end_beats && clip_end > start_beats {
+                                audio_removals.push((track.id, clip.id));
+                            }
+                        }
+                    }
+                    for nc in &track.note_clips {
+                        let clip_end = nc.position_beats + nc.duration_beats;
+                        if nc.position_beats < end_beats && clip_end > start_beats {
+                            note_removals.push((track.id, nc.id));
+                        }
+                    }
+                }
+                for (tid, cid) in &audio_removals {
+                    self.send_command(EngineCommand::RemoveClip(*tid, *cid));
+                    if let Some(track) = self.state.find_track_mut(*tid) {
+                        track.clips.retain(|c| c.id != *cid);
+                    }
+                }
+                for (tid, cid) in &note_removals {
+                    self.send_command(EngineCommand::RemoveNoteClip(*tid, *cid));
+                    if let Some(track) = self.state.find_track_mut(*tid) {
+                        track.note_clips.retain(|c| c.id != *cid);
+                    }
+                }
+                self.state.selected_arrangement_clip = None;
+                self.state.selected_note_clip = None;
+                self.state.time_selection_active = false;
+                let count = audio_removals.len() + note_removals.len();
+                self.state.status_text = format!("Deleted {count} clips in region");
+            }
         }
         Task::none()
     }
@@ -1435,10 +1595,154 @@ impl App {
 
         let layout = column![header, content, detail_panel, transport_bar, status_bar];
 
-        container(layout)
+        let base_layout: Element<'_, Message> = container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into();
+
+        if self.state.context_menu.is_some() {
+            stack![base_layout, self.view_context_menu_overlay()].into()
+        } else {
+            base_layout
+        }
+    }
+
+    fn view_context_menu_overlay(&self) -> Element<'_, Message> {
+        let menu = self.state.context_menu.as_ref().unwrap();
+        let x = menu.x;
+        let y = menu.y;
+
+        let menu_btn =
+            |icon_char: char, label_text: String, msg: Message| -> Element<'_, Message> {
+                button(
+                    row![
+                        icons::icon(icon_char).size(13).color(th::TEXT),
+                        text(label_text).size(13).color(th::TEXT)
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(msg)
+                .padding([6, 12])
+                .width(Length::Fill)
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => th::BG_HOVER,
+                        _ => th::BG_SURFACE,
+                    };
+                    button::Style {
+                        background: Some(bg.into()),
+                        text_color: th::TEXT,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                })
+                .into()
+            };
+
+        let menu_items: Element<'_, Message> = match &menu.target {
+            ContextMenuTarget::Clip {
+                track_id,
+                clip_id,
+                is_note_clip,
+            } => {
+                let track_id = *track_id;
+                let clip_id = *clip_id;
+                let is_note_clip = *is_note_clip;
+
+                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+
+                col = col.push(menu_btn(
+                    icons::TRASH_2,
+                    "Delete".into(),
+                    Message::DeleteSelectedClip,
+                ));
+                col = col.push(menu_btn(
+                    icons::COPY,
+                    "Duplicate".into(),
+                    Message::DuplicateSelectedClip,
+                ));
+
+                // Split at playhead
+                let playhead_beats = self.state.position_beats();
+                if is_note_clip {
+                    col = col.push(menu_btn(
+                        icons::SCISSORS,
+                        "Split at Playhead".into(),
+                        Message::SplitNoteClip {
+                            track_id,
+                            clip_id,
+                            split_beat: playhead_beats,
+                        },
+                    ));
+                } else {
+                    let split_sample = self.state.position_samples;
+                    col = col.push(menu_btn(
+                        icons::SCISSORS,
+                        "Split at Playhead".into(),
+                        Message::SplitAudioClip {
+                            track_id,
+                            clip_id,
+                            split_position: split_sample,
+                        },
+                    ));
+                }
+
+                col.into()
+            }
+            ContextMenuTarget::TimeSelection {
+                start_beats,
+                end_beats,
+            } => {
+                let start = *start_beats;
+                let end = *end_beats;
+                column![
+                    menu_btn(
+                        icons::TRASH_2,
+                        "Delete Clips in Region".into(),
+                        Message::DeleteClipsInRegion {
+                            start_beats: start,
+                            end_beats: end,
+                        },
+                    ),
+                    menu_btn(
+                        icons::REPEAT,
+                        "Set as Loop Region".into(),
+                        Message::SetSelectionAsLoop,
+                    ),
+                ]
+                .spacing(0)
+                .width(Length::Fixed(200.0))
+                .into()
+            }
+        };
+
+        let menu_container = container(menu_items)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding(4);
+
+        // Position menu at (x, y) using spacers in a column+row layout
+        let positioned = column![
+            vertical_space().height(Length::Fixed(y)),
+            row![horizontal_space().width(Length::Fixed(x)), menu_container,]
+        ];
+
+        // Full-screen click-eating backdrop
+        mouse_area(
+            container(positioned)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::DismissContextMenu)
+        .into()
     }
 
     fn view_header(&self) -> Element<'_, Message> {
@@ -1638,6 +1942,12 @@ impl App {
             zoom_level,
             scroll_offset_beats: scroll_offset,
             total_beats,
+            loop_enabled: self.state.loop_enabled,
+            loop_start_beats: self.state.loop_start_beats,
+            loop_end_beats: self.state.loop_end_beats,
+            time_selection_active: self.state.time_selection_active,
+            selection_start_beats: self.state.selection_start_beats,
+            selection_end_beats: self.state.selection_end_beats,
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -1712,6 +2022,12 @@ impl App {
                 track_ids.clone(),
                 track_kinds.clone(),
                 selected_clip,
+                self.state.loop_enabled,
+                self.state.loop_start_beats,
+                self.state.loop_end_beats,
+                self.state.time_selection_active,
+                self.state.selection_start_beats,
+                self.state.selection_end_beats,
             );
             let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
                 .width(Length::Fill)
@@ -2310,7 +2626,38 @@ impl App {
                 })
         };
 
-        let transport_buttons = row![skip_back_btn, play_pause_btn].spacing(4);
+        // Loop toggle button
+        let loop_btn = if self.state.loop_enabled {
+            button(icons::icon(icons::REPEAT).size(16).color(th::ACCENT))
+                .on_press(Message::ToggleArrangementLoop)
+                .padding([8, 12])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::ACCENT,
+                    border: iced::Border {
+                        color: th::ACCENT_DIM,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+        } else {
+            button(icons::icon(icons::REPEAT).size(16).color(th::TEXT_DIM))
+                .on_press(Message::ToggleArrangementLoop)
+                .padding([8, 12])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(th::BG_ELEVATED.into()),
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+        };
+
+        let transport_buttons = row![skip_back_btn, play_pause_btn, loop_btn].spacing(4);
 
         // Time display
         let time_text = text(format!(

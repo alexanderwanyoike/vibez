@@ -168,6 +168,28 @@ impl SnapGrid {
     }
 }
 
+/// Right-click context menu state.
+#[derive(Debug, Clone)]
+pub struct ContextMenu {
+    pub x: f32,
+    pub y: f32,
+    pub target: ContextMenuTarget,
+}
+
+/// What the context menu targets.
+#[derive(Debug, Clone)]
+pub enum ContextMenuTarget {
+    Clip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        is_note_clip: bool,
+    },
+    TimeSelection {
+        start_beats: f64,
+        end_beats: f64,
+    },
+}
+
 pub struct AppState {
     // Transport
     pub playing: bool,
@@ -207,6 +229,19 @@ pub struct AppState {
 
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
+
+    // Arrangement loop
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+
+    // Time selection (visible brackets on arrangement — independent from loop)
+    pub time_selection_active: bool,
+    pub selection_start_beats: f64,
+    pub selection_end_beats: f64,
+
+    // Context menu
+    pub context_menu: Option<ContextMenu>,
 }
 
 impl Default for AppState {
@@ -231,6 +266,13 @@ impl Default for AppState {
             selected_note_clip: None,
             selected_arrangement_clip: None,
             detail_panel_tab: DetailPanelTab::Clip,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 4.0,
+            time_selection_active: false,
+            selection_start_beats: 0.0,
+            selection_end_beats: 0.0,
+            context_menu: None,
         }
     }
 }
@@ -301,6 +343,15 @@ impl AppState {
         } else {
             // Minimum 16 beats to always show something useful
             16.0
+        }
+    }
+
+    /// Convert a beat value to a sample position.
+    pub fn beats_to_samples(&self, beats: f64) -> u64 {
+        if self.bpm > 0.0 {
+            (beats * self.sample_rate as f64 * 60.0 / self.bpm) as u64
+        } else {
+            0
         }
     }
 

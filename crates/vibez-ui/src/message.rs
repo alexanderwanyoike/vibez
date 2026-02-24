@@ -6,7 +6,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::MidiNote;
 
-use crate::state::{ArrangementSelection, DetailPanelTab, SnapGrid, Workspace};
+use crate::state::{ArrangementSelection, ContextMenuTarget, DetailPanelTab, SnapGrid, Workspace};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -157,4 +157,29 @@ pub enum Message {
 
     // Detail panel tabs
     SwitchDetailTab(DetailPanelTab),
+
+    // Arrangement loop
+    ToggleArrangementLoop,
+    SetArrangementLoopRegion {
+        start_beats: f64,
+        end_beats: f64,
+    },
+
+    // Time selection + context menu
+    SetTimeSelection {
+        start_beats: f64,
+        end_beats: f64,
+    },
+    SetSelectionAsLoop,
+    SetTimeSelectionActive(bool),
+    ShowContextMenu {
+        x: f32,
+        y: f32,
+        target: ContextMenuTarget,
+    },
+    DismissContextMenu,
+    DeleteClipsInRegion {
+        start_beats: f64,
+        end_beats: f64,
+    },
 }
