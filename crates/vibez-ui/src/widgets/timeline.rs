@@ -578,21 +578,24 @@ impl canvas::Program<Message> for RulerWidget {
                             Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
                         );
                     }
-                    // Shift+vertical scroll for horizontal panning
+                    // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
+                        if dy > 0.0 {
+                            return (canvas::event::Status::Captured, Some(Message::ZoomIn));
+                        } else {
+                            return (canvas::event::Status::Captured, Some(Message::ZoomOut));
+                        }
+                    }
+                    // Plain scroll for horizontal panning
+                    if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::ScrollArrangement(dy as f64 * 2.0)),
                         );
                     }
-                    if dy > 0.0 {
-                        return (canvas::event::Status::Captured, Some(Message::ZoomIn));
-                    } else if dy < 0.0 {
-                        return (canvas::event::Status::Captured, Some(Message::ZoomOut));
-                    }
                 }
             }
-            // Track shift key state for panning
+            // Track shift key state for zoom
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
             }
@@ -1631,7 +1634,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Scroll: zoom/pan (preserve existing) --
+            // -- Scroll: pan / Shift+scroll: zoom --
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
                     let (dx, dy) = match delta {
@@ -1645,18 +1648,20 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
                         );
                     }
-                    // Shift+vertical scroll for horizontal panning
+                    // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
+                        if dy > 0.0 {
+                            return (canvas::event::Status::Captured, Some(Message::ZoomIn));
+                        } else {
+                            return (canvas::event::Status::Captured, Some(Message::ZoomOut));
+                        }
+                    }
+                    // Plain scroll for horizontal panning
+                    if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::ScrollArrangement(dy as f64 * 2.0)),
                         );
-                    }
-                    // Vertical scroll for zoom
-                    if dy > 0.0 {
-                        return (canvas::event::Status::Captured, Some(Message::ZoomIn));
-                    } else if dy < 0.0 {
-                        return (canvas::event::Status::Captured, Some(Message::ZoomOut));
                     }
                 }
             }
