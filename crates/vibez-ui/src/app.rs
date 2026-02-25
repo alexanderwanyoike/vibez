@@ -2872,10 +2872,12 @@ impl App {
         });
 
         let piano_widget = if let Some(clip) = selected_clip {
+            // Convert global playhead to clip-relative beats
+            let clip_relative_playhead = playhead_beats - clip.position_beats;
             PianoRollWidget::from_clip(
                 track_id,
                 clip,
-                playhead_beats,
+                clip_relative_playhead,
                 clip.duration_beats,
                 track_color,
                 self.state.snap_grid,

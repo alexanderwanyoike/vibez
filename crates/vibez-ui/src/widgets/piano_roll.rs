@@ -882,15 +882,23 @@ impl canvas::Program<Message> for PianoRollWidget {
                             return (canvas::event::Status::Ignored, None);
                         }
 
-                        let snapped_beat = self.snap_grid.snap_beat(beat);
+                        let note_duration = self.snap_grid.beat_size();
+                        let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
+
+                        // Don't add notes at or beyond the clip end
+                        let max_start = self.total_beats - note_duration;
+                        if max_start < 0.0 || snapped_beat > max_start {
+                            return (canvas::event::Status::Captured, None);
+                        }
+
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::AddNote {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 pitch,
-                                start_beat: snapped_beat.max(0.0),
-                                duration_beats: self.snap_grid.beat_size(),
+                                start_beat: snapped_beat,
+                                duration_beats: note_duration,
                             }),
                         );
                     }
@@ -921,10 +929,13 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
+                                    let max_beat = (self.total_beats
+                                        - clip_data.notes[*note_index].duration_beats)
+                                        .max(0.0);
                                     let new_beat = self
                                         .snap_grid
                                         .snap_beat(original_start_beat + beat_delta)
-                                        .max(0.0);
+                                        .clamp(0.0, max_beat);
                                     let new_pitch = (*original_pitch as i16 + pitch_delta)
                                         .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
                                         as u8;

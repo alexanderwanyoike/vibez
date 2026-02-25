@@ -885,10 +885,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     clip_color,
                 );
 
-                // Mini waveform using track color
+                // Mini waveform using track color (drawn below title bar)
                 if !clip.peaks.is_empty() && clip_w > 4.0 {
-                    let center_y = clip_y + clip_h / 2.0;
-                    let half_h = clip_h / 2.0 - 2.0;
+                    let body_top = clip_y + CLIP_TITLE_HEIGHT;
+                    let body_h = clip_h - CLIP_TITLE_HEIGHT;
+                    let center_y = body_top + body_h / 2.0;
+                    let half_h = body_h / 2.0 - 2.0;
                     let pixels = clip_w as usize;
                     for px in 0..pixels {
                         let screen_x = clip_x + px as f32;
@@ -1016,8 +1018,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     note_clip_color,
                 );
 
-                // Draw note blocks inside the clip
+                // Draw note blocks inside the clip (below title bar)
                 if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                    let body_top = clip_y + CLIP_TITLE_HEIGHT;
+                    let body_h = clip_h - CLIP_TITLE_HEIGHT;
                     let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
                     let min_pitch = *pitches.iter().min().unwrap_or(&60);
                     let max_pitch = *pitches.iter().max().unwrap_or(&72);
@@ -1030,8 +1034,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         let note_w =
                             (duration_beats / note_clip.duration_beats * clip_w as f64) as f32;
                         let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;
-                        let note_y = clip_y + 2.0 + note_y_frac * (clip_h - 6.0);
-                        let note_h = ((clip_h - 6.0) / pitch_range).clamp(2.0, 6.0);
+                        let note_y = body_top + 2.0 + note_y_frac * (body_h - 4.0);
+                        let note_h = ((body_h - 4.0) / pitch_range).clamp(2.0, 6.0);
 
                         frame.fill_rectangle(
                             iced::Point::new(note_x, note_y),
@@ -1058,8 +1062,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             );
                         }
 
-                        // Draw ghost note blocks in this repeat
+                        // Draw ghost note blocks in this repeat (below title bar)
                         if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                            let gbody_top = clip_y + CLIP_TITLE_HEIGHT;
+                            let gbody_h = clip_h - CLIP_TITLE_HEIGHT;
                             let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
                             let gmin = *pitches.iter().min().unwrap_or(&60);
                             let gmax = *pitches.iter().max().unwrap_or(&72);
@@ -1081,8 +1087,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     * clip_w as f64)
                                     as f32;
                                 let gy_frac = (gmax.saturating_sub(pitch)) as f32 / gpitch_range;
-                                let gy = clip_y + 2.0 + gy_frac * (clip_h - 6.0);
-                                let gnh = ((clip_h - 6.0) / gpitch_range).clamp(2.0, 6.0);
+                                let gy = gbody_top + 2.0 + gy_frac * (gbody_h - 4.0);
+                                let gnh = ((gbody_h - 4.0) / gpitch_range).clamp(2.0, 6.0);
 
                                 if gx < clip_x + clip_w && gx + gnw > 0.0 {
                                     frame.fill_rectangle(
@@ -1599,17 +1605,47 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Ctrl+D for duplicate (canvas-local: needs selection check) --
+            // -- Keyboard shortcuts (Ctrl+D/E/J/T) --
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Character(ref c),
                 modifiers,
                 ..
             }) => {
-                if modifiers.control() && c.as_str() == "d" && !self.selected_clips.is_empty() {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::DuplicateSelectedClip),
-                    );
+                if modifiers.control() {
+                    match c.as_str() {
+                        "d" if !self.selected_clips.is_empty() => {
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::DuplicateSelectedClip),
+                            );
+                        }
+                        "e" => {
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::SplitSelectedAtPlayhead),
+                            );
+                        }
+                        "j" if !self.selected_clips.is_empty() => {
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::JoinSelectedClips),
+                            );
+                        }
+                        "t" | "T" => {
+                            if modifiers.shift() {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::AddInstrumentTrack),
+                                );
+                            } else {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::AddTrack),
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
 
