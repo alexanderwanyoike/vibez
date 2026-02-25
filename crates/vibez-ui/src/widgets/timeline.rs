@@ -8,7 +8,6 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
 use crate::theme;
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::midi::TrackKind;
 
 // ── Lightweight data types for rendering ──
 
@@ -767,7 +766,7 @@ impl TrackClipCanvas {
             bpm,
             selected,
             track_color,
-            is_instrument: matches!(track.kind, TrackKind::Instrument(_)),
+            is_instrument: track.kind.is_midi(),
             loop_enabled,
             loop_start_beats,
             loop_end_beats,

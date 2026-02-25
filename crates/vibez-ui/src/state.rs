@@ -66,6 +66,7 @@ pub struct UiTrack {
     pub note_clips: Vec<UiNoteClip>,
     pub kind: TrackKind,
     pub color_index: u8,
+    pub has_instrument: bool,
 }
 
 impl UiTrack {
@@ -84,10 +85,12 @@ impl UiTrack {
             note_clips: Vec::new(),
             kind: TrackKind::Audio,
             color_index,
+            has_instrument: false,
         }
     }
 
     pub fn new_instrument(id: TrackId, name: String, kind: TrackKind, color_index: u8) -> Self {
+        let has_instrument = matches!(kind, TrackKind::Instrument(_));
         Self {
             id,
             name,
@@ -102,6 +105,7 @@ impl UiTrack {
             note_clips: Vec::new(),
             kind,
             color_index,
+            has_instrument,
         }
     }
 }
@@ -193,6 +197,28 @@ pub enum ContextMenuTarget {
     ArrangementEmpty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PianoRollEditMode {
+    #[default]
+    Select,
+    Draw,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceMenuCategory {
+    Instruments,
+    Effects,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceContextMenu {
+    pub x: f32,
+    pub y: f32,
+    pub track_id: TrackId,
+    pub category: Option<DeviceMenuCategory>,
+    pub search: String,
+}
+
 pub struct AppState {
     // Transport
     pub playing: bool,
@@ -257,6 +283,12 @@ pub struct AppState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+
+    // Piano roll edit mode
+    pub piano_roll_edit_mode: PianoRollEditMode,
+
+    // Device context menu
+    pub device_context_menu: Option<DeviceContextMenu>,
 }
 
 
@@ -295,6 +327,8 @@ impl Default for AppState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            piano_roll_edit_mode: PianoRollEditMode::default(),
+            device_context_menu: None,
         }
     }
 }

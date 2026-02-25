@@ -444,6 +444,36 @@ impl AudioEngine {
                     self.tracks.push(track);
                     self.recalculate_audio_length();
                 }
+                EngineCommand::AddMidiTrack(id, _name) => {
+                    self.tracks.push(EngineTrack::new(id));
+                    self.recalculate_audio_length();
+                }
+                EngineCommand::SetTrackInstrument(track_id, _kind) => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if track.synth.is_none() {
+                            track.synth =
+                                Some(Box::new(SubtractiveSynth::new(self.sample_rate as f32)));
+                        }
+                    }
+                }
+                EngineCommand::RemoveTrackInstrument(track_id) => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.synth = None;
+                    }
+                }
+                EngineCommand::SetNoteClipDuration {
+                    track_id,
+                    clip_id,
+                    duration_beats,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) =
+                            track.note_clips.iter_mut().find(|c| c.id == clip_id)
+                        {
+                            clip.duration_beats = duration_beats;
+                        }
+                    }
+                }
                 EngineCommand::AddNoteClip {
                     track_id,
                     clip_id,

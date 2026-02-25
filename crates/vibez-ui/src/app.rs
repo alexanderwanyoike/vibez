@@ -330,9 +330,9 @@ impl App {
             Message::AddClipToTrack(track_id) => {
                 // Guard: only audio tracks can have audio clips
                 if let Some(track) = self.state.find_track(track_id) {
-                    if matches!(track.kind, TrackKind::Instrument(_)) {
+                    if track.kind.is_midi() {
                         self.state.status_text =
-                            "Instrument tracks use note clips, not audio".to_string();
+                            "MIDI tracks use note clips, not audio".to_string();
                         return Task::none();
                     }
                 }
@@ -486,6 +486,7 @@ impl App {
                     effect_type,
                     position: None,
                 });
+                self.state.device_context_menu = None;
                 self.state.status_text = format!("Added {} effect", effect_type.name());
             }
             Message::RemoveEffect(track_id, effect_id) => {
@@ -560,17 +561,13 @@ impl App {
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
                 self.state.next_track_number += 1;
                 let id = TrackId::new();
-                let name = format!("Synth {track_num}");
-                let kind = TrackKind::Instrument(InstrumentKind::SubtractiveSynth);
+                let name = format!("MIDI {track_num}");
+                let kind = TrackKind::Midi;
 
-                self.send_command(EngineCommand::AddInstrumentTrack(
-                    id,
-                    name.clone(),
-                    InstrumentKind::SubtractiveSynth,
-                ));
-                self.state
-                    .tracks
-                    .push(UiTrack::new_instrument(id, name, kind, color_index));
+                self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
+                let mut track = UiTrack::new_instrument(id, name, kind, color_index);
+                track.has_instrument = false;
+                self.state.tracks.push(track);
                 self.state.selected_track = Some(id);
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
@@ -690,9 +687,9 @@ impl App {
                         duration_beats,
                         notes: Vec::new(),
                         selected_note: None,
-                        loop_enabled: false,
+                        loop_enabled: true,
                         loop_start_beats: 0.0,
-                        loop_end_beats: 0.0,
+                        loop_end_beats: duration_beats,
                     });
                 }
                 self.send_command(EngineCommand::AddNoteClip {
@@ -700,9 +697,9 @@ impl App {
                     clip_id,
                     position_beats,
                     duration_beats,
-                    loop_enabled: false,
+                    loop_enabled: true,
                     loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
+                    loop_end_beats: duration_beats,
                 });
                 // Auto-select the new note clip for piano roll editing
                 self.state.selected_note_clip = Some((track_id, clip_id));
@@ -1906,11 +1903,11 @@ impl App {
             Message::CreateClipFromSelection => {
                 if let Some(tid) = self.state.selected_track {
                     if let Some(track) = self.state.find_track(tid) {
-                        if matches!(track.kind, TrackKind::Instrument(_)) {
+                        if track.kind.is_midi() {
                             return self.update(Message::CreateNoteClipFromSelection(tid));
                         } else {
                             self.state.status_text =
-                                "Select a time region on an instrument track".to_string();
+                                "Select a time region on a MIDI track".to_string();
                         }
                     }
                 } else {
@@ -1926,9 +1923,9 @@ impl App {
                     return Task::none();
                 }
                 if let Some(track) = self.state.find_track(track_id) {
-                    if !matches!(track.kind, TrackKind::Instrument(_)) {
+                    if !track.kind.is_midi() {
                         self.state.status_text =
-                            "Can only create note clips on instrument tracks".to_string();
+                            "Can only create note clips on MIDI tracks".to_string();
                         return Task::none();
                     }
                 }
@@ -2047,6 +2044,7 @@ impl App {
                 self.state.editing_track_name = None;
                 self.state.editing_clip_name = None;
                 self.state.edit_name_text.clear();
+                self.state.device_context_menu = None;
             }
             Message::RenameTrack(track_id, new_name) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -2061,6 +2059,103 @@ impl App {
                     if let Some(c) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         c.name = new_name;
                     }
+                }
+            }
+
+            // -- MIDI track (no auto-synth) --
+            Message::AddMidiTrack => {
+                let track_num = self.state.next_track_number;
+                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
+                self.state.next_track_number += 1;
+                let id = TrackId::new();
+                let name = format!("MIDI {track_num}");
+                let kind = TrackKind::Midi;
+
+                self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
+                let mut track = UiTrack::new_instrument(id, name, kind, color_index);
+                track.has_instrument = false;
+                self.state.tracks.push(track);
+                self.state.selected_track = Some(id);
+                self.state.status_text = format!("{} tracks", self.state.tracks.len());
+            }
+
+            // -- Instrument attach/detach --
+            Message::SetTrackInstrument(track_id, instrument_kind) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    track.has_instrument = true;
+                }
+                self.send_command(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
+                self.state.device_context_menu = None;
+                self.state.status_text = format!("Added {}", instrument_kind.name());
+            }
+            Message::RemoveTrackInstrument(track_id) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    track.has_instrument = false;
+                }
+                self.send_command(EngineCommand::RemoveTrackInstrument(track_id));
+                self.state.status_text = "Removed instrument".to_string();
+            }
+
+            // -- Pattern halve --
+            Message::HalveNoteClip(track_id, clip_id) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        let new_dur = (clip.duration_beats / 2.0).max(0.25);
+                        clip.duration_beats = new_dur;
+                        self.send_command(EngineCommand::SetNoteClipDuration {
+                            track_id,
+                            clip_id,
+                            duration_beats: new_dur,
+                        });
+                    }
+                }
+                self.state.status_text = "Halved clip duration".to_string();
+            }
+
+            // -- Edit mode --
+            Message::TogglePianoRollEditMode => {
+                use crate::state::PianoRollEditMode;
+                self.state.piano_roll_edit_mode = match self.state.piano_roll_edit_mode {
+                    PianoRollEditMode::Select => PianoRollEditMode::Draw,
+                    PianoRollEditMode::Draw => PianoRollEditMode::Select,
+                };
+                let mode_name = match self.state.piano_roll_edit_mode {
+                    PianoRollEditMode::Select => "Select",
+                    PianoRollEditMode::Draw => "Draw",
+                };
+                self.state.status_text = format!("Piano roll: {mode_name} mode");
+            }
+
+            // -- Device context menu --
+            Message::ShowDeviceContextMenu { x, y, track_id } => {
+                use crate::state::{DeviceContextMenu, DeviceMenuCategory};
+                let is_midi = self
+                    .state
+                    .find_track(track_id)
+                    .is_some_and(|t| t.kind.is_midi());
+                self.state.device_context_menu = Some(DeviceContextMenu {
+                    x,
+                    y,
+                    track_id,
+                    category: Some(if is_midi {
+                        DeviceMenuCategory::Instruments
+                    } else {
+                        DeviceMenuCategory::Effects
+                    }),
+                    search: String::new(),
+                });
+            }
+            Message::DismissDeviceContextMenu => {
+                self.state.device_context_menu = None;
+            }
+            Message::SetDeviceMenuCategory(category) => {
+                if let Some(ref mut menu) = self.state.device_context_menu {
+                    menu.category = Some(category);
+                }
+            }
+            Message::DeviceMenuSearch(query) => {
+                if let Some(ref mut menu) = self.state.device_context_menu {
+                    menu.search = query;
                 }
             }
         }
@@ -2338,6 +2433,8 @@ impl App {
             stack![base_layout, self.view_context_menu_overlay()].into()
         } else if self.state.editing_clip_name.is_some() {
             stack![base_layout, self.view_rename_overlay()].into()
+        } else if self.state.device_context_menu.is_some() {
+            stack![base_layout, self.view_device_context_menu_overlay()].into()
         } else {
             base_layout
         }
@@ -2478,7 +2575,7 @@ impl App {
                 let effective_track = track_id.or(self.state.selected_track);
                 if let Some(tid) = effective_track {
                     if let Some(track) = self.state.find_track(tid) {
-                        if matches!(track.kind, TrackKind::Instrument(_)) {
+                        if track.kind.is_midi() {
                             col = col.push(menu_btn(
                                 icons::MUSIC,
                                 "Create Note Clip".into(),
@@ -2771,7 +2868,7 @@ impl App {
             .state
             .tracks
             .iter()
-            .map(|t| matches!(t.kind, TrackKind::Instrument(_)))
+            .map(|t| t.kind.is_midi())
             .collect();
         let total_track_count = self.state.tracks.len();
 
@@ -3019,9 +3116,9 @@ impl App {
             // Tab content
             let tab_content: Element<'_, Message> = match self.state.detail_panel_tab {
                 DetailPanelTab::Clip => {
-                    let is_instrument = matches!(track.kind, TrackKind::Instrument(_));
-                    // Check for note clip selection on this instrument track
-                    let has_note_clip = is_instrument
+                    let is_midi = track.kind.is_midi();
+                    // Check for note clip selection on this MIDI track
+                    let has_note_clip = is_midi
                         && (self.state.selected_clips.iter().any(|s| {
                             matches!(s, ArrangementSelection::NoteClip { track_id: tid, .. } if *tid == track_id)
                         }) || self
@@ -3097,49 +3194,30 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let is_instrument = matches!(track.kind, TrackKind::Instrument(_));
-
-        // Header: track name + "+ Effect" button
+        // Header: track name + right-click hint
         let track_label = text(format!("{} — Devices", track.name))
             .size(13)
             .color(th::TEXT);
 
-        // "+ Effect" dropdown as buttons
-        let mut add_effects_row = row![].spacing(4);
-        for &et in EffectType::all() {
-            let btn = button(text(et.name()).size(10).color(th::TEXT_DIM))
-                .on_press(Message::AddEffect(track_id, et))
-                .padding([3, 8])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
-                    border: iced::Border {
-                        color: th::BORDER,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                });
-            add_effects_row = add_effects_row.push(btn);
-        }
+        let hint_label = text("Right-click to add")
+            .size(10)
+            .color(th::TEXT_MUTED);
 
-        let add_effect_label = text("+ Effect").size(11).color(th::ACCENT);
-        let header = row![
-            track_label,
-            horizontal_space(),
-            add_effect_label,
-            add_effects_row
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
+        let header = row![track_label, horizontal_space(), hint_label]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
 
         // Device cards
         let mut devices_row = row![].spacing(6);
 
-        // Synth device card for instrument tracks
-        if is_instrument {
+        // Synth device card (only if track has an instrument attached)
+        if track.has_instrument {
             let synth_card = self.view_synth_device(track_id, track_color);
             devices_row = devices_row.push(synth_card);
+        } else if track.kind.is_midi() {
+            // Show "No Instrument" placeholder card for MIDI tracks with no synth
+            let placeholder = self.view_add_instrument_placeholder();
+            devices_row = devices_row.push(placeholder);
         }
 
         // Effect cards
@@ -3152,10 +3230,18 @@ impl App {
             scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
         );
 
-        column![header, scrollable_devices]
+        let content = column![header, scrollable_devices]
             .spacing(6)
             .padding(8)
-            .width(Length::Fill)
+            .width(Length::Fill);
+
+        // Wrap in mouse_area for right-click context menu
+        mouse_area(content)
+            .on_right_press(Message::ShowDeviceContextMenu {
+                x: self.state.cursor_x,
+                y: self.state.cursor_y,
+                track_id,
+            })
             .into()
     }
 
@@ -3193,31 +3279,246 @@ impl App {
             .into()
     }
 
-    /// Piano roll panel for the detail panel split view.
-    fn view_piano_roll_panel(&self, track_id: TrackId, track_color: Color) -> Element<'_, Message> {
-        let playhead_beats = self.state.position_beats();
+    /// Placeholder card for MIDI tracks with no instrument attached.
+    fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
+        let label = text("No Instrument").size(11).color(th::TEXT_DIM);
+        let hint = text("Right-click to add").size(9).color(th::TEXT_MUTED);
 
-        let track = self.state.find_track(track_id);
-        let selected_clip = self.state.selected_note_clip.and_then(|(tid, cid)| {
-            if tid == track_id {
-                track.and_then(|t| t.note_clips.iter().find(|c| c.id == cid))
+        let card = column![label, hint]
+            .spacing(6)
+            .padding(12)
+            .width(Length::Fixed(120.0))
+            .align_x(iced::Alignment::Center);
+
+        container(card)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Device context menu overlay (instruments + effects browser).
+    fn view_device_context_menu_overlay(&self) -> Element<'_, Message> {
+        use crate::state::DeviceMenuCategory;
+
+        let menu = self.state.device_context_menu.as_ref().unwrap();
+        let track_id = menu.track_id;
+        let is_midi = self
+            .state
+            .find_track(track_id)
+            .is_some_and(|t| t.kind.is_midi());
+
+        // Category tabs
+        let mut tabs_row = row![].spacing(2);
+        if is_midi {
+            let inst_active = menu.category == Some(DeviceMenuCategory::Instruments);
+            let (bg, tc) = if inst_active {
+                (th::ACCENT_DIM, th::ACCENT)
             } else {
-                None
+                (th::BG_ELEVATED, th::TEXT_DIM)
+            };
+            let inst_tab = button(text("Instruments").size(11).color(tc))
+                .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Instruments))
+                .padding([4, 10])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(bg.into()),
+                    text_color: tc,
+                    border: iced::Border {
+                        color: if inst_active {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
+                        },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                });
+            tabs_row = tabs_row.push(inst_tab);
+        }
+        let fx_active = menu.category == Some(DeviceMenuCategory::Effects);
+        let (bg, tc) = if fx_active {
+            (th::ACCENT_DIM, th::ACCENT)
+        } else {
+            (th::BG_ELEVATED, th::TEXT_DIM)
+        };
+        let fx_tab = button(text("Effects").size(11).color(tc))
+            .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Effects))
+            .padding([4, 10])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(bg.into()),
+                text_color: tc,
+                border: iced::Border {
+                    color: if fx_active {
+                        th::ACCENT_DIM
+                    } else {
+                        th::BORDER
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
+        tabs_row = tabs_row.push(fx_tab);
+
+        // Search input
+        let search_input = text_input("Search...", &menu.search)
+            .on_input(Message::DeviceMenuSearch)
+            .size(12)
+            .width(Length::Fill);
+
+        // Items list
+        let mut items_col = column![].spacing(2);
+        let search_lower = menu.search.to_lowercase();
+
+        match menu.category {
+            Some(DeviceMenuCategory::Instruments) => {
+                for &kind in InstrumentKind::all() {
+                    let name = kind.name();
+                    if !search_lower.is_empty() && !name.to_lowercase().contains(&search_lower) {
+                        continue;
+                    }
+                    let btn = button(text(name).size(12).color(th::TEXT))
+                        .on_press(Message::SetTrackInstrument(track_id, kind))
+                        .padding([6, 10])
+                        .width(Length::Fill)
+                        .style(|_theme: &Theme, status| {
+                            let bg = match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Some(th::BG_HOVER.into())
+                                }
+                                _ => None,
+                            };
+                            button::Style {
+                                background: bg,
+                                text_color: th::TEXT,
+                                border: iced::Border::default(),
+                                ..Default::default()
+                            }
+                        });
+                    items_col = items_col.push(btn);
+                }
             }
+            Some(DeviceMenuCategory::Effects) | None => {
+                for &et in EffectType::all() {
+                    let name = et.name();
+                    if !search_lower.is_empty() && !name.to_lowercase().contains(&search_lower) {
+                        continue;
+                    }
+                    let btn = button(text(name).size(12).color(th::TEXT))
+                        .on_press(Message::AddEffect(track_id, et))
+                        .padding([6, 10])
+                        .width(Length::Fill)
+                        .style(|_theme: &Theme, status| {
+                            let bg = match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Some(th::BG_HOVER.into())
+                                }
+                                _ => None,
+                            };
+                            button::Style {
+                                background: bg,
+                                text_color: th::TEXT,
+                                border: iced::Border::default(),
+                                ..Default::default()
+                            }
+                        });
+                    items_col = items_col.push(btn);
+                }
+            }
+        }
+
+        let menu_content = column![tabs_row, search_input, items_col]
+            .spacing(6)
+            .padding(8)
+            .width(Length::Fixed(220.0));
+
+        let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
         });
 
-        let piano_widget = if let Some(clip) = selected_clip {
-            // Convert global playhead to clip-relative beats
-            let clip_relative_playhead = playhead_beats - clip.position_beats;
-            PianoRollWidget::from_clip(
-                track_id,
-                clip,
-                clip_relative_playhead,
-                clip.duration_beats,
-                track_color,
-                self.state.snap_grid,
-                self.state.piano_roll_scroll_y,
-            )
+        // Position the menu near where it was triggered
+        let padded = column![
+            vertical_space().height(Length::Fixed(menu.y.max(0.0))),
+            row![
+                horizontal_space().width(Length::Fixed(menu.x.max(0.0))),
+                menu_card,
+            ]
+        ];
+
+        mouse_area(
+            container(padded)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::DismissDeviceContextMenu)
+        .into()
+    }
+
+    /// Piano roll panel for the detail panel split view.
+    fn view_piano_roll_panel(&self, track_id: TrackId, track_color: Color) -> Element<'_, Message> {
+        use crate::state::PianoRollEditMode;
+
+        let playhead_beats = self.state.position_beats();
+
+        // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
+        let clip_data: Option<(String, f64, f64, bool, TrackId, ClipId)> =
+            if let Some((tid, cid)) = self.state.selected_note_clip {
+                if tid == track_id {
+                    self.state
+                        .tracks
+                        .iter()
+                        .find(|t| t.id == track_id)
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == cid))
+                        .map(|c| {
+                            (
+                                c.name.clone(),
+                                c.position_beats,
+                                c.duration_beats,
+                                c.loop_enabled,
+                                tid,
+                                cid,
+                            )
+                        })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+        let piano_widget = if let Some(ref cd) = clip_data {
+            if let Some(track) = self.state.find_track(track_id) {
+                if let Some(clip) = track.note_clips.iter().find(|c| c.id == cd.5) {
+                    let clip_relative_playhead = playhead_beats - clip.position_beats;
+                    PianoRollWidget::from_clip(
+                        track_id,
+                        clip,
+                        clip_relative_playhead,
+                        clip.duration_beats,
+                        track_color,
+                        self.state.snap_grid,
+                        self.state.piano_roll_scroll_y,
+                        self.state.piano_roll_edit_mode,
+                    )
+                } else {
+                    PianoRollWidget::empty(track_id, playhead_beats, track_color)
+                }
+            } else {
+                PianoRollWidget::empty(track_id, playhead_beats, track_color)
+            }
         } else {
             PianoRollWidget::empty(track_id, playhead_beats, track_color)
         };
@@ -3227,71 +3528,166 @@ impl App {
             .height(Length::Fill)
             .into();
 
+        // ── Clip properties bar (shown when a clip is selected) ──
+        let mut content_col = column![].spacing(2).padding(4);
+
+        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, tid, cid)) = clip_data {
+            let clip_name = text(clip_name_str.clone()).size(11).color(th::TEXT);
+            let pos_label = text(format!("Pos: {clip_pos:.1}"))
+                .size(10)
+                .color(th::TEXT_DIM);
+            let dur_label = text(format!("Dur: {clip_dur:.1}"))
+                .size(10)
+                .color(th::TEXT_DIM);
+
+            // Loop toggle
+            let loop_icon_color = if clip_loop {
+                th::ACCENT
+            } else {
+                th::TEXT_DIM
+            };
+            let loop_btn = button(icons::icon(icons::REPEAT).size(10).color(loop_icon_color))
+                .on_press(Message::ToggleNoteClipLoop(tid, cid))
+                .padding([2, 4])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: if clip_loop {
+                        Some(th::ACCENT_DIM.into())
+                    } else {
+                        Some(th::BG_ELEVATED.into())
+                    },
+                    text_color: loop_icon_color,
+                    border: iced::Border {
+                        color: if clip_loop {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+
+            // Clip operation buttons
+            let op_btn_style = |_theme: &Theme, _status| button::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                text_color: th::TEXT_DIM,
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            };
+
+            let dup_btn = button(
+                row![
+                    icons::icon(icons::COPY).size(10).color(th::TEXT_DIM),
+                    text("Dup").size(10).color(th::TEXT_DIM)
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::DuplicateNoteClip(tid, cid))
+            .padding([2, 6])
+            .style(op_btn_style);
+
+            let double_btn = button(text("2x").size(10).color(th::TEXT_DIM))
+                .on_press(Message::DoubleNoteClip(tid, cid))
+                .padding([2, 6])
+                .style(op_btn_style);
+
+            let halve_btn = button(text("\u{00BD}x").size(10).color(th::TEXT_DIM))
+                .on_press(Message::HalveNoteClip(tid, cid))
+                .padding([2, 6])
+                .style(op_btn_style);
+
+            let crop_btn = button(
+                row![
+                    icons::icon(icons::SCISSORS).size(10).color(th::TEXT_DIM),
+                    text("Crop").size(10).color(th::TEXT_DIM)
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::CropNoteClip(tid, cid))
+            .padding([2, 6])
+            .style(op_btn_style);
+
+            let props_row = row![
+                clip_name,
+                pos_label,
+                dur_label,
+                loop_btn,
+                dup_btn,
+                double_btn,
+                halve_btn,
+                crop_btn,
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+
+            content_col = content_col.push(props_row);
+        }
+
+        // ── Header row: label, edit mode toggle, snap grid ──
         let label = text("Piano Roll").size(11).color(th::TEXT_DIM);
 
-        // Clip operation buttons
-        let mut clip_ops = row![].spacing(2);
-        if let Some((tid, cid)) = self.state.selected_note_clip {
-            if tid == track_id {
-                let dup_btn = button(
-                    row![
-                        icons::icon(icons::COPY).size(10).color(th::TEXT_DIM),
-                        text("Dup").size(10).color(th::TEXT_DIM)
-                    ]
-                    .spacing(2)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::DuplicateNoteClip(tid, cid))
-                .padding([2, 6])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
-                    border: iced::Border {
-                        color: th::BORDER,
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                });
+        // Edit mode toggle: Select / Draw
+        let select_active = self.state.piano_roll_edit_mode == PianoRollEditMode::Select;
+        let draw_active = self.state.piano_roll_edit_mode == PianoRollEditMode::Draw;
 
-                let double_btn = button(text("2x").size(10).color(th::TEXT_DIM))
-                    .on_press(Message::DoubleNoteClip(tid, cid))
-                    .padding([2, 6])
-                    .style(|_theme: &Theme, _status| button::Style {
-                        background: Some(th::BG_ELEVATED.into()),
-                        text_color: th::TEXT_DIM,
-                        border: iced::Border {
-                            color: th::BORDER,
-                            width: 1.0,
-                            radius: 3.0.into(),
+        let select_btn = {
+            let (bg, tc) = if select_active {
+                (th::ACCENT_DIM, th::ACCENT)
+            } else {
+                (th::BG_ELEVATED, th::TEXT_DIM)
+            };
+            button(icons::icon(icons::MOUSE_POINTER).size(10).color(tc))
+                .on_press(Message::TogglePianoRollEditMode)
+                .padding([2, 5])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(bg.into()),
+                    text_color: tc,
+                    border: iced::Border {
+                        color: if select_active {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
                         },
-                        ..Default::default()
-                    });
-
-                let crop_btn = button(
-                    row![
-                        icons::icon(icons::SCISSORS).size(10).color(th::TEXT_DIM),
-                        text("Crop").size(10).color(th::TEXT_DIM)
-                    ]
-                    .spacing(2)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::CropNoteClip(tid, cid))
-                .padding([2, 6])
-                .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
-                    border: iced::Border {
-                        color: th::BORDER,
                         width: 1.0,
                         radius: 3.0.into(),
                     },
                     ..Default::default()
-                });
+                })
+        };
 
-                clip_ops = clip_ops.push(dup_btn).push(double_btn).push(crop_btn);
-            }
-        }
+        let draw_btn = {
+            let (bg, tc) = if draw_active {
+                (th::ACCENT_DIM, th::ACCENT)
+            } else {
+                (th::BG_ELEVATED, th::TEXT_DIM)
+            };
+            button(icons::icon(icons::PENCIL).size(10).color(tc))
+                .on_press(Message::TogglePianoRollEditMode)
+                .padding([2, 5])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(bg.into()),
+                    text_color: tc,
+                    border: iced::Border {
+                        color: if draw_active {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                })
+        };
+
+        let mode_row = row![select_btn, draw_btn].spacing(1);
 
         // Snap grid selector
         use crate::state::SnapGrid;
@@ -3323,13 +3719,14 @@ impl App {
             snap_row = snap_row.push(btn);
         }
         let snap_label = text("Snap:").size(10).color(th::TEXT_DIM);
-        let header_row = row![label, clip_ops, horizontal_space(), snap_label, snap_row]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let header_row =
+            row![label, mode_row, horizontal_space(), snap_label, snap_row]
+                .spacing(4)
+                .align_y(iced::Alignment::Center);
 
-        let content = column![header_row, piano_canvas].spacing(4).padding(4);
+        content_col = content_col.push(header_row).push(piano_canvas);
 
-        container(content)
+        container(content_col)
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
@@ -3591,6 +3988,14 @@ fn global_key_handler(
     // Escape: cancel editing
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
         return Some(Message::CancelEditing);
+    }
+
+    // B: toggle piano roll draw mode (no modifiers)
+    if !modifiers.control()
+        && !modifiers.shift()
+        && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
+    {
+        return Some(Message::TogglePianoRollEditMode);
     }
 
     if !modifiers.control() {

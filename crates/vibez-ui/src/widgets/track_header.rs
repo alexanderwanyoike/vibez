@@ -29,7 +29,9 @@ pub fn view_track_header<'a>(
         TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
             .size(12)
             .color(track_color),
-        TrackKind::Instrument(_) => icons::icon(icons::MUSIC).size(12).color(track_color),
+        TrackKind::Instrument(_) | TrackKind::Midi => {
+            icons::icon(icons::MUSIC).size(12).color(track_color)
+        }
     };
 
     // Name: if editing, show text_input; if selected, click starts rename; else click selects
@@ -63,9 +65,11 @@ pub fn view_track_header<'a>(
         TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
             .on_press(Message::AddClipToTrack(track.id))
             .padding([2, 6]),
-        TrackKind::Instrument(_) => button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
-            .on_press(Message::AddNoteClipToTrack(track.id))
-            .padding([2, 6]),
+        TrackKind::Instrument(_) | TrackKind::Midi => {
+            button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
+                .on_press(Message::AddNoteClipToTrack(track.id))
+                .padding([2, 6])
+        }
     };
 
     let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::TEXT_DIM))

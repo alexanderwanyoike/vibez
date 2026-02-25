@@ -47,6 +47,10 @@ impl InstrumentKind {
             InstrumentKind::SubtractiveSynth => "Subtractive Synth",
         }
     }
+
+    pub fn all() -> &'static [InstrumentKind] {
+        &[InstrumentKind::SubtractiveSynth]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -54,6 +58,14 @@ pub enum TrackKind {
     #[default]
     Audio,
     Instrument(InstrumentKind),
+    Midi,
+}
+
+impl TrackKind {
+    /// Returns true for both legacy Instrument and new Midi tracks.
+    pub fn is_midi(&self) -> bool {
+        matches!(self, TrackKind::Instrument(_) | TrackKind::Midi)
+    }
 }
 
 #[cfg(test)]
@@ -142,5 +154,27 @@ mod tests {
         let json = serde_json::to_string(&kind).unwrap();
         let loaded: TrackKind = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded, kind);
+    }
+
+    #[test]
+    fn track_kind_midi_serde_roundtrip() {
+        let kind = TrackKind::Midi;
+        let json = serde_json::to_string(&kind).unwrap();
+        let loaded: TrackKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, kind);
+    }
+
+    #[test]
+    fn track_kind_is_midi() {
+        assert!(!TrackKind::Audio.is_midi());
+        assert!(TrackKind::Instrument(InstrumentKind::SubtractiveSynth).is_midi());
+        assert!(TrackKind::Midi.is_midi());
+    }
+
+    #[test]
+    fn instrument_kind_all() {
+        let all = InstrumentKind::all();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0], InstrumentKind::SubtractiveSynth);
     }
 }

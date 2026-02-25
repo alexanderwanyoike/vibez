@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
-use crate::midi::TrackKind;
+use crate::midi::{InstrumentKind, TrackKind};
 
 /// Serializable track metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +21,8 @@ pub struct TrackInfo {
     pub kind: TrackKind,
     #[serde(default)]
     pub color_index: u8,
+    #[serde(default)]
+    pub instrument: Option<InstrumentKind>,
 }
 
 impl TrackInfo {
@@ -35,6 +37,7 @@ impl TrackInfo {
             effects: Vec::new(),
             kind: TrackKind::default(),
             color_index: 0,
+            instrument: None,
         }
     }
 }

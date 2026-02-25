@@ -3,7 +3,7 @@ use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
-use crate::state::{SnapGrid, UiNoteClip};
+use crate::state::{PianoRollEditMode, SnapGrid, UiNoteClip};
 use crate::theme;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
@@ -40,6 +40,7 @@ pub struct PianoRollWidget {
     pub track_color: Color,
     pub snap_grid: SnapGrid,
     pub scroll_y: f32,
+    pub edit_mode: PianoRollEditMode,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -54,6 +55,7 @@ pub struct PianoRollClipData {
 }
 
 impl PianoRollWidget {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_clip(
         track_id: TrackId,
         clip: &UiNoteClip,
@@ -62,6 +64,7 @@ impl PianoRollWidget {
         track_color: Color,
         snap_grid: SnapGrid,
         scroll_y: f32,
+        edit_mode: PianoRollEditMode,
     ) -> Self {
         Self {
             track_id,
@@ -78,6 +81,7 @@ impl PianoRollWidget {
             track_color,
             snap_grid,
             scroll_y,
+            edit_mode,
         }
     }
 
@@ -90,6 +94,7 @@ impl PianoRollWidget {
             track_color,
             snap_grid: SnapGrid::Eighth,
             scroll_y: default_scroll_y(200.0),
+            edit_mode: PianoRollEditMode::default(),
         }
     }
 
@@ -170,6 +175,7 @@ fn pitch_name(pitch: u8) -> String {
 
 /// Drag action in progress.
 #[derive(Debug, Clone)]
+#[allow(clippy::enum_variant_names)]
 enum DragAction {
     MoveNote {
         note_index: usize,
@@ -181,6 +187,12 @@ enum DragAction {
     ResizeNote {
         note_index: usize,
         original_duration: f64,
+        start_x: f32,
+    },
+    DrawNote {
+        clip_id: ClipId,
+        pitch: u8,
+        start_beat: f64,
         start_x: f32,
     },
 }
@@ -576,6 +588,21 @@ impl canvas::Program<Message> for PianoRollWidget {
                     color,
                 );
 
+                // Velocity indicator line (white, width proportional to velocity)
+                let vel_fraction = note.velocity as f32 / 127.0;
+                let vel_line_width = note_w * vel_fraction;
+                let vel_y = y + 0.5 + note_h - 2.0;
+                let vel_line = canvas::Path::line(
+                    iced::Point::new(x, vel_y),
+                    iced::Point::new(x + vel_line_width, vel_y),
+                );
+                frame.stroke(
+                    &vel_line,
+                    canvas::Stroke::default()
+                        .with_color(Color::WHITE)
+                        .with_width(1.5),
+                );
+
                 // Resize handle: highlight on right edge
                 let handle_color = if is_selected {
                     Color::WHITE
@@ -789,11 +816,18 @@ impl canvas::Program<Message> for PianoRollWidget {
         if let Some(ref drag) = state.drag {
             return match drag {
                 DragAction::MoveNote { .. } => mouse::Interaction::Grabbing,
-                DragAction::ResizeNote { .. } => mouse::Interaction::ResizingHorizontally,
+                DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
+                    mouse::Interaction::ResizingHorizontally
+                }
             };
         }
 
-        // Hover over note edge
+        // Draw mode: always crosshair
+        if self.edit_mode == PianoRollEditMode::Draw {
+            return mouse::Interaction::Crosshair;
+        }
+
+        // Select mode: hover over note edge
         if let Some(pos) = cursor.position_in(bounds) {
             if pos.x >= KEY_WIDTH && pos.y > RULER_HEIGHT {
                 if let Some((_idx, near_right)) = self.hit_test_note(pos, &bounds) {
@@ -846,6 +880,56 @@ impl canvas::Program<Message> for PianoRollWidget {
                     state.last_cursor = Some(pos);
 
                     if let Some(ref clip_data) = self.clip {
+                        if self.edit_mode == PianoRollEditMode::Draw {
+                            // ── Draw mode ──
+                            // Click existing note → delete it
+                            if let Some((idx, _)) = self.hit_test_note(pos, &bounds) {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::RemoveNote(
+                                        self.track_id,
+                                        clip_data.clip_id,
+                                        idx,
+                                    )),
+                                );
+                            }
+
+                            // Click empty space → add note + start draw drag
+                            let beat = self.x_to_beat(pos.x, &bounds);
+                            let pitch = self.y_to_pitch(pos.y);
+
+                            if !(LOW_NOTE..HIGH_NOTE).contains(&pitch) {
+                                return (canvas::event::Status::Ignored, None);
+                            }
+
+                            let note_duration = self.snap_grid.beat_size();
+                            let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
+
+                            let max_start = self.total_beats - note_duration;
+                            if max_start < 0.0 || snapped_beat > max_start {
+                                return (canvas::event::Status::Captured, None);
+                            }
+
+                            state.drag = Some(DragAction::DrawNote {
+                                clip_id: clip_data.clip_id,
+                                pitch,
+                                start_beat: snapped_beat,
+                                start_x: pos.x,
+                            });
+
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::AddNote {
+                                    track_id: self.track_id,
+                                    clip_id: clip_data.clip_id,
+                                    pitch,
+                                    start_beat: snapped_beat,
+                                    duration_beats: note_duration,
+                                }),
+                            );
+                        }
+
+                        // ── Select mode (default) ──
                         // Hit test existing notes
                         if let Some((idx, near_right)) = self.hit_test_note(pos, &bounds) {
                             let note = &clip_data.notes[idx];
@@ -977,6 +1061,38 @@ impl canvas::Program<Message> for PianoRollWidget {
                                             Some(Message::EditNote(
                                                 self.track_id,
                                                 clip_data.clip_id,
+                                                idx,
+                                                note,
+                                            )),
+                                        );
+                                    }
+                                }
+                                DragAction::DrawNote {
+                                    clip_id,
+                                    pitch,
+                                    start_beat,
+                                    start_x,
+                                } => {
+                                    // Extend note duration while dragging
+                                    let dx = local.x - start_x;
+                                    let beat_delta = dx as f64 * beats_per_pixel;
+                                    let min_duration = self.snap_grid.beat_size();
+                                    let new_duration = self.snap_grid.snap_beat(
+                                        (min_duration + beat_delta.max(0.0)).max(min_duration),
+                                    );
+
+                                    // Find the note we just added (last note at this pitch/beat)
+                                    if let Some(idx) = clip_data.notes.iter().rposition(|n| {
+                                        n.pitch == *pitch
+                                            && (n.start_beat - start_beat).abs() < 0.001
+                                    }) {
+                                        let mut note = clip_data.notes[idx];
+                                        note.duration_beats = new_duration;
+                                        return (
+                                            canvas::event::Status::Captured,
+                                            Some(Message::EditNote(
+                                                self.track_id,
+                                                *clip_id,
                                                 idx,
                                                 note,
                                             )),

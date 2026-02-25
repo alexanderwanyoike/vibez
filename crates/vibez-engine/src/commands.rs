@@ -90,6 +90,18 @@ pub enum EngineCommand {
 
     // -- Instrument tracks --
     AddInstrumentTrack(TrackId, String, InstrumentKind),
+    /// Add a bare MIDI track (no synth attached).
+    AddMidiTrack(TrackId, String),
+    /// Attach an instrument to a track.
+    SetTrackInstrument(TrackId, InstrumentKind),
+    /// Remove the instrument from a track.
+    RemoveTrackInstrument(TrackId),
+    /// Set note clip duration (for halve/double).
+    SetNoteClipDuration {
+        track_id: TrackId,
+        clip_id: ClipId,
+        duration_beats: f64,
+    },
     AddNoteClip {
         track_id: TrackId,
         clip_id: ClipId,

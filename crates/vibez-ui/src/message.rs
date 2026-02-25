@@ -4,9 +4,12 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::MidiNote;
+use vibez_core::midi::{InstrumentKind, MidiNote};
 
-use crate::state::{ArrangementSelection, ContextMenuTarget, DetailPanelTab, SnapGrid, Workspace};
+use crate::state::{
+    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SnapGrid,
+    Workspace,
+};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -211,6 +214,29 @@ pub enum Message {
     EditNameText(String),
     FinishEditing,
     CancelEditing,
+
+    // MIDI track (no auto-synth)
+    AddMidiTrack,
+
+    // Instrument attach/detach
+    SetTrackInstrument(TrackId, InstrumentKind),
+    RemoveTrackInstrument(TrackId),
+
+    // Pattern halve
+    HalveNoteClip(TrackId, ClipId),
+
+    // Edit mode
+    TogglePianoRollEditMode,
+
+    // Device context menu
+    ShowDeviceContextMenu {
+        x: f32,
+        y: f32,
+        track_id: TrackId,
+    },
+    DismissDeviceContextMenu,
+    SetDeviceMenuCategory(DeviceMenuCategory),
+    DeviceMenuSearch(String),
 
     // Cursor tracking
     CursorMoved(f32, f32),

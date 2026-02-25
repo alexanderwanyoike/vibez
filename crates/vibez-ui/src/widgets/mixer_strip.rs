@@ -19,7 +19,9 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
         TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
             .size(10)
             .color(track_color),
-        TrackKind::Instrument(_) => icons::icon(icons::MUSIC).size(10).color(track_color),
+        TrackKind::Instrument(_) | TrackKind::Midi => {
+            icons::icon(icons::MUSIC).size(10).color(track_color)
+        }
     };
 
     let name = text(&track.name)
