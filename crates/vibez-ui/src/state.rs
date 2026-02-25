@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -105,7 +106,7 @@ impl UiTrack {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArrangementSelection {
     AudioClip { track_id: TrackId, clip_id: ClipId },
     NoteClip { track_id: TrackId, clip_id: ClipId },
@@ -188,6 +189,7 @@ pub enum ContextMenuTarget {
         start_beats: f64,
         end_beats: f64,
     },
+    ArrangementEmpty,
 }
 
 pub struct AppState {
@@ -224,8 +226,8 @@ pub struct AppState {
     // Detail panel: which note clip is selected for piano roll editing
     pub selected_note_clip: Option<(TrackId, ClipId)>,
 
-    // Arrangement clip selection
-    pub selected_arrangement_clip: Option<ArrangementSelection>,
+    // Arrangement clip selection (multi-select)
+    pub selected_clips: HashSet<ArrangementSelection>,
 
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
@@ -242,6 +244,10 @@ pub struct AppState {
 
     // Context menu
     pub context_menu: Option<ContextMenu>,
+
+    // Cursor tracking (for right-click positioning from mouse_area)
+    pub cursor_x: f32,
+    pub cursor_y: f32,
 }
 
 impl Default for AppState {
@@ -264,7 +270,7 @@ impl Default for AppState {
             selected_track: None,
             next_track_number: 1,
             selected_note_clip: None,
-            selected_arrangement_clip: None,
+            selected_clips: HashSet::new(),
             detail_panel_tab: DetailPanelTab::Clip,
             loop_enabled: false,
             loop_start_beats: 0.0,
@@ -273,6 +279,8 @@ impl Default for AppState {
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
             context_menu: None,
+            cursor_x: 0.0,
+            cursor_y: 0.0,
         }
     }
 }
@@ -335,11 +343,12 @@ impl AppState {
         x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
     }
 
-    /// Total duration in beats across all tracks.
+    /// Total duration in beats across all tracks, with 8-beat padding.
     pub fn total_beats(&self) -> f64 {
         let dur = self.duration_seconds();
         if dur > 0.0 && self.bpm > 0.0 {
-            dur * self.bpm / 60.0
+            let content_beats = dur * self.bpm / 60.0;
+            (content_beats + 8.0).max(16.0)
         } else {
             // Minimum 16 beats to always show something useful
             16.0
@@ -352,6 +361,25 @@ impl AppState {
             (beats * self.sample_rate as f64 * 60.0 / self.bpm) as u64
         } else {
             0
+        }
+    }
+
+    /// Check if a clip is in the multi-selection set.
+    #[allow(dead_code)]
+    pub fn is_clip_selected(&self, clip_id: ClipId) -> bool {
+        self.selected_clips.iter().any(|sel| match sel {
+            ArrangementSelection::AudioClip { clip_id: cid, .. } => *cid == clip_id,
+            ArrangementSelection::NoteClip { clip_id: cid, .. } => *cid == clip_id,
+        })
+    }
+
+    /// Returns the single selected clip if exactly one is selected.
+    #[allow(dead_code)]
+    pub fn single_selected_clip(&self) -> Option<ArrangementSelection> {
+        if self.selected_clips.len() == 1 {
+            self.selected_clips.iter().next().copied()
+        } else {
+            None
         }
     }
 

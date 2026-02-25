@@ -115,7 +115,10 @@ pub enum Message {
     PianoRollScrollY(f32),
 
     // Arrangement clip interaction
-    SelectArrangementClip(ArrangementSelection),
+    SelectArrangementClip {
+        selection: ArrangementSelection,
+        shift_held: bool,
+    },
     MoveAudioClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -154,6 +157,8 @@ pub enum Message {
     },
     DeleteSelectedClip,
     DuplicateSelectedClip,
+    SplitSelectedAtPlayhead,
+    JoinSelectedClips,
 
     // Detail panel tabs
     SwitchDetailTab(DetailPanelTab),
@@ -182,4 +187,11 @@ pub enum Message {
         start_beats: f64,
         end_beats: f64,
     },
+    SplitClipsAtRegion {
+        start_beats: f64,
+        end_beats: f64,
+    },
+
+    // Cursor tracking
+    CursorMoved(f32, f32),
 }

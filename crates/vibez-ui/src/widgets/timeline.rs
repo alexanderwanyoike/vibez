@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
@@ -479,6 +481,38 @@ impl canvas::Program<Message> for RulerWidget {
                     return (canvas::event::Status::Captured, msg);
                 }
             }
+            // Right-click on ruler: show time selection context menu (or arrangement-empty)
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Right)) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    let screen_x = bounds.x + pos.x;
+                    let screen_y = bounds.y + pos.y;
+
+                    if self.time_selection_active
+                        && self.selection_end_beats > self.selection_start_beats
+                    {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::ShowContextMenu {
+                                x: screen_x,
+                                y: screen_y,
+                                target: ContextMenuTarget::TimeSelection {
+                                    start_beats: self.selection_start_beats,
+                                    end_beats: self.selection_end_beats,
+                                },
+                            }),
+                        );
+                    }
+
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::ShowContextMenu {
+                            x: screen_x,
+                            y: screen_y,
+                            target: ContextMenuTarget::ArrangementEmpty,
+                        }),
+                    );
+                }
+            }
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
                     let dy = match delta {
@@ -521,6 +555,11 @@ impl canvas::Program<Message> for RulerWidget {
 /// Pixel threshold for resize handle on right edge of clip.
 const RESIZE_EDGE_PX: f32 = 8.0;
 
+/// Height of the clip title bar zone (move/resize). Below this is the body zone (seek/region select).
+const CLIP_TITLE_HEIGHT: f32 = 18.0;
+/// Top padding of clips within the track canvas.
+const CLIP_Y: f32 = 4.0;
+
 /// Drag action in progress on the clip canvas.
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
@@ -550,6 +589,7 @@ pub enum ClipDragAction {
 #[derive(Debug, Default)]
 pub struct ClipInteractionState {
     pub drag: Option<ClipDragAction>,
+    pub shift_held: bool,
 }
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
@@ -559,7 +599,7 @@ pub struct TrackClipCanvas {
     pub total_tracks: usize,
     pub track_ids: Vec<TrackId>,
     pub track_kinds: Vec<bool>, // is_instrument flags
-    pub selected_clip: Option<ClipId>,
+    pub selected_clips: HashSet<ClipId>,
     pub clips: Vec<TimelineClip>,
     pub note_clips: Vec<TimelineNoteClip>,
     pub playhead_beats: f64,
@@ -596,7 +636,7 @@ impl TrackClipCanvas {
         total_tracks: usize,
         track_ids: Vec<TrackId>,
         track_kinds: Vec<bool>,
-        selected_clip: Option<ClipId>,
+        selected_clips: HashSet<ClipId>,
         loop_enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
@@ -642,7 +682,7 @@ impl TrackClipCanvas {
             total_tracks,
             track_ids,
             track_kinds,
-            selected_clip,
+            selected_clips,
             clips,
             note_clips,
             playhead_beats,
@@ -906,7 +946,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
 
                 // Selection highlight
-                let is_selected = self.selected_clip == Some(clip.clip_id);
+                let is_selected = self.selected_clips.contains(&clip.clip_id);
                 let border_color = if is_selected {
                     theme::ACCENT
                 } else {
@@ -924,6 +964,19 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     canvas::Stroke::default()
                         .with_color(border_color)
                         .with_width(border_width),
+                );
+
+                // Title bar separator
+                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
+                let title_line = canvas::Path::line(
+                    iced::Point::new(clip_x, title_sep_y),
+                    iced::Point::new(clip_x + clip_w.max(2.0), title_sep_y),
+                );
+                frame.stroke(
+                    &title_line,
+                    canvas::Stroke::default()
+                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
+                        .with_width(1.0),
                 );
 
                 // Clip name label
@@ -1056,7 +1109,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
 
                 // Selection highlight
-                let is_selected = self.selected_clip == Some(note_clip.clip_id);
+                let is_selected = self.selected_clips.contains(&note_clip.clip_id);
                 let border_color = if is_selected {
                     theme::ACCENT
                 } else {
@@ -1074,6 +1127,19 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     canvas::Stroke::default()
                         .with_color(border_color)
                         .with_width(border_width),
+                );
+
+                // Title bar separator
+                let title_sep_y = clip_y + CLIP_TITLE_HEIGHT;
+                let title_line = canvas::Path::line(
+                    iced::Point::new(clip_x, title_sep_y),
+                    iced::Point::new(clip_x + clip_w.max(2.0), title_sep_y),
+                );
+                frame.stroke(
+                    &title_line,
+                    canvas::Stroke::default()
+                        .with_color(theme::with_alpha(Color::BLACK, 0.3))
+                        .with_width(1.0),
                 );
 
                 // Clip name label
@@ -1163,10 +1229,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
         if let Some(pos) = cursor.position_in(bounds) {
             if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
-                if near_right {
+                let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
+                if near_right && in_title_bar {
                     return mouse::Interaction::ResizingHorizontally;
                 }
-                return mouse::Interaction::Grab;
+                if in_title_bar {
+                    return mouse::Interaction::Grab;
+                }
+                // Body zone — pointer (for seek / region select)
+                return mouse::Interaction::Pointer;
             }
             return mouse::Interaction::Pointer;
         }
@@ -1185,11 +1256,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
         match event {
             // -- Left click: select clip, start drag, or seek --
+            // Clip zones (Ableton-style):
+            //   Title bar (top ~18px): move / resize (right edge)
+            //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
                         self.hit_test(pos.x)
                     {
+                        let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
+
                         // Build selection message
                         let selection = if is_note_clip {
                             ArrangementSelection::NoteClip { track_id, clip_id }
@@ -1197,20 +1273,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ArrangementSelection::AudioClip { track_id, clip_id }
                         };
 
-                        // Alt+click = split
-                        // (iced canvas doesn't expose modifiers directly,
-                        //  so we use keyboard events for alt; for now, right-edge = resize)
-
-                        if near_right {
-                            // Start resize drag
+                        if near_right && in_title_bar {
+                            // Right edge of title bar → resize
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 clip_id,
                                 is_note_clip,
                                 start_x: pos.x,
                                 original_duration_beats: dur_beats,
                             });
-                        } else {
-                            // Start move drag
+                        } else if in_title_bar {
+                            // Title bar → move clip
                             let click_beat = self.x_to_beat(pos.x);
                             state.drag = Some(ClipDragAction::MoveClip {
                                 clip_id,
@@ -1219,11 +1291,21 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 original_position_beats: pos_beats,
                                 start_y: pos.y,
                             });
+                        } else {
+                            // Body → seek / region-select (like empty space)
+                            let beat = self.x_to_beat(pos.x);
+                            state.drag = Some(ClipDragAction::PendingSeek {
+                                beat,
+                                start_x: pos.x,
+                            });
                         }
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SelectArrangementClip(selection)),
+                            Some(Message::SelectArrangementClip {
+                                selection,
+                                shift_held: state.shift_held,
+                            }),
                         );
                     }
 
@@ -1283,7 +1365,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         }
                     }
 
-                    return (canvas::event::Status::Captured, None);
+                    // No clip, no time selection — show arrangement-empty context menu
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::ShowContextMenu {
+                            x: screen_x,
+                            y: screen_y,
+                            target: ContextMenuTarget::ArrangementEmpty,
+                        }),
+                    );
                 }
             }
 
@@ -1492,7 +1582,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Delete/Backspace for selected clip --
+            // -- Keyboard: Delete/Backspace for selected clip(s) --
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
                 ..
@@ -1501,7 +1591,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
                 ..
             }) => {
-                if self.selected_clip.is_some() {
+                if !self.selected_clips.is_empty() {
                     return (
                         canvas::event::Status::Captured,
                         Some(Message::DeleteSelectedClip),
@@ -1509,18 +1599,23 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Ctrl+D for duplicate --
+            // -- Keyboard: Ctrl+D for duplicate (canvas-local: needs selection check) --
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Character(ref c),
                 modifiers,
                 ..
             }) => {
-                if modifiers.control() && c.as_str() == "d" && self.selected_clip.is_some() {
+                if modifiers.control() && c.as_str() == "d" && !self.selected_clips.is_empty() {
                     return (
                         canvas::event::Status::Captured,
                         Some(Message::DuplicateSelectedClip),
                     );
                 }
+            }
+
+            // -- Track shift key state for multi-select --
+            canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.shift_held = modifiers.shift();
             }
 
             _ => {}
