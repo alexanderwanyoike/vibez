@@ -178,6 +178,22 @@ impl canvas::Program<Message> for RulerWidget {
 
             // Adaptive label density based on zoom
             let ppb = self.pixels_per_beat();
+            let pixels_per_bar = ppb * beats_per_bar as f32;
+
+            // Adaptive: ensure ~60px minimum between labeled bars
+            let bar_step: i64 = if pixels_per_bar >= 60.0 {
+                1
+            } else if pixels_per_bar >= 30.0 {
+                2
+            } else if pixels_per_bar >= 15.0 {
+                4
+            } else if pixels_per_bar >= 8.0 {
+                8
+            } else if pixels_per_bar >= 4.0 {
+                16
+            } else {
+                32
+            };
 
             for beat_i in start_beat..end_beat {
                 let beat = beat_i as f64;
@@ -192,37 +208,46 @@ impl canvas::Program<Message> for RulerWidget {
                 let is_bar = beat_in_bar == 0;
 
                 if is_bar {
-                    // Bar line (thick)
-                    let tick =
-                        canvas::Path::line(iced::Point::new(x, h * 0.3), iced::Point::new(x, h));
-                    frame.stroke(
-                        &tick,
-                        canvas::Stroke::default()
-                            .with_color(theme::BORDER)
-                            .with_width(1.5),
-                    );
+                    let show_label = (bar_index % bar_step) == 0;
+                    let show_tick = show_label || pixels_per_bar >= 10.0;
 
-                    // Bar label — always show bar number
-                    if ppb < 40.0 {
-                        // Low zoom: bar numbers only ("1", "2", "3")
-                        let label = format!("{}", bar_index + 1);
-                        frame.fill_text(canvas::Text {
-                            content: label,
-                            position: iced::Point::new(x + 4.0, 3.0),
-                            color: theme::RULER_TEXT,
-                            size: iced::Pixels(12.0),
-                            ..Default::default()
-                        });
-                    } else {
-                        // Medium/high zoom: bar.beat ("1.1", "2.1")
-                        let label = format!("{}.1", bar_index + 1);
-                        frame.fill_text(canvas::Text {
-                            content: label,
-                            position: iced::Point::new(x + 4.0, 3.0),
-                            color: theme::RULER_TEXT,
-                            size: iced::Pixels(12.0),
-                            ..Default::default()
-                        });
+                    if show_tick {
+                        // Bar line (thick)
+                        let tick = canvas::Path::line(
+                            iced::Point::new(x, h * 0.3),
+                            iced::Point::new(x, h),
+                        );
+                        frame.stroke(
+                            &tick,
+                            canvas::Stroke::default()
+                                .with_color(theme::BORDER)
+                                .with_width(1.5),
+                        );
+                    }
+
+                    if show_label {
+                        // Bar label
+                        if ppb < 40.0 {
+                            // Low zoom: bar numbers only ("1", "2", "3")
+                            let label = format!("{}", bar_index + 1);
+                            frame.fill_text(canvas::Text {
+                                content: label,
+                                position: iced::Point::new(x + 4.0, 3.0),
+                                color: theme::RULER_TEXT,
+                                size: iced::Pixels(12.0),
+                                ..Default::default()
+                            });
+                        } else {
+                            // Medium/high zoom: bar.beat ("1.1", "2.1")
+                            let label = format!("{}.1", bar_index + 1);
+                            frame.fill_text(canvas::Text {
+                                content: label,
+                                position: iced::Point::new(x + 4.0, 3.0),
+                                color: theme::RULER_TEXT,
+                                size: iced::Pixels(12.0),
+                                ..Default::default()
+                            });
+                        }
                     }
                 } else if ppb >= 40.0 {
                     // Beat ticks only at medium+ zoom
@@ -417,6 +442,32 @@ impl canvas::Program<Message> for RulerWidget {
                         let ppb = self.pixels_per_beat();
                         let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
 
+                        // Auto-scroll when dragging near ruler edges
+                        if matches!(drag, RulerDragAction::RegionSelect { .. }) {
+                            let edge_zone = 50.0_f32;
+                            if local_x > bounds.width - edge_zone {
+                                let overshoot = ((local_x - (bounds.width - edge_zone))
+                                    / edge_zone)
+                                    .clamp(0.0, 3.0);
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::ScrollArrangement(
+                                        overshoot as f64 * 2.0,
+                                    )),
+                                );
+                            }
+                            if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
+                                let overshoot = ((edge_zone - local_x) / edge_zone)
+                                    .clamp(0.0, 3.0);
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::ScrollArrangement(
+                                        -(overshoot as f64 * 2.0),
+                                    )),
+                                );
+                            }
+                        }
+
                         match drag {
                             RulerDragAction::PendingSeek {
                                 beat: anchor,
@@ -592,8 +643,7 @@ pub enum ClipDragAction {
     ResizeClip {
         clip_id: ClipId,
         is_note_clip: bool,
-        start_x: f32,
-        original_duration_beats: f64,
+        clip_start_beat: f64,
     },
     PendingSeek {
         beat: f64,
@@ -1286,7 +1336,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
             //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
+                    if let Some((clip_id, is_note_clip, near_right, pos_beats, _dur_beats)) =
                         self.hit_test(pos.x)
                     {
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
@@ -1303,8 +1353,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 clip_id,
                                 is_note_clip,
-                                start_x: pos.x,
-                                original_duration_beats: dur_beats,
+                                clip_start_beat: pos_beats,
                             });
                         } else if in_title_bar {
                             // Title bar → move clip
@@ -1525,12 +1574,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ClipDragAction::ResizeClip {
                                 clip_id,
                                 is_note_clip,
-                                start_x,
-                                original_duration_beats,
+                                clip_start_beat,
                             } => {
-                                let dx = local_x - start_x;
-                                let delta_beats = dx as f64 / ppb as f64;
-                                let new_dur = (original_duration_beats + delta_beats).max(0.25);
+                                let current_beat = self.x_to_beat(local_x);
+                                let new_dur = (current_beat - clip_start_beat).max(0.25);
                                 // Snap to quarter beat
                                 let snapped = (new_dur * 4.0).round() / 4.0;
 

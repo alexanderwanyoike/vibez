@@ -248,7 +248,11 @@ pub struct AppState {
     // Cursor tracking (for right-click positioning from mouse_area)
     pub cursor_x: f32,
     pub cursor_y: f32,
+
+    // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
+    pub drag_resize_active: bool,
 }
+
 
 impl Default for AppState {
     fn default() -> Self {
@@ -281,6 +285,7 @@ impl Default for AppState {
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,
+            drag_resize_active: false,
         }
     }
 }

@@ -71,6 +71,7 @@ pub enum Message {
     ZoomIn,
     ZoomOut,
     SetZoom(f32),
+    ZoomToFit,
     ScrollArrangement(f64),
 
     // Snap grid
@@ -194,4 +195,5 @@ pub enum Message {
 
     // Cursor tracking
     CursorMoved(f32, f32),
+    MouseReleased,
 }

@@ -92,6 +92,31 @@ impl App {
         }
     }
 
+    /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
+    /// Called from resize/move handlers so the view follows the drag.
+    fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
+        let ppb = 20.0 * self.state.zoom_level as f64;
+        // Conservative estimate of canvas width (window minus track headers)
+        let canvas_width = 1400.0_f64;
+        let visible_beats = canvas_width / ppb;
+        let visible_end = self.state.scroll_offset_beats + visible_beats;
+        let margin = 2.0_f64;
+
+        if clip_end_beat > visible_end - margin {
+            let delta = clip_end_beat - visible_end + margin * 2.0;
+            let total = self.state.total_beats();
+            self.state.scroll_offset_beats =
+                (self.state.scroll_offset_beats + delta).clamp(0.0, total);
+        }
+        // Also scroll left when dragging toward the left edge
+        if clip_end_beat < self.state.scroll_offset_beats + margin
+            && self.state.scroll_offset_beats > 0.0
+        {
+            let delta = self.state.scroll_offset_beats + margin - clip_end_beat;
+            self.state.scroll_offset_beats = (self.state.scroll_offset_beats - delta).max(0.0);
+        }
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         // Auto-dismiss context menu on any action except tick/engine/menu events
         if self.state.context_menu.is_some() {
@@ -114,6 +139,7 @@ impl App {
                     | Message::SplitNoteClip { .. }
                     | Message::SplitClipsAtRegion { .. }
                     | Message::CursorMoved(_, _)
+                    | Message::MouseReleased
             );
             if !keep_menu {
                 self.state.context_menu = None;
@@ -183,10 +209,20 @@ impl App {
                 self.state.zoom_level = (self.state.zoom_level * 1.25).min(16.0);
             }
             Message::ZoomOut => {
-                self.state.zoom_level = (self.state.zoom_level / 1.25).max(0.25);
+                self.state.zoom_level = (self.state.zoom_level / 1.25).max(0.01);
             }
             Message::SetZoom(level) => {
-                self.state.zoom_level = level.clamp(0.25, 16.0);
+                self.state.zoom_level = level.clamp(0.01, 16.0);
+            }
+            Message::ZoomToFit => {
+                let content_beats = self.state.total_beats();
+                if content_beats > 0.0 {
+                    // Conservative estimate of canvas width (window minus track headers)
+                    let canvas_width = 1400.0_f32;
+                    let target_ppb = canvas_width / content_beats as f32;
+                    self.state.zoom_level = (target_ppb / 20.0).clamp(0.01, 16.0);
+                    self.state.scroll_offset_beats = 0.0;
+                }
             }
             Message::ScrollArrangement(delta) => {
                 let total = self.state.total_beats();
@@ -202,6 +238,39 @@ impl App {
             // -- Engine events --
             Message::Tick => {
                 self.poll_engine_events();
+
+                // Tick-driven auto-scroll: when dragging a clip and cursor is near the
+                // window edge, continuously scroll the arrangement. The canvas can't
+                // generate new events when the cursor is stationary at the screen edge,
+                // so this tick loop drives the scrolling at 60fps.
+                if self.state.drag_resize_active {
+                    let edge_zone = 60.0_f32;
+                    // Right edge: estimate window right ~= track header + canvas
+                    // Use cursor_x relative to a conservative right boundary
+                    let right_boundary = 1600.0_f32; // reasonable default
+                    if self.state.cursor_x > right_boundary - edge_zone {
+                        let overshoot = ((self.state.cursor_x
+                            - (right_boundary - edge_zone))
+                            / edge_zone)
+                            .clamp(0.0, 3.0) as f64;
+                        let delta = overshoot * 2.0;
+                        let total = self.state.total_beats();
+                        self.state.scroll_offset_beats =
+                            (self.state.scroll_offset_beats + delta).clamp(0.0, total);
+                    }
+                    // Left edge
+                    let left_boundary = 230.0_f32; // ~track header width
+                    if self.state.cursor_x < left_boundary + edge_zone
+                        && self.state.scroll_offset_beats > 0.0
+                    {
+                        let overshoot = ((left_boundary + edge_zone - self.state.cursor_x)
+                            / edge_zone)
+                            .clamp(0.0, 3.0) as f64;
+                        let delta = overshoot * 2.0;
+                        self.state.scroll_offset_beats =
+                            (self.state.scroll_offset_beats - delta).max(0.0);
+                    }
+                }
             }
             Message::EnginePosition(pos) => {
                 self.state.position_samples = pos;
@@ -874,9 +943,13 @@ impl App {
                 clip_id,
                 new_position,
             } => {
+                let spb = 60.0 * self.state.sample_rate as f64 / self.state.bpm;
+                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position = new_position;
+                        clip_end_beat =
+                            Some((clip.position + clip.duration) as f64 / spb);
                     }
                 }
                 self.send_command(EngineCommand::MoveClip {
@@ -884,6 +957,10 @@ impl App {
                     clip_id,
                     new_position,
                 });
+                if let Some(end_beat) = clip_end_beat {
+                    self.auto_scroll_to_beat(end_beat);
+                }
+                self.state.drag_resize_active = true;
             }
 
             Message::MoveNoteClipPosition {
@@ -891,9 +968,11 @@ impl App {
                 clip_id,
                 new_position_beats,
             } => {
+                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position_beats = new_position_beats;
+                        clip_end_beat = Some(clip.position_beats + clip.duration_beats);
                     }
                 }
                 self.send_command(EngineCommand::MoveNoteClip {
@@ -901,6 +980,10 @@ impl App {
                     clip_id,
                     new_position_beats,
                 });
+                if let Some(end_beat) = clip_end_beat {
+                    self.auto_scroll_to_beat(end_beat);
+                }
+                self.state.drag_resize_active = true;
             }
 
             Message::ResizeAudioClip {
@@ -909,7 +992,9 @@ impl App {
                 new_duration,
             } => {
                 // Update UI state — auto-enable loop when extending past source length
+                let spb = 60.0 * self.state.sample_rate as f64 / self.state.bpm;
                 let mut sync_data = None;
+                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
@@ -924,6 +1009,8 @@ impl App {
                         } else {
                             clip.duration = new_duration;
                         }
+                        clip_end_beat =
+                            Some((clip.position + clip.duration) as f64 / spb);
                         sync_data = Some((
                             Arc::clone(&clip.audio),
                             clip.position,
@@ -959,6 +1046,10 @@ impl App {
                         loop_end,
                     });
                 }
+                if let Some(end_beat) = clip_end_beat {
+                    self.auto_scroll_to_beat(end_beat);
+                }
+                self.state.drag_resize_active = true;
             }
 
             Message::ResizeNoteClipDuration {
@@ -967,6 +1058,7 @@ impl App {
                 new_duration_beats,
             } => {
                 let mut sync_data = None;
+                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
@@ -986,6 +1078,8 @@ impl App {
                             }
                         }
 
+                        clip_end_beat =
+                            Some(clip.position_beats + clip.duration_beats);
                         sync_data = Some((
                             clip.position_beats,
                             clip.duration_beats,
@@ -1018,6 +1112,10 @@ impl App {
                         });
                     }
                 }
+                if let Some(end_beat) = clip_end_beat {
+                    self.auto_scroll_to_beat(end_beat);
+                }
+                self.state.drag_resize_active = true;
             }
 
             Message::MoveClipToTrack {
@@ -1642,6 +1740,9 @@ impl App {
             Message::CursorMoved(x, y) => {
                 self.state.cursor_x = x;
                 self.state.cursor_y = y;
+            }
+            Message::MouseReleased => {
+                self.state.drag_resize_active = false;
             }
             Message::ShowContextMenu { x, y, target } => {
                 // For ArrangementEmpty from mouse_area (no cursor coords),
@@ -3233,6 +3334,9 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                     Some(Message::CursorMoved(position.x, position.y))
                 }
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::MouseReleased),
                 _ => None,
             }),
         ])
@@ -3266,6 +3370,7 @@ fn global_key_handler(
             "e" => Some(Message::SplitSelectedAtPlayhead),
             "j" => Some(Message::JoinSelectedClips),
             "l" => Some(Message::ToggleArrangementLoop),
+            "0" => Some(Message::ZoomToFit),
             _ => None,
         },
         _ => None,
