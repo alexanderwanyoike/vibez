@@ -3265,6 +3265,7 @@ fn global_key_handler(
             }
             "e" => Some(Message::SplitSelectedAtPlayhead),
             "j" => Some(Message::JoinSelectedClips),
+            "l" => Some(Message::ToggleArrangementLoop),
             _ => None,
         },
         _ => None,

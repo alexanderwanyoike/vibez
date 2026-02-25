@@ -343,15 +343,17 @@ impl AppState {
         x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
     }
 
-    /// Total duration in beats across all tracks, with 8-beat padding.
+    /// Total duration in beats across all tracks, with generous padding.
     pub fn total_beats(&self) -> f64 {
         let dur = self.duration_seconds();
         if dur > 0.0 && self.bpm > 0.0 {
             let content_beats = dur * self.bpm / 60.0;
-            (content_beats + 8.0).max(16.0)
+            // Pad by 32 beats or 25% of content, whichever is larger
+            let padding = (content_beats * 0.25).max(32.0);
+            (content_beats + padding).max(64.0)
         } else {
-            // Minimum 16 beats to always show something useful
-            16.0
+            // Minimum 64 beats for empty projects
+            64.0
         }
     }
 

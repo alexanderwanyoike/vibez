@@ -135,6 +135,7 @@ enum RulerDragAction {
 #[derive(Debug, Default)]
 pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
+    shift_held: bool,
 }
 
 impl RulerWidget {
@@ -515,16 +516,34 @@ impl canvas::Program<Message> for RulerWidget {
             }
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
-                    let dy = match delta {
-                        iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                        iced::mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
+                    let (dx, dy) = match delta {
+                        iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
+                        iced::mouse::ScrollDelta::Pixels { x, y } => (x / 20.0, y / 20.0),
                     };
+                    // Horizontal scroll for panning
+                    if dx.abs() > dy.abs() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
+                        );
+                    }
+                    // Shift+vertical scroll for horizontal panning
+                    if state.shift_held && dy.abs() > 0.0 {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::ScrollArrangement(dy as f64 * 2.0)),
+                        );
+                    }
                     if dy > 0.0 {
                         return (canvas::event::Status::Captured, Some(Message::ZoomIn));
                     } else if dy < 0.0 {
                         return (canvas::event::Status::Captured, Some(Message::ZoomOut));
                     }
                 }
+            }
+            // Track shift key state for panning
+            canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.shift_held = modifiers.shift();
             }
             _ => {}
         }
@@ -1572,11 +1591,18 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
                         iced::mouse::ScrollDelta::Pixels { x, y } => (x / 20.0, y / 20.0),
                     };
-                    // Shift+scroll or horizontal scroll for panning
+                    // Horizontal scroll for panning
                     if dx.abs() > dy.abs() {
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
+                        );
+                    }
+                    // Shift+vertical scroll for horizontal panning
+                    if state.shift_held && dy.abs() > 0.0 {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::ScrollArrangement(dy as f64 * 2.0)),
                         );
                     }
                     // Vertical scroll for zoom
