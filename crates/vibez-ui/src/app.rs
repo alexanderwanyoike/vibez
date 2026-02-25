@@ -2074,7 +2074,7 @@ impl App {
         let transport_bar = self.view_transport();
         let status_bar = self.view_status();
 
-        let layout = column![header, content, detail_panel, transport_bar, status_bar];
+        let layout = column![header, transport_bar, content, detail_panel, status_bar];
 
         let base_layout: Element<'_, Message> = container(layout)
             .width(Length::Fill)
@@ -3243,6 +3243,14 @@ fn global_key_handler(
     key: iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,
 ) -> Option<Message> {
+    // Space: toggle playback (no modifiers required)
+    if matches!(
+        key,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space)
+    ) {
+        return Some(Message::TogglePlayback);
+    }
+
     if !modifiers.control() {
         return None;
     }
