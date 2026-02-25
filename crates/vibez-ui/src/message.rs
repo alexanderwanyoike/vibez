@@ -193,6 +193,25 @@ pub enum Message {
         end_beats: f64,
     },
 
+    // Clip creation from region
+    CreateClipFromSelection,
+    CreateNoteClipFromSelection(TrackId),
+
+    // Track reordering
+    MoveTrackUp(TrackId),
+    MoveTrackDown(TrackId),
+    MoveSelectedTrackUp,
+    MoveSelectedTrackDown,
+
+    // Renaming
+    RenameTrack(TrackId, String),
+    RenameClip(TrackId, ClipId, String),
+    StartEditingTrackName(TrackId),
+    StartEditingClipName(TrackId, ClipId),
+    EditNameText(String),
+    FinishEditing,
+    CancelEditing,
+
     // Cursor tracking
     CursorMoved(f32, f32),
     MouseReleased,

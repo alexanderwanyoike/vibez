@@ -1,4 +1,4 @@
-use iced::widget::{button, canvas, column, container, row, text};
+use iced::widget::{button, canvas, column, container, horizontal_space, row, text, text_input};
 use iced::{Element, Length, Theme};
 
 use crate::icons;
@@ -16,10 +16,15 @@ pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
 
 /// Render the track header for the arrangement view.
-pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
+pub fn view_track_header<'a>(
+    track: &'a UiTrack,
+    selected: bool,
+    editing_name: bool,
+    edit_text: &'a str,
+) -> Element<'a, Message> {
     let track_color = th::track_color(track.color_index);
 
-    // Row 1: Track type icon + name + "+" add clip button
+    // Row 1: Track type icon + name + "+" add clip button + delete button
     let type_icon = match track.kind {
         TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
             .size(12)
@@ -27,9 +32,32 @@ pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
         TrackKind::Instrument(_) => icons::icon(icons::MUSIC).size(12).color(track_color),
     };
 
-    let name = text(&track.name)
-        .size(13)
-        .color(if track.mute { th::TEXT_DIM } else { th::TEXT });
+    // Name: if editing, show text_input; if selected, click starts rename; else click selects
+    let name_widget: Element<'_, Message> = if editing_name {
+        text_input("Name", edit_text)
+            .on_input(Message::EditNameText)
+            .on_submit(Message::FinishEditing)
+            .size(13)
+            .width(Length::Fill)
+            .into()
+    } else {
+        let name_color = if track.mute { th::TEXT_DIM } else { th::TEXT };
+        let msg = if selected {
+            Message::StartEditingTrackName(track.id)
+        } else {
+            Message::SelectTrack(track.id)
+        };
+        button(text(&track.name).size(13).color(name_color))
+            .on_press(msg)
+            .padding(0)
+            .style(|_theme: &Theme, _status| button::Style {
+                background: None,
+                text_color: th::TEXT,
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .into()
+    };
 
     let add_btn = match track.kind {
         TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
@@ -40,9 +68,31 @@ pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
             .padding([2, 6]),
     };
 
-    let name_row = row![type_icon, name, add_btn]
-        .spacing(6)
-        .align_y(iced::Alignment::Center);
+    let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::TEXT_DIM))
+        .on_press(Message::RemoveTrack(track.id))
+        .padding([2, 4])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT_DIM,
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        });
+
+    let name_row = row![
+        type_icon,
+        name_widget,
+        horizontal_space(),
+        add_btn,
+        delete_btn
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center);
 
     // Row 2: Mute/Solo buttons with filled backgrounds when active
     let mute_btn = {
@@ -142,11 +192,18 @@ pub fn view_track_header(track: &UiTrack) -> Element<'_, Message> {
     let header_with_bar = row![color_bar, header].height(Length::Fill);
 
     container(header_with_bar)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(
+                if selected {
+                    th::TRACK_BG_SELECTED
+                } else {
+                    th::BG_SURFACE
+                }
+                .into(),
+            ),
             border: iced::Border {
-                color: th::BORDER,
-                width: 0.0,
+                color: if selected { th::ACCENT_DIM } else { th::BORDER },
+                width: if selected { 1.0 } else { 0.0 },
                 radius: 0.0.into(),
             },
             ..Default::default()

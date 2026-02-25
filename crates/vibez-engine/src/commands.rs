@@ -29,6 +29,8 @@ pub enum EngineCommand {
     AddTrack(TrackId, String),
     /// Remove a track by ID.
     RemoveTrack(TrackId),
+    /// Reorder tracks to match the given ID order.
+    ReorderTracks(Vec<TrackId>),
     /// Add a clip to a track.
     AddClip {
         track_id: TrackId,
@@ -201,6 +203,7 @@ mod tests {
         let _pan = EngineCommand::SetTrackPan(tid, 0.3);
         let _mute = EngineCommand::SetTrackMute(tid, true);
         let _solo = EngineCommand::SetTrackSolo(tid, true);
+        let _reorder = EngineCommand::ReorderTracks(vec![tid]);
     }
 
     #[test]
@@ -226,6 +229,26 @@ mod tests {
 
         let cmd = consumer.pop().unwrap();
         assert!(matches!(cmd, EngineCommand::Stop));
+    }
+
+    #[test]
+    fn reorder_tracks_command_through_rtrb() {
+        let (mut producer, mut consumer) = rtrb::RingBuffer::<EngineCommand>::new(16);
+        let tid1 = TrackId::new();
+        let tid2 = TrackId::new();
+
+        producer
+            .push(EngineCommand::ReorderTracks(vec![tid2, tid1]))
+            .unwrap();
+        let cmd = consumer.pop().unwrap();
+        match cmd {
+            EngineCommand::ReorderTracks(order) => {
+                assert_eq!(order.len(), 2);
+                assert_eq!(order[0], tid2);
+                assert_eq!(order[1], tid1);
+            }
+            _ => panic!("expected ReorderTracks"),
+        }
     }
 
     #[test]

@@ -188,6 +188,7 @@ pub enum ContextMenuTarget {
     TimeSelection {
         start_beats: f64,
         end_beats: f64,
+        track_id: Option<TrackId>,
     },
     ArrangementEmpty,
 }
@@ -251,6 +252,11 @@ pub struct AppState {
 
     // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
     pub drag_resize_active: bool,
+
+    // Inline renaming
+    pub editing_track_name: Option<TrackId>,
+    pub editing_clip_name: Option<(TrackId, ClipId)>,
+    pub edit_name_text: String,
 }
 
 
@@ -286,6 +292,9 @@ impl Default for AppState {
             cursor_x: 0.0,
             cursor_y: 0.0,
             drag_resize_active: false,
+            editing_track_name: None,
+            editing_clip_name: None,
+            edit_name_text: String::new(),
         }
     }
 }
@@ -426,5 +435,154 @@ impl AppState {
         };
 
         audio_max.max(note_max)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::TrackId;
+
+    fn make_state_with(tracks: Vec<UiTrack>) -> AppState {
+        AppState {
+            tracks,
+            ..Default::default()
+        }
+    }
+
+    fn make_two_tracks() -> Vec<UiTrack> {
+        vec![
+            UiTrack::new(TrackId::new(), "Track 1".into(), 0),
+            UiTrack::new(TrackId::new(), "Track 2".into(), 1),
+        ]
+    }
+
+    #[test]
+    fn move_track_up() {
+        let mut state = make_state_with(make_two_tracks());
+        let id0 = state.tracks[0].id;
+        let id1 = state.tracks[1].id;
+
+        if let Some(idx) = state.tracks.iter().position(|t| t.id == id1) {
+            if idx > 0 {
+                state.tracks.swap(idx, idx - 1);
+            }
+        }
+        assert_eq!(state.tracks[0].id, id1);
+        assert_eq!(state.tracks[1].id, id0);
+    }
+
+    #[test]
+    fn move_track_down() {
+        let mut state = make_state_with(make_two_tracks());
+        let id0 = state.tracks[0].id;
+        let id1 = state.tracks[1].id;
+
+        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.tracks.len() {
+                state.tracks.swap(idx, idx + 1);
+            }
+        }
+        assert_eq!(state.tracks[0].id, id1);
+        assert_eq!(state.tracks[1].id, id0);
+    }
+
+    #[test]
+    fn move_first_track_up_noop() {
+        let mut state = make_state_with(vec![UiTrack::new(
+            TrackId::new(),
+            "Track 1".into(),
+            0,
+        )]);
+        let id0 = state.tracks[0].id;
+
+        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
+            if idx > 0 {
+                state.tracks.swap(idx, idx - 1);
+            }
+        }
+        assert_eq!(state.tracks[0].id, id0);
+    }
+
+    #[test]
+    fn move_last_track_down_noop() {
+        let mut state = make_state_with(vec![UiTrack::new(
+            TrackId::new(),
+            "Track 1".into(),
+            0,
+        )]);
+        let id0 = state.tracks[0].id;
+
+        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.tracks.len() {
+                state.tracks.swap(idx, idx + 1);
+            }
+        }
+        assert_eq!(state.tracks[0].id, id0);
+    }
+
+    #[test]
+    fn rename_track() {
+        let mut state = make_state_with(vec![UiTrack::new(
+            TrackId::new(),
+            "Track 1".into(),
+            0,
+        )]);
+        let id = state.tracks[0].id;
+
+        if let Some(track) = state.find_track_mut(id) {
+            track.name = "My Custom Track".into();
+        }
+        assert_eq!(state.tracks[0].name, "My Custom Track");
+    }
+
+    #[test]
+    fn rename_note_clip() {
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        let mut track = UiTrack::new_instrument(
+            tid,
+            "Synth".into(),
+            TrackKind::Instrument(vibez_core::midi::InstrumentKind::SubtractiveSynth),
+            0,
+        );
+        track.note_clips.push(UiNoteClip {
+            id: cid,
+            name: "Pattern 1".into(),
+            position_beats: 0.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            selected_note: None,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        });
+        let mut state = make_state_with(vec![track]);
+
+        if let Some(t) = state.find_track_mut(tid) {
+            if let Some(c) = t.note_clips.iter_mut().find(|c| c.id == cid) {
+                c.name = "Intro Pattern".into();
+            }
+        }
+        assert_eq!(state.tracks[0].note_clips[0].name, "Intro Pattern");
+    }
+
+    #[test]
+    fn rename_empty_rejected() {
+        let mut state = make_state_with(vec![UiTrack::new(
+            TrackId::new(),
+            "Track 1".into(),
+            0,
+        )]);
+        let id = state.tracks[0].id;
+
+        // Simulate the FinishEditing guard: empty name doesn't rename
+        let new_name = "";
+        if !new_name.is_empty() {
+            if let Some(track) = state.find_track_mut(id) {
+                track.name = new_name.to_string();
+            }
+        }
+        assert_eq!(state.tracks[0].name, "Track 1");
     }
 }

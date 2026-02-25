@@ -138,6 +138,8 @@ impl App {
                     | Message::SplitAudioClip { .. }
                     | Message::SplitNoteClip { .. }
                     | Message::SplitClipsAtRegion { .. }
+                    | Message::CreateNoteClipFromSelection(_)
+                    | Message::EditNameText(_)
                     | Message::CursorMoved(_, _)
                     | Message::MouseReleased
             );
@@ -1899,6 +1901,168 @@ impl App {
                         format!("Split {split_count} clips at region boundaries");
                 }
             }
+
+            // -- Clip creation from region --
+            Message::CreateClipFromSelection => {
+                if let Some(tid) = self.state.selected_track {
+                    if let Some(track) = self.state.find_track(tid) {
+                        if matches!(track.kind, TrackKind::Instrument(_)) {
+                            return self.update(Message::CreateNoteClipFromSelection(tid));
+                        } else {
+                            self.state.status_text =
+                                "Select a time region on an instrument track".to_string();
+                        }
+                    }
+                } else {
+                    self.state.status_text = "No track selected".to_string();
+                }
+            }
+            Message::CreateNoteClipFromSelection(track_id) => {
+                self.state.context_menu = None;
+                if !self.state.time_selection_active
+                    || self.state.selection_end_beats <= self.state.selection_start_beats
+                {
+                    self.state.status_text = "No time selection active".to_string();
+                    return Task::none();
+                }
+                if let Some(track) = self.state.find_track(track_id) {
+                    if !matches!(track.kind, TrackKind::Instrument(_)) {
+                        self.state.status_text =
+                            "Can only create note clips on instrument tracks".to_string();
+                        return Task::none();
+                    }
+                }
+                let clip_id = ClipId::new();
+                let position_beats = self.state.selection_start_beats;
+                let duration_beats =
+                    self.state.selection_end_beats - self.state.selection_start_beats;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    track.note_clips.push(UiNoteClip {
+                        id: clip_id,
+                        name: format!("Pattern {}", track.note_clips.len() + 1),
+                        position_beats,
+                        duration_beats,
+                        notes: Vec::new(),
+                        selected_note: None,
+                        loop_enabled: false,
+                        loop_start_beats: 0.0,
+                        loop_end_beats: 0.0,
+                    });
+                }
+                self.send_command(EngineCommand::AddNoteClip {
+                    track_id,
+                    clip_id,
+                    position_beats,
+                    duration_beats,
+                    loop_enabled: false,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: 0.0,
+                });
+                self.state.selected_note_clip = Some((track_id, clip_id));
+                self.state.selected_clips.clear();
+                self.state.selected_clips.insert(ArrangementSelection::NoteClip {
+                    track_id,
+                    clip_id,
+                });
+                self.state.status_text = "Created note clip from selection".to_string();
+            }
+
+            // -- Track reordering --
+            Message::MoveTrackUp(track_id) => {
+                if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
+                    if idx > 0 {
+                        self.state.tracks.swap(idx, idx - 1);
+                        let order: Vec<TrackId> =
+                            self.state.tracks.iter().map(|t| t.id).collect();
+                        self.send_command(EngineCommand::ReorderTracks(order));
+                    }
+                }
+            }
+            Message::MoveTrackDown(track_id) => {
+                if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
+                    if idx + 1 < self.state.tracks.len() {
+                        self.state.tracks.swap(idx, idx + 1);
+                        let order: Vec<TrackId> =
+                            self.state.tracks.iter().map(|t| t.id).collect();
+                        self.send_command(EngineCommand::ReorderTracks(order));
+                    }
+                }
+            }
+            Message::MoveSelectedTrackUp => {
+                if let Some(tid) = self.state.selected_track {
+                    return self.update(Message::MoveTrackUp(tid));
+                }
+            }
+            Message::MoveSelectedTrackDown => {
+                if let Some(tid) = self.state.selected_track {
+                    return self.update(Message::MoveTrackDown(tid));
+                }
+            }
+
+            // -- Renaming --
+            Message::StartEditingTrackName(track_id) => {
+                if let Some(track) = self.state.find_track(track_id) {
+                    self.state.edit_name_text = track.name.clone();
+                    self.state.editing_track_name = Some(track_id);
+                    self.state.editing_clip_name = None;
+                }
+            }
+            Message::StartEditingClipName(track_id, clip_id) => {
+                self.state.context_menu = None;
+                let name = self.state.find_track(track_id).and_then(|t| {
+                    t.clips
+                        .iter()
+                        .find(|c| c.id == clip_id)
+                        .map(|c| c.name.clone())
+                        .or_else(|| {
+                            t.note_clips
+                                .iter()
+                                .find(|c| c.id == clip_id)
+                                .map(|c| c.name.clone())
+                        })
+                });
+                if let Some(name) = name {
+                    self.state.edit_name_text = name;
+                    self.state.editing_clip_name = Some((track_id, clip_id));
+                    self.state.editing_track_name = None;
+                }
+            }
+            Message::EditNameText(t) => {
+                self.state.edit_name_text = t;
+            }
+            Message::FinishEditing => {
+                let new_name = self.state.edit_name_text.clone();
+                if let Some(track_id) = self.state.editing_track_name.take() {
+                    if !new_name.is_empty() {
+                        return self.update(Message::RenameTrack(track_id, new_name));
+                    }
+                }
+                if let Some((track_id, clip_id)) = self.state.editing_clip_name.take() {
+                    if !new_name.is_empty() {
+                        return self.update(Message::RenameClip(track_id, clip_id, new_name));
+                    }
+                }
+            }
+            Message::CancelEditing => {
+                self.state.editing_track_name = None;
+                self.state.editing_clip_name = None;
+                self.state.edit_name_text.clear();
+            }
+            Message::RenameTrack(track_id, new_name) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    track.name = new_name;
+                }
+            }
+            Message::RenameClip(track_id, clip_id, new_name) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(c) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        c.name = new_name.clone();
+                    }
+                    if let Some(c) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        c.name = new_name;
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -2172,9 +2336,43 @@ impl App {
 
         if self.state.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
+        } else if self.state.editing_clip_name.is_some() {
+            stack![base_layout, self.view_rename_overlay()].into()
         } else {
             base_layout
         }
+    }
+
+    fn view_rename_overlay(&self) -> Element<'_, Message> {
+        let input = text_input("Name", &self.state.edit_name_text)
+            .on_input(Message::EditNameText)
+            .on_submit(Message::FinishEditing)
+            .size(14)
+            .width(Length::Fixed(250.0));
+
+        let label = text("Rename Clip").size(14).color(th::TEXT);
+
+        let dialog = container(
+            column![label, input]
+                .spacing(8)
+                .padding(16)
+                .width(Length::Fixed(280.0)),
+        )
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let centered = center(dialog).width(Length::Fill).height(Length::Fill);
+
+        mouse_area(centered)
+            .on_press(Message::CancelEditing)
+            .into()
     }
 
     fn view_context_menu_overlay(&self) -> Element<'_, Message> {
@@ -2258,40 +2456,61 @@ impl App {
                     ));
                 }
 
+                // Rename clip
+                col = col.push(menu_btn(
+                    icons::PENCIL,
+                    "Rename".into(),
+                    Message::StartEditingClipName(track_id, clip_id),
+                ));
+
                 col.into()
             }
             ContextMenuTarget::TimeSelection {
                 start_beats,
                 end_beats,
+                track_id,
             } => {
                 let start = *start_beats;
                 let end = *end_beats;
-                column![
-                    menu_btn(
-                        icons::SCISSORS,
-                        "Split Clips at Region".into(),
-                        Message::SplitClipsAtRegion {
-                            start_beats: start,
-                            end_beats: end,
-                        },
-                    ),
-                    menu_btn(
-                        icons::TRASH_2,
-                        "Delete Clips in Region".into(),
-                        Message::DeleteClipsInRegion {
-                            start_beats: start,
-                            end_beats: end,
-                        },
-                    ),
-                    menu_btn(
-                        icons::REPEAT,
-                        "Set as Loop Region".into(),
-                        Message::SetSelectionAsLoop,
-                    ),
-                ]
-                .spacing(0)
-                .width(Length::Fixed(200.0))
-                .into()
+                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+
+                // "Create Note Clip" if track is an instrument track
+                let effective_track = track_id.or(self.state.selected_track);
+                if let Some(tid) = effective_track {
+                    if let Some(track) = self.state.find_track(tid) {
+                        if matches!(track.kind, TrackKind::Instrument(_)) {
+                            col = col.push(menu_btn(
+                                icons::MUSIC,
+                                "Create Note Clip".into(),
+                                Message::CreateNoteClipFromSelection(tid),
+                            ));
+                        }
+                    }
+                }
+
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Split Clips at Region".into(),
+                    Message::SplitClipsAtRegion {
+                        start_beats: start,
+                        end_beats: end,
+                    },
+                ));
+                col = col.push(menu_btn(
+                    icons::TRASH_2,
+                    "Delete Clips in Region".into(),
+                    Message::DeleteClipsInRegion {
+                        start_beats: start,
+                        end_beats: end,
+                    },
+                ));
+                col = col.push(menu_btn(
+                    icons::REPEAT,
+                    "Set as Loop Region".into(),
+                    Message::SetSelectionAsLoop,
+                ));
+
+                col.into()
             }
             ContextMenuTarget::ArrangementEmpty => column![
                 menu_btn(
@@ -2412,31 +2631,7 @@ impl App {
 
         let tabs = row![arrange_tab, mix_tab].spacing(4);
 
-        let mut header_row = row![title, tabs, horizontal_space()].spacing(8);
-
-        if let Some(selected_id) = self.state.selected_track {
-            let remove_btn = button(
-                row![
-                    icons::icon(icons::TRASH_2).size(13),
-                    text("Remove").size(13)
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::RemoveTrack(selected_id))
-            .padding([6, 14])
-            .style(|_theme: &Theme, _status| button::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                text_color: th::DANGER,
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
-            header_row = header_row.push(remove_btn);
-        }
+        let header_row = row![title, tabs, horizontal_space()].spacing(8);
 
         let header = header_row.padding(10).align_y(iced::Alignment::Center);
 
@@ -2608,7 +2803,8 @@ impl App {
                 .collect();
 
             // Track header (iced widgets)
-            let header = view_track_header(track);
+            let editing = self.state.editing_track_name == Some(track.id);
+            let header = view_track_header(track, selected, editing, &self.state.edit_name_text);
 
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
@@ -3385,18 +3581,24 @@ fn global_key_handler(
     key: iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,
 ) -> Option<Message> {
+    use iced::keyboard::key::Named;
+
     // Space: toggle playback (no modifiers required)
-    if matches!(
-        key,
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space)
-    ) {
+    if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
         return Some(Message::TogglePlayback);
+    }
+
+    // Escape: cancel editing
+    if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
+        return Some(Message::CancelEditing);
     }
 
     if !modifiers.control() {
         return None;
     }
     match key {
+        iced::keyboard::Key::Named(Named::ArrowUp) => Some(Message::MoveSelectedTrackUp),
+        iced::keyboard::Key::Named(Named::ArrowDown) => Some(Message::MoveSelectedTrackDown),
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
             "t" | "T" => {
                 if modifiers.shift() {
@@ -3405,6 +3607,7 @@ fn global_key_handler(
                     Some(Message::AddTrack)
                 }
             }
+            "m" => Some(Message::CreateClipFromSelection),
             "e" => Some(Message::SplitSelectedAtPlayhead),
             "j" => Some(Message::JoinSelectedClips),
             "l" => Some(Message::ToggleArrangementLoop),

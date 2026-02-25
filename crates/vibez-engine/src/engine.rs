@@ -298,6 +298,11 @@ impl AudioEngine {
                     self.tracks.retain(|t| t.id != id);
                     self.recalculate_audio_length();
                 }
+                EngineCommand::ReorderTracks(order) => {
+                    self.tracks.sort_by_key(|t| {
+                        order.iter().position(|id| *id == t.id).unwrap_or(usize::MAX)
+                    });
+                }
                 EngineCommand::AddClip {
                     track_id,
                     clip_id,
@@ -889,6 +894,40 @@ mod tests {
         engine.process(&mut buf, 2);
         assert_eq!(engine.tracks().len(), 1);
         assert_eq!(engine.tracks()[0].id, tid2);
+    }
+
+    #[test]
+    fn reorder_tracks() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid1 = TrackId::new();
+        let tid2 = TrackId::new();
+        let tid3 = TrackId::new();
+
+        cmd_tx
+            .push(EngineCommand::AddTrack(tid1, "Track 1".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddTrack(tid2, "Track 2".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddTrack(tid3, "Track 3".into()))
+            .unwrap();
+
+        let mut buf = vec![0.0f32; 8];
+        engine.process(&mut buf, 2);
+        assert_eq!(engine.tracks().len(), 3);
+        assert_eq!(engine.tracks()[0].id, tid1);
+        assert_eq!(engine.tracks()[1].id, tid2);
+        assert_eq!(engine.tracks()[2].id, tid3);
+
+        // Reverse the order
+        cmd_tx
+            .push(EngineCommand::ReorderTracks(vec![tid3, tid2, tid1]))
+            .unwrap();
+        engine.process(&mut buf, 2);
+        assert_eq!(engine.tracks()[0].id, tid3);
+        assert_eq!(engine.tracks()[1].id, tid2);
+        assert_eq!(engine.tracks()[2].id, tid1);
     }
 
     #[test]

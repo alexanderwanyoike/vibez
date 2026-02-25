@@ -550,6 +550,7 @@ impl canvas::Program<Message> for RulerWidget {
                                 target: ContextMenuTarget::TimeSelection {
                                     start_beats: self.selection_start_beats,
                                     end_beats: self.selection_end_beats,
+                                    track_id: None,
                                 },
                             }),
                         );
@@ -1436,6 +1437,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     target: ContextMenuTarget::TimeSelection {
                                         start_beats: self.selection_start_beats,
                                         end_beats: self.selection_end_beats,
+                                        track_id: Some(self.track_id),
                                     },
                                 }),
                             );
@@ -1679,6 +1681,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     return (
                         canvas::event::Status::Captured,
                         Some(Message::DeleteSelectedClip),
+                    );
+                } else if self.selected {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::RemoveTrack(self.track_id)),
                     );
                 }
             }
