@@ -30,7 +30,7 @@ use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
 use crate::widgets::effect_slot::view_effect_slot;
 use crate::widgets::mixer_strip::view_mixer_strip;
 use crate::widgets::piano_roll::PianoRollWidget;
-use crate::widgets::timeline::{RulerWidget, TrackClipCanvas};
+use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
 use crate::widgets::track_header::view_track_header;
 use crate::widgets::vu_meter::VuMeterWidget;
 
@@ -943,13 +943,9 @@ impl App {
                 clip_id,
                 new_position,
             } => {
-                let spb = 60.0 * self.state.sample_rate as f64 / self.state.bpm;
-                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position = new_position;
-                        clip_end_beat =
-                            Some((clip.position + clip.duration) as f64 / spb);
                     }
                 }
                 self.send_command(EngineCommand::MoveClip {
@@ -957,9 +953,6 @@ impl App {
                     clip_id,
                     new_position,
                 });
-                if let Some(end_beat) = clip_end_beat {
-                    self.auto_scroll_to_beat(end_beat);
-                }
                 self.state.drag_resize_active = true;
             }
 
@@ -968,11 +961,9 @@ impl App {
                 clip_id,
                 new_position_beats,
             } => {
-                let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position_beats = new_position_beats;
-                        clip_end_beat = Some(clip.position_beats + clip.duration_beats);
                     }
                 }
                 self.send_command(EngineCommand::MoveNoteClip {
@@ -980,9 +971,6 @@ impl App {
                     clip_id,
                     new_position_beats,
                 });
-                if let Some(end_beat) = clip_end_beat {
-                    self.auto_scroll_to_beat(end_beat);
-                }
                 self.state.drag_resize_active = true;
             }
 
@@ -2532,6 +2520,56 @@ impl App {
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
+        // Arrangement overview minimap
+        let spb = if bpm > 0.0 {
+            60.0 * sample_rate as f64 / bpm
+        } else {
+            1.0
+        };
+        let minimap = ArrangementMinimap {
+            total_beats,
+            scroll_offset_beats: scroll_offset,
+            zoom_level,
+            playhead_beats,
+            bpm,
+            loop_enabled: self.state.loop_enabled,
+            loop_start_beats: self.state.loop_start_beats,
+            loop_end_beats: self.state.loop_end_beats,
+            tracks: self
+                .state
+                .tracks
+                .iter()
+                .map(|t| {
+                    let color = th::track_color(t.color_index);
+                    let mut clips: Vec<(f64, f64)> = t
+                        .clips
+                        .iter()
+                        .map(|c| (c.position as f64 / spb, c.duration as f64 / spb))
+                        .collect();
+                    clips.extend(
+                        t.note_clips
+                            .iter()
+                            .map(|c| (c.position_beats, c.duration_beats)),
+                    );
+                    MinimapTrack { color, clips }
+                })
+                .collect(),
+        };
+        let minimap_spacer = container(text(""))
+            .width(Length::Fixed(
+                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+            ))
+            .height(Length::Fixed(40.0))
+            .style(|_theme: &Theme| iced::widget::container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                ..Default::default()
+            });
+        let minimap_canvas: Element<'_, Message> = canvas(minimap)
+            .width(Length::Fill)
+            .height(Length::Fixed(40.0))
+            .into();
+        let minimap_row = row![minimap_spacer, minimap_canvas];
+
         // Collect track IDs and kinds for cross-track drag
         let track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
         let track_kinds: Vec<bool> = self
@@ -2606,7 +2644,7 @@ impl App {
             track_rows = track_rows.push(track_row);
         }
 
-        let content = column![ruler_row, track_rows];
+        let content = column![ruler_row, minimap_row, track_rows];
 
         let scrollable_content = scrollable(content).direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::default(),
