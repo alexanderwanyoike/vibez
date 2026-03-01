@@ -571,13 +571,64 @@ impl App {
                 self.state.selected_track = Some(id);
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
-            Message::SetSynthParam(track_id, param_index, value) => {
-                self.send_command(EngineCommand::SetSynthParam {
+            Message::SetInstrumentParam(track_id, param_index, value) => {
+                self.send_command(EngineCommand::SetInstrumentParam {
                     track_id,
                     param_index,
                     value,
                 });
-                self.state.status_text = format!("Synth param {param_index} = {value:.2}");
+                self.state.status_text = format!("Param {param_index} = {value:.2}");
+            }
+
+            // -- Sampler --
+            Message::LoadSamplerSample(track_id) => {
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Load Sample")
+                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
+                            .pick_file()
+                            .await;
+                        handle.map(|h| h.path().to_path_buf())
+                    },
+                    move |path| Message::SamplerFileSelected(track_id, path),
+                );
+            }
+            Message::SamplerFileSelected(track_id, path) => {
+                if let Some(path) = path {
+                    let file_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    self.state.status_text = format!("Loading {file_name}...");
+
+                    return Task::perform(
+                        decode_file_async(path),
+                        move |result| match result {
+                            Ok(audio) => Message::SamplerSampleDecoded(
+                                track_id,
+                                Arc::new(audio),
+                                file_name.clone(),
+                            ),
+                            Err(e) => Message::SamplerDecodeError(track_id, e),
+                        },
+                    );
+                }
+            }
+            Message::SamplerSampleDecoded(track_id, audio, name) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    track.sample_name = Some(name.clone());
+                }
+                self.send_command(EngineCommand::LoadSamplerSample {
+                    track_id,
+                    sample: audio,
+                    sample_name: name.clone(),
+                });
+                self.state.status_text = format!("Loaded sample: {name}");
+            }
+            Message::SamplerDecodeError(track_id, err) => {
+                let _ = track_id;
+                self.state.status_text = format!("Sample load error: {err}");
             }
 
             // -- Clip looping --
@@ -686,7 +737,7 @@ impl App {
                         position_beats,
                         duration_beats,
                         notes: Vec::new(),
-                        selected_note: None,
+                        selected_notes: HashSet::new(),
                         loop_enabled: true,
                         loop_start_beats: 0.0,
                         loop_end_beats: duration_beats,
@@ -737,7 +788,11 @@ impl App {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         if note_index < clip.notes.len() {
                             clip.notes.remove(note_index);
-                            clip.selected_note = None;
+                            // Re-index: remove deleted index, shift down any higher indices
+                            clip.selected_notes.remove(&note_index);
+                            clip.selected_notes = clip.selected_notes.iter()
+                                .map(|&i| if i > note_index { i - 1 } else { i })
+                                .collect();
                         }
                     }
                 }
@@ -762,11 +817,119 @@ impl App {
                     note: new_note,
                 });
             }
-            Message::SelectNote(track_id, clip_id, note_index) => {
+            Message::SelectNote(track_id, clip_id, note_index, shift_held) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.selected_note = note_index;
+                        match note_index {
+                            Some(idx) => {
+                                if shift_held {
+                                    // Toggle note in/out of selection
+                                    if !clip.selected_notes.remove(&idx) {
+                                        clip.selected_notes.insert(idx);
+                                    }
+                                } else {
+                                    // Clear all, select only this note
+                                    clip.selected_notes.clear();
+                                    clip.selected_notes.insert(idx);
+                                }
+                            }
+                            None => {
+                                clip.selected_notes.clear();
+                            }
+                        }
                     }
+                }
+            }
+            Message::SelectAllNotes(track_id, clip_id) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.selected_notes = (0..clip.notes.len()).collect();
+                    }
+                }
+            }
+            Message::RemoveSelectedNotes(track_id, clip_id) => {
+                // Collect indices to remove in reverse order
+                let indices_to_remove: Vec<usize> = if let Some(track) = self.state.find_track(track_id) {
+                    if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
+                        let mut indices: Vec<usize> = clip.selected_notes.iter().copied()
+                            .filter(|&i| i < clip.notes.len())
+                            .collect();
+                        indices.sort_unstable_by(|a, b| b.cmp(a));
+                        indices
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                // Remove from engine in reverse order (indices stay valid)
+                for &idx in &indices_to_remove {
+                    self.send_command(EngineCommand::RemoveNote {
+                        track_id,
+                        clip_id,
+                        note_index: idx,
+                    });
+                }
+
+                // Remove from UI state
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        for &idx in &indices_to_remove {
+                            if idx < clip.notes.len() {
+                                clip.notes.remove(idx);
+                            }
+                        }
+                        clip.selected_notes.clear();
+                    }
+                }
+            }
+            Message::NudgeSelectedNotes { track_id, clip_id, delta_beats, delta_semitones } => {
+                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        let indices: Vec<usize> = clip.selected_notes.iter().copied()
+                            .filter(|&i| i < clip.notes.len())
+                            .collect();
+                        for &idx in &indices {
+                            let note = &mut clip.notes[idx];
+                            note.start_beat = (note.start_beat + delta_beats).max(0.0);
+                            note.pitch = (note.pitch as i16 + delta_semitones as i16)
+                                .clamp(0, 127) as u8;
+                            updates.push((idx, *note));
+                        }
+                    }
+                }
+                for (idx, note) in updates {
+                    self.send_command(EngineCommand::EditNote {
+                        track_id,
+                        clip_id,
+                        note_index: idx,
+                        note,
+                    });
+                }
+            }
+
+            Message::MoveNotesAbsolute { track_id, clip_id, moves } => {
+                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        for &(idx, new_beat, new_pitch) in &moves {
+                            if idx < clip.notes.len() {
+                                clip.notes[idx].start_beat = new_beat;
+                                clip.notes[idx].pitch = new_pitch;
+                                updates.push((idx, clip.notes[idx]));
+                            }
+                        }
+                    }
+                }
+                for (idx, note) in updates {
+                    self.send_command(EngineCommand::EditNote {
+                        track_id,
+                        clip_id,
+                        note_index: idx,
+                        note,
+                    });
                 }
             }
 
@@ -785,7 +948,7 @@ impl App {
                                 position_beats: new_pos,
                                 duration_beats: clip.duration_beats,
                                 notes: clip.notes.clone(),
-                                selected_note: None,
+                                selected_notes: HashSet::new(),
                                 loop_enabled: clip.loop_enabled,
                                 loop_start_beats: clip.loop_start_beats,
                                 loop_end_beats: clip.loop_end_beats,
@@ -1399,7 +1562,7 @@ impl App {
                             position_beats: orig_pos,
                             duration_beats: left_dur,
                             notes: left_notes,
-                            selected_note: None,
+                            selected_notes: HashSet::new(),
                             loop_enabled: false,
                             loop_start_beats: 0.0,
                             loop_end_beats: 0.0,
@@ -1430,7 +1593,7 @@ impl App {
                             position_beats: right_pos,
                             duration_beats: right_dur,
                             notes: right_notes,
-                            selected_note: None,
+                            selected_notes: HashSet::new(),
                             loop_enabled: false,
                             loop_start_beats: 0.0,
                             loop_end_beats: 0.0,
@@ -1585,7 +1748,7 @@ impl App {
                                             position_beats: new_pos,
                                             duration_beats: dur,
                                             notes,
-                                            selected_note: None,
+                                            selected_notes: HashSet::new(),
                                             loop_enabled: false,
                                             loop_start_beats: 0.0,
                                             loop_end_beats: 0.0,
@@ -1940,7 +2103,7 @@ impl App {
                         position_beats,
                         duration_beats,
                         notes: Vec::new(),
-                        selected_note: None,
+                        selected_notes: HashSet::new(),
                         loop_enabled: false,
                         loop_start_beats: 0.0,
                         loop_end_beats: 0.0,
@@ -2083,6 +2246,8 @@ impl App {
             Message::SetTrackInstrument(track_id, instrument_kind) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = true;
+                    track.instrument_kind = Some(instrument_kind);
+                    track.sample_name = None;
                 }
                 self.send_command(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
                 self.state.device_context_menu = None;
@@ -2091,6 +2256,8 @@ impl App {
             Message::RemoveTrackInstrument(track_id) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = false;
+                    track.instrument_kind = None;
+                    track.sample_name = None;
                 }
                 self.send_command(EngineCommand::RemoveTrackInstrument(track_id));
                 self.state.status_text = "Removed instrument".to_string();
@@ -2358,7 +2525,7 @@ impl App {
                 position_beats: start_pos,
                 duration_beats: total_duration,
                 notes: merged_notes,
-                selected_note: None,
+                selected_notes: HashSet::new(),
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
@@ -3210,12 +3377,19 @@ impl App {
         // Device cards
         let mut devices_row = row![].spacing(6);
 
-        // Synth device card (only if track has an instrument attached)
+        // Instrument device card (branched by kind)
         if track.has_instrument {
-            let synth_card = self.view_synth_device(track_id, track_color);
-            devices_row = devices_row.push(synth_card);
+            match track.instrument_kind {
+                Some(vibez_core::midi::InstrumentKind::Sampler) => {
+                    let card = self.view_sampler_device(track_id, track, track_color);
+                    devices_row = devices_row.push(card);
+                }
+                _ => {
+                    let synth_card = self.view_synth_device(track_id, track_color);
+                    devices_row = devices_row.push(synth_card);
+                }
+            }
         } else if track.kind.is_midi() {
-            // Show "No Instrument" placeholder card for MIDI tracks with no synth
             let placeholder = self.view_add_instrument_placeholder();
             devices_row = devices_row.push(placeholder);
         }
@@ -3265,6 +3439,70 @@ impl App {
             .spacing(6)
             .padding(8)
             .width(Length::Fixed(120.0));
+
+        container(card)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Sampler device card.
+    fn view_sampler_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        let dot = text("\u{25CF}").size(10).color(track_color);
+        let name = text("Sampler").size(11).color(th::TEXT);
+        let header = row![dot, name].spacing(4).align_y(iced::Alignment::Center);
+
+        // Sample name display
+        let sample_label = match &track.sample_name {
+            Some(name) => text(name.as_str()).size(10).color(th::TEXT),
+            None => text("No Sample").size(10).color(th::TEXT_MUTED),
+        };
+
+        // Load button
+        let load_btn = button(text("Load").size(10).color(th::TEXT))
+            .on_press(Message::LoadSamplerSample(track_id))
+            .padding([2, 8])
+            .style(|_theme: &Theme, _status| button::Style {
+                background: Some(th::BG_DARK.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: th::TEXT,
+                ..Default::default()
+            });
+
+        let sample_row = row![sample_label, load_btn]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+
+        // Parameter labels
+        let param_names = ["Attack", "Decay", "Sustain", "Release", "Volume"];
+        let mut params_col = column![].spacing(3);
+        for param_name in &param_names {
+            let label = text(*param_name).size(10).color(th::TEXT_DIM);
+            let value = text("—").size(9).color(th::TEXT_MUTED);
+            let param_row = column![label, value].spacing(1);
+            params_col = params_col.push(param_row);
+        }
+
+        let card = column![header, sample_row, params_col]
+            .spacing(5)
+            .padding(8)
+            .width(Length::Fixed(140.0));
 
         container(card)
             .style(|_theme: &Theme| container::Style {

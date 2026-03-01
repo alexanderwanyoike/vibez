@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Instant;
+
 use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
@@ -48,7 +51,7 @@ pub struct PianoRollWidget {
 pub struct PianoRollClipData {
     pub clip_id: ClipId,
     pub notes: Vec<MidiNote>,
-    pub selected_note: Option<usize>,
+    pub selected_notes: HashSet<usize>,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
@@ -71,7 +74,7 @@ impl PianoRollWidget {
             clip: Some(PianoRollClipData {
                 clip_id: clip.id,
                 notes: clip.notes.clone(),
-                selected_note: clip.selected_note,
+                selected_notes: clip.selected_notes.clone(),
                 loop_enabled: clip.loop_enabled,
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
@@ -181,6 +184,8 @@ enum DragAction {
         note_index: usize,
         original_pitch: u8,
         original_start_beat: f64,
+        /// All selected notes: (index, pitch, start_beat)
+        original_notes: Vec<(usize, u8, f64)>,
         start_x: f32,
         start_y: f32,
     },
@@ -197,28 +202,35 @@ enum DragAction {
     },
 }
 
+/// Max time between clicks to count as double-click (ms).
+const DOUBLE_CLICK_MS: u128 = 400;
+/// Max distance between clicks to count as double-click (px).
+const DOUBLE_CLICK_DIST: f32 = 8.0;
+
 /// State for piano roll interaction.
 #[derive(Debug, Default)]
 pub struct PianoRollState {
     drag: Option<DragAction>,
     last_cursor: Option<Point>,
+    shift_held: bool,
+    last_click: Option<(Instant, Point)>,
 }
 
 // ── Grid row colors ──
 
-/// White key row background: #1e1e1e
+/// White key row background: #252525
 const WHITE_ROW_BG: Color = Color {
-    r: 0.118,
-    g: 0.118,
-    b: 0.118,
+    r: 0.145,
+    g: 0.145,
+    b: 0.145,
     a: 1.0,
 };
 
-/// Black key row background: #141414
+/// Black key row background: #1c1c1c
 const BLACK_ROW_BG: Color = Color {
-    r: 0.078,
-    g: 0.078,
-    b: 0.078,
+    r: 0.110,
+    g: 0.110,
+    b: 0.110,
     a: 1.0,
 };
 
@@ -434,13 +446,14 @@ impl canvas::Program<Message> for PianoRollWidget {
                 .with_width(1.0),
         );
 
-        // ── Vertical beat grid lines ──
-        let grid_step = self.snap_grid.beat_size();
+        // ── Vertical beat grid lines (always 16th-note resolution) ──
+        let grid_step = 0.25_f64; // always show 16th-note grid
         let num_steps = (total / grid_step).ceil() as usize;
 
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
-            let x = KEY_WIDTH + (beat / total) as f32 * grid_width;
+            // Snap to half-pixel for crisp 1px rendering (avoids blurry subpixel splits)
+            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
             if x > w {
                 break;
             }
@@ -451,33 +464,33 @@ impl canvas::Program<Message> for PianoRollWidget {
             let (line_color, line_width) = if is_bar {
                 (
                     Color {
-                        r: 0.314,
-                        g: 0.314,
-                        b: 0.314,
+                        r: 0.376,
+                        g: 0.376,
+                        b: 0.376,
                         a: 1.0,
                     },
                     1.5,
-                ) // #505050
+                ) // #606060
             } else if is_beat {
                 (
                     Color {
-                        r: 0.22,
-                        g: 0.22,
-                        b: 0.22,
+                        r: 0.251,
+                        g: 0.251,
+                        b: 0.251,
                         a: 1.0,
                     },
-                    0.8,
-                ) // #383838
+                    1.0,
+                ) // #404040
             } else {
                 (
                     Color {
-                        r: 0.133,
-                        g: 0.133,
-                        b: 0.133,
+                        r: 0.216,
+                        g: 0.216,
+                        b: 0.216,
                         a: 1.0,
                     },
-                    0.3,
-                ) // #222222
+                    1.0,
+                ) // #373737
             };
 
             let vline =
@@ -572,7 +585,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     continue;
                 }
 
-                let is_selected = clip_data.selected_note == Some(idx);
+                let is_selected = clip_data.selected_notes.contains(&idx);
 
                 // Velocity-based alpha: 0.3 + (velocity / 127) * 0.7
                 let vel_alpha = 0.3 + (note.velocity as f32 / 127.0) * 0.7;
@@ -733,7 +746,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         // Ruler tick marks and labels
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
-            let x = KEY_WIDTH + (beat / total) as f32 * grid_width;
+            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
             if x > w {
                 break;
             }
@@ -933,57 +946,134 @@ impl canvas::Program<Message> for PianoRollWidget {
                         // Hit test existing notes
                         if let Some((idx, near_right)) = self.hit_test_note(pos, &bounds) {
                             let note = &clip_data.notes[idx];
+                            let shift = state.shift_held;
+
                             if near_right {
+                                // Resize always selects just this note
                                 state.drag = Some(DragAction::ResizeNote {
                                     note_index: idx,
                                     original_duration: note.duration_beats,
                                     start_x: pos.x,
                                 });
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::SelectNote(
+                                        self.track_id,
+                                        clip_data.clip_id,
+                                        Some(idx),
+                                        false,
+                                    )),
+                                );
+                            }
+
+                            // Determine the selection set after this click
+                            let will_be_selected = if shift {
+                                // Toggle: if already selected it stays for drag purposes
+                                true
                             } else {
+                                true
+                            };
+
+                            if will_be_selected {
+                                // Build original_notes for multi-note drag
+                                // After selection message is processed, the set will include
+                                // the clicked note. We need to predict the final selection set.
+                                let selected_set: HashSet<usize> = if shift {
+                                    let mut s = clip_data.selected_notes.clone();
+                                    if !s.remove(&idx) {
+                                        s.insert(idx);
+                                    }
+                                    s
+                                } else {
+                                    // If clicked note is already in selection, move all selected
+                                    if clip_data.selected_notes.contains(&idx) {
+                                        clip_data.selected_notes.clone()
+                                    } else {
+                                        let mut s = HashSet::new();
+                                        s.insert(idx);
+                                        s
+                                    }
+                                };
+
+                                let original_notes: Vec<(usize, u8, f64)> = selected_set
+                                    .iter()
+                                    .filter(|&&i| i < clip_data.notes.len())
+                                    .map(|&i| (i, clip_data.notes[i].pitch, clip_data.notes[i].start_beat))
+                                    .collect();
+
                                 state.drag = Some(DragAction::MoveNote {
                                     note_index: idx,
                                     original_pitch: note.pitch,
                                     original_start_beat: note.start_beat,
+                                    original_notes,
                                     start_x: pos.x,
                                     start_y: pos.y,
                                 });
                             }
-                            return (
-                                canvas::event::Status::Captured,
+
+                            // If clicked note was already selected and no shift,
+                            // don't change selection (allows dragging multi-selection)
+                            let msg = if !shift && clip_data.selected_notes.contains(&idx) {
+                                None
+                            } else {
                                 Some(Message::SelectNote(
                                     self.track_id,
                                     clip_data.clip_id,
                                     Some(idx),
-                                )),
+                                    shift,
+                                ))
+                            };
+
+                            return (canvas::event::Status::Captured, msg);
+                        }
+
+                        // Select mode empty space:
+                        // Double-click → add note, single-click → deselect
+                        let is_double = state.last_click.is_some_and(|(t, p)| {
+                            t.elapsed().as_millis() < DOUBLE_CLICK_MS
+                                && (p.x - pos.x).abs() < DOUBLE_CLICK_DIST
+                                && (p.y - pos.y).abs() < DOUBLE_CLICK_DIST
+                        });
+                        state.last_click = Some((Instant::now(), pos));
+
+                        if is_double {
+                            // Double-click: add note
+                            let beat = self.x_to_beat(pos.x, &bounds);
+                            let pitch = self.y_to_pitch(pos.y);
+
+                            if !(LOW_NOTE..HIGH_NOTE).contains(&pitch) {
+                                return (canvas::event::Status::Ignored, None);
+                            }
+
+                            let note_duration = self.snap_grid.beat_size();
+                            let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
+
+                            let max_start = self.total_beats - note_duration;
+                            if max_start < 0.0 || snapped_beat > max_start {
+                                return (canvas::event::Status::Captured, None);
+                            }
+
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::AddNote {
+                                    track_id: self.track_id,
+                                    clip_id: clip_data.clip_id,
+                                    pitch,
+                                    start_beat: snapped_beat,
+                                    duration_beats: note_duration,
+                                }),
                             );
                         }
 
-                        // Click on empty space: add a note
-                        let beat = self.x_to_beat(pos.x, &bounds);
-                        let pitch = self.y_to_pitch(pos.y);
-
-                        if !(LOW_NOTE..HIGH_NOTE).contains(&pitch) {
-                            return (canvas::event::Status::Ignored, None);
-                        }
-
-                        let note_duration = self.snap_grid.beat_size();
-                        let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
-
-                        // Don't add notes at or beyond the clip end
-                        let max_start = self.total_beats - note_duration;
-                        if max_start < 0.0 || snapped_beat > max_start {
-                            return (canvas::event::Status::Captured, None);
-                        }
-
+                        // Single-click: deselect all
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::AddNote {
-                                track_id: self.track_id,
-                                clip_id: clip_data.clip_id,
-                                pitch,
-                                start_beat: snapped_beat,
-                                duration_beats: note_duration,
-                            }),
+                            Some(Message::SelectNote(
+                                self.track_id,
+                                clip_data.clip_id,
+                                None,
+                                false,
+                            )),
                         );
                     }
                 }
@@ -1007,25 +1097,31 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     original_start_beat,
                                     start_x,
                                     start_y,
+                                    ..
                                 } => {
                                     let dx = local.x - start_x;
                                     let dy = local.y - start_y;
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
-                                    let max_beat = (self.total_beats
-                                        - clip_data.notes[*note_index].duration_beats)
-                                        .max(0.0);
-                                    let new_beat = self
+                                    let anchor_new_beat = self
                                         .snap_grid
-                                        .snap_beat(original_start_beat + beat_delta)
-                                        .clamp(0.0, max_beat);
-                                    let new_pitch = (*original_pitch as i16 + pitch_delta)
-                                        .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
-                                        as u8;
+                                        .snap_beat(original_start_beat + beat_delta);
+                                    let snapped_beat_delta = anchor_new_beat - original_start_beat;
 
+                                    // Move anchor note for visual feedback (works for both
+                                    // single and multi-note drag; other notes move on release)
                                     let idx = *note_index;
                                     if idx < clip_data.notes.len() {
+                                        let max_beat = (self.total_beats
+                                            - clip_data.notes[idx].duration_beats)
+                                            .max(0.0);
+                                        let new_beat = (original_start_beat + snapped_beat_delta)
+                                            .clamp(0.0, max_beat);
+                                        let new_pitch = (*original_pitch as i16 + pitch_delta)
+                                            .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
+                                            as u8;
+
                                         let mut note = clip_data.notes[idx];
                                         note.start_beat = new_beat;
                                         note.pitch = new_pitch;
@@ -1106,12 +1202,80 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
 
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.drag.is_some() {
-                    state.drag = None;
+                if let Some(drag) = state.drag.take() {
+                    // On release of a multi-note drag, move all non-anchor notes
+                    if let DragAction::MoveNote {
+                        note_index,
+                        original_start_beat,
+                        ref original_notes,
+                        start_x,
+                        start_y,
+                        ..
+                    } = drag
+                    {
+                        if original_notes.len() > 1 {
+                            if let Some(ref clip_data) = self.clip {
+                                if let Some(pos) = state.last_cursor {
+                                    let grid_width = bounds.width - KEY_WIDTH;
+                                    let total = self.total_beats.max(1.0);
+                                    let beats_per_pixel = total / grid_width as f64;
+
+                                    let dx = pos.x - start_x;
+                                    let dy = pos.y - start_y;
+                                    let beat_delta = dx as f64 * beats_per_pixel;
+                                    let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
+
+                                    let anchor_new_beat = self
+                                        .snap_grid
+                                        .snap_beat(original_start_beat + beat_delta);
+                                    let snapped_beat_delta = anchor_new_beat - original_start_beat;
+
+                                    // Compute absolute positions for all selected notes
+                                    // (anchor was already moved during drag, non-anchor need moving)
+                                    let moves: Vec<(usize, f64, u8)> = original_notes
+                                        .iter()
+                                        .filter(|(i, _, _)| *i != note_index && *i < clip_data.notes.len())
+                                        .map(|(i, orig_pitch, orig_beat)| {
+                                            let new_beat = (orig_beat + snapped_beat_delta).max(0.0);
+                                            let new_pitch = (*orig_pitch as i16 + pitch_delta)
+                                                .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1) as u8;
+                                            (*i, new_beat, new_pitch)
+                                        })
+                                        .collect();
+
+                                    if !moves.is_empty() {
+                                        return (
+                                            canvas::event::Status::Captured,
+                                            Some(Message::MoveNotesAbsolute {
+                                                track_id: self.track_id,
+                                                clip_id: clip_data.clip_id,
+                                                moves,
+                                            }),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                     return (canvas::event::Status::Captured, None);
                 }
             }
 
+            // ── Keyboard: track shift state ──
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+                ..
+            }) => {
+                state.shift_held = true;
+            }
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+                ..
+            }) => {
+                state.shift_held = false;
+            }
+
+            // ── Keyboard: Delete / Backspace → remove selected notes ──
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
                 ..
@@ -1121,16 +1285,106 @@ impl canvas::Program<Message> for PianoRollWidget {
                 ..
             }) => {
                 if let Some(ref clip_data) = self.clip {
-                    if let Some(selected_idx) = clip_data.selected_note {
+                    if !clip_data.selected_notes.is_empty() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::RemoveNote(
+                            Some(Message::RemoveSelectedNotes(
                                 self.track_id,
                                 clip_data.clip_id,
-                                selected_idx,
                             )),
                         );
                     }
+                }
+            }
+
+            // ── Keyboard: Arrow keys → nudge selected notes ──
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
+                ..
+            }) => {
+                if let Some(ref clip_data) = self.clip {
+                    if !clip_data.selected_notes.is_empty() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::NudgeSelectedNotes {
+                                track_id: self.track_id,
+                                clip_id: clip_data.clip_id,
+                                delta_beats: -self.snap_grid.beat_size(),
+                                delta_semitones: 0,
+                            }),
+                        );
+                    }
+                }
+            }
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+                ..
+            }) => {
+                if let Some(ref clip_data) = self.clip {
+                    if !clip_data.selected_notes.is_empty() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::NudgeSelectedNotes {
+                                track_id: self.track_id,
+                                clip_id: clip_data.clip_id,
+                                delta_beats: self.snap_grid.beat_size(),
+                                delta_semitones: 0,
+                            }),
+                        );
+                    }
+                }
+            }
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+                ..
+            }) => {
+                if let Some(ref clip_data) = self.clip {
+                    if !clip_data.selected_notes.is_empty() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::NudgeSelectedNotes {
+                                track_id: self.track_id,
+                                clip_id: clip_data.clip_id,
+                                delta_beats: 0.0,
+                                delta_semitones: 1,
+                            }),
+                        );
+                    }
+                }
+            }
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+                ..
+            }) => {
+                if let Some(ref clip_data) = self.clip {
+                    if !clip_data.selected_notes.is_empty() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::NudgeSelectedNotes {
+                                track_id: self.track_id,
+                                clip_id: clip_data.clip_id,
+                                delta_beats: 0.0,
+                                delta_semitones: -1,
+                            }),
+                        );
+                    }
+                }
+            }
+
+            // ── Keyboard: Ctrl+A → select all notes ──
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Character(ref ch),
+                modifiers,
+                ..
+            }) if ch.as_str() == "a" && modifiers.command() => {
+                if let Some(ref clip_data) = self.clip {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::SelectAllNotes(
+                            self.track_id,
+                            clip_data.clip_id,
+                        )),
+                    );
                 }
             }
 

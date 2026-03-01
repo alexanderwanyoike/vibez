@@ -5,7 +5,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{MidiNote, TrackKind};
+use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -43,7 +43,7 @@ pub struct UiNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
-    pub selected_note: Option<usize>,
+    pub selected_notes: HashSet<usize>,
     // Looping
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
@@ -67,6 +67,8 @@ pub struct UiTrack {
     pub kind: TrackKind,
     pub color_index: u8,
     pub has_instrument: bool,
+    pub instrument_kind: Option<InstrumentKind>,
+    pub sample_name: Option<String>,
 }
 
 impl UiTrack {
@@ -86,11 +88,16 @@ impl UiTrack {
             kind: TrackKind::Audio,
             color_index,
             has_instrument: false,
+            instrument_kind: None,
+            sample_name: None,
         }
     }
 
     pub fn new_instrument(id: TrackId, name: String, kind: TrackKind, color_index: u8) -> Self {
-        let has_instrument = matches!(kind, TrackKind::Instrument(_));
+        let (has_instrument, instrument_kind) = match kind {
+            TrackKind::Instrument(ik) => (true, Some(ik)),
+            _ => (false, None),
+        };
         Self {
             id,
             name,
@@ -106,6 +113,8 @@ impl UiTrack {
             kind,
             color_index,
             has_instrument,
+            instrument_kind,
+            sample_name: None,
         }
     }
 }
@@ -586,7 +595,7 @@ mod tests {
             position_beats: 0.0,
             duration_beats: 4.0,
             notes: Vec::new(),
-            selected_note: None,
+            selected_notes: HashSet::new(),
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,

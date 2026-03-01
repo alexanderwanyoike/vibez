@@ -68,7 +68,13 @@ pub enum Message {
 
     // Instrument tracks
     AddInstrumentTrack,
-    SetSynthParam(TrackId, usize, f32),
+    SetInstrumentParam(TrackId, usize, f32),
+
+    // Sampler
+    LoadSamplerSample(TrackId),
+    SamplerFileSelected(TrackId, Option<PathBuf>),
+    SamplerSampleDecoded(TrackId, Arc<DecodedAudio>, String),
+    SamplerDecodeError(TrackId, String),
 
     // Zoom / scroll
     ZoomIn,
@@ -108,7 +114,22 @@ pub enum Message {
     },
     RemoveNote(TrackId, ClipId, usize),
     EditNote(TrackId, ClipId, usize, MidiNote),
-    SelectNote(TrackId, ClipId, Option<usize>),
+    SelectNote(TrackId, ClipId, Option<usize>, bool),
+    SelectAllNotes(TrackId, ClipId),
+    RemoveSelectedNotes(TrackId, ClipId),
+    NudgeSelectedNotes {
+        track_id: TrackId,
+        clip_id: ClipId,
+        delta_beats: f64,
+        delta_semitones: i8,
+    },
+    /// Batch-move notes to absolute positions (used by multi-note drag on release).
+    MoveNotesAbsolute {
+        track_id: TrackId,
+        clip_id: ClipId,
+        /// (note_index, new_start_beat, new_pitch)
+        moves: Vec<(usize, f64, u8)>,
+    },
 
     // Clip operations
     DuplicateNoteClip(TrackId, ClipId),
