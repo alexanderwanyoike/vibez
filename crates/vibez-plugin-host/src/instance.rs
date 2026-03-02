@@ -12,6 +12,16 @@ pub trait PluginInstance: Send {
     fn process_audio(&mut self, buffer: &mut [f32], channels: usize);
     fn note_on(&mut self, pitch: u8, velocity: u8);
     fn note_off(&mut self, pitch: u8);
+    /// Schedule a note-on at a specific frame offset within the next process buffer.
+    fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
+        let _ = frame_offset;
+        self.note_on(pitch, velocity);
+    }
+    /// Schedule a note-off at a specific frame offset within the next process buffer.
+    fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
+        let _ = frame_offset;
+        self.note_off(pitch);
+    }
     fn reset(&mut self);
     fn is_instrument(&self) -> bool;
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32);

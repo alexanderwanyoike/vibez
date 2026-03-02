@@ -25,8 +25,8 @@ use crate::icons;
 use crate::message::Message;
 use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
-    AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, UiClip, UiEffect,
-    UiNoteClip, UiTrack, Workspace,
+    AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, SettingsTab, UiClip,
+    UiEffect, UiNoteClip, UiTrack, Workspace,
 };
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
@@ -92,7 +92,7 @@ impl App {
     fn new() -> (Self, Task<Message>) {
         let (engine, cmd_tx, event_rx) = AudioEngine::new();
 
-        let (stream, sample_rate) = match AudioOutputStream::open(engine) {
+        let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
             Ok(s) => {
                 let sr = s.sample_rate();
                 if let Err(e) = s.play() {
@@ -199,6 +199,8 @@ impl App {
                     | Message::DismissFileMenu
                     | Message::OpenSettings
                     | Message::CloseSettings
+                    | Message::SelectSettingsTab(_)
+                    | Message::SetBufferSize(_)
                     | Message::ScanPlugins
                     | Message::ScanPluginsComplete(_)
                     | Message::PluginLoadError(_)
@@ -2438,6 +2440,33 @@ impl App {
                 self.state.settings_open = false;
                 let _ = self.state.plugin_settings.save();
             }
+            Message::SelectSettingsTab(tab) => {
+                self.state.settings_tab = tab;
+            }
+            Message::SetBufferSize(size) => {
+                self.state.settings_buffer_size = size;
+
+                if let Some(stream) = self._stream.as_mut() {
+                    match stream.reconfigure(Some(size)) {
+                        Ok(()) => {
+                            let sr = stream.sample_rate();
+                            if let Err(e) = stream.play() {
+                                eprintln!("vibez: failed to restart audio stream: {e}");
+                            }
+                            self.state.sample_rate = sr;
+                            self.state.status_text =
+                                format!("Audio restarted — buffer {size}, {sr} Hz");
+                        }
+                        Err(e) => {
+                            eprintln!("vibez: failed to reconfigure audio stream: {e}");
+                            self.state.status_text = format!("Audio error: {e}");
+                        }
+                    }
+                } else {
+                    self.state.status_text =
+                        "No audio device — cannot change buffer size".to_string();
+                }
+            }
 
             // -- Plugin scanning --
             Message::ScanPlugins => {
@@ -3104,6 +3133,164 @@ impl App {
 
         let header = row![title, horizontal_space(), close_btn].align_y(iced::Alignment::Center);
 
+        // -- Tab bar --
+        let make_tab_btn =
+            |label: &'static str, tab: SettingsTab, is_active: bool| {
+                let color = if is_active { th::ACCENT } else { th::TEXT_DIM };
+                button(text(label).size(13).color(color))
+                    .on_press(Message::SelectSettingsTab(tab))
+                    .padding([6, 16])
+                    .style(move |_theme: &Theme, status| {
+                        let bg = if is_active {
+                            None
+                        } else {
+                            match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Some(th::BG_HOVER.into())
+                                }
+                                _ => None,
+                            }
+                        };
+                        button::Style {
+                            background: bg,
+                            text_color: color,
+                            border: iced::Border {
+                                color: if is_active {
+                                    th::ACCENT
+                                } else {
+                                    Color::TRANSPARENT
+                                },
+                                width: if is_active { 2.0 } else { 0.0 },
+                                radius: 0.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    })
+            };
+
+        let active = self.state.settings_tab;
+        let tab_bar = row![
+            make_tab_btn("Audio", SettingsTab::Audio, active == SettingsTab::Audio),
+            make_tab_btn("Plugins", SettingsTab::Plugins, active == SettingsTab::Plugins),
+        ]
+        .spacing(0);
+
+        // -- Tab body --
+        let tab_body: Element<'_, Message> = match self.state.settings_tab {
+            SettingsTab::Audio => self.view_settings_audio_tab(),
+            SettingsTab::Plugins => self.view_settings_plugins_tab(),
+        };
+
+        let content = column![
+            header,
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }),
+            tab_bar,
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }),
+            tab_body,
+        ]
+        .spacing(8)
+        .padding(20)
+        .width(Length::Fixed(480.0));
+
+        let dialog = container(content).style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Centered overlay with dimmed background
+        mouse_area(
+            container(
+                center(dialog)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                ..Default::default()
+            }),
+        )
+        .on_press(Message::CloseSettings)
+        .into()
+    }
+
+    fn view_settings_audio_tab(&self) -> Element<'_, Message> {
+        let buf_label = text("Buffer Size").size(14).color(th::TEXT);
+        let buf_hint = text("Lower = less latency, higher = more CPU headroom")
+            .size(11)
+            .color(th::TEXT_DIM);
+
+        let sizes: &[u32] = &[64, 128, 256, 512, 1024, 2048, 4096];
+        let mut buf_row = row![].spacing(4);
+        for &size in sizes {
+            let is_selected = self.state.settings_buffer_size == size;
+            let label = format!("{size}");
+            let btn = button(text(label).size(11).color(if is_selected {
+                th::TEXT
+            } else {
+                th::TEXT_DIM
+            }))
+            .on_press(Message::SetBufferSize(size))
+            .padding([6, 10])
+            .style(move |_theme: &Theme, status| {
+                if is_selected {
+                    button::Style {
+                        background: Some(th::ACCENT.into()),
+                        text_color: th::TEXT,
+                        border: iced::Border {
+                            color: th::ACCENT,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                } else {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT_DIM,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                }
+            });
+            buf_row = buf_row.push(btn);
+        }
+
+        let sr_label = text("Sample Rate").size(14).color(th::TEXT);
+        let sr_value = text(format!("{} Hz", self.state.sample_rate))
+            .size(13)
+            .color(th::TEXT_DIM);
+
+        column![buf_label, buf_hint, buf_row, sr_label, sr_value]
+            .spacing(8)
+            .into()
+    }
+
+    fn view_settings_plugins_tab(&self) -> Element<'_, Message> {
         // Plugin section header
         let plugin_title = text("Plugin Library").size(14).color(th::TEXT);
 
@@ -3227,48 +3414,16 @@ impl App {
             text(format!("{cache_count} plugins cached")).size(11).color(th::TEXT_DIM)
         };
 
-        let content = column![
-            header,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
-                    ..Default::default()
-                }),
+        column![
             plugin_title,
             default_paths_btn,
             paths_col,
-            row![add_path_btn, horizontal_space(), scan_btn].spacing(8).align_y(iced::Alignment::Center),
+            row![add_path_btn, horizontal_space(), scan_btn]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
             status,
         ]
-        .spacing(12)
-        .padding(20)
-        .width(Length::Fixed(480.0));
-
-        let dialog = container(content).style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
-            border: iced::Border {
-                color: th::BORDER,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        });
-
-        // Centered overlay with dimmed background
-        mouse_area(
-            container(
-                center(dialog)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
-                ..Default::default()
-            }),
-        )
-        .on_press(Message::CloseSettings)
+        .spacing(8)
         .into()
     }
 

@@ -38,6 +38,8 @@ struct NoteEvent {
     is_on: bool,
     pitch: u8,
     velocity: u8,
+    /// Frame offset within the current process buffer for sample-accurate timing.
+    time: u32,
 }
 
 /// A partially loaded CLAP plugin — DSO loaded on a background thread.
@@ -314,13 +316,15 @@ impl PluginInstance for ClapPluginInstance {
 
         self.buffer_adapter.deinterleave(buffer, frames);
 
-        // Build note events
+        // Build note events — sorted by time for CLAP spec compliance
         let mut input_events_storage: Vec<ClapNoteEventWrapper> = Vec::new();
+        // Sort events by frame offset so the plugin sees them in order
+        self.note_events.sort_by_key(|e| e.time);
         for ne in self.note_events.drain(..) {
             let event = clap_event_note {
                 header: clap_event_header {
                     size: std::mem::size_of::<clap_event_note>() as u32,
-                    time: 0,
+                    time: ne.time,
                     space_id: CLAP_CORE_EVENT_SPACE_ID,
                     type_: if ne.is_on {
                         CLAP_EVENT_NOTE_ON
@@ -395,6 +399,7 @@ impl PluginInstance for ClapPluginInstance {
             is_on: true,
             pitch,
             velocity,
+            time: 0,
         });
     }
 
@@ -403,6 +408,25 @@ impl PluginInstance for ClapPluginInstance {
             is_on: false,
             pitch,
             velocity: 0,
+            time: 0,
+        });
+    }
+
+    fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
+        self.note_events.push(NoteEvent {
+            is_on: true,
+            pitch,
+            velocity,
+            time: frame_offset,
+        });
+    }
+
+    fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
+        self.note_events.push(NoteEvent {
+            is_on: false,
+            pitch,
+            velocity: 0,
+            time: frame_offset,
         });
     }
 

@@ -54,6 +54,18 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.note_off(pitch);
     }
 
+    fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
+        self.inner.note_on_at(pitch, velocity, frame_offset);
+    }
+
+    fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
+        self.inner.note_off_at(pitch, frame_offset);
+    }
+
+    fn supports_batch_render(&self) -> bool {
+        true
+    }
+
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
         // Catch panics from external plugin code to avoid crashing the audio thread.
         let inner = &mut self.inner;

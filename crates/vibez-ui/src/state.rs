@@ -226,6 +226,13 @@ pub enum PianoRollEditMode {
     Draw,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    Audio,
+    Plugins,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceMenuCategory {
     Instruments,
@@ -316,6 +323,8 @@ pub struct AppState {
     // File menu / Settings
     pub file_menu_open: bool,
     pub settings_open: bool,
+    pub settings_tab: SettingsTab,
+    pub settings_buffer_size: u32,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
@@ -363,6 +372,8 @@ impl Default for AppState {
             device_context_menu: None,
             file_menu_open: false,
             settings_open: false,
+            settings_tab: SettingsTab::default(),
+            settings_buffer_size: 512,
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
@@ -636,6 +647,29 @@ mod tests {
             }
         }
         assert_eq!(state.tracks[0].note_clips[0].name, "Intro Pattern");
+    }
+
+    #[test]
+    fn settings_tab_default() {
+        assert_eq!(SettingsTab::default(), SettingsTab::Audio);
+    }
+
+    #[test]
+    fn settings_tab_equality() {
+        assert_ne!(SettingsTab::Audio, SettingsTab::Plugins);
+        assert_eq!(SettingsTab::Audio, SettingsTab::Audio);
+    }
+
+    #[test]
+    fn app_state_default_buffer_size() {
+        let state = AppState::default();
+        assert_eq!(state.settings_buffer_size, 512);
+    }
+
+    #[test]
+    fn app_state_default_settings_tab() {
+        let state = AppState::default();
+        assert_eq!(state.settings_tab, SettingsTab::Audio);
     }
 
     #[test]

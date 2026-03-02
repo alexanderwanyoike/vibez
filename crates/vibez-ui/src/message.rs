@@ -9,8 +9,8 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginId, PluginInfo};
 
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SnapGrid,
-    Workspace,
+    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SettingsTab,
+    SnapGrid, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -272,6 +272,8 @@ pub enum Message {
     // Settings
     OpenSettings,
     CloseSettings,
+    SelectSettingsTab(SettingsTab),
+    SetBufferSize(u32),
 
     // Plugin scanning
     ScanPlugins,

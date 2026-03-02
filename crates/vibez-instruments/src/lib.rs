@@ -19,8 +19,22 @@ pub trait Instrument: Send {
     fn get_param(&self, index: usize) -> f32;
     fn note_on(&mut self, pitch: u8, velocity: u8);
     fn note_off(&mut self, pitch: u8);
+    /// Schedule a note-on at a specific frame offset (for batch rendering).
+    fn note_on_at(&mut self, pitch: u8, velocity: u8, _frame_offset: u32) {
+        self.note_on(pitch, velocity);
+    }
+    /// Schedule a note-off at a specific frame offset (for batch rendering).
+    fn note_off_at(&mut self, pitch: u8, _frame_offset: u32) {
+        self.note_off(pitch);
+    }
     fn render(&mut self, buffer: &mut [f32], channels: usize);
     fn reset(&mut self);
+    /// Whether this instrument supports batch rendering with timed events.
+    /// When true, the mixer will call note_on_at/note_off_at with frame
+    /// offsets and then render() once for the entire buffer.
+    fn supports_batch_render(&self) -> bool {
+        false
+    }
 
     /// Load a sample into the instrument. No-op for non-sample instruments.
     fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {}
