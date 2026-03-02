@@ -4266,54 +4266,24 @@ impl App {
             .into()
     }
 
-    /// Device card for an external plugin instrument — shows plugin name, clickable to open GUI.
-    fn view_plugin_instrument_device<'a>(
-        &'a self,
-        track_id: TrackId,
-        track: &'a UiTrack,
-        track_color: Color,
-    ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(10).color(track_color);
-        let plugin_name = track
-            .plugin_instrument_name
-            .as_deref()
-            .unwrap_or("Plugin");
+    // ── Shared device card helpers ──────────────────────────────────
 
-        let name_elem: Element<'a, Message> = if track.has_plugin_instrument_gui {
-            let gui_key = PluginGuiKey::Instrument { track_id };
-            button(text(plugin_name).size(11).color(th::TEXT))
-                .on_press(Message::OpenPluginGui(gui_key))
-                .padding([0, 2])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: None,
-                    text_color: th::TEXT,
-                    ..Default::default()
-                })
-                .into()
-        } else {
-            text(plugin_name).size(11).color(th::TEXT).into()
-        };
+    /// Dark title bar used by all device cards.
+    fn device_title_bar<'a>(
+        content: impl Into<Element<'a, Message>>,
+    ) -> iced::widget::Container<'a, Message> {
+        container(content)
+            .padding([4, 6])
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                ..Default::default()
+            })
+    }
 
-        let remove_btn = button(icons::icon(icons::X).size(11).color(th::TEXT_MUTED))
-            .on_press(Message::RemoveTrackInstrument(track_id))
-            .padding([2, 4]);
-
-        let header = row![dot, name_elem, remove_btn]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
-
-        let hint = if track.has_plugin_instrument_gui {
-            text("Click name to open GUI").size(9).color(th::TEXT_MUTED)
-        } else {
-            text("No GUI available").size(9).color(th::TEXT_MUTED)
-        };
-
-        let card = column![header, hint]
-            .spacing(6)
-            .padding(8)
-            .width(Length::Fixed(160.0));
-
-        container(card)
+    /// Wrap card content in the standard device card container.
+    fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
+        container(content)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::BG_ELEVATED.into()),
                 border: iced::Border {
@@ -4326,38 +4296,121 @@ impl App {
             .into()
     }
 
+    /// Small icon-only button for device card actions.
+    fn device_icon_btn(
+        icon_char: char,
+        color: Color,
+        hover_color: Color,
+        msg: Message,
+    ) -> iced::widget::Button<'static, Message> {
+        button(icons::icon(icon_char).size(12).color(color))
+            .on_press(msg)
+            .padding([3, 5])
+            .style(move |_theme: &Theme, status| {
+                let (bg, tc) = match status {
+                    button::Status::Hovered => (Some(th::BG_HOVER.into()), hover_color),
+                    button::Status::Pressed => (Some(th::BG_DARK.into()), hover_color),
+                    _ => (None, color),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: tc,
+                    border: iced::Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+    }
+
+    /// Device card for an external plugin instrument.
+    fn view_plugin_instrument_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        let dot = text("\u{25CF}").size(9).color(track_color);
+        let plugin_name = track
+            .plugin_instrument_name
+            .as_deref()
+            .unwrap_or("Plugin");
+
+        let name_section =
+            container(text(plugin_name).size(11).color(th::TEXT)).width(Length::Fill);
+
+        // Edit button for plugins with a native GUI
+        let edit_btn: Option<iced::widget::Button<'_, Message>> =
+            if track.has_plugin_instrument_gui {
+                let gui_key = PluginGuiKey::Instrument { track_id };
+                Some(
+                    button(text("Edit").size(9).color(th::TEXT_DIM))
+                        .on_press(Message::OpenPluginGui(gui_key))
+                        .padding([2, 5])
+                        .style(|_theme: &Theme, status| {
+                            let (bg, tc) = match status {
+                                button::Status::Hovered => {
+                                    (Some(th::BG_HOVER.into()), th::ACCENT)
+                                }
+                                _ => (None, th::TEXT_DIM),
+                            };
+                            button::Style {
+                                background: bg,
+                                text_color: tc,
+                                border: iced::Border {
+                                    color: th::BORDER,
+                                    width: 1.0,
+                                    radius: 3.0.into(),
+                                },
+                                ..Default::default()
+                            }
+                        }),
+                )
+            } else {
+                None
+            };
+
+        let remove: Element<'a, Message> = Self::device_icon_btn(
+            icons::X,
+            th::TEXT_DIM,
+            th::DANGER,
+            Message::RemoveTrackInstrument(track_id),
+        )
+        .into();
+
+        let mut title_row = row![dot, name_section]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+        if let Some(eb) = edit_btn {
+            title_row = title_row.push(eb);
+        }
+        title_row = title_row.push(remove);
+
+        let title = Self::device_title_bar(title_row);
+
+        Self::device_card(column![title].width(Length::Fixed(200.0)))
+    }
+
     /// Synth device card for instrument tracks.
     fn view_synth_device(&self, _track_id: TrackId, track_color: Color) -> Element<'_, Message> {
-        let dot = text("\u{25CF}").size(10).color(track_color);
+        let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Synth").size(11).color(th::TEXT);
-        let header = row![dot, name].spacing(4).align_y(iced::Alignment::Center);
 
-        // Basic synth param labels (placeholder knobs)
+        let title = Self::device_title_bar(
+            row![dot, name].spacing(4).align_y(iced::Alignment::Center),
+        );
+
         let param_names = ["Attack", "Decay", "Sustain", "Release"];
-        let mut params_col = column![].spacing(4);
-        for param_name in &param_names {
-            let label = text(*param_name).size(10).color(th::TEXT_DIM);
-            let value = text("0.50").size(9).color(th::TEXT_MUTED);
-            let param_row = column![label, value].spacing(1);
-            params_col = params_col.push(param_row);
+        let mut params_col = column![].spacing(3);
+        for pn in &param_names {
+            let label = text(*pn).size(9).color(th::TEXT_DIM);
+            let value = text("0.50").size(8).color(th::TEXT_MUTED);
+            params_col = params_col.push(column![label, value].spacing(1));
         }
+        let body = container(params_col).padding([6, 6]).width(Length::Fill);
 
-        let card = column![header, params_col]
-            .spacing(6)
-            .padding(8)
-            .width(Length::Fixed(120.0));
-
-        container(card)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        Self::device_card(column![title, body].width(Length::Fixed(120.0)))
     }
 
     /// Sampler device card.
@@ -4367,85 +4420,73 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(10).color(track_color);
+        let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Sampler").size(11).color(th::TEXT);
-        let header = row![dot, name].spacing(4).align_y(iced::Alignment::Center);
 
-        // Sample name display
+        let title = Self::device_title_bar(
+            row![dot, name].spacing(4).align_y(iced::Alignment::Center),
+        );
+
         let sample_label = match &track.sample_name {
             Some(name) => text(name.as_str()).size(10).color(th::TEXT),
             None => text("No Sample").size(10).color(th::TEXT_MUTED),
         };
 
-        // Load button
-        let load_btn = button(text("Load").size(10).color(th::TEXT))
+        let load_btn = button(text("Load").size(9).color(th::TEXT))
             .on_press(Message::LoadSamplerSample(track_id))
             .padding([2, 8])
-            .style(|_theme: &Theme, _status| button::Style {
-                background: Some(th::BG_DARK.into()),
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                text_color: th::TEXT,
-                ..Default::default()
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => th::BG_HOVER,
+                    _ => th::BG_DARK,
+                };
+                button::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    text_color: th::TEXT,
+                    ..Default::default()
+                }
             });
 
         let sample_row = row![sample_label, load_btn]
             .spacing(6)
             .align_y(iced::Alignment::Center);
 
-        // Parameter labels
         let param_names = ["Attack", "Decay", "Sustain", "Release", "Volume"];
-        let mut params_col = column![].spacing(3);
-        for param_name in &param_names {
-            let label = text(*param_name).size(10).color(th::TEXT_DIM);
-            let value = text("—").size(9).color(th::TEXT_MUTED);
-            let param_row = column![label, value].spacing(1);
-            params_col = params_col.push(param_row);
+        let mut params_col = column![].spacing(2);
+        for pn in &param_names {
+            let label = text(*pn).size(9).color(th::TEXT_DIM);
+            let value = text("\u{2014}").size(8).color(th::TEXT_MUTED);
+            params_col = params_col.push(column![label, value].spacing(1));
         }
 
-        let card = column![header, sample_row, params_col]
-            .spacing(5)
-            .padding(8)
-            .width(Length::Fixed(140.0));
+        let body = container(column![sample_row, params_col].spacing(6))
+            .padding([6, 6])
+            .width(Length::Fill);
 
-        container(card)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        Self::device_card(column![title, body].width(Length::Fixed(140.0)))
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.
     fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
-        let label = text("No Instrument").size(11).color(th::TEXT_DIM);
-        let hint = text("Right-click to add").size(9).color(th::TEXT_MUTED);
+        let title = Self::device_title_bar(
+            text("No Instrument").size(11).color(th::TEXT_DIM),
+        );
+        let body = container(
+            text("Right-click to add").size(9).color(th::TEXT_MUTED),
+        )
+        .padding([8, 6])
+        .width(Length::Fill);
 
-        let card = column![label, hint]
-            .spacing(6)
-            .padding(12)
-            .width(Length::Fixed(120.0))
-            .align_x(iced::Alignment::Center);
-
-        container(card)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        Self::device_card(
+            column![title, body]
+                .width(Length::Fixed(120.0))
+                .align_x(iced::Alignment::Center),
+        )
     }
 
     /// Device context menu overlay (instruments + effects browser).

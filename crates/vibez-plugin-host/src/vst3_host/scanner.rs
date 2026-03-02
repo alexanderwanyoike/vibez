@@ -100,7 +100,9 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
     let release: ReleaseFn = unsafe { std::mem::transmute(*vtbl_ptr.add(2)) };
     unsafe { release(factory_ptr) };
 
-    std::mem::forget(lib);
+    // Drop the library so the OS fully unloads it and resets all statics.
+    // Leaking via mem::forget can poison plugins that use one-shot init guards.
+    drop(lib);
 
     Ok(results)
 }

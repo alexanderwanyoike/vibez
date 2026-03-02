@@ -55,6 +55,7 @@ fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
 
     if factory_ptr.is_null() {
         unsafe { (entry_ref.deinit.unwrap())() };
+        drop(lib);
         return Err("No plugin factory".into());
     }
 
@@ -117,9 +118,12 @@ fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
 
     unsafe { (entry_ref.deinit.unwrap())() };
 
-    // We intentionally leak the library handle so the symbols remain valid
-    // for the duration of the scan. The library will be reloaded when instantiating.
-    std::mem::forget(lib);
+    // Drop the library so the OS fully unloads it and resets all statics.
+    // Plugins like LSP use a singletone (one-shot) init guard — if we leaked
+    // the library (mem::forget), the singletone stays "initialized" but the
+    // factory pointer is NULL after deinit, causing "No plugin factory" on
+    // subsequent loads. Dropping cleanly allows a fresh init later.
+    drop(lib);
 
     Ok(results)
 }

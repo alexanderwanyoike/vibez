@@ -175,6 +175,17 @@ impl Vst3PluginInstance {
         let hr =
             unsafe { query_interface(component, IAUDIOPROCESSOR_IID.as_ptr(), &mut processor) };
         if hr != 0 || processor.is_null() {
+            // Clean up: terminate and release the component before returning,
+            // otherwise dropping `lib` unloads the DSO while the COM object
+            // is still alive, causing a segfault.
+            type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+            let terminate: TerminateFn = unsafe { std::mem::transmute(*comp_vtbl.add(4)) };
+            unsafe { terminate(component) };
+
+            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+            let release: ReleaseFn = unsafe { std::mem::transmute(*comp_vtbl.add(2)) };
+            unsafe { release(component) };
+
             return Err("Component does not implement IAudioProcessor".into());
         }
 
