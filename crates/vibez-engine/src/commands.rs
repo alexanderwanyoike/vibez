@@ -3,6 +3,8 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_dsp::effect::AudioEffect;
+use vibez_instruments::Instrument;
 
 /// Commands sent from the UI thread to the audio engine (via rtrb).
 ///
@@ -134,10 +136,15 @@ pub enum EngineCommand {
         note_index: usize,
         note: MidiNote,
     },
-    SetSynthParam {
+    SetInstrumentParam {
         track_id: TrackId,
         param_index: usize,
         value: f32,
+    },
+    LoadSamplerSample {
+        track_id: TrackId,
+        sample: Arc<DecodedAudio>,
+        sample_name: String,
     },
 
     // -- Arrangement loop --
@@ -161,6 +168,20 @@ pub enum EngineCommand {
         enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
+    },
+
+    // -- External plugins --
+    /// Add a pre-loaded external plugin effect to a track.
+    AddPluginEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect: Box<dyn AudioEffect>,
+        position: Option<usize>,
+    },
+    /// Set a pre-loaded external plugin instrument on a track.
+    SetPluginInstrument {
+        track_id: TrackId,
+        instrument: Box<dyn Instrument>,
     },
 }
 

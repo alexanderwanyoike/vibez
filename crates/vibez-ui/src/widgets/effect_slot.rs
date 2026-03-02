@@ -7,11 +7,12 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use vibez_core::id::TrackId;
+use vibez_plugin_host::gui::PluginGuiKey;
 
 /// Render an Ableton-style device card for the detail panel.
 pub fn view_effect_slot<'a>(
     track_id: TrackId,
-    effect: &UiEffect,
+    effect: &'a UiEffect,
     track_color: Color,
 ) -> Element<'a, Message> {
     let dot_color = if effect.bypass {
@@ -23,13 +24,32 @@ pub fn view_effect_slot<'a>(
     // Header: colored dot + effect name + power (bypass) + X (remove)
     let dot = text("\u{25CF}").size(10).color(dot_color);
 
-    let name = text(effect.effect_type.name())
-        .size(11)
-        .color(if effect.bypass {
-            th::TEXT_DIM
-        } else {
-            th::TEXT
-        });
+    let display_name = effect
+        .plugin_name
+        .as_deref()
+        .unwrap_or_else(|| effect.effect_type.name());
+    let name_color = if effect.bypass {
+        th::TEXT_DIM
+    } else {
+        th::TEXT
+    };
+    let name: Element<'a, Message> = if effect.has_plugin_gui {
+        let gui_key = PluginGuiKey::Effect {
+            track_id,
+            effect_id: effect.id,
+        };
+        button(text(display_name).size(11).color(name_color))
+            .on_press(Message::OpenPluginGui(gui_key))
+            .padding([0, 2])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: None,
+                text_color: name_color,
+                ..Default::default()
+            })
+            .into()
+    } else {
+        text(display_name).size(11).color(name_color).into()
+    };
 
     let bypass_btn = {
         let icon = icons::icon(icons::POWER).size(11);

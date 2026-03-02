@@ -1,6 +1,8 @@
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::MidiNote;
 
+use crate::envelope::{Envelope, EnvelopeStage};
+
 /// Waveform shapes for the oscillator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Waveform {
@@ -83,91 +85,6 @@ pub static SYNTH_PARAMS: &[ParamDescriptor] = &[
 ];
 
 const MAX_VOICES: usize = 8;
-
-/// ADSR envelope stages.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum EnvelopeStage {
-    Idle,
-    Attack,
-    Decay,
-    Sustain,
-    Release,
-}
-
-/// Per-voice ADSR envelope.
-#[derive(Debug, Clone)]
-struct Envelope {
-    stage: EnvelopeStage,
-    level: f32,
-    attack: f32,
-    decay: f32,
-    sustain: f32,
-    release: f32,
-    sample_rate: f32,
-}
-
-impl Envelope {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            stage: EnvelopeStage::Idle,
-            level: 0.0,
-            attack: 0.01,
-            decay: 0.1,
-            sustain: 0.7,
-            release: 0.3,
-            sample_rate,
-        }
-    }
-
-    fn trigger(&mut self) {
-        self.stage = EnvelopeStage::Attack;
-        // Don't reset level — allows retriggering without clicks
-    }
-
-    fn release(&mut self) {
-        if self.stage != EnvelopeStage::Idle {
-            self.stage = EnvelopeStage::Release;
-        }
-    }
-
-    fn is_active(&self) -> bool {
-        self.stage != EnvelopeStage::Idle
-    }
-
-    fn tick(&mut self) -> f32 {
-        match self.stage {
-            EnvelopeStage::Idle => 0.0,
-            EnvelopeStage::Attack => {
-                let rate = 1.0 / (self.attack * self.sample_rate).max(1.0);
-                self.level += rate;
-                if self.level >= 1.0 {
-                    self.level = 1.0;
-                    self.stage = EnvelopeStage::Decay;
-                }
-                self.level
-            }
-            EnvelopeStage::Decay => {
-                let rate = 1.0 / (self.decay * self.sample_rate).max(1.0);
-                self.level -= rate * (1.0 - self.sustain);
-                if self.level <= self.sustain {
-                    self.level = self.sustain;
-                    self.stage = EnvelopeStage::Sustain;
-                }
-                self.level
-            }
-            EnvelopeStage::Sustain => self.sustain,
-            EnvelopeStage::Release => {
-                let rate = 1.0 / (self.release * self.sample_rate).max(1.0);
-                self.level -= rate * self.level.max(0.001);
-                if self.level <= 0.001 {
-                    self.level = 0.0;
-                    self.stage = EnvelopeStage::Idle;
-                }
-                self.level
-            }
-        }
-    }
-}
 
 /// Single synth voice with oscillator, envelope, and per-voice filter.
 #[derive(Debug, Clone)]
@@ -435,6 +352,40 @@ impl SubtractiveSynth {
             voice.filter_state = 0.0;
             voice.phase = 0.0;
         }
+    }
+}
+
+impl crate::Instrument for SubtractiveSynth {
+    fn instrument_kind(&self) -> vibez_core::midi::InstrumentKind {
+        vibez_core::midi::InstrumentKind::SubtractiveSynth
+    }
+
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        self.param_descriptors()
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) -> bool {
+        self.set_param(index, value)
+    }
+
+    fn get_param(&self, index: usize) -> f32 {
+        self.get_param(index)
+    }
+
+    fn note_on(&mut self, pitch: u8, velocity: u8) {
+        self.note_on(pitch, velocity);
+    }
+
+    fn note_off(&mut self, pitch: u8) {
+        self.note_off(pitch);
+    }
+
+    fn render(&mut self, buffer: &mut [f32], channels: usize) {
+        self.render(buffer, channels);
+    }
+
+    fn reset(&mut self) {
+        self.reset();
     }
 }
 

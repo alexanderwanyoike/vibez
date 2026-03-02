@@ -10,7 +10,9 @@ vibez-engine = { workspace = true }
 vibez-audio-io = { workspace = true }
 vibez-dsp = { workspace = true }
 vibez-instruments = { workspace = true }
+vibez-plugin-host = { workspace = true }
 iced = { workspace = true }
 rtrb = { workspace = true }
 rfd = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+x11rb = "0.13"

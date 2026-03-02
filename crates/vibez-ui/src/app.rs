@@ -13,14 +13,17 @@ use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
 use vibez_core::effect::EffectType;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
+use vibez_plugin_host::gui::PluginGuiKey;
+use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance};
 
 use crate::icons;
 use crate::message::Message;
+use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
     AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, UiClip, UiEffect,
     UiNoteClip, UiTrack, Workspace,
@@ -34,11 +37,46 @@ use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, Tr
 use crate::widgets::track_header::view_track_header;
 use crate::widgets::vu_meter::VuMeterWidget;
 
+/// Result of loading a plugin on a background thread.
+/// For CLAP plugins, `clap_partial` carries an un-initialized plugin that
+/// must be finished on the UI thread (for JUCE MessageManager compatibility).
+struct PluginLoadResult {
+    track_id: TrackId,
+    effect_id: EffectId,
+    plugin_name: String,
+    /// Fully-loaded effect (VST3) or None (CLAP — see `clap_partial`).
+    effect: Option<Box<dyn vibez_dsp::effect::AudioEffect>>,
+    gui_raw_ptr: Option<PluginRawPtr>,
+    /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
+    clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
+    sample_rate: f64,
+}
+
+/// Result of loading a plugin instrument on a background thread.
+struct PluginInstrumentLoadResult {
+    track_id: TrackId,
+    plugin_name: String,
+    /// Fully-loaded instrument (VST3) or None (CLAP — see `clap_partial`).
+    instrument: Option<Box<dyn vibez_instruments::Instrument>>,
+    gui_raw_ptr: Option<PluginRawPtr>,
+    /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
+    clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
+    sample_rate: f64,
+}
+
 struct App {
     state: AppState,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
     _stream: Option<AudioOutputStream>,
+    // Channels for receiving loaded plugins from background threads
+    plugin_effect_rx: std::sync::mpsc::Receiver<PluginLoadResult>,
+    plugin_effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
+    plugin_instrument_rx: std::sync::mpsc::Receiver<PluginInstrumentLoadResult>,
+    plugin_instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
+    // Plugin GUI support
+    plugin_window_manager: Option<PluginWindowManager>,
+    plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
 }
 
 pub fn run() -> iced::Result {
@@ -73,11 +111,26 @@ impl App {
             ..Default::default()
         };
 
+        let (plugin_effect_tx, plugin_effect_rx) = std::sync::mpsc::channel();
+        let (plugin_instrument_tx, plugin_instrument_rx) = std::sync::mpsc::channel();
+
+        // Register the UI thread (process main thread) as the CLAP "main thread".
+        // JUCE-based CLAP plugins require GUI calls on this thread.
+        vibez_plugin_host::set_clap_main_thread();
+
+        let plugin_window_manager = PluginWindowManager::new();
+
         let mut app = Self {
             state,
             cmd_tx: Some(cmd_tx),
             event_rx: Some(event_rx),
             _stream: stream,
+            plugin_effect_rx,
+            plugin_effect_tx,
+            plugin_instrument_rx,
+            plugin_instrument_tx,
+            plugin_window_manager,
+            plugin_gui_raw_ptrs: std::collections::HashMap::new(),
         };
 
         // Inform the engine of the actual sample rate
@@ -142,6 +195,13 @@ impl App {
                     | Message::EditNameText(_)
                     | Message::CursorMoved(_, _)
                     | Message::MouseReleased
+                    | Message::ToggleFileMenu
+                    | Message::DismissFileMenu
+                    | Message::OpenSettings
+                    | Message::CloseSettings
+                    | Message::ScanPlugins
+                    | Message::ScanPluginsComplete(_)
+                    | Message::PluginLoadError(_)
             );
             if !keep_menu {
                 self.state.context_menu = None;
@@ -240,6 +300,10 @@ impl App {
             // -- Engine events --
             Message::Tick => {
                 self.poll_engine_events();
+                self.poll_plugin_loads();
+                self.poll_plugin_windows();
+                // Pump CLAP plugin timers and FDs (needed for JUCE event loop)
+                vibez_plugin_host::poll_clap_events();
 
                 // Tick-driven auto-scroll: when dragging a clip and cursor is near the
                 // window edge, continuously scroll the arrangement. The canvas can't
@@ -299,6 +363,16 @@ impl App {
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
             Message::RemoveTrack(track_id) => {
+                // Close all plugin GUI windows for this track
+                if let Some(ref mut mgr) = self.plugin_window_manager {
+                    mgr.close_track_effects(track_id);
+                }
+                self.plugin_gui_raw_ptrs
+                    .retain(|k, _| match k {
+                        PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
+                        PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
+                    });
+
                 self.send_command(EngineCommand::RemoveTrack(track_id));
                 self.state.tracks.retain(|t| t.id != track_id);
                 if self.state.selected_track == Some(track_id) {
@@ -478,6 +552,8 @@ impl App {
                         bypass: false,
                         params,
                         descriptors,
+                        plugin_name: None,
+                        has_plugin_gui: false,
                     });
                 }
                 self.send_command(EngineCommand::AddEffect {
@@ -490,6 +566,16 @@ impl App {
                 self.state.status_text = format!("Added {} effect", effect_type.name());
             }
             Message::RemoveEffect(track_id, effect_id) => {
+                // Close plugin GUI window if open
+                let gui_key = PluginGuiKey::Effect {
+                    track_id,
+                    effect_id,
+                };
+                if let Some(ref mut mgr) = self.plugin_window_manager {
+                    mgr.close(gui_key);
+                }
+                self.plugin_gui_raw_ptrs.remove(&gui_key);
+
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.effects.retain(|e| e.id != effect_id);
                 }
@@ -2254,10 +2340,19 @@ impl App {
                 self.state.status_text = format!("Added {}", instrument_kind.name());
             }
             Message::RemoveTrackInstrument(track_id) => {
+                // Close plugin GUI window if open
+                let gui_key = PluginGuiKey::Instrument { track_id };
+                if let Some(ref mut mgr) = self.plugin_window_manager {
+                    mgr.close(gui_key);
+                }
+                self.plugin_gui_raw_ptrs.remove(&gui_key);
+
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = false;
                     track.instrument_kind = None;
                     track.sample_name = None;
+                    track.plugin_instrument_name = None;
+                    track.has_plugin_instrument_gui = false;
                 }
                 self.send_command(EngineCommand::RemoveTrackInstrument(track_id));
                 self.state.status_text = "Removed instrument".to_string();
@@ -2323,6 +2418,182 @@ impl App {
             Message::DeviceMenuSearch(query) => {
                 if let Some(ref mut menu) = self.state.device_context_menu {
                     menu.search = query;
+                }
+            }
+
+            // -- File menu --
+            Message::ToggleFileMenu => {
+                self.state.file_menu_open = !self.state.file_menu_open;
+            }
+            Message::DismissFileMenu => {
+                self.state.file_menu_open = false;
+            }
+
+            // -- Settings --
+            Message::OpenSettings => {
+                self.state.settings_open = true;
+                self.state.file_menu_open = false;
+            }
+            Message::CloseSettings => {
+                self.state.settings_open = false;
+                let _ = self.state.plugin_settings.save();
+            }
+
+            // -- Plugin scanning --
+            Message::ScanPlugins => {
+                if !self.state.plugin_scan_in_progress {
+                    self.state.plugin_scan_in_progress = true;
+                    self.state.plugin_scan_status = "Scanning...".to_string();
+                    let settings = self.state.plugin_settings.clone();
+                    return Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                vibez_plugin_host::scan_plugins(&settings)
+                            })
+                            .await
+                            .unwrap_or_default()
+                        },
+                        Message::ScanPluginsComplete,
+                    );
+                }
+            }
+            Message::ScanPluginsComplete(plugins) => {
+                let count = plugins.len();
+                self.state.plugin_settings.cache = plugins;
+                self.state.plugin_scan_in_progress = false;
+                self.state.plugin_scan_status = format!("Found {count} plugins");
+                let _ = self.state.plugin_settings.save();
+            }
+            Message::AddPluginScanPath => {
+                return Task::perform(
+                    async {
+                        let result = rfd::AsyncFileDialog::new()
+                            .set_title("Select Plugin Scan Directory")
+                            .pick_folder()
+                            .await;
+                        result.map(|h| h.path().to_path_buf())
+                    },
+                    Message::PluginScanPathSelected,
+                );
+            }
+            Message::PluginScanPathSelected(path) => {
+                if let Some(path) = path {
+                    if !self.state.plugin_settings.extra_scan_paths.contains(&path) {
+                        self.state.plugin_settings.extra_scan_paths.push(path);
+                        let _ = self.state.plugin_settings.save();
+                    }
+                }
+            }
+            Message::RemovePluginScanPath(index) => {
+                if index < self.state.plugin_settings.extra_scan_paths.len() {
+                    self.state.plugin_settings.extra_scan_paths.remove(index);
+                    let _ = self.state.plugin_settings.save();
+                }
+            }
+            Message::ToggleScanDefaultPaths => {
+                self.state.plugin_settings.scan_default_paths =
+                    !self.state.plugin_settings.scan_default_paths;
+                let _ = self.state.plugin_settings.save();
+            }
+
+            // -- Plugin loading --
+            Message::AddPluginToTrack(track_id, plugin_id) => {
+                self.state.device_context_menu = None;
+                if let Some(info) = self
+                    .state
+                    .plugin_settings
+                    .cache
+                    .iter()
+                    .find(|p| p.id == plugin_id)
+                    .cloned()
+                {
+                    let sample_rate = self.state.sample_rate as f64;
+                    let is_instrument = info.category.is_instrument();
+                    let loading_name = info.name.clone();
+
+                    if is_instrument {
+                        let tx = self.plugin_instrument_tx.clone();
+                        std::thread::spawn(move || {
+                            match load_plugin_instrument_bg(&info, sample_rate) {
+                                Ok(mut result) => {
+                                    result.track_id = track_id;
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    eprintln!("Plugin load error: {e}");
+                                }
+                            }
+                        });
+                    } else {
+                        let tx = self.plugin_effect_tx.clone();
+                        std::thread::spawn(move || {
+                            match load_plugin_effect_bg(&info, sample_rate) {
+                                Ok(mut result) => {
+                                    result.track_id = track_id;
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    eprintln!("Plugin load error: {e}");
+                                }
+                            }
+                        });
+                    }
+                    self.state.status_text = format!("Loading {loading_name}...");
+                }
+            }
+            Message::PluginLoadError(err) => {
+                self.state.status_text = format!("Plugin error: {err}");
+            }
+
+            // -- Plugin GUI windows --
+            Message::OpenPluginGui(key) => {
+                // If the window is already open, raise it
+                if let Some(ref mgr) = self.plugin_window_manager {
+                    if mgr.is_open(key) {
+                        mgr.raise(key);
+                        return Task::none();
+                    }
+                }
+                if let Some(&raw_ptr) = self.plugin_gui_raw_ptrs.get(&key) {
+                    let title = match key {
+                        PluginGuiKey::Effect {
+                            track_id,
+                            effect_id,
+                        } => self
+                            .state
+                            .find_track(track_id)
+                            .and_then(|t| {
+                                t.effects
+                                    .iter()
+                                    .find(|e| e.id == effect_id)
+                                    .and_then(|e| e.plugin_name.clone())
+                            })
+                            .unwrap_or_else(|| "Plugin".to_string()),
+                        PluginGuiKey::Instrument { track_id } => self
+                            .state
+                            .find_track(track_id)
+                            .and_then(|t| t.plugin_instrument_name.clone())
+                            .unwrap_or_else(|| "Plugin".to_string()),
+                    };
+                    if let Some(ref mut mgr) = self.plugin_window_manager {
+                        if mgr.open(key, raw_ptr, title) {
+                            self.state.status_text = "Plugin GUI opened".to_string();
+                        } else {
+                            self.state.status_text =
+                                "Failed to open plugin GUI".to_string();
+                        }
+                    } else {
+                        self.state.status_text =
+                            "No X11 display — plugin GUI unavailable".to_string();
+                    }
+                } else {
+                    self.state.status_text =
+                        "Plugin GUI handle not available".to_string();
+                }
+            }
+            Message::ClosePluginGui(key) => {
+                if let Some(ref mut mgr) = self.plugin_window_manager {
+                    mgr.close(key);
                 }
             }
         }
@@ -2543,6 +2814,144 @@ impl App {
         self.state.status_text = "Joined note clips".to_string();
     }
 
+    fn poll_plugin_loads(&mut self) {
+        // Poll for loaded plugin effects
+        while let Ok(result) = self.plugin_effect_rx.try_recv() {
+            let track_id = result.track_id;
+            let effect_id = result.effect_id;
+            let plugin_name = result.plugin_name.clone();
+
+            // Phase 2: If this is a CLAP plugin, finish init on the UI thread.
+            // This is critical — JUCE creates its MessageManager during init(),
+            // and guiCreate() needs to be on the same thread.
+            let (effect, gui_raw_ptr): (
+                Box<dyn vibez_dsp::effect::AudioEffect>,
+                Option<PluginRawPtr>,
+            ) = if let Some(partial) = result.clap_partial {
+                match vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+                    partial,
+                    result.sample_rate,
+                    4096,
+                ) {
+                    Ok(clap_inst) => {
+                        let raw_ptr = Some(PluginRawPtr::Clap(
+                            clap_inst.plugin_ptr() as *const std::ffi::c_void,
+                        ));
+                        let wrapper =
+                            vibez_plugin_host::PluginEffectWrapper::new(Box::new(clap_inst));
+                        (Box::new(wrapper), raw_ptr)
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: CLAP init failed on UI thread: {e}");
+                        self.state.status_text = format!("Plugin init failed: {e}");
+                        continue;
+                    }
+                }
+            } else if let Some(effect) = result.effect {
+                (effect, result.gui_raw_ptr)
+            } else {
+                continue;
+            };
+
+            let has_gui = gui_raw_ptr.is_some();
+
+            if let Some(raw_ptr) = gui_raw_ptr {
+                let key = PluginGuiKey::Effect {
+                    track_id,
+                    effect_id,
+                };
+                self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
+            }
+
+            if let Some(track) = self.state.find_track_mut(track_id) {
+                let descriptors: &'static [vibez_core::effect::ParamDescriptor] =
+                    Box::leak(Vec::new().into_boxed_slice());
+                track.effects.push(UiEffect {
+                    id: effect_id,
+                    effect_type: EffectType::Gain,
+                    bypass: false,
+                    params: Vec::new(),
+                    descriptors,
+                    plugin_name: Some(plugin_name.clone()),
+                    has_plugin_gui: has_gui,
+                });
+            }
+            self.send_command(EngineCommand::AddPluginEffect {
+                track_id,
+                effect_id,
+                effect,
+                position: None,
+            });
+            self.state.status_text = format!("Loaded {plugin_name}");
+        }
+
+        // Poll for loaded plugin instruments
+        while let Ok(result) = self.plugin_instrument_rx.try_recv() {
+            let track_id = result.track_id;
+            let plugin_name = result.plugin_name.clone();
+
+            // Phase 2: finish CLAP init on UI thread
+            let (instrument, gui_raw_ptr): (
+                Box<dyn vibez_instruments::Instrument>,
+                Option<PluginRawPtr>,
+            ) = if let Some(partial) = result.clap_partial {
+                match vibez_plugin_host::clap_host::instance::ClapPluginInstance::init_on_main_thread(
+                    partial,
+                    result.sample_rate,
+                    4096,
+                ) {
+                    Ok(clap_inst) => {
+                        let raw_ptr = Some(PluginRawPtr::Clap(
+                            clap_inst.plugin_ptr() as *const std::ffi::c_void,
+                        ));
+                        let wrapper =
+                            vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(clap_inst));
+                        (Box::new(wrapper), raw_ptr)
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: CLAP instrument init failed on UI thread: {e}");
+                        self.state.status_text = format!("Plugin init failed: {e}");
+                        continue;
+                    }
+                }
+            } else if let Some(instrument) = result.instrument {
+                (instrument, result.gui_raw_ptr)
+            } else {
+                continue;
+            };
+
+            let has_gui = gui_raw_ptr.is_some();
+
+            if let Some(raw_ptr) = gui_raw_ptr {
+                let key = PluginGuiKey::Instrument { track_id };
+                self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
+            }
+
+            if let Some(track) = self.state.find_track_mut(track_id) {
+                track.has_instrument = true;
+                track.plugin_instrument_name = Some(plugin_name.clone());
+                track.has_plugin_instrument_gui = has_gui;
+            }
+            self.send_command(EngineCommand::SetPluginInstrument {
+                track_id,
+                instrument,
+            });
+            self.state.status_text = format!("Loaded {plugin_name}");
+        }
+    }
+
+    fn poll_plugin_windows(&mut self) {
+        if let Some(ref mut mgr) = self.plugin_window_manager {
+            for event in mgr.poll_events() {
+                match event {
+                    PluginWindowEvent::Closed(_key) => {
+                        self.state.status_text = "Plugin GUI closed".to_string();
+                    }
+                }
+            }
+        }
+    }
+
     fn poll_engine_events(&mut self) {
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
@@ -2596,7 +3005,11 @@ impl App {
             .height(Length::Fill)
             .into();
 
-        if self.state.context_menu.is_some() {
+        if self.state.settings_open {
+            stack![base_layout, self.view_settings_modal()].into()
+        } else if self.state.file_menu_open {
+            stack![base_layout, self.view_file_menu_overlay()].into()
+        } else if self.state.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
         } else if self.state.editing_clip_name.is_some() {
             stack![base_layout, self.view_rename_overlay()].into()
@@ -2605,6 +3018,258 @@ impl App {
         } else {
             base_layout
         }
+    }
+
+    fn view_file_menu_overlay(&self) -> Element<'_, Message> {
+        let settings_btn = button(
+            row![
+                icons::icon(icons::SLIDERS_VERTICAL).size(12).color(th::TEXT),
+                text("Settings...").size(12).color(th::TEXT)
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::OpenSettings)
+        .padding([8, 16])
+        .width(Length::Fill)
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(th::BG_HOVER.into())
+                }
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT,
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        });
+
+        let menu_content = column![settings_btn]
+            .spacing(2)
+            .padding(4)
+            .width(Length::Fixed(160.0));
+
+        let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Position below the header, near the File button
+        let padded = column![
+            vertical_space().height(Length::Fixed(42.0)),
+            row![
+                horizontal_space().width(Length::Fixed(60.0)),
+                menu_card,
+            ]
+        ];
+
+        mouse_area(
+            container(padded)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::DismissFileMenu)
+        .into()
+    }
+
+    fn view_settings_modal(&self) -> Element<'_, Message> {
+        let title = text("Settings").size(18).color(th::ACCENT);
+        let close_btn = button(
+            icons::icon(icons::X).size(14).color(th::TEXT_DIM),
+        )
+        .on_press(Message::CloseSettings)
+        .padding([4, 8])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(th::BG_HOVER.into())
+                }
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT_DIM,
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        });
+
+        let header = row![title, horizontal_space(), close_btn].align_y(iced::Alignment::Center);
+
+        // Plugin section header
+        let plugin_title = text("Plugin Library").size(14).color(th::TEXT);
+
+        // Default paths checkbox
+        let default_paths_label = if self.state.plugin_settings.scan_default_paths {
+            icons::icon(icons::CIRCLE_DOT).size(12).color(th::ACCENT)
+        } else {
+            icons::icon(icons::CIRCLE).size(12).color(th::TEXT_DIM)
+        };
+        let default_paths_btn = button(
+            row![
+                default_paths_label,
+                text("Scan default system paths").size(12).color(th::TEXT)
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::ToggleScanDefaultPaths)
+        .padding([4, 8])
+        .style(|_theme: &Theme, _status| button::Style {
+            background: None,
+            text_color: th::TEXT,
+            border: iced::Border::default(),
+            ..Default::default()
+        });
+
+        // Scan paths list
+        let mut paths_col = column![].spacing(4);
+        for (i, path) in self.state.plugin_settings.extra_scan_paths.iter().enumerate() {
+            let path_text = text(path.display().to_string()).size(11).color(th::TEXT_DIM);
+            let remove_btn = button(
+                icons::icon(icons::X).size(10).color(th::DANGER),
+            )
+            .on_press(Message::RemovePluginScanPath(i))
+            .padding([2, 6])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::DANGER,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            });
+            paths_col = paths_col.push(
+                row![path_text, horizontal_space(), remove_btn]
+                    .align_y(iced::Alignment::Center)
+                    .spacing(4),
+            );
+        }
+
+        let add_path_btn = button(
+            row![
+                icons::icon(icons::PLUS).size(12).color(th::ACCENT),
+                text("Add Path").size(12).color(th::ACCENT)
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::AddPluginScanPath)
+        .padding([6, 12])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(th::BG_HOVER.into())
+                }
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::ACCENT,
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
+        // Scan button
+        let scan_label = if self.state.plugin_scan_in_progress {
+            "Scanning..."
+        } else {
+            "Scan Plugins"
+        };
+        let scan_btn = button(
+            text(scan_label).size(12).color(th::TEXT),
+        )
+        .on_press(Message::ScanPlugins)
+        .padding([8, 16])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(th::ACCENT_DIM.into())
+                }
+                _ => Some(th::BG_ELEVATED.into()),
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT,
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
+        // Status
+        let cache_count = self.state.plugin_settings.cache.len();
+        let status = if !self.state.plugin_scan_status.is_empty() {
+            text(&self.state.plugin_scan_status).size(11).color(th::TEXT_DIM)
+        } else {
+            text(format!("{cache_count} plugins cached")).size(11).color(th::TEXT_DIM)
+        };
+
+        let content = column![
+            header,
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }),
+            plugin_title,
+            default_paths_btn,
+            paths_col,
+            row![add_path_btn, horizontal_space(), scan_btn].spacing(8).align_y(iced::Alignment::Center),
+            status,
+        ]
+        .spacing(12)
+        .padding(20)
+        .width(Length::Fixed(480.0));
+
+        let dialog = container(content).style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        });
+
+        // Centered overlay with dimmed background
+        mouse_area(
+            container(
+                center(dialog)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                ..Default::default()
+            }),
+        )
+        .on_press(Message::CloseSettings)
+        .into()
     }
 
     fn view_rename_overlay(&self) -> Element<'_, Message> {
@@ -2895,7 +3560,27 @@ impl App {
 
         let tabs = row![arrange_tab, mix_tab].spacing(4);
 
-        let header_row = row![title, tabs, horizontal_space()].spacing(8);
+        let file_btn = button(
+            text("File").size(13).color(th::TEXT_DIM),
+        )
+        .on_press(Message::ToggleFileMenu)
+        .padding([6, 14])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    Some(th::BG_HOVER.into())
+                }
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT_DIM,
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        });
+
+        let header_row = row![title, file_btn, tabs, horizontal_space()].spacing(8);
 
         let header = header_row.padding(10).align_y(iced::Alignment::Center);
 
@@ -3379,14 +4064,21 @@ impl App {
 
         // Instrument device card (branched by kind)
         if track.has_instrument {
-            match track.instrument_kind {
-                Some(vibez_core::midi::InstrumentKind::Sampler) => {
-                    let card = self.view_sampler_device(track_id, track, track_color);
-                    devices_row = devices_row.push(card);
-                }
-                _ => {
-                    let synth_card = self.view_synth_device(track_id, track_color);
-                    devices_row = devices_row.push(synth_card);
+            if track.plugin_instrument_name.is_some() {
+                // External plugin instrument — clickable card
+                let card =
+                    self.view_plugin_instrument_device(track_id, track, track_color);
+                devices_row = devices_row.push(card);
+            } else {
+                match track.instrument_kind {
+                    Some(vibez_core::midi::InstrumentKind::Sampler) => {
+                        let card = self.view_sampler_device(track_id, track, track_color);
+                        devices_row = devices_row.push(card);
+                    }
+                    _ => {
+                        let synth_card = self.view_synth_device(track_id, track_color);
+                        devices_row = devices_row.push(synth_card);
+                    }
                 }
             }
         } else if track.kind.is_midi() {
@@ -3415,6 +4107,66 @@ impl App {
                 x: self.state.cursor_x,
                 y: self.state.cursor_y,
                 track_id,
+            })
+            .into()
+    }
+
+    /// Device card for an external plugin instrument — shows plugin name, clickable to open GUI.
+    fn view_plugin_instrument_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        let dot = text("\u{25CF}").size(10).color(track_color);
+        let plugin_name = track
+            .plugin_instrument_name
+            .as_deref()
+            .unwrap_or("Plugin");
+
+        let name_elem: Element<'a, Message> = if track.has_plugin_instrument_gui {
+            let gui_key = PluginGuiKey::Instrument { track_id };
+            button(text(plugin_name).size(11).color(th::TEXT))
+                .on_press(Message::OpenPluginGui(gui_key))
+                .padding([0, 2])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: None,
+                    text_color: th::TEXT,
+                    ..Default::default()
+                })
+                .into()
+        } else {
+            text(plugin_name).size(11).color(th::TEXT).into()
+        };
+
+        let remove_btn = button(icons::icon(icons::X).size(11).color(th::TEXT_MUTED))
+            .on_press(Message::RemoveTrackInstrument(track_id))
+            .padding([2, 4]);
+
+        let header = row![dot, name_elem, remove_btn]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+
+        let hint = if track.has_plugin_instrument_gui {
+            text("Click name to open GUI").size(9).color(th::TEXT_MUTED)
+        } else {
+            text("No GUI available").size(9).color(th::TEXT_MUTED)
+        };
+
+        let card = column![header, hint]
+            .spacing(6)
+            .padding(8)
+            .width(Length::Fixed(160.0));
+
+        container(card)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
             })
             .into()
     }
@@ -3605,6 +4357,32 @@ impl App {
             });
         tabs_row = tabs_row.push(fx_tab);
 
+        // Plugins tab
+        let plugins_active = menu.category == Some(DeviceMenuCategory::Plugins);
+        let (bg, tc) = if plugins_active {
+            (th::ACCENT_DIM, th::ACCENT)
+        } else {
+            (th::BG_ELEVATED, th::TEXT_DIM)
+        };
+        let plugins_tab = button(text("Plugins").size(11).color(tc))
+            .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Plugins))
+            .padding([4, 10])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(bg.into()),
+                text_color: tc,
+                border: iced::Border {
+                    color: if plugins_active {
+                        th::ACCENT_DIM
+                    } else {
+                        th::BORDER
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
+        tabs_row = tabs_row.push(plugins_tab);
+
         // Search input
         let search_input = text_input("Search...", &menu.search)
             .on_input(Message::DeviceMenuSearch)
@@ -3641,6 +4419,55 @@ impl App {
                             }
                         });
                     items_col = items_col.push(btn);
+                }
+            }
+            Some(DeviceMenuCategory::Plugins) => {
+                if self.state.plugin_settings.cache.is_empty() {
+                    items_col = items_col.push(
+                        text("No plugins scanned yet.\nUse File → Settings to scan.")
+                            .size(11)
+                            .color(th::TEXT_DIM),
+                    );
+                } else {
+                    for plugin in &self.state.plugin_settings.cache {
+                        let name = &plugin.name;
+                        if !search_lower.is_empty()
+                            && !name.to_lowercase().contains(&search_lower)
+                            && !plugin.vendor.to_lowercase().contains(&search_lower)
+                        {
+                            continue;
+                        }
+                        let format_badge = match plugin.format {
+                            PluginFormat::Clap => "CLAP",
+                            PluginFormat::Vst3 => "VST3",
+                        };
+                        let cat_label = match plugin.category {
+                            PluginCategory::Effect => "fx",
+                            PluginCategory::Instrument => "inst",
+                            PluginCategory::Both => "fx+inst",
+                        };
+                        let label_text = format!("{name}  [{format_badge}] {cat_label}");
+                        let plugin_id = plugin.id.clone();
+                        let btn = button(text(label_text).size(11).color(th::TEXT))
+                            .on_press(Message::AddPluginToTrack(track_id, plugin_id))
+                            .padding([6, 10])
+                            .width(Length::Fill)
+                            .style(|_theme: &Theme, status| {
+                                let bg = match status {
+                                    button::Status::Hovered | button::Status::Pressed => {
+                                        Some(th::BG_HOVER.into())
+                                    }
+                                    _ => None,
+                                };
+                                button::Style {
+                                    background: bg,
+                                    text_color: th::TEXT,
+                                    border: iced::Border::default(),
+                                    ..Default::default()
+                                }
+                            });
+                        items_col = items_col.push(btn);
+                    }
                 }
             }
             Some(DeviceMenuCategory::Effects) | None => {
@@ -4209,6 +5036,99 @@ impl App {
                 _ => None,
             }),
         ])
+    }
+}
+
+/// Phase 1 of plugin loading (runs on background thread).
+/// For CLAP: only loads the DSO — NO CLAP API calls (not even create_plugin).
+/// For VST3: fully loads (VST3 doesn't have JUCE MessageManager issues).
+fn load_plugin_effect_bg(
+    info: &PluginInfo,
+    sample_rate: f64,
+) -> Result<PluginLoadResult, String> {
+    match info.format {
+        PluginFormat::Clap => {
+            let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
+                &info.path,
+                &info.id.uid,
+                false,
+            )?;
+            Ok(PluginLoadResult {
+                track_id: TrackId::default(), // filled in by caller
+                effect_id: EffectId::new(),
+                plugin_name: info.name.clone(),
+                effect: None,
+                gui_raw_ptr: None,
+                clap_partial: Some(partial),
+                sample_rate,
+            })
+        }
+        PluginFormat::Vst3 => {
+            let vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+                &info.path,
+                &info.id.uid,
+                false,
+                sample_rate,
+                4096,
+            )?;
+            let gui_raw_ptr = Some(PluginRawPtr::Vst3(vst3_inst.component_ptr()));
+            let name = vst3_inst.name().to_string();
+            let wrapper = vibez_plugin_host::PluginEffectWrapper::new(Box::new(vst3_inst));
+            Ok(PluginLoadResult {
+                track_id: TrackId::default(),
+                effect_id: EffectId::new(),
+                plugin_name: name,
+                effect: Some(Box::new(wrapper)),
+                gui_raw_ptr,
+                clap_partial: None,
+                sample_rate,
+            })
+        }
+    }
+}
+
+/// Phase 1 of instrument loading (runs on background thread).
+fn load_plugin_instrument_bg(
+    info: &PluginInfo,
+    sample_rate: f64,
+) -> Result<PluginInstrumentLoadResult, String> {
+    match info.format {
+        PluginFormat::Clap => {
+            let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
+                &info.path,
+                &info.id.uid,
+                true,
+            )?;
+            Ok(PluginInstrumentLoadResult {
+                track_id: TrackId::default(),
+                plugin_name: info.name.clone(),
+                instrument: None,
+                gui_raw_ptr: None,
+                clap_partial: Some(partial),
+                sample_rate,
+            })
+        }
+        PluginFormat::Vst3 => {
+            let vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+                &info.path,
+                &info.id.uid,
+                true,
+                sample_rate,
+                4096,
+            )?;
+            let gui_raw_ptr = Some(PluginRawPtr::Vst3(vst3_inst.component_ptr()));
+            let name = vst3_inst.name().to_string();
+            let wrapper =
+                vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
+            Ok(PluginInstrumentLoadResult {
+                track_id: TrackId::default(),
+                plugin_name: name,
+                instrument: Some(Box::new(wrapper)),
+                gui_raw_ptr,
+                clap_partial: None,
+                sample_rate,
+            })
+        }
     }
 }
 

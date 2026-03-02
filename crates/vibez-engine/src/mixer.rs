@@ -6,7 +6,7 @@ use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::time::TempoMap;
 use vibez_dsp::effect::AudioEffect;
-use vibez_instruments::synth::SubtractiveSynth;
+use vibez_instruments::Instrument;
 
 /// A clip as it exists at runtime in the engine (on the audio thread).
 pub struct EngineClip {
@@ -68,7 +68,7 @@ pub struct EngineTrack {
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
     pub note_clips: Vec<EngineNoteClip>,
-    pub synth: Option<Box<SubtractiveSynth>>,
+    pub instrument: Option<Box<dyn Instrument>>,
 }
 
 impl EngineTrack {
@@ -83,7 +83,7 @@ impl EngineTrack {
             mix_buffer: Vec::new(),
             effects: Vec::new(),
             note_clips: Vec::new(),
-            synth: None,
+            instrument: None,
         }
     }
 
@@ -177,7 +177,7 @@ impl EngineTrack {
         channels: usize,
         tempo_map: &TempoMap,
     ) -> bool {
-        if self.synth.is_none() {
+        if self.instrument.is_none() {
             return false;
         }
 
@@ -286,19 +286,19 @@ impl EngineTrack {
                 }
             }
 
-            let synth = self.synth.as_mut().unwrap();
+            let instrument = self.instrument.as_mut().unwrap();
             // Process note_offs before note_ons for clean re-triggers
             for pitch in &note_offs {
-                synth.note_off(*pitch);
+                instrument.note_off(*pitch);
             }
             for (pitch, vel) in &note_ons {
-                synth.note_on(*pitch, *vel);
+                instrument.note_on(*pitch, *vel);
                 rendered = true;
             }
 
             let start = frame * channels;
             let end = start + channels;
-            synth.render(&mut self.mix_buffer[start..end], channels);
+            instrument.render(&mut self.mix_buffer[start..end], channels);
         }
 
         if !rendered {

@@ -6,6 +6,7 @@ use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_plugin_host::PluginSettings;
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -33,6 +34,10 @@ pub struct UiEffect {
     pub bypass: bool,
     pub params: Vec<f32>,
     pub descriptors: &'static [ParamDescriptor],
+    /// Display name override for external plugins.
+    pub plugin_name: Option<String>,
+    /// Whether this effect has a native plugin GUI available.
+    pub has_plugin_gui: bool,
 }
 
 /// A note clip (MIDI pattern) as represented in the UI.
@@ -69,6 +74,10 @@ pub struct UiTrack {
     pub has_instrument: bool,
     pub instrument_kind: Option<InstrumentKind>,
     pub sample_name: Option<String>,
+    /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
+    pub plugin_instrument_name: Option<String>,
+    /// Whether the plugin instrument has a native GUI.
+    pub has_plugin_instrument_gui: bool,
 }
 
 impl UiTrack {
@@ -90,6 +99,8 @@ impl UiTrack {
             has_instrument: false,
             instrument_kind: None,
             sample_name: None,
+            plugin_instrument_name: None,
+            has_plugin_instrument_gui: false,
         }
     }
 
@@ -115,6 +126,8 @@ impl UiTrack {
             has_instrument,
             instrument_kind,
             sample_name: None,
+            plugin_instrument_name: None,
+            has_plugin_instrument_gui: false,
         }
     }
 }
@@ -217,6 +230,7 @@ pub enum PianoRollEditMode {
 pub enum DeviceMenuCategory {
     Instruments,
     Effects,
+    Plugins,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +312,15 @@ pub struct AppState {
 
     // Device context menu
     pub device_context_menu: Option<DeviceContextMenu>,
+
+    // File menu / Settings
+    pub file_menu_open: bool,
+    pub settings_open: bool,
+
+    // Plugin hosting
+    pub plugin_settings: PluginSettings,
+    pub plugin_scan_in_progress: bool,
+    pub plugin_scan_status: String,
 }
 
 
@@ -338,6 +361,11 @@ impl Default for AppState {
             edit_name_text: String::new(),
             piano_roll_edit_mode: PianoRollEditMode::default(),
             device_context_menu: None,
+            file_menu_open: false,
+            settings_open: false,
+            plugin_settings: PluginSettings::load(),
+            plugin_scan_in_progress: false,
+            plugin_scan_status: String::new(),
         }
     }
 }

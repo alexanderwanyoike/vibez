@@ -5,6 +5,8 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_plugin_host::gui::PluginGuiKey;
+use vibez_plugin_host::{PluginId, PluginInfo};
 
 use crate::state::{
     ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SnapGrid,
@@ -262,4 +264,28 @@ pub enum Message {
     // Cursor tracking
     CursorMoved(f32, f32),
     MouseReleased,
+
+    // File menu
+    ToggleFileMenu,
+    DismissFileMenu,
+
+    // Settings
+    OpenSettings,
+    CloseSettings,
+
+    // Plugin scanning
+    ScanPlugins,
+    ScanPluginsComplete(Vec<PluginInfo>),
+    AddPluginScanPath,
+    PluginScanPathSelected(Option<PathBuf>),
+    RemovePluginScanPath(usize),
+    ToggleScanDefaultPaths,
+
+    // Plugin loading (via device menu)
+    AddPluginToTrack(TrackId, PluginId),
+    PluginLoadError(String),
+
+    // Plugin GUI windows
+    OpenPluginGui(PluginGuiKey),
+    ClosePluginGui(PluginGuiKey),
 }
