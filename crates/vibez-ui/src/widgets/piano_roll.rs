@@ -1279,12 +1279,11 @@ impl canvas::Program<Message> for PianoRollWidget {
                 state.shift_held = false;
             }
 
-            // ── Keyboard: Delete / Backspace → remove selected notes ──
+            // ── Keyboard: Delete → remove selected notes ──
+            //
+            // Backspace is intentionally not bound because iced 0.13 canvas
+            // receives keyboard events even when a text input is focused.
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
-                ..
-            })
-            | canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
                 ..
             }) => {

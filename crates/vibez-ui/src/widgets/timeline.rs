@@ -1662,13 +1662,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Delete/Backspace for selected clip(s) --
+            // -- Keyboard: Delete for selected clip(s) --
+            //
+            // Intentionally does NOT capture Backspace. iced 0.13's canvas
+            // receives keyboard events even when a text input is focused, so
+            // binding Backspace here caused BPM edits to delete clips.
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
-                ..
-            })
-            | canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
                 ..
             }) => {
                 if !self.selected_clips.is_empty() {
