@@ -2,7 +2,7 @@
 //!
 //! Operates on [`NoteClipInfo`] to produce a set of mutated variants that keep
 //! the identity of the source phrase intact but add musical motion. The seed
-//! and mutator list determine the output completely — calling
+//! and mutator list determine the output completely: calling
 //! [`generate_variants`] twice with the same seed returns the same output.
 //!
 //! The mutators are deliberately coarse: they're meant to be auditioned and
@@ -343,7 +343,7 @@ fn apply_humanize(
 // ---------------------------------------------------------------------------
 
 /// Deterministic xorshift64 RNG. Small, fast, and good enough for musical
-/// noise — we don't need cryptographic quality here.
+/// noise; we don't need cryptographic quality here.
 struct Rng {
     state: u64,
 }

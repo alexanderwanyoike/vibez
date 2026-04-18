@@ -48,7 +48,7 @@ static COMPRESSOR_PARAMS: &[ParamDescriptor] = &[
 ];
 
 /// Single-channel-linked feedforward compressor with a log-domain envelope
-/// detector. Designed for musical gluing — ratios and times are
+/// detector. Designed for musical gluing: ratios and times are
 /// forgiving, not surgical.
 pub struct CompressorEffect {
     threshold_db: f32,

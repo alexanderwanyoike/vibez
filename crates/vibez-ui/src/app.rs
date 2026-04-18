@@ -904,7 +904,7 @@ impl App {
         clip_name: String,
     ) -> Task<Message> {
         if range_samples.1 <= range_samples.0 {
-            self.state.status_text = "Empty range — nothing to bounce".to_string();
+            self.state.status_text = "Empty range, nothing to bounce".to_string();
             return Task::none();
         }
 
@@ -4548,7 +4548,7 @@ impl App {
 
         let mut template_rows: Vec<Element<'_, Message>> = Vec::new();
         for template in vibez_project::templates::TEMPLATES {
-            let label = format!("New — {} {}", template.name, template.bpm as u32);
+            let label = format!("New: {} {}", template.name, template.bpm as u32);
             template_rows.push(
                 button(
                     row![

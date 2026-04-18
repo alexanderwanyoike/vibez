@@ -2,7 +2,7 @@
 //!
 //! Each template returns a [`Project`] with a tempo, an empty track layout,
 //! and default instrument assignments. Templates intentionally ship no audio
-//! content — they're a shape to pour samples into, not a pre-composed song.
+//! content: they're a shape to pour samples into, not a pre-composed song.
 
 use vibez_core::constants::DEFAULT_SAMPLE_RATE;
 use vibez_core::midi::{InstrumentKind, TrackKind};

@@ -6,7 +6,7 @@
 //! the audio thread are used, so what you bounce matches what you hear.
 //!
 //! Plugin instruments and plugin effects are **not** reconstructed offline in
-//! this version — tracks or effect slots backed by an external plugin are
+//! this version: tracks or effect slots backed by an external plugin are
 //! silently skipped and a warning is emitted. Native instruments and native
 //! effects (`vibez-dsp`) render fully.
 
@@ -133,7 +133,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             engine.instrument = Some(instrument);
         } else if track_info.kind.is_midi() {
             warnings.push(format!(
-                "Track '{}' has no native instrument — any plugin instrument will not render",
+                "Track '{}' has no native instrument; any plugin instrument will not render",
                 track_info.name
             ));
         }
@@ -163,7 +163,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                     loop_end: clip.loop_end,
                 }),
                 None => warnings.push(format!(
-                    "Clip '{}' audio missing — skipped",
+                    "Clip '{}' audio missing, skipped",
                     clip.name
                 )),
             }
