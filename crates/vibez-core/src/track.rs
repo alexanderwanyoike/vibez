@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
+use crate::midi::{InstrumentKind, TrackKind};
 
 /// Serializable track metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +15,14 @@ pub struct TrackInfo {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    #[serde(default)]
+    pub effects: Vec<EffectInfo>,
+    #[serde(default)]
+    pub kind: TrackKind,
+    #[serde(default)]
+    pub color_index: u8,
+    #[serde(default)]
+    pub instrument: Option<InstrumentKind>,
 }
 
 impl TrackInfo {
@@ -24,6 +34,10 @@ impl TrackInfo {
             pan: crate::constants::DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            effects: Vec::new(),
+            kind: TrackKind::default(),
+            color_index: 0,
+            instrument: None,
         }
     }
 }
@@ -42,6 +56,12 @@ pub struct ClipInfo {
     pub duration: u64,
     /// Path to the source audio file.
     pub file_path: PathBuf,
+    #[serde(default)]
+    pub loop_enabled: bool,
+    #[serde(default)]
+    pub loop_start: u64,
+    #[serde(default)]
+    pub loop_end: u64,
 }
 
 impl ClipInfo {
@@ -75,6 +95,9 @@ mod tests {
             source_offset: 0,
             duration: 500,
             file_path: PathBuf::from("test.wav"),
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         assert_eq!(clip.end_position(), 1500);
     }
@@ -89,6 +112,9 @@ mod tests {
             source_offset: 0,
             duration: 100,
             file_path: PathBuf::from("test.wav"),
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         assert_eq!(clip.end_position(), u64::MAX);
     }
@@ -120,6 +146,9 @@ mod tests {
             source_offset: 1000,
             duration: 88200,
             file_path: PathBuf::from("/audio/vocal.wav"),
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         let json = serde_json::to_string(&clip).unwrap();
         let deserialized: ClipInfo = serde_json::from_str(&json).unwrap();

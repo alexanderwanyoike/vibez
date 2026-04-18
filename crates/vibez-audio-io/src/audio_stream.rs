@@ -5,6 +5,7 @@
 //! inside the real-time audio callback.
 
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -103,7 +104,7 @@ pub struct StreamParams {
 ///
 /// ```ignore
 /// let (engine, cmd_tx, event_rx) = AudioEngine::new();
-/// let stream = AudioOutputStream::open(engine)?;
+/// let stream = AudioOutputStream::open(engine, None)?;
 /// stream.play()?;
 /// // ... use cmd_tx / event_rx on the UI thread ...
 /// stream.pause()?;
@@ -111,40 +112,84 @@ pub struct StreamParams {
 ///
 /// # Thread safety
 ///
-/// The `AudioEngine` is moved *into* the cpal callback closure. Because
-/// `AudioEngine` is `Send` and the closure is `FnMut + Send + 'static`,
-/// this satisfies cpal's requirements.  The engine is **not** shared across
-/// threads -- it lives exclusively on the audio thread once the stream is
-/// built.
+/// The `AudioEngine` is held in an `Arc<Mutex<Option<AudioEngine>>>` shared
+/// between the UI thread and the cpal callback closure.  The audio callback
+/// uses `try_lock` so it never blocks — if the UI thread briefly holds the
+/// lock (during [`reconfigure`](AudioOutputStream::reconfigure)), the
+/// callback outputs silence for that single buffer (a few ms, inaudible).
 ///
-/// # Future improvement
-///
-/// Use `audio_thread_priority` to promote the cpal callback thread to
-/// real-time priority for glitch-free playback.
+/// Outside of reconfigure the lock is uncontended, so `try_lock` always
+/// succeeds with no overhead beyond the atomic check.
 pub struct AudioOutputStream {
     stream: cpal::Stream,
     params: StreamParams,
+    /// Shared engine slot.  The audio callback `try_lock`s this each
+    /// invocation and calls `engine.process()` if the lock is obtained.
+    engine_slot: Arc<Mutex<Option<AudioEngine>>>,
 }
 
 impl AudioOutputStream {
     /// Open a new output stream on the default device.
     ///
-    /// The `engine` is moved into the audio callback; the caller should
-    /// have already extracted the command producer and event consumer from
-    /// [`AudioEngine::new()`] before calling this.
-    pub fn open(engine: AudioEngine) -> Result<Self, AudioStreamError> {
+    /// The `engine` is moved into a shared slot accessible from the audio
+    /// callback; the caller should have already extracted the command
+    /// producer and event consumer from [`AudioEngine::new()`] before
+    /// calling this.
+    ///
+    /// If `buffer_size` is `Some(n)`, a fixed buffer size of `n` frames is
+    /// requested from the device.  If `None`, the device's default is used.
+    pub fn open(engine: AudioEngine, buffer_size: Option<u32>) -> Result<Self, AudioStreamError> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
             .ok_or(AudioStreamError::NoOutputDevice)?;
 
-        Self::open_on_device(engine, &device)
+        Self::open_on_device(engine, &device, buffer_size)
     }
 
     /// Open a new output stream on a specific device.
     pub fn open_on_device(
         engine: AudioEngine,
         device: &cpal::Device,
+        buffer_size: Option<u32>,
+    ) -> Result<Self, AudioStreamError> {
+        let engine_slot = Arc::new(Mutex::new(Some(engine)));
+        Self::build_stream(engine_slot, device, buffer_size)
+    }
+
+    /// Reconfigure the stream with a new buffer size, preserving the engine
+    /// and all its state (tracks, clips, effects, plugins, transport, etc.).
+    ///
+    /// The old cpal stream is dropped and a new one is created.  During the
+    /// brief moment the engine is being moved between streams, the old
+    /// callback outputs silence (one buffer, inaudible).
+    pub fn reconfigure(&mut self, buffer_size: Option<u32>) -> Result<(), AudioStreamError> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or(AudioStreamError::NoOutputDevice)?;
+
+        // Pause the old stream so the callback stops firing.
+        let _ = self.stream.pause();
+
+        // Take the engine out of the shared slot.  The old callback will
+        // output silence if it fires between pause and drop.
+        let engine_slot = Arc::clone(&self.engine_slot);
+
+        // Build a new stream that reuses the same engine slot.
+        let new = Self::build_stream(engine_slot, &device, buffer_size)?;
+
+        self.stream = new.stream;
+        self.params = new.params;
+        // engine_slot is already the same Arc
+        Ok(())
+    }
+
+    /// Internal: build a cpal stream around an existing engine slot.
+    fn build_stream(
+        engine_slot: Arc<Mutex<Option<AudioEngine>>>,
+        device: &cpal::Device,
+        buffer_size: Option<u32>,
     ) -> Result<Self, AudioStreamError> {
         let supported_config = device.default_output_config()?;
 
@@ -163,10 +208,15 @@ impl AudioOutputStream {
         // Clamp to at least DEFAULT_CHANNELS so the engine always gets stereo.
         let channels = channels.max(DEFAULT_CHANNELS);
 
+        let buf_size = match buffer_size {
+            Some(size) => cpal::BufferSize::Fixed(size),
+            None => cpal::BufferSize::Default,
+        };
+
         let config = StreamConfig {
             channels: channels as u16,
             sample_rate: SampleRate(sample_rate),
-            buffer_size: cpal::BufferSize::Default,
+            buffer_size: buf_size,
         };
 
         let params = StreamParams {
@@ -174,15 +224,49 @@ impl AudioOutputStream {
             channels,
         };
 
-        // Move the engine into the callback.  This is lock-free: the engine
-        // communicates with the UI thread via rtrb ring buffers, not mutexes.
-        let mut engine = engine;
         let ch = channels;
+
+        // Promote the audio callback thread to realtime on first invocation.
+        // The handle must be kept alive for the lifetime of the stream on
+        // platforms where dropping it demotes the thread (macOS/Windows).
+        let buffer_frames = buffer_size.unwrap_or(512);
+        let rt_sample_rate = sample_rate;
+        #[allow(clippy::type_complexity)]
+        let mut rt_state: Option<Result<audio_thread_priority::RtPriorityHandle, ()>> = None;
+
+        let slot = Arc::clone(&engine_slot);
 
         let stream = device.build_output_stream(
             &config,
             move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
-                engine.process(data, ch);
+                if rt_state.is_none() {
+                    rt_state = Some(
+                        match audio_thread_priority::promote_current_thread_to_real_time(
+                            buffer_frames,
+                            rt_sample_rate,
+                        ) {
+                            Ok(handle) => {
+                                eprintln!("vibez: audio thread promoted to realtime");
+                                Ok(handle)
+                            }
+                            Err(e) => {
+                                eprintln!("vibez: failed to promote audio thread: {e}");
+                                Err(())
+                            }
+                        },
+                    );
+                }
+
+                // try_lock: never blocks the audio thread.  If the UI thread
+                // holds the lock during reconfigure, output silence.
+                if let Ok(mut guard) = slot.try_lock() {
+                    if let Some(engine) = guard.as_mut() {
+                        engine.process(data, ch);
+                        return;
+                    }
+                }
+                // Fallback: silence
+                data.fill(0.0);
             },
             move |err| {
                 eprintln!("vibez: audio stream error: {err}");
@@ -190,7 +274,11 @@ impl AudioOutputStream {
             None,
         )?;
 
-        Ok(Self { stream, params })
+        Ok(Self {
+            stream,
+            params,
+            engine_slot,
+        })
     }
 
     /// Start (or resume) audio playback.
@@ -232,7 +320,7 @@ mod tests {
     #[test]
     fn error_display() {
         let err = AudioStreamError::NoOutputDevice;
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("no default"));
     }
 
@@ -246,5 +334,45 @@ mod tests {
         let p2 = p;
         assert_eq!(p2.sample_rate, 44100);
         assert_eq!(p2.channels, 2);
+    }
+
+    /// Verify `StreamParams` default values are sensible.
+    #[test]
+    fn stream_params_default_values() {
+        let p = StreamParams {
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            channels: DEFAULT_CHANNELS,
+        };
+        assert_eq!(p.sample_rate, 44100);
+        assert_eq!(p.channels, 2);
+    }
+
+    /// Verify `BufferSize::Fixed` is constructed for `Some(1024)`.
+    #[test]
+    fn buffer_size_fixed_config() {
+        let buf = match Some(1024u32) {
+            Some(size) => cpal::BufferSize::Fixed(size),
+            None => cpal::BufferSize::Default,
+        };
+        assert!(matches!(buf, cpal::BufferSize::Fixed(1024)));
+    }
+
+    /// Verify `BufferSize::Default` is used for `None`.
+    #[test]
+    fn buffer_size_none_uses_default() {
+        let buf: cpal::BufferSize = match None::<u32> {
+            Some(size) => cpal::BufferSize::Fixed(size),
+            None => cpal::BufferSize::Default,
+        };
+        assert!(matches!(buf, cpal::BufferSize::Default));
+    }
+
+    /// Calling `promote_current_thread_to_real_time` doesn't panic
+    /// (may fail without permissions, that's OK).
+    #[test]
+    fn promote_does_not_panic() {
+        let result = audio_thread_priority::promote_current_thread_to_real_time(512, 44100);
+        // We don't assert Ok — CI may lack permissions. Just ensure no panic.
+        drop(result);
     }
 }

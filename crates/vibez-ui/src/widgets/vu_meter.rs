@@ -1,9 +1,10 @@
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::theme;
 
+/// Vertical VU meter (for mixer strips and master).
 pub struct VuMeterWidget {
     pub peak_l: f32,
     pub peak_r: f32,
@@ -43,19 +44,15 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, h),
-            theme::BG_SURFACE,
+            theme::BG_ELEVATED,
         );
 
         let bar_width = (w / 2.0 - 3.0).max(4.0);
         let padding = 2.0;
         let max_height = h - padding * 2.0;
 
-        // Draw a single meter bar
+        // Draw a single meter bar with segmented green/yellow/red
         let draw_bar = |frame: &mut canvas::Frame, x: f32, level: f32| {
-            let bar_height = (level * max_height).clamp(0.0, max_height);
-            let y = h - padding - bar_height;
-
-            // Three-color gradient segments
             let green_threshold = 0.6;
             let yellow_threshold = 0.85;
 
@@ -91,21 +88,6 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
                     );
                 }
             }
-
-            // Border
-            let border = canvas::Path::rectangle(
-                iced::Point::new(x, y),
-                iced::Size::new(bar_width, bar_height),
-            );
-            frame.stroke(
-                &border,
-                canvas::Stroke::default()
-                    .with_color(iced::Color {
-                        a: 0.2,
-                        ..theme::TEXT
-                    })
-                    .with_width(0.5),
-            );
         };
 
         let left_x = padding;
@@ -120,9 +102,21 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
 
 /// Horizontal VU meter for arrangement track headers.
 /// Two bars stacked vertically (L on top, R below), growing left to right.
+/// Uses track color for the fill.
 pub struct HorizontalVuMeterWidget {
     pub peak_l: f32,
     pub peak_r: f32,
+    pub track_color: Color,
+}
+
+impl HorizontalVuMeterWidget {
+    pub fn new(peak_l: f32, peak_r: f32, track_color: Color) -> Self {
+        Self {
+            peak_l,
+            peak_r,
+            track_color,
+        }
+    }
 }
 
 impl canvas::Program<crate::message::Message> for HorizontalVuMeterWidget {
@@ -144,48 +138,31 @@ impl canvas::Program<crate::message::Message> for HorizontalVuMeterWidget {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, h),
-            theme::BG_SURFACE,
+            theme::BG_ELEVATED,
         );
 
         let padding = 1.0;
         let bar_height = (h / 2.0 - padding * 1.5).max(2.0);
         let max_width = w - padding * 2.0;
 
-        let draw_bar = |frame: &mut canvas::Frame, y: f32, level: f32| {
-            let green_threshold = 0.6;
-            let yellow_threshold = 0.85;
+        let track_color = self.track_color;
 
+        let draw_bar = |frame: &mut canvas::Frame, y: f32, level: f32| {
             if level > 0.0 {
-                // Green portion (0..0.6)
-                let green_w = (level.min(green_threshold) * max_width).max(0.0);
+                let bar_w = (level * max_width).clamp(0.0, max_width);
+                // Use track color with brightness modulated by level
+                let color = if level > 0.85 {
+                    theme::METER_RED
+                } else if level > 0.6 {
+                    theme::METER_YELLOW
+                } else {
+                    track_color
+                };
                 frame.fill_rectangle(
                     iced::Point::new(padding, y),
-                    iced::Size::new(green_w, bar_height),
-                    theme::METER_GREEN,
+                    iced::Size::new(bar_w, bar_height),
+                    color,
                 );
-
-                // Yellow portion (0.6..0.85)
-                if level > green_threshold {
-                    let green_end = green_threshold * max_width;
-                    let yellow_w =
-                        ((level.min(yellow_threshold) - green_threshold) * max_width).max(0.0);
-                    frame.fill_rectangle(
-                        iced::Point::new(padding + green_end, y),
-                        iced::Size::new(yellow_w, bar_height),
-                        theme::METER_YELLOW,
-                    );
-                }
-
-                // Red portion (0.85..1.0)
-                if level > yellow_threshold {
-                    let yellow_end = yellow_threshold * max_width;
-                    let red_w = ((level.min(1.0) - yellow_threshold) * max_width).max(0.0);
-                    frame.fill_rectangle(
-                        iced::Point::new(padding + yellow_end, y),
-                        iced::Size::new(red_w, bar_height),
-                        theme::METER_RED,
-                    );
-                }
             }
         };
 

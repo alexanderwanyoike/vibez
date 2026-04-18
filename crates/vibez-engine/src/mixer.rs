@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::MidiNote;
+use vibez_core::time::TempoMap;
+use vibez_dsp::effect::AudioEffect;
+use vibez_instruments::Instrument;
 
 /// A clip as it exists at runtime in the engine (on the audio thread).
 pub struct EngineClip {
@@ -14,6 +18,10 @@ pub struct EngineClip {
     pub source_offset: u64,
     /// Duration in samples.
     pub duration: u64,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start: u64,
+    pub loop_end: u64,
 }
 
 impl EngineClip {
@@ -31,6 +39,23 @@ impl EngineClip {
     }
 }
 
+pub struct EffectSlot {
+    pub id: EffectId,
+    pub effect: Box<dyn AudioEffect>,
+    pub bypass: bool,
+}
+
+pub struct EngineNoteClip {
+    pub id: ClipId,
+    pub position_beats: f64,
+    pub duration_beats: f64,
+    pub notes: Vec<MidiNote>,
+    // Looping
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+}
+
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
     pub id: TrackId,
@@ -41,6 +66,13 @@ pub struct EngineTrack {
     pub solo: bool,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
+    pub effects: Vec<EffectSlot>,
+    pub note_clips: Vec<EngineNoteClip>,
+    pub instrument: Option<Box<dyn Instrument>>,
+    /// Scratch storage for batch rendering: (frame_offset, pitch, velocity)
+    timed_note_ons: Vec<(u32, u8, u8)>,
+    /// Scratch storage for batch rendering: (frame_offset, pitch)
+    timed_note_offs: Vec<(u32, u8)>,
 }
 
 impl EngineTrack {
@@ -53,6 +85,11 @@ impl EngineTrack {
             mute: false,
             solo: false,
             mix_buffer: Vec::new(),
+            effects: Vec::new(),
+            note_clips: Vec::new(),
+            instrument: None,
+            timed_note_ons: Vec::new(),
+            timed_note_offs: Vec::new(),
         }
     }
 
@@ -98,7 +135,17 @@ impl EngineTrack {
 
                 // Calculate the sample index into the source audio
                 let clip_frame = global_frame - clip.position as usize;
-                let source_frame = clip.source_offset as usize + clip_frame;
+                let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
+                    let raw = clip.source_offset as usize + clip_frame;
+                    let loop_len = (clip.loop_end - clip.loop_start) as usize;
+                    if raw >= clip.loop_end as usize {
+                        clip.loop_start as usize + (raw - clip.loop_start as usize) % loop_len
+                    } else {
+                        raw
+                    }
+                } else {
+                    clip.source_offset as usize + clip_frame
+                };
 
                 for ch in 0..channels {
                     let sample = if ch < audio_channels {
@@ -114,6 +161,292 @@ impl EngineTrack {
         }
 
         rendered_any
+    }
+
+    pub fn process_effects(&mut self, frames: usize, channels: usize) {
+        let buf_size = frames * channels;
+        if buf_size == 0 {
+            return;
+        }
+        for slot in &mut self.effects {
+            if !slot.bypass {
+                slot.effect
+                    .process(&mut self.mix_buffer[..buf_size], channels);
+            }
+        }
+    }
+
+    pub fn render_instrument(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        tempo_map: &TempoMap,
+    ) -> bool {
+        if self.instrument.is_none() {
+            return false;
+        }
+
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
+        }
+
+        let spb = tempo_map.samples_per_beat();
+        if spb <= 0.0 {
+            return false;
+        }
+
+        let batch = self.instrument.as_ref().unwrap().supports_batch_render();
+
+        if batch {
+            self.render_instrument_batch(pos, frames, channels, spb)
+        } else {
+            self.render_instrument_per_frame(pos, frames, channels, spb)
+        }
+    }
+
+    /// Batch render path: pre-collect all timed MIDI events, send them with
+    /// frame offsets, then call `render()` once for the entire buffer.
+    /// Used for external plugins (CLAP/VST3) that process efficiently in
+    /// larger blocks.
+    fn render_instrument_batch(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        spb: f64,
+    ) -> bool {
+        let buf_size = frames * channels;
+        let beat_step = 1.0 / spb;
+        let mut rendered = false;
+
+        // Pre-scan: collect all events with frame offsets
+        for frame in 0..frames {
+            let sample_pos = pos + frame as u64;
+            let current_beat = sample_pos as f64 / spb;
+            let prev_beat = if sample_pos > 0 {
+                (sample_pos - 1) as f64 / spb
+            } else {
+                -1.0
+            };
+
+            for clip in &self.note_clips {
+                let clip_start_beat = clip.position_beats;
+                let clip_end_beat = clip.position_beats + clip.duration_beats;
+
+                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
+                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
+
+                if was_in_clip && !in_clip {
+                    for note in &clip.notes {
+                        self.timed_note_offs.push((frame as u32, note.pitch));
+                    }
+                    continue;
+                }
+
+                if !in_clip {
+                    continue;
+                }
+
+                let local_beat = current_beat - clip_start_beat;
+                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+                let loop_len = if looping {
+                    clip.loop_end_beats - clip.loop_start_beats
+                } else {
+                    0.0
+                };
+
+                let effective_local = if looping && local_beat >= clip.loop_end_beats {
+                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
+                } else {
+                    local_beat
+                };
+
+                let prev_effective_local = if !was_in_clip {
+                    -1.0
+                } else {
+                    let prev_local = prev_beat - clip_start_beat;
+                    if looping && prev_local >= clip.loop_end_beats {
+                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
+                    } else {
+                        prev_local
+                    }
+                };
+
+                let wrapped = looping
+                    && was_in_clip
+                    && prev_effective_local > effective_local + beat_step * 0.5;
+
+                if wrapped {
+                    for note in &clip.notes {
+                        self.timed_note_offs.push((frame as u32, note.pitch));
+                    }
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            self.timed_note_ons
+                                .push((frame as u32, note.pitch, note.velocity));
+                        }
+                    }
+                } else {
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            self.timed_note_ons
+                                .push((frame as u32, note.pitch, note.velocity));
+                        }
+                        let end_diff = effective_local - note.end_beat();
+                        if end_diff >= 0.0 && end_diff < beat_step {
+                            self.timed_note_offs.push((frame as u32, note.pitch));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Send all events with timing, then render the whole buffer at once
+        let instrument = self.instrument.as_mut().unwrap();
+
+        for &(frame, pitch) in &self.timed_note_offs {
+            instrument.note_off_at(pitch, frame);
+        }
+        for &(frame, pitch, vel) in &self.timed_note_ons {
+            instrument.note_on_at(pitch, vel, frame);
+            rendered = true;
+        }
+
+        instrument.render(&mut self.mix_buffer[..buf_size], channels);
+
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
+
+        if !rendered {
+            rendered = self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0);
+        }
+
+        rendered
+    }
+
+    /// Per-frame render path: process one sample at a time with immediate
+    /// note events. Used for built-in instruments (SubtractiveSynth, Sampler)
+    /// which handle per-frame rendering efficiently.
+    fn render_instrument_per_frame(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        spb: f64,
+    ) -> bool {
+        let buf_size = frames * channels;
+        let mut rendered = false;
+        let mut note_ons: Vec<(u8, u8)> = Vec::new();
+        let mut note_offs: Vec<u8> = Vec::new();
+        let beat_step = 1.0 / spb;
+
+        for frame in 0..frames {
+            let sample_pos = pos + frame as u64;
+            let current_beat = sample_pos as f64 / spb;
+            let prev_beat = if sample_pos > 0 {
+                (sample_pos - 1) as f64 / spb
+            } else {
+                -1.0
+            };
+
+            note_ons.clear();
+            note_offs.clear();
+
+            for clip in &self.note_clips {
+                let clip_start_beat = clip.position_beats;
+                let clip_end_beat = clip.position_beats + clip.duration_beats;
+
+                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
+                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
+
+                if was_in_clip && !in_clip {
+                    for note in &clip.notes {
+                        note_offs.push(note.pitch);
+                    }
+                    continue;
+                }
+
+                if !in_clip {
+                    continue;
+                }
+
+                let local_beat = current_beat - clip_start_beat;
+                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+                let loop_len = if looping {
+                    clip.loop_end_beats - clip.loop_start_beats
+                } else {
+                    0.0
+                };
+
+                let effective_local = if looping && local_beat >= clip.loop_end_beats {
+                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
+                } else {
+                    local_beat
+                };
+
+                let prev_effective_local = if !was_in_clip {
+                    -1.0
+                } else {
+                    let prev_local = prev_beat - clip_start_beat;
+                    if looping && prev_local >= clip.loop_end_beats {
+                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
+                    } else {
+                        prev_local
+                    }
+                };
+
+                let wrapped = looping
+                    && was_in_clip
+                    && prev_effective_local > effective_local + beat_step * 0.5;
+
+                if wrapped {
+                    for note in &clip.notes {
+                        note_offs.push(note.pitch);
+                    }
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            note_ons.push((note.pitch, note.velocity));
+                        }
+                    }
+                } else {
+                    for note in &clip.notes {
+                        let diff = effective_local - note.start_beat;
+                        if diff >= 0.0 && diff < beat_step {
+                            note_ons.push((note.pitch, note.velocity));
+                        }
+                        let end_diff = effective_local - note.end_beat();
+                        if end_diff >= 0.0 && end_diff < beat_step {
+                            note_offs.push(note.pitch);
+                        }
+                    }
+                }
+            }
+
+            let instrument = self.instrument.as_mut().unwrap();
+            for pitch in &note_offs {
+                instrument.note_off(*pitch);
+            }
+            for (pitch, vel) in &note_ons {
+                instrument.note_on(*pitch, *vel);
+                rendered = true;
+            }
+
+            let start = frame * channels;
+            let end = start + channels;
+            instrument.render(&mut self.mix_buffer[start..end], channels);
+        }
+
+        if !rendered {
+            rendered = self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0);
+        }
+
+        rendered
     }
 }
 
@@ -196,6 +529,9 @@ mod tests {
             position: 0,
             source_offset: 0,
             duration: 64,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         let rendered = track.render(0, 8, 2);
@@ -224,6 +560,9 @@ mod tests {
             position: 0,
             source_offset: 10,
             duration: 20,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         let rendered = track.render(0, 4, 2);
@@ -251,6 +590,9 @@ mod tests {
             position: 50,
             source_offset: 0,
             duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         });
 
         assert_eq!(calculate_total_length(&tracks), 150);
@@ -283,6 +625,9 @@ mod tests {
             position: 100,
             source_offset: 0,
             duration: 50,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         // Requesting frames 0..50 — clip starts at 100, not active
         assert!(!clip.is_active(0, 50));
@@ -297,8 +642,159 @@ mod tests {
             position: 40,
             source_offset: 0,
             duration: 50,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         // Requesting frames 30..60 — clip is at 40..90, overlaps
         assert!(clip.is_active(30, 30));
+    }
+
+    #[test]
+    fn clip_loop_renders_audio_past_source() {
+        let audio = make_test_audio(100, 0.5);
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 100,
+        });
+
+        // Render frames 100..108 (in looped region, past source length)
+        let rendered = track.render(100, 8, 2);
+        assert!(rendered);
+
+        // Output should be source audio (0.5), not silence
+        for i in 0..16 {
+            assert!(
+                (track.mix_buffer[i] - 0.5).abs() < 1e-6,
+                "sample {i}: expected 0.5, got {}",
+                track.mix_buffer[i]
+            );
+        }
+    }
+
+    #[test]
+    fn clip_loop_wraps_correctly() {
+        // Source: 100 frames with ascending values 0.0..0.99
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio: audio.clone(),
+            position: 0,
+            source_offset: 0,
+            duration: 250,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 100,
+        });
+
+        // Render all 250 frames
+        let rendered = track.render(0, 250, 2);
+        assert!(rendered);
+
+        // frame 150 should wrap to source frame 50 (150 % 100 = 50)
+        let val_150 = track.mix_buffer[150 * 2]; // left channel
+        let expected_50 = audio.sample(0, 50);
+        assert!(
+            (val_150 - expected_50).abs() < 1e-6,
+            "frame 150: expected {expected_50} (same as frame 50), got {val_150}",
+        );
+
+        // frame 200 should wrap to source frame 0 (200 % 100 = 0)
+        let val_200 = track.mix_buffer[200 * 2];
+        let expected_0 = audio.sample(0, 0);
+        assert!(
+            (val_200 - expected_0).abs() < 1e-6,
+            "frame 200: expected {expected_0} (same as frame 0), got {val_200}",
+        );
+    }
+
+    #[test]
+    fn clip_loop_with_source_offset() {
+        // Source: 100 frames ascending
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio: audio.clone(),
+            position: 0,
+            source_offset: 20,
+            duration: 200,
+            loop_enabled: true,
+            loop_start: 20,
+            loop_end: 100,
+        });
+
+        let rendered = track.render(0, 200, 2);
+        assert!(rendered);
+
+        // First frame maps to source frame 20
+        let val_0 = track.mix_buffer[0];
+        assert!(
+            (val_0 - audio.sample(0, 20)).abs() < 1e-6,
+            "frame 0: expected source[20]={}, got {}",
+            audio.sample(0, 20),
+            val_0
+        );
+
+        // frame 80: source_offset + 80 = 100 which is >= loop_end (100)
+        // wraps: loop_start + (100 - loop_start) % loop_len = 20 + (100 - 20) % 80 = 20 + 0 = 20
+        let val_80 = track.mix_buffer[80 * 2];
+        assert!(
+            (val_80 - audio.sample(0, 20)).abs() < 1e-6,
+            "frame 80: expected source[20]={}, got {}",
+            audio.sample(0, 20),
+            val_80
+        );
+    }
+
+    #[test]
+    fn clip_no_loop_silence_past_source() {
+        let audio = make_test_audio(100, 0.5);
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+
+        // Render frames 100..108 (past source, no loop)
+        let rendered = track.render(100, 8, 2);
+        assert!(rendered); // clip is still "active" (duration=200)
+
+        // Output should be silence since DecodedAudio returns 0.0 for out-of-bounds
+        for i in 0..16 {
+            assert!(
+                track.mix_buffer[i].abs() < 1e-6,
+                "sample {i}: expected silence, got {}",
+                track.mix_buffer[i]
+            );
+        }
     }
 }

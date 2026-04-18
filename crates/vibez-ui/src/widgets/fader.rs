@@ -1,6 +1,6 @@
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
@@ -11,11 +11,17 @@ pub struct HorizontalFaderWidget {
     pub track_id: TrackId,
     /// Current gain value (0.0..2.0).
     pub value: f32,
+    /// Fill color (track color).
+    pub fill_color: Color,
 }
 
 impl HorizontalFaderWidget {
-    pub fn new(track_id: TrackId, value: f32) -> Self {
-        Self { track_id, value }
+    pub fn new(track_id: TrackId, value: f32, fill_color: Color) -> Self {
+        Self {
+            track_id,
+            value,
+            fill_color,
+        }
     }
 }
 
@@ -73,13 +79,13 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         let handle_h = h - 4.0;
         let handle_y = 2.0;
 
-        // Filled portion (from left to handle)
+        // Filled portion (from left to handle) using track color
         let fill_w = handle_x - track_left;
         if fill_w > 0.0 {
             frame.fill_rectangle(
                 iced::Point::new(track_left, track_y),
                 iced::Size::new(fill_w, track_h),
-                theme::ACCENT,
+                self.fill_color,
             );
         }
 
@@ -156,11 +162,17 @@ pub struct FaderWidget {
     pub track_id: TrackId,
     /// Current gain value (0.0..2.0).
     pub value: f32,
+    /// Fill color (track color).
+    pub fill_color: Color,
 }
 
 impl FaderWidget {
-    pub fn new(track_id: TrackId, value: f32) -> Self {
-        Self { track_id, value }
+    pub fn new(track_id: TrackId, value: f32, fill_color: Color) -> Self {
+        Self {
+            track_id,
+            value,
+            fill_color,
+        }
     }
 }
 
@@ -218,13 +230,13 @@ impl canvas::Program<Message> for FaderWidget {
         let handle_w = w - 4.0;
         let handle_x = 2.0;
 
-        // Filled portion (from bottom to handle)
+        // Filled portion (from bottom to handle) using track color
         let fill_h = track_top + track_h - handle_y;
         if fill_h > 0.0 {
             frame.fill_rectangle(
                 iced::Point::new(track_x, handle_y),
                 iced::Size::new(track_w, fill_h),
-                theme::ACCENT,
+                self.fill_color,
             );
         }
 

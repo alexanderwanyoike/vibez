@@ -1,6 +1,10 @@
+pub mod audio_clip_detail;
+pub mod effect_knob;
+pub mod effect_slot;
 pub mod fader;
 pub mod knob;
 pub mod mixer_strip;
+pub mod piano_roll;
 pub mod timeline;
 pub mod track_header;
 pub mod vu_meter;

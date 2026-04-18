@@ -19,3 +19,6 @@ pub const RING_BUFFER_CAPACITY: usize = 1024;
 
 /// UI tick rate in milliseconds (60fps).
 pub const UI_TICK_MS: u64 = 16;
+
+/// Maximum number of effects per track.
+pub const MAX_EFFECTS_PER_TRACK: usize = 8;

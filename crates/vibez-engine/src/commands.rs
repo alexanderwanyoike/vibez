@@ -1,6 +1,10 @@
 use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::effect::EffectType;
+use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_dsp::effect::AudioEffect;
+use vibez_instruments::Instrument;
 
 /// Commands sent from the UI thread to the audio engine (via rtrb).
 ///
@@ -27,6 +31,8 @@ pub enum EngineCommand {
     AddTrack(TrackId, String),
     /// Remove a track by ID.
     RemoveTrack(TrackId),
+    /// Reorder tracks to match the given ID order.
+    ReorderTracks(Vec<TrackId>),
     /// Add a clip to a track.
     AddClip {
         track_id: TrackId,
@@ -35,6 +41,9 @@ pub enum EngineCommand {
         position: u64,
         source_offset: u64,
         duration: u64,
+        loop_enabled: bool,
+        loop_start: u64,
+        loop_end: u64,
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
@@ -52,6 +61,128 @@ pub enum EngineCommand {
     SetTrackMute(TrackId, bool),
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
+
+    // -- Infrastructure --
+    SetSampleRate(u32),
+
+    // -- Effects --
+    AddEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect_type: EffectType,
+        position: Option<usize>,
+    },
+    RemoveEffect(TrackId, EffectId),
+    SetEffectParam {
+        track_id: TrackId,
+        effect_id: EffectId,
+        param_index: usize,
+        value: f32,
+    },
+    SetEffectBypass {
+        track_id: TrackId,
+        effect_id: EffectId,
+        bypass: bool,
+    },
+    MoveEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        new_index: usize,
+    },
+
+    // -- Instrument tracks --
+    AddInstrumentTrack(TrackId, String, InstrumentKind),
+    /// Add a bare MIDI track (no synth attached).
+    AddMidiTrack(TrackId, String),
+    /// Attach an instrument to a track.
+    SetTrackInstrument(TrackId, InstrumentKind),
+    /// Remove the instrument from a track.
+    RemoveTrackInstrument(TrackId),
+    /// Set note clip duration (for halve/double).
+    SetNoteClipDuration {
+        track_id: TrackId,
+        clip_id: ClipId,
+        duration_beats: f64,
+    },
+    AddNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        position_beats: f64,
+        duration_beats: f64,
+        loop_enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
+    RemoveNoteClip(TrackId, ClipId),
+    /// Move a note clip to a new beat position on the timeline.
+    MoveNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_position_beats: f64,
+    },
+    AddNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note: MidiNote,
+    },
+    RemoveNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note_index: usize,
+    },
+    EditNote {
+        track_id: TrackId,
+        clip_id: ClipId,
+        note_index: usize,
+        note: MidiNote,
+    },
+    SetInstrumentParam {
+        track_id: TrackId,
+        param_index: usize,
+        value: f32,
+    },
+    LoadSamplerSample {
+        track_id: TrackId,
+        sample: Arc<DecodedAudio>,
+        sample_name: String,
+    },
+
+    // -- Arrangement loop --
+    SetArrangementLoop(bool),
+    SetArrangementLoopRegion {
+        start: u64,
+        end: u64,
+    },
+
+    // -- Clip looping --
+    SetClipLoop {
+        track_id: TrackId,
+        clip_id: ClipId,
+        enabled: bool,
+        loop_start: u64,
+        loop_end: u64,
+    },
+    SetNoteClipLoop {
+        track_id: TrackId,
+        clip_id: ClipId,
+        enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    },
+
+    // -- External plugins --
+    /// Add a pre-loaded external plugin effect to a track.
+    AddPluginEffect {
+        track_id: TrackId,
+        effect_id: EffectId,
+        effect: Box<dyn AudioEffect>,
+        position: Option<usize>,
+    },
+    /// Set a pre-loaded external plugin instrument on a track.
+    SetPluginInstrument {
+        track_id: TrackId,
+        instrument: Box<dyn Instrument>,
+    },
 }
 
 #[cfg(test)]
@@ -91,6 +222,9 @@ mod tests {
             position: 0,
             source_offset: 0,
             duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
         };
         let _remove_clip = EngineCommand::RemoveClip(tid, cid);
         let _move_clip = EngineCommand::MoveClip {
@@ -102,6 +236,7 @@ mod tests {
         let _pan = EngineCommand::SetTrackPan(tid, 0.3);
         let _mute = EngineCommand::SetTrackMute(tid, true);
         let _solo = EngineCommand::SetTrackSolo(tid, true);
+        let _reorder = EngineCommand::ReorderTracks(vec![tid]);
     }
 
     #[test]
@@ -127,6 +262,26 @@ mod tests {
 
         let cmd = consumer.pop().unwrap();
         assert!(matches!(cmd, EngineCommand::Stop));
+    }
+
+    #[test]
+    fn reorder_tracks_command_through_rtrb() {
+        let (mut producer, mut consumer) = rtrb::RingBuffer::<EngineCommand>::new(16);
+        let tid1 = TrackId::new();
+        let tid2 = TrackId::new();
+
+        producer
+            .push(EngineCommand::ReorderTracks(vec![tid2, tid1]))
+            .unwrap();
+        let cmd = consumer.pop().unwrap();
+        match cmd {
+            EngineCommand::ReorderTracks(order) => {
+                assert_eq!(order.len(), 2);
+                assert_eq!(order[0], tid2);
+                assert_eq!(order[1], tid1);
+            }
+            _ => panic!("expected ReorderTracks"),
+        }
     }
 
     #[test]

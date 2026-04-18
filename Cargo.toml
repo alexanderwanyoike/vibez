@@ -5,6 +5,7 @@ members = [
     "crates/vibez-audio-io",
     "crates/vibez-dsp",
     "crates/vibez-instruments",
+    "crates/vibez-plugin-host",
     "crates/vibez-project",
     "crates/vibez-ui",
 ]
@@ -22,6 +23,7 @@ vibez-engine = { path = "crates/vibez-engine" }
 vibez-audio-io = { path = "crates/vibez-audio-io" }
 vibez-dsp = { path = "crates/vibez-dsp" }
 vibez-instruments = { path = "crates/vibez-instruments" }
+vibez-plugin-host = { path = "crates/vibez-plugin-host" }
 vibez-project = { path = "crates/vibez-project" }
 vibez-ui = { path = "crates/vibez-ui" }
 
@@ -48,3 +50,6 @@ license.workspace = true
 [dependencies]
 vibez-ui = { workspace = true }
 iced = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.8"

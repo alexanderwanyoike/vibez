@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use vibez_core::midi::NoteClipInfo;
 use vibez_core::track::{ClipInfo, TrackInfo};
 
 /// A serializable project containing tracks and clips.
@@ -11,6 +12,8 @@ pub struct Project {
     pub sample_rate: u32,
     pub tracks: Vec<TrackInfo>,
     pub clips: Vec<ClipInfo>,
+    #[serde(default)]
+    pub note_clips: Vec<NoteClipInfo>,
 }
 
 impl Default for Project {
@@ -21,6 +24,7 @@ impl Default for Project {
             sample_rate: vibez_core::constants::DEFAULT_SAMPLE_RATE,
             tracks: Vec::new(),
             clips: Vec::new(),
+            note_clips: Vec::new(),
         }
     }
 }
@@ -84,6 +88,7 @@ mod tests {
     use std::error::Error;
     use std::path::PathBuf;
     use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::midi::{MidiNote, NoteClipInfo};
 
     #[test]
     fn project_roundtrip() {
@@ -103,7 +108,11 @@ mod tests {
                 source_offset: 0,
                 duration: 44100,
                 file_path: PathBuf::from("audio/loop.wav"),
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
             }],
+            note_clips: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -162,5 +171,102 @@ mod tests {
         let json_err: Result<Project, _> = serde_json::from_str(json_str);
         let project_err = ProjectError::Json(json_err.unwrap_err());
         assert!(project_err.to_string().contains("JSON error"));
+    }
+
+    #[test]
+    fn backward_compat_no_note_clips() {
+        // Simulate a project saved before note_clips existed
+        let json = r#"{
+            "name": "Old Project",
+            "bpm": 120.0,
+            "sample_rate": 44100,
+            "tracks": [],
+            "clips": []
+        }"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert_eq!(project.name, "Old Project");
+        assert!(project.note_clips.is_empty());
+    }
+
+    #[test]
+    fn note_clips_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notes.vibez");
+
+        let tid = TrackId::new();
+        let project = Project {
+            name: "Note Test".into(),
+            bpm: 128.0,
+            sample_rate: 44_100,
+            tracks: vec![],
+            clips: vec![],
+            note_clips: vec![NoteClipInfo {
+                id: ClipId::new(),
+                track_id: tid,
+                name: "Pattern 1".into(),
+                position_beats: 0.0,
+                duration_beats: 4.0,
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+                notes: vec![
+                    MidiNote {
+                        pitch: 60,
+                        velocity: 100,
+                        start_beat: 0.0,
+                        duration_beats: 1.0,
+                    },
+                    MidiNote {
+                        pitch: 64,
+                        velocity: 80,
+                        start_beat: 1.0,
+                        duration_beats: 0.5,
+                    },
+                ],
+            }],
+        };
+
+        project.save_to_file(&path).unwrap();
+        let loaded = Project::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.note_clips.len(), 1);
+        assert_eq!(loaded.note_clips[0].name, "Pattern 1");
+        assert_eq!(loaded.note_clips[0].notes.len(), 2);
+        assert_eq!(loaded.note_clips[0].notes[0].pitch, 60);
+        assert_eq!(loaded.note_clips[0].notes[1].pitch, 64);
+    }
+
+    #[test]
+    fn track_effects_roundtrip() {
+        use vibez_core::effect::{EffectInfo, EffectType};
+        use vibez_core::id::EffectId;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fx.vibez");
+
+        let mut track = TrackInfo::new("FX Track");
+        track.effects.push(EffectInfo {
+            id: EffectId::new(),
+            effect_type: EffectType::Delay,
+            bypass: false,
+            params: vec![500.0, 0.5, 0.3],
+        });
+
+        let project = Project {
+            name: "FX Test".into(),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            tracks: vec![track],
+            clips: vec![],
+            note_clips: vec![],
+        };
+
+        project.save_to_file(&path).unwrap();
+        let loaded = Project::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.tracks.len(), 1);
+        assert_eq!(loaded.tracks[0].effects.len(), 1);
+        assert_eq!(loaded.tracks[0].effects[0].effect_type, EffectType::Delay);
+        assert_eq!(loaded.tracks[0].effects[0].params.len(), 3);
     }
 }

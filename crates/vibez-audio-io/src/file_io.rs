@@ -434,7 +434,7 @@ mod tests {
             .iter()
             .map(|s| s.abs())
             .fold(0.0f32, f32::max);
-        assert!(peak > 0.9, "peak was {}", peak);
+        assert!(peak > 0.9, "peak was {peak}");
     }
 
     #[test]
@@ -459,8 +459,8 @@ mod tests {
             .iter()
             .map(|s| s.abs())
             .fold(0.0f32, f32::max);
-        assert!(peak_l > 0.9, "peak_l was {}", peak_l);
-        assert!(peak_r > 0.9, "peak_r was {}", peak_r);
+        assert!(peak_l > 0.9, "peak_l was {peak_l}");
+        assert!(peak_r > 0.9, "peak_r was {peak_r}");
     }
 
     #[test]
@@ -481,7 +481,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(FileIoError::Io(_)) => {} // Expected.
-            other => panic!("expected Io error, got {:?}", other),
+            other => panic!("expected Io error, got {other:?}"),
         }
     }
 
@@ -538,9 +538,7 @@ mod tests {
         let tolerance = 1024; // sinc resampler introduces latency + tail from zero-padding
         assert!(
             (actual_frames as isize - expected_frames as isize).unsigned_abs() < tolerance,
-            "expected ~{} frames, got {}",
-            expected_frames,
-            actual_frames
+            "expected ~{expected_frames} frames, got {actual_frames}"
         );
 
         // The resampled signal should still have significant energy (not all zeros).
@@ -548,7 +546,7 @@ mod tests {
             .iter()
             .map(|s| s.abs())
             .fold(0.0f32, f32::max);
-        assert!(peak > 0.5, "peak was {}", peak);
+        assert!(peak > 0.5, "peak was {peak}");
     }
 
     #[test]
@@ -578,9 +576,7 @@ mod tests {
         let tolerance = 1024;
         assert!(
             (actual_frames as isize - expected_frames as isize).unsigned_abs() < tolerance,
-            "expected ~{} frames, got {}",
-            expected_frames,
-            actual_frames
+            "expected ~{expected_frames} frames, got {actual_frames}"
         );
     }
 
@@ -614,8 +610,8 @@ mod tests {
         assert_eq!(resampled.num_channels(), 2);
 
         // Both channels should have data.
-        assert!(resampled.channels[0].len() > 0);
-        assert!(resampled.channels[1].len() > 0);
+        assert!(!resampled.channels[0].is_empty());
+        assert!(!resampled.channels[1].is_empty());
     }
 
     #[test]
@@ -655,7 +651,7 @@ mod tests {
     #[test]
     fn error_type_implements_display_and_error() {
         let err = FileIoError::NoAudioTrack;
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("no audio track"));
 
         // Test Error trait.

@@ -10,3 +10,4 @@ Thumbs.db
 *.ogg
 !assets/**
 .env
+.notes/
