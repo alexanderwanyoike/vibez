@@ -8,6 +8,13 @@ pub enum EffectType {
     Filter,
     Delay,
     Reverb,
+    Drive,
+    Bitcrush,
+    Compressor,
+    AutoPan,
+    Gate,
+    Phaser,
+    Eq,
 }
 
 impl EffectType {
@@ -17,6 +24,13 @@ impl EffectType {
             EffectType::Filter => "Filter",
             EffectType::Delay => "Delay",
             EffectType::Reverb => "Reverb",
+            EffectType::Drive => "Drive",
+            EffectType::Bitcrush => "Bitcrush",
+            EffectType::Compressor => "Compressor",
+            EffectType::AutoPan => "Auto-Pan",
+            EffectType::Gate => "Gate",
+            EffectType::Phaser => "Phaser",
+            EffectType::Eq => "EQ",
         }
     }
 
@@ -24,8 +38,15 @@ impl EffectType {
         &[
             EffectType::Gain,
             EffectType::Filter,
+            EffectType::Eq,
+            EffectType::Compressor,
+            EffectType::Gate,
+            EffectType::Drive,
+            EffectType::Bitcrush,
             EffectType::Delay,
             EffectType::Reverb,
+            EffectType::Phaser,
+            EffectType::AutoPan,
         ]
     }
 }
@@ -62,7 +83,7 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 11);
     }
 
     #[test]

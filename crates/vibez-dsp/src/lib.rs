@@ -1,6 +1,13 @@
+pub mod auto_pan;
+pub mod bitcrush;
+pub mod compressor;
 pub mod delay;
+pub mod drive;
 pub mod effect;
+pub mod eq;
 pub mod factory;
 pub mod filter;
 pub mod gain;
+pub mod gate;
+pub mod phaser;
 pub mod reverb;
