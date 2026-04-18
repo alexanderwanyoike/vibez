@@ -406,6 +406,21 @@ pub enum Message {
         clip_id: ClipId,
     },
 
+    // Quantize
+    QuantizeNoteClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+
+    // Undo / redo
+    Undo,
+    Redo,
+
+    // Export
+    ExportProject,
+    ExportPathSelected(Option<PathBuf>),
+    ExportComplete(Result<PathBuf, String>),
+
     // Sample browser mode
     SetSampleBrowserMode(crate::state::SampleBrowserMode),
 

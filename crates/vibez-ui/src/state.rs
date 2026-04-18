@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -329,6 +329,71 @@ pub enum SettingsTab {
     Audio,
     Plugins,
     Dropbox,
+}
+
+/// A point-in-time snapshot of the editable project state, used to
+/// implement undo / redo. `UiTrack` clones share audio via `Arc` so
+/// each snapshot is cheap on memory despite the full tree.
+#[derive(Debug, Clone)]
+pub struct ProjectSnapshot {
+    pub tracks: Vec<UiTrack>,
+    pub bpm: f64,
+    pub bpm_text: String,
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+    pub selected_track: Option<TrackId>,
+    pub selected_clips: HashSet<ArrangementSelection>,
+    pub selected_note_clip: Option<(TrackId, ClipId)>,
+    pub next_track_number: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct UndoHistory {
+    pub undo: VecDeque<ProjectSnapshot>,
+    pub redo: VecDeque<ProjectSnapshot>,
+}
+
+impl UndoHistory {
+    pub const CAPACITY: usize = 100;
+
+    pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
+        self.undo.push_back(snapshot);
+        if self.undo.len() > Self::CAPACITY {
+            self.undo.pop_front();
+        }
+        self.redo.clear();
+    }
+
+    pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
+        self.undo.pop_back()
+    }
+
+    pub fn push_redo(&mut self, snapshot: ProjectSnapshot) {
+        self.redo.push_back(snapshot);
+        if self.redo.len() > Self::CAPACITY {
+            self.redo.pop_front();
+        }
+    }
+
+    pub fn pop_redo(&mut self) -> Option<ProjectSnapshot> {
+        self.redo.pop_back()
+    }
+
+    #[allow(dead_code)]
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    #[allow(dead_code)]
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

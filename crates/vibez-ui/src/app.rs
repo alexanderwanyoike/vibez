@@ -104,6 +104,9 @@ struct App {
     dropbox_settings: DropboxSettings,
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
+
+    // Undo / redo
+    undo_history: crate::state::UndoHistory,
 }
 
 pub fn run() -> iced::Result {
@@ -182,6 +185,7 @@ impl App {
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
+            undo_history: crate::state::UndoHistory::default(),
         };
 
         // Inform the engine of the actual sample rate
@@ -248,12 +252,14 @@ impl App {
         self.send_command(EngineCommand::SetBpm(self.state.bpm));
         self.state.current_project_path = None;
         self.state.project_dirty = false;
+        self.undo_history.clear();
         self.state.status_text = "New project".to_string();
     }
 
     fn apply_template(&mut self, template: &vibez_project::templates::GenreTemplate) {
         let project = template.build();
         self.clear_project_runtime();
+        self.undo_history.clear();
         self.state.bpm = project.bpm;
         self.state.bpm_text = format!("{:.0}", project.bpm);
         self.send_command(EngineCommand::SetBpm(project.bpm));
@@ -645,6 +651,7 @@ impl App {
 
     fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
         self.clear_project_runtime();
+        self.undo_history.clear();
         self.state.bpm = loaded.project.bpm;
         self.state.bpm_text = format!("{:.0}", loaded.project.bpm);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
@@ -1025,6 +1032,226 @@ impl App {
         );
     }
 
+    fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
+        crate::state::ProjectSnapshot {
+            tracks: self.state.tracks.clone(),
+            bpm: self.state.bpm,
+            bpm_text: self.state.bpm_text.clone(),
+            loop_enabled: self.state.loop_enabled,
+            loop_start_beats: self.state.loop_start_beats,
+            loop_end_beats: self.state.loop_end_beats,
+            selected_track: self.state.selected_track,
+            selected_clips: self.state.selected_clips.clone(),
+            selected_note_clip: self.state.selected_note_clip,
+            next_track_number: self.state.next_track_number,
+        }
+    }
+
+    fn push_undo_snapshot(&mut self) {
+        let snapshot = self.take_snapshot();
+        self.undo_history.push_undo(snapshot);
+    }
+
+    fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        // Tear down the engine side.
+        let existing_track_ids: Vec<TrackId> =
+            self.state.tracks.iter().map(|t| t.id).collect();
+        for track_id in existing_track_ids {
+            self.send_command(EngineCommand::RemoveTrack(track_id));
+        }
+
+        self.state.tracks = snapshot.tracks;
+        self.state.bpm = snapshot.bpm;
+        self.state.bpm_text = snapshot.bpm_text;
+        self.state.loop_enabled = snapshot.loop_enabled;
+        self.state.loop_start_beats = snapshot.loop_start_beats;
+        self.state.loop_end_beats = snapshot.loop_end_beats;
+        self.state.selected_track = snapshot.selected_track;
+        self.state.selected_clips = snapshot.selected_clips;
+        self.state.selected_note_clip = snapshot.selected_note_clip;
+        self.state.next_track_number = snapshot.next_track_number;
+
+        self.send_command(EngineCommand::SetBpm(self.state.bpm));
+        self.send_command(EngineCommand::SetArrangementLoop(self.state.loop_enabled));
+        if self.state.loop_enabled {
+            let start = self.state.beats_to_samples(self.state.loop_start_beats);
+            let end = self.state.beats_to_samples(self.state.loop_end_beats);
+            self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+        }
+
+        let tracks = self.state.tracks.clone();
+        for track in &tracks {
+            self.replay_track_to_engine(track);
+        }
+    }
+
+    fn replay_track_to_engine(&mut self, track: &UiTrack) {
+        match track.kind {
+            TrackKind::Audio => {
+                self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
+            }
+            TrackKind::Midi | TrackKind::Instrument(_) => {
+                self.send_command(EngineCommand::AddMidiTrack(
+                    track.id,
+                    track.name.clone(),
+                ));
+            }
+        }
+        self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
+        self.send_command(EngineCommand::SetTrackPan(track.id, track.pan));
+        self.send_command(EngineCommand::SetTrackMute(track.id, track.mute));
+        self.send_command(EngineCommand::SetTrackSolo(track.id, track.solo));
+
+        if let Some(kind) = track.instrument_kind {
+            self.send_command(EngineCommand::SetTrackInstrument(track.id, kind));
+            for (idx, value) in track.instrument_params.iter().copied().enumerate() {
+                self.send_command(EngineCommand::SetInstrumentParam {
+                    track_id: track.id,
+                    param_index: idx,
+                    value,
+                });
+            }
+            match kind {
+                InstrumentKind::Sampler => {
+                    if let Some(audio) = &track.sample_audio {
+                        self.send_command(EngineCommand::LoadSamplerSample {
+                            track_id: track.id,
+                            sample: Arc::clone(audio),
+                            sample_name: track.sample_name.clone().unwrap_or_default(),
+                        });
+                    }
+                }
+                InstrumentKind::DrumRack => {
+                    for (pad_index, pad) in track.drum_rack_pads.iter().enumerate() {
+                        self.send_command(EngineCommand::SetDrumRackPadState {
+                            track_id: track.id,
+                            pad_index,
+                            state: pad.to_state(),
+                        });
+                        if let Some(audio) = &pad.audio {
+                            self.send_command(EngineCommand::LoadDrumRackPadSample {
+                                track_id: track.id,
+                                pad_index,
+                                sample: Arc::clone(audio),
+                                sample_name: pad.name.clone().unwrap_or_default(),
+                            });
+                        }
+                    }
+                }
+                InstrumentKind::SubtractiveSynth => {}
+            }
+        }
+
+        for effect in &track.effects {
+            self.send_command(EngineCommand::AddEffect {
+                track_id: track.id,
+                effect_id: effect.id,
+                effect_type: effect.effect_type,
+                position: None,
+            });
+            for (idx, value) in effect.params.iter().copied().enumerate() {
+                self.send_command(EngineCommand::SetEffectParam {
+                    track_id: track.id,
+                    effect_id: effect.id,
+                    param_index: idx,
+                    value,
+                });
+            }
+            self.send_command(EngineCommand::SetEffectBypass {
+                track_id: track.id,
+                effect_id: effect.id,
+                bypass: effect.bypass,
+            });
+        }
+
+        for clip in &track.clips {
+            self.send_command(EngineCommand::AddClip {
+                track_id: track.id,
+                clip_id: clip.id,
+                audio: Arc::clone(&clip.audio),
+                position: clip.position,
+                source_offset: clip.source_offset,
+                duration: clip.duration,
+                loop_enabled: clip.loop_enabled,
+                loop_start: clip.loop_start,
+                loop_end: clip.loop_end,
+            });
+        }
+
+        for clip in &track.note_clips {
+            self.send_command(EngineCommand::AddNoteClip {
+                track_id: track.id,
+                clip_id: clip.id,
+                position_beats: clip.position_beats,
+                duration_beats: clip.duration_beats,
+                loop_enabled: clip.loop_enabled,
+                loop_start_beats: clip.loop_start_beats,
+                loop_end_beats: clip.loop_end_beats,
+            });
+            for note in &clip.notes {
+                self.send_command(EngineCommand::AddNote {
+                    track_id: track.id,
+                    clip_id: clip.id,
+                    note: *note,
+                });
+            }
+        }
+    }
+
+    fn undo(&mut self) {
+        let Some(snapshot) = self.undo_history.pop_undo() else {
+            self.state.status_text = "Nothing to undo".to_string();
+            return;
+        };
+        let redo = self.take_snapshot();
+        self.undo_history.push_redo(redo);
+        self.apply_snapshot(snapshot);
+        self.state.status_text = "Undo".to_string();
+    }
+
+    fn redo(&mut self) {
+        let Some(snapshot) = self.undo_history.pop_redo() else {
+            self.state.status_text = "Nothing to redo".to_string();
+            return;
+        };
+        let undo = self.take_snapshot();
+        self.undo_history.push_undo(undo);
+        self.apply_snapshot(snapshot);
+        self.state.status_text = "Redo".to_string();
+    }
+
+    fn quantize_note_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
+        let grid = self.state.snap_grid;
+        let mut changes: Vec<(usize, MidiNote)> = Vec::new();
+        let Some(track) = self.state.find_track_mut(track_id) else {
+            return;
+        };
+        let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) else {
+            return;
+        };
+        for (idx, note) in clip.notes.iter_mut().enumerate() {
+            let snapped = grid.snap_beat(note.start_beat).max(0.0);
+            if (snapped - note.start_beat).abs() > f64::EPSILON {
+                note.start_beat = snapped;
+                changes.push((idx, *note));
+            }
+        }
+        let count = changes.len();
+        for (idx, note) in changes {
+            self.send_command(EngineCommand::EditNote {
+                track_id,
+                clip_id,
+                note_index: idx,
+                note,
+            });
+        }
+        self.mark_project_dirty();
+        self.state.status_text = format!(
+            "Quantized {count} note(s) to {}",
+            grid.label()
+        );
+    }
+
     fn generate_phrase_variations(&mut self, track_id: TrackId, clip_id: ClipId) {
         let source_info = {
             let Some(track) = self.state.find_track(track_id) else {
@@ -1248,6 +1475,7 @@ impl App {
                 | Message::HalveNoteClip(..)
         );
         if should_mark_dirty {
+            self.push_undo_snapshot();
             self.mark_project_dirty();
         }
 
@@ -4122,6 +4350,82 @@ impl App {
                 self.generate_phrase_variations(track_id, clip_id);
             }
 
+            // -- Quantize --
+            Message::QuantizeNoteClip { track_id, clip_id } => {
+                self.state.context_menu = None;
+                self.quantize_note_clip(track_id, clip_id);
+            }
+
+            // -- Undo / redo --
+            Message::Undo => {
+                self.undo();
+            }
+            Message::Redo => {
+                self.redo();
+            }
+
+            // -- Export --
+            Message::ExportProject => {
+                self.state.file_menu_open = false;
+                let default_name = self
+                    .state
+                    .current_project_path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|n| format!("{}.wav", n.to_string_lossy()))
+                    .unwrap_or_else(|| "vibez-export.wav".to_string());
+                return Task::perform(
+                    async move {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Export to WAV")
+                            .set_file_name(&default_name)
+                            .add_filter("WAV", &["wav"])
+                            .save_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ExportPathSelected,
+                );
+            }
+            Message::ExportPathSelected(path) => {
+                let Some(mut path) = path else {
+                    return Task::none();
+                };
+                if path.extension().is_none() {
+                    path.set_extension("wav");
+                }
+                let total = self.state.total_duration_samples();
+                if total == 0 {
+                    self.state.status_text =
+                        "Nothing to export: project is empty".to_string();
+                    return Task::none();
+                }
+                let assets = self.collect_bounce_assets();
+                let project = self.project_from_state();
+                let sample_rate = self.state.sample_rate;
+                let bpm = self.state.bpm;
+                let request = vibez_engine::render::BounceRequest {
+                    tracks: project.tracks,
+                    audio_clips: project.clips,
+                    note_clips: project.note_clips,
+                    clip_audio: assets.clips,
+                    sampler_audio: assets.samplers,
+                    drum_pad_audio: assets.pads,
+                    mode: vibez_engine::render::BounceMode::Master,
+                    range_samples: (0, total),
+                    bpm,
+                    sample_rate,
+                };
+                self.state.status_text = format!("Exporting to {}...", path.display());
+                return Task::perform(export_async(request, path), Message::ExportComplete);
+            }
+            Message::ExportComplete(Ok(path)) => {
+                self.state.status_text = format!("Exported: {}", path.display());
+            }
+            Message::ExportComplete(Err(err)) => {
+                self.state.status_text = format!("Export error: {err}");
+            }
+
             // -- Sample browser mode --
             Message::SetSampleBrowserMode(mode) => {
                 self.state.sample_browser_mode = mode;
@@ -4785,6 +5089,11 @@ impl App {
         };
 
         let new_btn = make_menu_btn("New (Empty)", icons::PLUS, Message::NewProject);
+        let export_btn = make_menu_btn(
+            "Export to WAV...",
+            icons::AUDIO_WAVEFORM,
+            Message::ExportProject,
+        );
 
         let mut template_rows: Vec<Element<'_, Message>> = Vec::new();
         for template in vibez_project::templates::TEMPLATES {
@@ -4861,6 +5170,7 @@ impl App {
             .push(open_btn)
             .push(save_btn)
             .push(save_as_btn)
+            .push(export_btn)
             .push(settings_btn)
             .padding(4)
             .width(Length::Fixed(220.0));
@@ -5480,12 +5790,17 @@ impl App {
                     },
                 ));
 
-                // Phrase variation (note clips only)
+                // Phrase variation + quantize (note clips only)
                 if is_note_clip {
                     col = col.push(menu_btn(
                         icons::REPEAT,
                         "Generate Variations".into(),
                         Message::GenerateVariations { track_id, clip_id },
+                    ));
+                    col = col.push(menu_btn(
+                        icons::CIRCLE_DOT,
+                        format!("Quantize ({})", self.state.snap_grid.label()),
+                        Message::QuantizeNoteClip { track_id, clip_id },
                     ));
                 }
 
@@ -8168,6 +8483,14 @@ fn global_key_handler(
             "j" => Some(Message::JoinSelectedClips),
             "l" => Some(Message::ToggleArrangementLoop),
             "0" => Some(Message::ZoomToFit),
+            "z" | "Z" => {
+                if modifiers.shift() {
+                    Some(Message::Redo)
+                } else {
+                    Some(Message::Undo)
+                }
+            }
+            "y" | "Y" => Some(Message::Redo),
             _ => None,
         },
         _ => None,
@@ -8238,6 +8561,20 @@ async fn fetch_dropbox_sample_async(
         rev: entry.rev.clone(),
     };
     Ok((Arc::new(decoded), entry.name, source))
+}
+
+async fn export_async(
+    request: vibez_engine::render::BounceRequest,
+    wav_path: PathBuf,
+) -> Result<PathBuf, String> {
+    tokio::task::spawn_blocking(move || {
+        let result = vibez_engine::render::render_offline(&request);
+        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
+            .map_err(|e| format!("WAV write error: {e}"))?;
+        Ok(wav_path)
+    })
+    .await
+    .map_err(|err| format!("export task failed: {err}"))?
 }
 
 async fn bounce_async(
