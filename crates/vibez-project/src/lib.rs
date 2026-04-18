@@ -89,6 +89,7 @@ mod tests {
     use std::path::PathBuf;
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
+    use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
 
     #[test]
     fn project_roundtrip() {
@@ -107,7 +108,10 @@ mod tests {
                 position: 0,
                 source_offset: 0,
                 duration: 44100,
-                file_path: PathBuf::from("audio/loop.wav"),
+                source: Some(MediaSourceRef::LocalFile {
+                    path: PathBuf::from("audio/loop.wav"),
+                }),
+                file_path: Some(PathBuf::from("audio/loop.wav")),
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
@@ -251,6 +255,9 @@ mod tests {
             bypass: false,
             params: vec![500.0, 0.5, 0.3],
         });
+        track.native_instrument = Some(InstrumentStateInfo::SubtractiveSynth {
+            params: vec![0.05, 0.2, 0.8, 0.4],
+        });
 
         let project = Project {
             name: "FX Test".into(),
@@ -268,5 +275,9 @@ mod tests {
         assert_eq!(loaded.tracks[0].effects.len(), 1);
         assert_eq!(loaded.tracks[0].effects[0].effect_type, EffectType::Delay);
         assert_eq!(loaded.tracks[0].effects[0].params.len(), 3);
+        assert!(matches!(
+            loaded.tracks[0].native_instrument,
+            Some(InstrumentStateInfo::SubtractiveSynth { .. })
+        ));
     }
 }

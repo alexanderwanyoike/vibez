@@ -4321,6 +4321,7 @@ dependencies = [
  "vibez-engine",
  "vibez-instruments",
  "vibez-plugin-host",
+ "vibez-project",
  "x11rb",
 ]
 

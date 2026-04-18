@@ -5,13 +5,38 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::track::{ClipInfo, MediaSourceRef};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginId, PluginInfo};
+use vibez_project::Project;
 
 use crate::state::{
     ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SettingsTab,
     SnapGrid, Workspace,
 };
+
+#[derive(Debug, Clone)]
+pub struct LoadedClipData {
+    pub info: ClipInfo,
+    pub audio: Arc<DecodedAudio>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedSamplerData {
+    pub track_id: TrackId,
+    pub source: MediaSourceRef,
+    pub audio: Arc<DecodedAudio>,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectLoadResult {
+    pub path: PathBuf,
+    pub project: Project,
+    pub clips: Vec<LoadedClipData>,
+    pub sampler_samples: Vec<LoadedSamplerData>,
+    pub warnings: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -43,7 +68,7 @@ pub enum Message {
     SelectTrack(TrackId),
     AddClipToTrack(TrackId),
     ClipFileSelected(TrackId, Option<PathBuf>),
-    ClipAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String),
+    ClipAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String, MediaSourceRef),
     ClipDecodeError(TrackId, String),
     RemoveClip(TrackId, ClipId),
 
@@ -75,7 +100,7 @@ pub enum Message {
     // Sampler
     LoadSamplerSample(TrackId),
     SamplerFileSelected(TrackId, Option<PathBuf>),
-    SamplerSampleDecoded(TrackId, Arc<DecodedAudio>, String),
+    SamplerSampleDecoded(TrackId, Arc<DecodedAudio>, String, MediaSourceRef),
     SamplerDecodeError(TrackId, String),
 
     // Zoom / scroll
@@ -266,8 +291,16 @@ pub enum Message {
     MouseReleased,
 
     // File menu
+    NewProject,
+    OpenProject,
+    SaveProject,
+    SaveProjectAs,
     ToggleFileMenu,
     DismissFileMenu,
+    ProjectOpenPathSelected(Option<PathBuf>),
+    ProjectSavePathSelected(Option<PathBuf>),
+    ProjectLoaded(Result<ProjectLoadResult, String>),
+    ProjectSaved(Result<PathBuf, String>),
 
     // Settings
     OpenSettings,

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -6,6 +7,7 @@ use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::track::MediaSourceRef;
 use vibez_plugin_host::PluginSettings;
 
 /// A clip as represented in the UI.
@@ -14,6 +16,7 @@ pub struct UiClip {
     pub id: ClipId,
     pub name: String,
     pub audio: Arc<DecodedAudio>,
+    pub source: Option<MediaSourceRef>,
     /// Position on the timeline in samples.
     pub position: u64,
     /// Offset into the source audio in samples.
@@ -74,6 +77,8 @@ pub struct UiTrack {
     pub has_instrument: bool,
     pub instrument_kind: Option<InstrumentKind>,
     pub sample_name: Option<String>,
+    pub sample_source: Option<MediaSourceRef>,
+    pub instrument_params: Vec<f32>,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
     /// Whether the plugin instrument has a native GUI.
@@ -99,6 +104,8 @@ impl UiTrack {
             has_instrument: false,
             instrument_kind: None,
             sample_name: None,
+            sample_source: None,
+            instrument_params: Vec::new(),
             plugin_instrument_name: None,
             has_plugin_instrument_gui: false,
         }
@@ -126,6 +133,8 @@ impl UiTrack {
             has_instrument,
             instrument_kind,
             sample_name: None,
+            sample_source: None,
+            instrument_params: Vec::new(),
             plugin_instrument_name: None,
             has_plugin_instrument_gui: false,
         }
@@ -325,6 +334,8 @@ pub struct AppState {
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
+    pub current_project_path: Option<PathBuf>,
+    pub project_dirty: bool,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
@@ -374,6 +385,8 @@ impl Default for AppState {
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
+            current_project_path: None,
+            project_dirty: false,
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),

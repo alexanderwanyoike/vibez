@@ -15,14 +15,16 @@ use vibez_core::constants::UI_TICK_MS;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance};
+use vibez_project::Project;
 
 use crate::icons;
-use crate::message::Message;
+use crate::message::{LoadedClipData, LoadedSamplerData, Message, ProjectLoadResult};
 use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
     AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, SettingsTab, UiClip,
@@ -145,6 +147,359 @@ impl App {
         }
     }
 
+    fn mark_project_dirty(&mut self) {
+        self.state.project_dirty = true;
+    }
+
+    fn clear_project_runtime(&mut self) {
+        self.state.playing = false;
+        self.state.position_samples = 0;
+        self.send_command(EngineCommand::Stop);
+        self.send_command(EngineCommand::Seek(0));
+
+        let existing_track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
+        for track_id in existing_track_ids {
+            self.send_command(EngineCommand::RemoveTrack(track_id));
+        }
+
+        self.state.tracks.clear();
+        self.state.selected_track = None;
+        self.state.next_track_number = 1;
+        self.state.selected_note_clip = None;
+        self.state.selected_clips.clear();
+        self.state.loop_enabled = false;
+        self.state.loop_start_beats = 0.0;
+        self.state.loop_end_beats = 4.0;
+        self.state.time_selection_active = false;
+        self.state.selection_start_beats = 0.0;
+        self.state.selection_end_beats = 0.0;
+        self.state.scroll_offset_beats = 0.0;
+        self.state.context_menu = None;
+        self.state.device_context_menu = None;
+        self.state.file_menu_open = false;
+        self.state.editing_track_name = None;
+        self.state.editing_clip_name = None;
+        self.state.edit_name_text.clear();
+    }
+
+    fn reset_to_new_project(&mut self) {
+        self.clear_project_runtime();
+        self.state.bpm = vibez_core::constants::DEFAULT_BPM;
+        self.state.bpm_text = format!("{:.0}", self.state.bpm);
+        self.send_command(EngineCommand::SetBpm(self.state.bpm));
+        self.state.current_project_path = None;
+        self.state.project_dirty = false;
+        self.state.status_text = "New project".to_string();
+    }
+
+    fn track_info_from_ui(&self, track: &UiTrack) -> TrackInfo {
+        let effects = track
+            .effects
+            .iter()
+            .filter(|effect| effect.plugin_name.is_none())
+            .map(|effect| vibez_core::effect::EffectInfo {
+                id: effect.id,
+                effect_type: effect.effect_type,
+                bypass: effect.bypass,
+                params: effect.params.clone(),
+            })
+            .collect();
+
+        let native_instrument = match track.instrument_kind {
+            Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
+                params: track.instrument_params.clone(),
+            }),
+            Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
+                params: track.instrument_params.clone(),
+                source: track.sample_source.clone(),
+            }),
+            None => None,
+        };
+
+        TrackInfo {
+            id: track.id,
+            name: track.name.clone(),
+            gain: track.gain,
+            pan: track.pan,
+            mute: track.mute,
+            solo: track.solo,
+            effects,
+            kind: track.kind,
+            color_index: track.color_index,
+            instrument: track.instrument_kind,
+            native_instrument,
+        }
+    }
+
+    fn project_from_state(&self) -> Project {
+        let tracks = self
+            .state
+            .tracks
+            .iter()
+            .map(|track| self.track_info_from_ui(track))
+            .collect();
+
+        let clips = self
+            .state
+            .tracks
+            .iter()
+            .flat_map(|track| {
+                track.clips.iter().map(|clip| ClipInfo {
+                    id: clip.id,
+                    track_id: track.id,
+                    name: clip.name.clone(),
+                    position: clip.position,
+                    source_offset: clip.source_offset,
+                    duration: clip.duration,
+                    source: clip.source.clone(),
+                    file_path: clip.source.as_ref().and_then(|source| match source {
+                        MediaSourceRef::LocalFile { path } => Some(path.clone()),
+                        MediaSourceRef::DropboxFile { .. } => None,
+                    }),
+                    loop_enabled: clip.loop_enabled,
+                    loop_start: clip.loop_start,
+                    loop_end: clip.loop_end,
+                })
+            })
+            .collect();
+
+        let note_clips = self
+            .state
+            .tracks
+            .iter()
+            .flat_map(|track| {
+                track.note_clips.iter().map(|clip| vibez_core::midi::NoteClipInfo {
+                    id: clip.id,
+                    track_id: track.id,
+                    name: clip.name.clone(),
+                    position_beats: clip.position_beats,
+                    duration_beats: clip.duration_beats,
+                    notes: clip.notes.clone(),
+                    loop_enabled: clip.loop_enabled,
+                    loop_start_beats: clip.loop_start_beats,
+                    loop_end_beats: clip.loop_end_beats,
+                })
+            })
+            .collect();
+
+        Project {
+            name: self
+                .state
+                .current_project_path
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Untitled".to_string()),
+            bpm: self.state.bpm,
+            sample_rate: self.state.sample_rate,
+            tracks,
+            clips,
+            note_clips,
+        }
+    }
+
+    fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
+        self.clear_project_runtime();
+        self.state.bpm = loaded.project.bpm;
+        self.state.bpm_text = format!("{:.0}", loaded.project.bpm);
+        self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
+
+        for track_info in &loaded.project.tracks {
+            let mut track = UiTrack::new_instrument(
+                track_info.id,
+                track_info.name.clone(),
+                track_info.kind,
+                track_info.color_index,
+            );
+            track.gain = track_info.gain;
+            track.pan = track_info.pan;
+            track.mute = track_info.mute;
+            track.solo = track_info.solo;
+            track.instrument_kind = track_info.instrument;
+            track.has_instrument = track_info.instrument.is_some();
+
+            match track.kind {
+                TrackKind::Audio => {
+                    self.send_command(EngineCommand::AddTrack(
+                        track_info.id,
+                        track_info.name.clone(),
+                    ));
+                }
+                TrackKind::Midi | TrackKind::Instrument(_) => {
+                    self.send_command(EngineCommand::AddMidiTrack(
+                        track_info.id,
+                        track_info.name.clone(),
+                    ));
+                }
+            }
+
+            self.send_command(EngineCommand::SetTrackGain(track_info.id, track_info.gain));
+            self.send_command(EngineCommand::SetTrackPan(track_info.id, track_info.pan));
+            self.send_command(EngineCommand::SetTrackMute(track_info.id, track_info.mute));
+            self.send_command(EngineCommand::SetTrackSolo(track_info.id, track_info.solo));
+
+            if let Some(kind) = track_info.instrument {
+                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
+            }
+
+            if let Some(native) = &track_info.native_instrument {
+                match native {
+                    InstrumentStateInfo::SubtractiveSynth { params } => {
+                        track.instrument_params = params.clone();
+                        for (idx, value) in params.iter().copied().enumerate() {
+                            self.send_command(EngineCommand::SetInstrumentParam {
+                                track_id: track_info.id,
+                                param_index: idx,
+                                value,
+                            });
+                        }
+                    }
+                    InstrumentStateInfo::Sampler { params, source } => {
+                        track.instrument_params = params.clone();
+                        track.sample_source = source.clone();
+                        track.sample_name = source.as_ref().map(MediaSourceRef::display_name);
+                        for (idx, value) in params.iter().copied().enumerate() {
+                            self.send_command(EngineCommand::SetInstrumentParam {
+                                track_id: track_info.id,
+                                param_index: idx,
+                                value,
+                            });
+                        }
+                    }
+                    InstrumentStateInfo::DrumRack { .. } => {}
+                }
+            }
+
+            for effect_info in &track_info.effects {
+                let fx = vibez_dsp::factory::create_effect_with_params(
+                    effect_info.effect_type,
+                    self.state.sample_rate as f32,
+                    &effect_info.params,
+                );
+                let descriptors = fx.param_descriptors();
+                track.effects.push(UiEffect {
+                    id: effect_info.id,
+                    effect_type: effect_info.effect_type,
+                    bypass: effect_info.bypass,
+                    params: effect_info.params.clone(),
+                    descriptors,
+                    plugin_name: None,
+                    has_plugin_gui: false,
+                });
+                self.send_command(EngineCommand::AddEffect {
+                    track_id: track_info.id,
+                    effect_id: effect_info.id,
+                    effect_type: effect_info.effect_type,
+                    position: None,
+                });
+                for (idx, value) in effect_info.params.iter().copied().enumerate() {
+                    self.send_command(EngineCommand::SetEffectParam {
+                        track_id: track_info.id,
+                        effect_id: effect_info.id,
+                        param_index: idx,
+                        value,
+                    });
+                }
+                self.send_command(EngineCommand::SetEffectBypass {
+                    track_id: track_info.id,
+                    effect_id: effect_info.id,
+                    bypass: effect_info.bypass,
+                });
+            }
+
+            self.state.next_track_number = self.state.next_track_number.max(
+                self.state.tracks.len() as u32 + 1,
+            );
+            self.state.tracks.push(track);
+        }
+
+        for loaded_clip in loaded.clips {
+            self.send_command(EngineCommand::AddClip {
+                track_id: loaded_clip.info.track_id,
+                clip_id: loaded_clip.info.id,
+                audio: Arc::clone(&loaded_clip.audio),
+                position: loaded_clip.info.position,
+                source_offset: loaded_clip.info.source_offset,
+                duration: loaded_clip.info.duration,
+                loop_enabled: loaded_clip.info.loop_enabled,
+                loop_start: loaded_clip.info.loop_start,
+                loop_end: loaded_clip.info.loop_end,
+            });
+
+            if let Some(track) = self.state.find_track_mut(loaded_clip.info.track_id) {
+                track.clips.push(UiClip {
+                    id: loaded_clip.info.id,
+                    name: loaded_clip.info.name,
+                    audio: loaded_clip.audio,
+                    source: loaded_clip.info.source.clone(),
+                    position: loaded_clip.info.position,
+                    source_offset: loaded_clip.info.source_offset,
+                    duration: loaded_clip.info.duration,
+                    loop_enabled: loaded_clip.info.loop_enabled,
+                    loop_start: loaded_clip.info.loop_start,
+                    loop_end: loaded_clip.info.loop_end,
+                });
+            }
+        }
+
+        for note_clip in &loaded.project.note_clips {
+            self.send_command(EngineCommand::AddNoteClip {
+                track_id: note_clip.track_id,
+                clip_id: note_clip.id,
+                position_beats: note_clip.position_beats,
+                duration_beats: note_clip.duration_beats,
+                loop_enabled: note_clip.loop_enabled,
+                loop_start_beats: note_clip.loop_start_beats,
+                loop_end_beats: note_clip.loop_end_beats,
+            });
+            for note in &note_clip.notes {
+                self.send_command(EngineCommand::AddNote {
+                    track_id: note_clip.track_id,
+                    clip_id: note_clip.id,
+                    note: *note,
+                });
+            }
+            if let Some(track) = self.state.find_track_mut(note_clip.track_id) {
+                track.note_clips.push(UiNoteClip {
+                    id: note_clip.id,
+                    name: note_clip.name.clone(),
+                    position_beats: note_clip.position_beats,
+                    duration_beats: note_clip.duration_beats,
+                    notes: note_clip.notes.clone(),
+                    selected_notes: HashSet::new(),
+                    loop_enabled: note_clip.loop_enabled,
+                    loop_start_beats: note_clip.loop_start_beats,
+                    loop_end_beats: note_clip.loop_end_beats,
+                });
+            }
+        }
+
+        for sampler in loaded.sampler_samples {
+            if let Some(track) = self.state.find_track_mut(sampler.track_id) {
+                track.sample_name = Some(sampler.name.clone());
+                track.sample_source = Some(sampler.source.clone());
+            }
+            self.send_command(EngineCommand::LoadSamplerSample {
+                track_id: sampler.track_id,
+                sample: sampler.audio,
+                sample_name: sampler.name,
+            });
+        }
+
+        self.state.selected_track = self.state.tracks.first().map(|track| track.id);
+        self.state.current_project_path = Some(loaded.path.clone());
+        self.state.project_dirty = false;
+        self.state.status_text = if loaded.warnings.is_empty() {
+            format!("Opened {}", loaded.path.display())
+        } else {
+            format!(
+                "Opened {} with {} warning(s)",
+                loaded.path.display(),
+                loaded.warnings.len()
+            )
+        };
+    }
+
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
@@ -195,8 +550,16 @@ impl App {
                     | Message::EditNameText(_)
                     | Message::CursorMoved(_, _)
                     | Message::MouseReleased
+                    | Message::NewProject
+                    | Message::OpenProject
+                    | Message::SaveProject
+                    | Message::SaveProjectAs
                     | Message::ToggleFileMenu
                     | Message::DismissFileMenu
+                    | Message::ProjectOpenPathSelected(_)
+                    | Message::ProjectSavePathSelected(_)
+                    | Message::ProjectLoaded(_)
+                    | Message::ProjectSaved(_)
                     | Message::OpenSettings
                     | Message::CloseSettings
                     | Message::SelectSettingsTab(_)
@@ -208,6 +571,72 @@ impl App {
             if !keep_menu {
                 self.state.context_menu = None;
             }
+        }
+
+        let should_mark_dirty = matches!(
+            &message,
+            Message::BpmSubmit
+                | Message::AddTrack
+                | Message::RemoveTrack(_)
+                | Message::ClipAudioDecoded(..)
+                | Message::RemoveClip(..)
+                | Message::SetTrackGain(..)
+                | Message::SetTrackPan(..)
+                | Message::SetTrackMute(_)
+                | Message::SetTrackSolo(_)
+                | Message::AddEffect(..)
+                | Message::RemoveEffect(..)
+                | Message::SetEffectParam(..)
+                | Message::ToggleEffectBypass(..)
+                | Message::MoveEffectUp(..)
+                | Message::MoveEffectDown(..)
+                | Message::AddInstrumentTrack
+                | Message::SetInstrumentParam(..)
+                | Message::SamplerSampleDecoded(..)
+                | Message::ToggleClipLoop(..)
+                | Message::SetClipLoopRegion { .. }
+                | Message::ToggleNoteClipLoop(..)
+                | Message::SetNoteClipLoopRegion { .. }
+                | Message::AddNoteClipToTrack(_)
+                | Message::AddNote { .. }
+                | Message::RemoveNote(..)
+                | Message::EditNote(..)
+                | Message::RemoveSelectedNotes(..)
+                | Message::NudgeSelectedNotes { .. }
+                | Message::MoveNotesAbsolute { .. }
+                | Message::DuplicateNoteClip(..)
+                | Message::DoubleNoteClip(..)
+                | Message::CropNoteClip(..)
+                | Message::MoveAudioClip { .. }
+                | Message::MoveNoteClipPosition { .. }
+                | Message::ResizeAudioClip { .. }
+                | Message::ResizeNoteClipDuration { .. }
+                | Message::MoveClipToTrack { .. }
+                | Message::SplitAudioClip { .. }
+                | Message::SplitNoteClip { .. }
+                | Message::DeleteSelectedClip
+                | Message::DuplicateSelectedClip
+                | Message::SplitSelectedAtPlayhead
+                | Message::JoinSelectedClips
+                | Message::ToggleArrangementLoop
+                | Message::SetArrangementLoopRegion { .. }
+                | Message::DeleteClipsInRegion { .. }
+                | Message::SplitClipsAtRegion { .. }
+                | Message::CreateClipFromSelection
+                | Message::CreateNoteClipFromSelection(_)
+                | Message::MoveTrackUp(_)
+                | Message::MoveTrackDown(_)
+                | Message::MoveSelectedTrackUp
+                | Message::MoveSelectedTrackDown
+                | Message::RenameTrack(..)
+                | Message::RenameClip(..)
+                | Message::AddMidiTrack
+                | Message::SetTrackInstrument(..)
+                | Message::RemoveTrackInstrument(_)
+                | Message::HalveNoteClip(..)
+        );
+        if should_mark_dirty {
+            self.mark_project_dirty();
         }
 
         match message {
@@ -432,6 +861,7 @@ impl App {
                         .unwrap_or_default();
                     self.state.status_text = format!("Loading {file_name}...");
                     let clip_id = ClipId::new();
+                    let source = MediaSourceRef::LocalFile { path: path.clone() };
 
                     return Task::perform(decode_file_async(path), move |result| match result {
                         Ok(audio) => Message::ClipAudioDecoded(
@@ -439,12 +869,13 @@ impl App {
                             clip_id,
                             Arc::new(audio),
                             file_name.clone(),
+                            source.clone(),
                         ),
                         Err(e) => Message::ClipDecodeError(track_id, e),
                     });
                 }
             }
-            Message::ClipAudioDecoded(track_id, clip_id, audio, name) => {
+            Message::ClipAudioDecoded(track_id, clip_id, audio, name, source) => {
                 let existing_end = self
                     .state
                     .find_track(track_id)
@@ -476,6 +907,7 @@ impl App {
                         id: clip_id,
                         name: name.clone(),
                         audio,
+                        source: Some(source),
                         position: existing_end,
                         source_offset: 0,
                         duration,
@@ -660,6 +1092,11 @@ impl App {
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
             Message::SetInstrumentParam(track_id, param_index, value) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if param_index < track.instrument_params.len() {
+                        track.instrument_params[param_index] = value;
+                    }
+                }
                 self.send_command(EngineCommand::SetInstrumentParam {
                     track_id,
                     param_index,
@@ -689,6 +1126,7 @@ impl App {
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
                     self.state.status_text = format!("Loading {file_name}...");
+                    let source = MediaSourceRef::LocalFile { path: path.clone() };
 
                     return Task::perform(
                         decode_file_async(path),
@@ -697,15 +1135,17 @@ impl App {
                                 track_id,
                                 Arc::new(audio),
                                 file_name.clone(),
+                                source.clone(),
                             ),
                             Err(e) => Message::SamplerDecodeError(track_id, e),
                         },
                     );
                 }
             }
-            Message::SamplerSampleDecoded(track_id, audio, name) => {
+            Message::SamplerSampleDecoded(track_id, audio, name, source) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.sample_name = Some(name.clone());
+                    track.sample_source = Some(source);
                 }
                 self.send_command(EngineCommand::LoadSamplerSample {
                     track_id,
@@ -1472,6 +1912,7 @@ impl App {
                             split_data = Some((
                                 Arc::clone(&clip.audio),
                                 clip.name.clone(),
+                                clip.source.clone(),
                                 clip.position,
                                 clip.source_offset,
                                 left_dur,
@@ -1485,6 +1926,7 @@ impl App {
                 if let Some((
                     audio,
                     name,
+                    source,
                     orig_pos,
                     orig_offset,
                     left_dur,
@@ -1519,6 +1961,7 @@ impl App {
                             id: left_id,
                             name: format!("{name} L"),
                             audio: Arc::clone(&audio),
+                            source: source.clone(),
                             position: orig_pos,
                             source_offset: orig_offset,
                             duration: left_dur,
@@ -1545,6 +1988,7 @@ impl App {
                             id: right_id,
                             name: format!("{name} R"),
                             audio,
+                            source,
                             position: right_pos,
                             source_offset: right_offset,
                             duration: right_dur,
@@ -1756,13 +2200,14 @@ impl App {
                                         dup_data = Some((
                                             Arc::clone(&clip.audio),
                                             clip.name.clone(),
+                                            clip.source.clone(),
                                             new_pos,
                                             clip.source_offset,
                                             clip.duration,
                                         ));
                                     }
                                 }
-                                if let Some((audio, name, position, source_offset, duration)) =
+                                if let Some((audio, name, source, position, source_offset, duration)) =
                                     dup_data
                                 {
                                     let new_id = ClipId::new();
@@ -1782,6 +2227,7 @@ impl App {
                                             id: new_id,
                                             name: format!("{name} (copy)"),
                                             audio,
+                                            source,
                                             position,
                                             source_offset,
                                             duration,
@@ -2332,12 +2778,23 @@ impl App {
 
             // -- Instrument attach/detach --
             Message::SetTrackInstrument(track_id, instrument_kind) => {
+                let sample_rate = self.state.sample_rate as f32;
+                let instrument_params = default_instrument_params(instrument_kind, sample_rate);
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = true;
                     track.instrument_kind = Some(instrument_kind);
                     track.sample_name = None;
+                    track.sample_source = None;
+                    track.instrument_params = instrument_params.clone();
                 }
                 self.send_command(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
+                for (param_index, value) in instrument_params.into_iter().enumerate() {
+                    self.send_command(EngineCommand::SetInstrumentParam {
+                        track_id,
+                        param_index,
+                        value,
+                    });
+                }
                 self.state.device_context_menu = None;
                 self.state.status_text = format!("Added {}", instrument_kind.name());
             }
@@ -2353,6 +2810,8 @@ impl App {
                     track.has_instrument = false;
                     track.instrument_kind = None;
                     track.sample_name = None;
+                    track.sample_source = None;
+                    track.instrument_params.clear();
                     track.plugin_instrument_name = None;
                     track.has_plugin_instrument_gui = false;
                 }
@@ -2424,12 +2883,85 @@ impl App {
             }
 
             // -- File menu --
+            Message::NewProject => {
+                self.reset_to_new_project();
+            }
+            Message::OpenProject => {
+                self.state.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Open Vibez Project")
+                            .add_filter("Vibez Project", &["vibez", "json"])
+                            .pick_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectOpenPathSelected,
+                );
+            }
+            Message::SaveProject => {
+                self.state.file_menu_open = false;
+                let project = self.project_from_state();
+                if let Some(path) = self.state.current_project_path.clone() {
+                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                }
+                return self.update(Message::SaveProjectAs);
+            }
+            Message::SaveProjectAs => {
+                self.state.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Save Vibez Project")
+                            .set_file_name("Untitled.vibez")
+                            .add_filter("Vibez Project", &["vibez"])
+                            .save_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectSavePathSelected,
+                );
+            }
             Message::ToggleFileMenu => {
                 self.state.file_menu_open = !self.state.file_menu_open;
             }
             Message::DismissFileMenu => {
                 self.state.file_menu_open = false;
             }
+            Message::ProjectOpenPathSelected(path) => {
+                if let Some(path) = path {
+                    self.state.status_text = format!("Opening {}...", path.display());
+                    return Task::perform(load_project_async(path), Message::ProjectLoaded);
+                }
+            }
+            Message::ProjectSavePathSelected(path) => {
+                if let Some(mut path) = path {
+                    if path.extension().is_none() {
+                        path.set_extension("vibez");
+                    }
+                    let project = self.project_from_state();
+                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                }
+            }
+            Message::ProjectLoaded(result) => match result {
+                Ok(loaded) => {
+                    self.rebuild_from_loaded_project(loaded);
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project load error: {err}");
+                }
+            },
+            Message::ProjectSaved(result) => match result {
+                Ok(path) => {
+                    self.state.current_project_path = Some(path.clone());
+                    self.state.project_dirty = false;
+                    self.state.status_text = format!("Saved {}", path.display());
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project save error: {err}");
+                }
+            },
 
             // -- Settings --
             Message::OpenSettings => {
@@ -2729,6 +3261,7 @@ impl App {
                 id: new_id,
                 name: "Joined".to_string(),
                 audio: joined_audio,
+                source: None,
                 position: start_pos,
                 source_offset: 0,
                 duration: total_duration,
@@ -3050,6 +3583,44 @@ impl App {
     }
 
     fn view_file_menu_overlay(&self) -> Element<'_, Message> {
+        let make_menu_btn =
+            |label: &'static str, icon: char, msg: Message| {
+                button(
+                    row![
+                        icons::icon(icon).size(12).color(th::TEXT),
+                        text(label).size(12).color(th::TEXT)
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(msg)
+                .padding([8, 16])
+                .width(Length::Fill)
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                })
+            };
+
+        let new_btn = make_menu_btn("New Project", icons::PLUS, Message::NewProject);
+        let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
+        let save_label = if self.state.project_dirty {
+            "Save*"
+        } else {
+            "Save"
+        };
+        let save_btn = make_menu_btn(save_label, icons::COPY, Message::SaveProject);
+        let save_as_btn = make_menu_btn("Save As...", icons::COPY, Message::SaveProjectAs);
         let settings_btn = button(
             row![
                 icons::icon(icons::SLIDERS_VERTICAL).size(12).color(th::TEXT),
@@ -3076,7 +3647,7 @@ impl App {
             }
         });
 
-        let menu_content = column![settings_btn]
+        let menu_content = column![new_btn, open_btn, save_btn, save_as_btn, settings_btn]
             .spacing(2)
             .padding(4)
             .width(Length::Fixed(160.0));
@@ -5385,4 +5956,98 @@ async fn decode_file_async(
     })
     .await
     .map_err(|e| format!("decode task failed: {e}"))?
+}
+
+async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, String> {
+    tokio::task::spawn_blocking(move || {
+        let save_path = path;
+        project
+            .save_to_file(&save_path)
+            .map(|_| save_path)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| format!("save task failed: {err}"))?
+}
+
+async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let project = Project::load_from_file(&path).map_err(|err| err.to_string())?;
+        let mut clips = Vec::new();
+        let mut sampler_samples = Vec::new();
+        let mut warnings = Vec::new();
+
+        for clip in &project.clips {
+            match clip.resolved_source().cloned() {
+                Some(MediaSourceRef::LocalFile { path: clip_path }) => {
+                    match file_io::decode_audio_file(&clip_path) {
+                        Ok(audio) => clips.push(LoadedClipData {
+                            info: clip.clone(),
+                            audio: Arc::new(audio),
+                        }),
+                        Err(err) => warnings.push(format!(
+                            "Skipped clip '{}' ({})",
+                            clip.name, err
+                        )),
+                    }
+                }
+                Some(MediaSourceRef::DropboxFile { .. }) => warnings.push(format!(
+                    "Skipped clip '{}' (Dropbox sources are not available yet)",
+                    clip.name
+                )),
+                None => warnings.push(format!(
+                    "Skipped clip '{}' (missing source reference)",
+                    clip.name
+                )),
+            }
+        }
+
+        for track in &project.tracks {
+            if let Some(InstrumentStateInfo::Sampler {
+                source: Some(source),
+                ..
+            }) = &track.native_instrument
+            {
+                match source {
+                    MediaSourceRef::LocalFile { path: sample_path } => {
+                        match file_io::decode_audio_file(sample_path) {
+                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                                track_id: track.id,
+                                source: source.clone(),
+                                audio: Arc::new(audio),
+                                name: source.display_name(),
+                            }),
+                            Err(err) => warnings.push(format!(
+                                "Skipped sampler source on '{}' ({})",
+                                track.name, err
+                            )),
+                        }
+                    }
+                    MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
+                        "Skipped sampler source on '{}' (Dropbox sources are not available yet)",
+                        track.name
+                    )),
+                }
+            }
+        }
+
+        Ok(ProjectLoadResult {
+            path,
+            project,
+            clips,
+            sampler_samples,
+            warnings,
+        })
+    })
+    .await
+    .map_err(|err| format!("load task failed: {err}"))?
+}
+
+fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<f32> {
+    let instrument = vibez_instruments::create_instrument(kind, sample_rate);
+    instrument
+        .param_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.default)
+        .collect()
 }

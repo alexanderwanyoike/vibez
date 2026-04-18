@@ -6,6 +6,62 @@ use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 
+/// Canonical reference to media outside the project file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MediaSourceRef {
+    LocalFile {
+        path: PathBuf,
+    },
+    DropboxFile {
+        path_lower: String,
+        display_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+    },
+}
+
+impl MediaSourceRef {
+    pub fn display_name(&self) -> String {
+        match self {
+            MediaSourceRef::LocalFile { path } => path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string()),
+            MediaSourceRef::DropboxFile { display_path, .. } => PathBuf::from(display_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| display_path.clone()),
+        }
+    }
+}
+
+/// Persisted state for a future native drum rack.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DrumPadState {
+    pub source: Option<MediaSourceRef>,
+    pub gain: f32,
+    pub pan: f32,
+    pub start: f32,
+    pub end: f32,
+    pub coarse_tune: i8,
+    pub fine_tune: f32,
+    pub one_shot: bool,
+    pub choke_group: Option<u8>,
+}
+
+/// Persisted state for native instruments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InstrumentStateInfo {
+    SubtractiveSynth { params: Vec<f32> },
+    Sampler {
+        params: Vec<f32>,
+        source: Option<MediaSourceRef>,
+    },
+    DrumRack { pads: Vec<DrumPadState> },
+}
+
 /// Serializable track metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackInfo {
@@ -23,6 +79,8 @@ pub struct TrackInfo {
     pub color_index: u8,
     #[serde(default)]
     pub instrument: Option<InstrumentKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_instrument: Option<InstrumentStateInfo>,
 }
 
 impl TrackInfo {
@@ -38,6 +96,7 @@ impl TrackInfo {
             kind: TrackKind::default(),
             color_index: 0,
             instrument: None,
+            native_instrument: None,
         }
     }
 }
@@ -54,8 +113,12 @@ pub struct ClipInfo {
     pub source_offset: u64,
     /// Duration in samples.
     pub duration: u64,
-    /// Path to the source audio file.
-    pub file_path: PathBuf,
+    /// Canonical external media source reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MediaSourceRef>,
+    /// Legacy local path kept for backward compatibility with older projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<PathBuf>,
     #[serde(default)]
     pub loop_enabled: bool,
     #[serde(default)]
@@ -68,6 +131,18 @@ impl ClipInfo {
     /// The end position of this clip on the timeline (position + duration).
     pub fn end_position(&self) -> u64 {
         self.position.saturating_add(self.duration)
+    }
+
+    pub fn resolved_source(&self) -> Option<&MediaSourceRef> {
+        self.source.as_ref()
+    }
+
+    pub fn resolved_local_path(&self) -> Option<&PathBuf> {
+        if let Some(MediaSourceRef::LocalFile { path }) = self.source.as_ref() {
+            Some(path)
+        } else {
+            self.file_path.as_ref()
+        }
     }
 }
 
@@ -94,7 +169,10 @@ mod tests {
             position: 1000,
             source_offset: 0,
             duration: 500,
-            file_path: PathBuf::from("test.wav"),
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("test.wav"),
+            }),
+            file_path: Some(PathBuf::from("test.wav")),
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
@@ -111,7 +189,10 @@ mod tests {
             position: u64::MAX - 10,
             source_offset: 0,
             duration: 100,
-            file_path: PathBuf::from("test.wav"),
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("test.wav"),
+            }),
+            file_path: Some(PathBuf::from("test.wav")),
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
@@ -145,7 +226,10 @@ mod tests {
             position: 44100,
             source_offset: 1000,
             duration: 88200,
-            file_path: PathBuf::from("/audio/vocal.wav"),
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("/audio/vocal.wav"),
+            }),
+            file_path: Some(PathBuf::from("/audio/vocal.wav")),
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
@@ -157,5 +241,22 @@ mod tests {
         assert_eq!(clip.source_offset, deserialized.source_offset);
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
+        assert_eq!(clip.source, deserialized.source);
+    }
+
+    #[test]
+    fn clip_info_backward_compat_from_legacy_file_path() {
+        let json = r#"{
+            "id":0,
+            "track_id":0,
+            "name":"legacy.wav",
+            "position":0,
+            "source_offset":0,
+            "duration":100,
+            "file_path":"legacy.wav"
+        }"#;
+        let clip: ClipInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
+        assert!(clip.source.is_none());
     }
 }
