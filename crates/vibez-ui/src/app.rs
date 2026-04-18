@@ -1220,6 +1220,135 @@ impl App {
         self.state.status_text = "Redo".to_string();
     }
 
+    fn quantize_audio_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
+        const DEFAULT_SENSITIVITY: f32 = 1.5;
+
+        let (audio, original_name, clip_position, clip_source_offset, clip_duration) = {
+            let Some(track) = self.state.find_track(track_id) else {
+                self.state.status_text = "Track not found".to_string();
+                return;
+            };
+            let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+                self.state.status_text = "Clip not found".to_string();
+                return;
+            };
+            (
+                Arc::clone(&clip.audio),
+                clip.name.clone(),
+                clip.position,
+                clip.source_offset,
+                clip.duration,
+            )
+        };
+
+        let onsets_all = vibez_core::onset::detect_onsets(&audio, DEFAULT_SENSITIVITY);
+        let clip_end_src = clip_source_offset.saturating_add(clip_duration);
+        let onsets: Vec<u64> = onsets_all
+            .into_iter()
+            .filter(|&o| o >= clip_source_offset && o < clip_end_src)
+            .collect();
+
+        if onsets.is_empty() {
+            self.state.status_text =
+                "No transients detected in clip; nothing to quantize".to_string();
+            return;
+        }
+
+        let bpm = self.state.bpm;
+        let sr = self.state.sample_rate as f64;
+        let samples_to_beats = |s: u64| -> f64 {
+            if bpm > 0.0 && sr > 0.0 {
+                s as f64 * bpm / (sr * 60.0)
+            } else {
+                0.0
+            }
+        };
+        let grid = self.state.snap_grid;
+
+        struct NewSlice {
+            clip_id: ClipId,
+            name: String,
+            position: u64,
+            source_offset: u64,
+            duration: u64,
+        }
+        let slice_count = onsets.len();
+        let mut new_slices: Vec<NewSlice> = Vec::with_capacity(slice_count);
+        for (i, &onset) in onsets.iter().enumerate() {
+            let slice_end = onsets.get(i + 1).copied().unwrap_or(clip_end_src);
+            if slice_end <= onset {
+                continue;
+            }
+            let original_timeline_pos =
+                clip_position.saturating_add(onset - clip_source_offset);
+            let snapped_beats = grid.snap_beat(samples_to_beats(original_timeline_pos));
+            let snapped_pos = self.state.beats_to_samples(snapped_beats.max(0.0));
+            new_slices.push(NewSlice {
+                clip_id: ClipId::new(),
+                name: format!("{original_name} {}", i + 1),
+                position: snapped_pos,
+                source_offset: onset,
+                duration: slice_end - onset,
+            });
+        }
+
+        if new_slices.is_empty() {
+            self.state.status_text =
+                "Transients detected but slices collapsed to zero length".to_string();
+            return;
+        }
+
+        // Remove the original clip from the engine and UI track.
+        self.send_command(EngineCommand::RemoveClip(track_id, clip_id));
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.clips.retain(|c| c.id != clip_id);
+        }
+        self.state.selected_clips.retain(|sel| match sel {
+            ArrangementSelection::AudioClip {
+                clip_id: cid,
+                track_id: tid,
+            } => !(*tid == track_id && *cid == clip_id),
+            _ => true,
+        });
+
+        // Add each slice.
+        for slice in &new_slices {
+            self.send_command(EngineCommand::AddClip {
+                track_id,
+                clip_id: slice.clip_id,
+                audio: Arc::clone(&audio),
+                position: slice.position,
+                source_offset: slice.source_offset,
+                duration: slice.duration,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+            });
+        }
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            for slice in new_slices.iter() {
+                track.clips.push(UiClip {
+                    id: slice.clip_id,
+                    name: slice.name.clone(),
+                    audio: Arc::clone(&audio),
+                    source: None,
+                    position: slice.position,
+                    source_offset: slice.source_offset,
+                    duration: slice.duration,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 0,
+                });
+            }
+        }
+
+        self.state.status_text = format!(
+            "Quantized {} slice(s) to {}",
+            new_slices.len(),
+            grid.label()
+        );
+    }
+
     fn quantize_note_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
         let grid = self.state.snap_grid;
         let mut changes: Vec<(usize, MidiNote)> = Vec::new();
@@ -1473,6 +1602,8 @@ impl App {
                 | Message::SetTrackInstrument(..)
                 | Message::RemoveTrackInstrument(_)
                 | Message::HalveNoteClip(..)
+                | Message::QuantizeNoteClip { .. }
+                | Message::QuantizeAudioClip { .. }
         );
         if should_mark_dirty {
             self.push_undo_snapshot();
@@ -4355,6 +4486,10 @@ impl App {
                 self.state.context_menu = None;
                 self.quantize_note_clip(track_id, clip_id);
             }
+            Message::QuantizeAudioClip { track_id, clip_id } => {
+                self.state.context_menu = None;
+                self.quantize_audio_clip(track_id, clip_id);
+            }
 
             // -- Undo / redo --
             Message::Undo => {
@@ -5801,6 +5936,12 @@ impl App {
                         icons::CIRCLE_DOT,
                         format!("Quantize ({})", self.state.snap_grid.label()),
                         Message::QuantizeNoteClip { track_id, clip_id },
+                    ));
+                } else {
+                    col = col.push(menu_btn(
+                        icons::CIRCLE_DOT,
+                        format!("Quantize ({})", self.state.snap_grid.label()),
+                        Message::QuantizeAudioClip { track_id, clip_id },
                     ));
                 }
 

@@ -411,6 +411,10 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
+    QuantizeAudioClip {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
 
     // Undo / redo
     Undo,

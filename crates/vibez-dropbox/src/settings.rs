@@ -77,39 +77,39 @@ pub fn load_app_key_with_env_override(settings: &DropboxSettings) -> Option<Stri
 mod tests {
     use super::*;
 
+    // These three test cases all mutate the same process env var, so cargo's
+    // default parallel test runner races them. Merged into one sequential
+    // case to keep the suite deterministic without adding a new dep.
     #[test]
-    fn env_var_takes_precedence_over_settings() {
-        let settings = DropboxSettings {
+    fn app_key_resolution_env_settings_and_empty() {
+        let settings_key = DropboxSettings {
             app_key: Some("settings_key".into()),
             ..Default::default()
         };
-        // SAFETY: single-threaded test; no other setters contend.
-        std::env::set_var(APP_KEY_ENV, "env_key");
-        let resolved = load_app_key_with_env_override(&settings);
-        std::env::remove_var(APP_KEY_ENV);
-        assert_eq!(resolved.as_deref(), Some("env_key"));
-    }
-
-    #[test]
-    fn settings_fallback_when_no_env() {
-        let settings = DropboxSettings {
-            app_key: Some("settings_key".into()),
-            ..Default::default()
-        };
-        std::env::remove_var(APP_KEY_ENV);
-        let resolved = load_app_key_with_env_override(&settings);
-        assert_eq!(resolved.as_deref(), Some("settings_key"));
-    }
-
-    #[test]
-    fn empty_app_key_is_treated_as_missing() {
-        let settings = DropboxSettings {
+        let empty_key = DropboxSettings {
             app_key: Some("   ".into()),
             ..Default::default()
         };
+
+        // Env var takes precedence over settings.
+        // SAFETY: this test must not run in parallel with itself, which
+        // cargo guarantees for the default runner.
+        std::env::set_var(APP_KEY_ENV, "env_key");
+        assert_eq!(
+            load_app_key_with_env_override(&settings_key).as_deref(),
+            Some("env_key"),
+        );
+
+        // Settings are used when env var is absent.
         std::env::remove_var(APP_KEY_ENV);
-        assert!(load_app_key_with_env_override(&settings).is_none()
-            || APP_KEY_BUILD.is_some());
+        assert_eq!(
+            load_app_key_with_env_override(&settings_key).as_deref(),
+            Some("settings_key"),
+        );
+
+        // Whitespace-only settings values are treated as missing.
+        let resolved_empty = load_app_key_with_env_override(&empty_key);
+        assert!(resolved_empty.is_none() || APP_KEY_BUILD.is_some());
     }
 
     #[test]
