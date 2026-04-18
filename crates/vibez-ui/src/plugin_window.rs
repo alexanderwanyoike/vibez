@@ -261,9 +261,7 @@ impl PluginWindowManager {
             match self.conn.poll_for_event() {
                 Ok(Some(event)) => {
                     if let x11rb::protocol::Event::ClientMessage(cm) = event {
-                        if cm.format == 32
-                            && cm.data.as_data32()[0] == self.wm_delete_window
-                        {
+                        if cm.format == 32 && cm.data.as_data32()[0] == self.wm_delete_window {
                             let key = self
                                 .windows
                                 .iter()

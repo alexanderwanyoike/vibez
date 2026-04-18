@@ -250,11 +250,9 @@ fn poll_timers() {
             // Get the plugin's timer extension
             let plugin_ref = unsafe { &*plugin_ptr };
             let ext_ptr = unsafe {
-                (plugin_ref.get_extension.unwrap())(
-                    plugin_ptr,
-                    CLAP_EXT_TIMER_SUPPORT.as_ptr(),
-                )
-            } as *const clap_sys::ext::timer_support::clap_plugin_timer_support;
+                (plugin_ref.get_extension.unwrap())(plugin_ptr, CLAP_EXT_TIMER_SUPPORT.as_ptr())
+            }
+                as *const clap_sys::ext::timer_support::clap_plugin_timer_support;
 
             if !ext_ptr.is_null() {
                 let ext = unsafe { &*ext_ptr };
@@ -306,7 +304,8 @@ fn poll_fds() {
                         plugin_ptr,
                         CLAP_EXT_POSIX_FD_SUPPORT.as_ptr(),
                     )
-                } as *const clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support;
+                }
+                    as *const clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support;
 
                 if !ext_ptr.is_null() {
                     let ext = unsafe { &*ext_ptr };
@@ -533,9 +532,7 @@ mod tests {
     #[test]
     fn test_host_get_extension_returns_thread_check() {
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_THREAD_CHECK.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_THREAD_CHECK.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
@@ -549,18 +546,14 @@ mod tests {
     #[test]
     fn test_host_get_extension_returns_timer_support() {
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_TIMER_SUPPORT.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_TIMER_SUPPORT.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
     #[test]
     fn test_host_get_extension_returns_posix_fd_support() {
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_POSIX_FD_SUPPORT.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_POSIX_FD_SUPPORT.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
@@ -719,9 +712,7 @@ mod tests {
 
         unsafe { host_register_fd(&host, 10, CLAP_POSIX_FD_READ) };
 
-        let ok = unsafe {
-            host_modify_fd(&host, 10, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE)
-        };
+        let ok = unsafe { host_modify_fd(&host, 10, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE) };
         assert!(ok);
 
         {

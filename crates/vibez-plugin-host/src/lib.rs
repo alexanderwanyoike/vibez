@@ -1,21 +1,21 @@
+pub mod buffer;
+pub mod clap_host;
 pub mod format;
 pub mod gui;
 pub mod info;
-pub mod paths;
-pub mod settings;
-pub mod scanner;
 pub mod instance;
-pub mod buffer;
-pub mod clap_host;
+pub mod paths;
+pub mod scanner;
+pub mod settings;
 pub mod vst3_host;
 pub mod wrappers;
 
+pub use clap_host::host_impl::{poll_clap_events, set_clap_main_thread};
 pub use format::{PluginCategory, PluginFormat, PluginId};
 pub use gui::{PluginGuiHandle, PluginGuiKey};
 pub use info::PluginInfo;
 pub use instance::PluginInstance;
-pub use settings::PluginSettings;
 pub use scanner::scan_plugins;
+pub use settings::PluginSettings;
 pub use wrappers::effect::PluginEffectWrapper;
 pub use wrappers::instrument::PluginInstrumentWrapper;
-pub use clap_host::host_impl::{poll_clap_events, set_clap_main_thread};

@@ -450,19 +450,14 @@ impl canvas::Program<Message> for RulerWidget {
                                     .clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(
-                                        overshoot as f64 * 2.0,
-                                    )),
+                                    Some(Message::ScrollArrangement(overshoot as f64 * 2.0)),
                                 );
                             }
                             if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
-                                let overshoot = ((edge_zone - local_x) / edge_zone)
-                                    .clamp(0.0, 3.0);
+                                let overshoot = ((edge_zone - local_x) / edge_zone).clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(
-                                        -(overshoot as f64 * 2.0),
-                                    )),
+                                    Some(Message::ScrollArrangement(-(overshoot as f64 * 2.0))),
                                 );
                             }
                         }
@@ -1722,10 +1717,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     Some(Message::AddInstrumentTrack),
                                 );
                             } else {
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::AddTrack),
-                                );
+                                return (canvas::event::Status::Captured, Some(Message::AddTrack));
                             }
                         }
                         _ => {}
@@ -1888,10 +1880,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
         // Playhead line
         let ph_x = (self.playhead_beats * ppb_mini) as f32;
         if ph_x >= 0.0 && ph_x <= w {
-            let playhead = canvas::Path::line(
-                iced::Point::new(ph_x, 0.0),
-                iced::Point::new(ph_x, h),
-            );
+            let playhead =
+                canvas::Path::line(iced::Point::new(ph_x, 0.0), iced::Point::new(ph_x, h));
             frame.stroke(
                 &playhead,
                 canvas::Stroke::default()
@@ -1901,10 +1891,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         // Bottom border
-        let border = canvas::Path::line(
-            iced::Point::new(0.0, h - 0.5),
-            iced::Point::new(w, h - 0.5),
-        );
+        let border =
+            canvas::Path::line(iced::Point::new(0.0, h - 0.5), iced::Point::new(w, h - 0.5));
         frame.stroke(
             &border,
             canvas::Stroke::default()
@@ -1930,9 +1918,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         let visible = self.visible_beats(bounds.width);
 
         match event {
-            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                iced::mouse::Button::Left,
-            )) => {
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let click_beat = pos.x as f64 / ppb_mini;
 
@@ -1990,9 +1976,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                     }
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                iced::mouse::Button::Left,
-            )) => {
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 if state.drag.is_some() {
                     state.drag = None;
                     return (canvas::event::Status::Captured, None);

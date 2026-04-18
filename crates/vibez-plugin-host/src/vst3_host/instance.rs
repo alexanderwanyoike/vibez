@@ -36,14 +36,12 @@ struct NoteEvent {
 
 // VST3 IComponent IID: {E831FF31-F2D5-4301-928E-BBEE25697802}
 const ICOMPONENT_IID: [u8; 16] = [
-    0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01,
-    0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02,
+    0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02,
 ];
 
 // VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33F}
 const IAUDIOPROCESSOR_IID: [u8; 16] = [
-    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C,
-    0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3F,
+    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3F,
 ];
 
 /// Raw ProcessSetup matching VST3 C layout.
@@ -168,8 +166,7 @@ impl Vst3PluginInstance {
             *const u8,
             *mut *mut std::ffi::c_void,
         ) -> i32;
-        let query_interface: QueryInterfaceFn =
-            unsafe { std::mem::transmute(*comp_vtbl.add(0)) };
+        let query_interface: QueryInterfaceFn = unsafe { std::mem::transmute(*comp_vtbl.add(0)) };
 
         let mut processor: *mut std::ffi::c_void = std::ptr::null_mut();
         let hr =
@@ -252,8 +249,8 @@ fn parse_uid(uid_str: &str) -> Result<[u8; 16], String> {
     }
     let mut bytes = [0u8; 16];
     for i in 0..16 {
-        bytes[i] =
-            u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|e| format!("UID parse: {e}"))?;
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|e| format!("UID parse: {e}"))?;
     }
     Ok(bytes)
 }
@@ -408,8 +405,7 @@ impl PluginInstance for Vst3PluginInstance {
         if hr == 0 {
             if !self.processor.is_null() {
                 // IAudioProcessor::setProcessing - vtable [8]
-                type SetProcessingFn =
-                    unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+                type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
                 let proc_vtbl = unsafe { vtbl(self.processor) };
                 let set_processing: SetProcessingFn =
                     unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
@@ -427,11 +423,9 @@ impl PluginInstance for Vst3PluginInstance {
             return;
         }
         if !self.processor.is_null() {
-            type SetProcessingFn =
-                unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+            type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
             let proc_vtbl = unsafe { vtbl(self.processor) };
-            let set_processing: SetProcessingFn =
-                unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
+            let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
             unsafe { set_processing(self.processor, 0) };
         }
         if !self.component.is_null() {

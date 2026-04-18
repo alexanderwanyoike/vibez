@@ -51,9 +51,7 @@ pub fn default_scan_paths(format: PluginFormat) -> Vec<PathBuf> {
             }
             #[cfg(target_os = "windows")]
             {
-                paths.push(PathBuf::from(
-                    r"C:\Program Files\Common Files\VST3",
-                ));
+                paths.push(PathBuf::from(r"C:\Program Files\Common Files\VST3"));
             }
         }
     }

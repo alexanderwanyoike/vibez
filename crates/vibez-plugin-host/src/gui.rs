@@ -171,9 +171,7 @@ impl ClapGuiHandle {
             return false;
         }
         let gui = unsafe { &*self.gui_ext };
-        unsafe {
-            (gui.create.unwrap())(self.plugin_ptr, CLAP_WINDOW_API_X11.as_ptr(), false)
-        }
+        unsafe { (gui.create.unwrap())(self.plugin_ptr, CLAP_WINDOW_API_X11.as_ptr(), false) }
     }
 
     fn attach_to_x11(&self, window_id: u32) -> bool {
@@ -228,8 +226,7 @@ impl ClapGuiHandle {
 
 /// VST3 IEditController IID: {DCD7BBE3-7742-448D-A874-AACC979C759E}
 const IEDIT_CONTROLLER_IID: [u8; 16] = [
-    0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75,
-    0x9E,
+    0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E,
 ];
 
 pub struct Vst3GuiHandle {
@@ -253,11 +250,8 @@ impl Vst3GuiHandle {
             return None;
         }
         // FUnknown::queryInterface(iid, &mut obj) - vtable[0]
-        type QueryInterfaceFn = unsafe extern "system" fn(
-            *mut c_void,
-            *const u8,
-            *mut *mut c_void,
-        ) -> i32;
+        type QueryInterfaceFn =
+            unsafe extern "system" fn(*mut c_void, *const u8, *mut *mut c_void) -> i32;
         let vtbl = *(component as *const *const *const c_void);
         let query_interface: QueryInterfaceFn = std::mem::transmute(*vtbl.add(0));
 
@@ -328,8 +322,7 @@ impl Vst3GuiHandle {
             return false;
         }
         // IPlugView::attached(parent, type) - vtable[4]
-        type AttachedFn =
-            unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8) -> i32;
+        type AttachedFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8) -> i32;
         let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
         let attached: AttachedFn = unsafe { std::mem::transmute(*vtbl.add(4)) };
         let platform_type = b"X11EmbedWindowID\0";
@@ -376,8 +369,7 @@ impl Vst3GuiHandle {
         // IEditController::createView(name) -> IPlugView*
         // IEditController vtable: FUnknown[0-2] + IPluginBase[3-4] + IEditController[5-17]
         // createView is at index 17 in the vtable
-        type CreateViewFn =
-            unsafe extern "system" fn(*mut c_void, *const u8) -> *mut c_void;
+        type CreateViewFn = unsafe extern "system" fn(*mut c_void, *const u8) -> *mut c_void;
         let vtbl = unsafe { *(self.edit_controller as *const *const *const c_void) };
         let create_view: CreateViewFn = unsafe { std::mem::transmute(*vtbl.add(17)) };
         let editor_name = b"editor\0";
@@ -391,11 +383,9 @@ impl Vst3GuiHandle {
         self.plug_view = view;
 
         // Check if X11 is supported: IPlugView::isPlatformTypeSupported(type) - vtable[3]
-        type IsPlatformSupportedFn =
-            unsafe extern "system" fn(*mut c_void, *const u8) -> i32;
+        type IsPlatformSupportedFn = unsafe extern "system" fn(*mut c_void, *const u8) -> i32;
         let view_vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
-        let is_supported: IsPlatformSupportedFn =
-            unsafe { std::mem::transmute(*view_vtbl.add(3)) };
+        let is_supported: IsPlatformSupportedFn = unsafe { std::mem::transmute(*view_vtbl.add(3)) };
         let platform_type = b"X11EmbedWindowID\0";
         let hr = unsafe { is_supported(self.plug_view, platform_type.as_ptr()) };
         eprintln!("vibez: open_view — isPlatformTypeSupported(X11) = {hr}");

@@ -998,7 +998,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 let original_notes: Vec<(usize, u8, f64)> = selected_set
                                     .iter()
                                     .filter(|&&i| i < clip_data.notes.len())
-                                    .map(|&i| (i, clip_data.notes[i].pitch, clip_data.notes[i].start_beat))
+                                    .map(|&i| {
+                                        (i, clip_data.notes[i].pitch, clip_data.notes[i].start_beat)
+                                    })
                                     .collect();
 
                                 state.drag = Some(DragAction::MoveNote {
@@ -1104,9 +1106,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
-                                    let anchor_new_beat = self
-                                        .snap_grid
-                                        .snap_beat(original_start_beat + beat_delta);
+                                    let anchor_new_beat =
+                                        self.snap_grid.snap_beat(original_start_beat + beat_delta);
                                     let snapped_beat_delta = anchor_new_beat - original_start_beat;
 
                                     // Move anchor note for visual feedback (works for both
@@ -1225,20 +1226,23 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
-                                    let anchor_new_beat = self
-                                        .snap_grid
-                                        .snap_beat(original_start_beat + beat_delta);
+                                    let anchor_new_beat =
+                                        self.snap_grid.snap_beat(original_start_beat + beat_delta);
                                     let snapped_beat_delta = anchor_new_beat - original_start_beat;
 
                                     // Compute absolute positions for all selected notes
                                     // (anchor was already moved during drag, non-anchor need moving)
                                     let moves: Vec<(usize, f64, u8)> = original_notes
                                         .iter()
-                                        .filter(|(i, _, _)| *i != note_index && *i < clip_data.notes.len())
+                                        .filter(|(i, _, _)| {
+                                            *i != note_index && *i < clip_data.notes.len()
+                                        })
                                         .map(|(i, orig_pitch, orig_beat)| {
-                                            let new_beat = (orig_beat + snapped_beat_delta).max(0.0);
+                                            let new_beat =
+                                                (orig_beat + snapped_beat_delta).max(0.0);
                                             let new_pitch = (*orig_pitch as i16 + pitch_delta)
-                                                .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1) as u8;
+                                                .clamp(LOW_NOTE as i16, HIGH_NOTE as i16 - 1)
+                                                as u8;
                                             (*i, new_beat, new_pitch)
                                         })
                                         .collect();
@@ -1380,10 +1384,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(ref clip_data) = self.clip {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::SelectAllNotes(
-                            self.track_id,
-                            clip_data.clip_id,
-                        )),
+                        Some(Message::SelectAllNotes(self.track_id, clip_data.clip_id)),
                     );
                 }
             }

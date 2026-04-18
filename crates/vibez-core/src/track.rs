@@ -54,12 +54,16 @@ pub struct DrumPadState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InstrumentStateInfo {
-    SubtractiveSynth { params: Vec<f32> },
+    SubtractiveSynth {
+        params: Vec<f32>,
+    },
     Sampler {
         params: Vec<f32>,
         source: Option<MediaSourceRef>,
     },
-    DrumRack { pads: Vec<DrumPadState> },
+    DrumRack {
+        pads: Vec<DrumPadState>,
+    },
 }
 
 /// Serializable track metadata shared between engine and UI.

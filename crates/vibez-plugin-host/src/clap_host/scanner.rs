@@ -38,10 +38,8 @@ fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
     let entry_ref = unsafe { &*entry_ptr };
 
     // Initialize the entry
-    let path_cstr = std::ffi::CString::new(
-        path.to_str().unwrap_or_default(),
-    )
-    .map_err(|e| format!("Invalid path: {e}"))?;
+    let path_cstr = std::ffi::CString::new(path.to_str().unwrap_or_default())
+        .map_err(|e| format!("Invalid path: {e}"))?;
 
     let init_ok = unsafe { (entry_ref.init.unwrap())(path_cstr.as_ptr()) };
     if !init_ok {
@@ -50,8 +48,8 @@ fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
 
     // Get the plugin factory
     let factory_id = clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID;
-    let factory_ptr =
-        unsafe { (entry_ref.get_factory.unwrap())(factory_id.as_ptr()) } as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
+    let factory_ptr = unsafe { (entry_ref.get_factory.unwrap())(factory_id.as_ptr()) }
+        as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
 
     if factory_ptr.is_null() {
         unsafe { (entry_ref.deinit.unwrap())() };
@@ -65,8 +63,7 @@ fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
     let mut results = Vec::new();
 
     for i in 0..count {
-        let desc_ptr =
-            unsafe { (factory.get_plugin_descriptor.unwrap())(factory_ptr, i as u32) };
+        let desc_ptr = unsafe { (factory.get_plugin_descriptor.unwrap())(factory_ptr, i as u32) };
         if desc_ptr.is_null() {
             continue;
         }

@@ -155,12 +155,12 @@ pub fn view_effect_slot<'a>(
         .push(remove);
 
     let title_bar = container(title_row)
-    .padding([4, 6])
-    .width(Length::Fill)
-    .style(|_theme: &Theme| container::Style {
-        background: Some(th::BG_SURFACE.into()),
-        ..Default::default()
-    });
+        .padding([4, 6])
+        .width(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            ..Default::default()
+        });
 
     // ── Body ─────────────────────────────────────────────────
     let body: Element<'a, Message> = if has_params && !has_gui {
