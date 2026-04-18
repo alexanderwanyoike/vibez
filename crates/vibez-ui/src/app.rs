@@ -221,6 +221,87 @@ impl App {
         self.state.status_text = "New project".to_string();
     }
 
+    fn apply_template(&mut self, template: &vibez_project::templates::GenreTemplate) {
+        let project = template.build();
+        self.clear_project_runtime();
+        self.state.bpm = project.bpm;
+        self.state.bpm_text = format!("{:.0}", project.bpm);
+        self.send_command(EngineCommand::SetBpm(project.bpm));
+
+        for track_info in &project.tracks {
+            let mut ui_track = UiTrack::new_instrument(
+                track_info.id,
+                track_info.name.clone(),
+                track_info.kind,
+                track_info.color_index,
+            );
+            ui_track.gain = track_info.gain;
+            ui_track.pan = track_info.pan;
+            ui_track.mute = track_info.mute;
+            ui_track.solo = track_info.solo;
+            ui_track.instrument_kind = track_info.instrument;
+            ui_track.has_instrument = track_info.instrument.is_some();
+
+            match track_info.kind {
+                TrackKind::Audio => {
+                    self.send_command(EngineCommand::AddTrack(
+                        track_info.id,
+                        track_info.name.clone(),
+                    ));
+                }
+                TrackKind::Midi | TrackKind::Instrument(_) => {
+                    self.send_command(EngineCommand::AddMidiTrack(
+                        track_info.id,
+                        track_info.name.clone(),
+                    ));
+                }
+            }
+
+            self.send_command(EngineCommand::SetTrackGain(track_info.id, track_info.gain));
+            self.send_command(EngineCommand::SetTrackPan(track_info.id, track_info.pan));
+
+            if let Some(kind) = track_info.instrument {
+                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
+            }
+
+            if let Some(state) = &track_info.native_instrument {
+                match state {
+                    InstrumentStateInfo::SubtractiveSynth { params }
+                    | InstrumentStateInfo::Sampler { params, .. } => {
+                        ui_track.instrument_params = params.clone();
+                        for (i, v) in params.iter().copied().enumerate() {
+                            self.send_command(EngineCommand::SetInstrumentParam {
+                                track_id: track_info.id,
+                                param_index: i,
+                                value: v,
+                            });
+                        }
+                    }
+                    InstrumentStateInfo::DrumRack { pads } => {
+                        ui_track.drum_rack_pads =
+                            pads.iter().map(UiDrumPad::from_state).collect();
+                        for (i, pad) in pads.iter().cloned().enumerate() {
+                            self.send_command(EngineCommand::SetDrumRackPadState {
+                                track_id: track_info.id,
+                                pad_index: i,
+                                state: pad,
+                            });
+                        }
+                    }
+                }
+            }
+
+            self.state.tracks.push(ui_track);
+            self.state.next_track_number =
+                (self.state.tracks.len() as u32).max(self.state.next_track_number);
+        }
+
+        self.state.selected_track = self.state.tracks.first().map(|t| t.id);
+        self.state.current_project_path = None;
+        self.state.project_dirty = false;
+        self.state.status_text = format!("New project from template: {}", template.name);
+    }
+
     fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
             sample_library_roots: self.state.sample_browser_roots.clone(),
@@ -3558,7 +3639,17 @@ impl App {
 
             // -- File menu --
             Message::NewProject => {
+                self.state.file_menu_open = false;
                 self.reset_to_new_project();
+            }
+            Message::NewProjectFromTemplate(id) => {
+                self.state.file_menu_open = false;
+                match vibez_project::templates::find(id) {
+                    Some(template) => self.apply_template(template),
+                    None => {
+                        self.state.status_text = format!("Unknown template: {id}");
+                    }
+                }
             }
             Message::OpenProject => {
                 self.state.file_menu_open = false;
@@ -4363,7 +4454,41 @@ impl App {
             })
         };
 
-        let new_btn = make_menu_btn("New Project", icons::PLUS, Message::NewProject);
+        let new_btn = make_menu_btn("New (Empty)", icons::PLUS, Message::NewProject);
+
+        let mut template_rows: Vec<Element<'_, Message>> = Vec::new();
+        for template in vibez_project::templates::TEMPLATES {
+            let label = format!("New — {} {}", template.name, template.bpm as u32);
+            template_rows.push(
+                button(
+                    row![
+                        icons::icon(icons::MUSIC).size(12).color(th::TEXT_DIM),
+                        text(label).size(12).color(th::TEXT)
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(Message::NewProjectFromTemplate(template.id))
+                .padding([8, 16])
+                .width(Length::Fill)
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                })
+                .into(),
+            );
+        }
+
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
         let save_label = if self.state.project_dirty {
             "Save*"
@@ -4398,10 +4523,17 @@ impl App {
             }
         });
 
-        let menu_content = column![new_btn, open_btn, save_btn, save_as_btn, settings_btn]
-            .spacing(2)
+        let mut menu_content = column![new_btn].spacing(2);
+        for row in template_rows {
+            menu_content = menu_content.push(row);
+        }
+        let menu_content = menu_content
+            .push(open_btn)
+            .push(save_btn)
+            .push(save_as_btn)
+            .push(settings_btn)
             .padding(4)
-            .width(Length::Fixed(160.0));
+            .width(Length::Fixed(220.0));
 
         let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
             background: Some(th::BG_SURFACE.into()),

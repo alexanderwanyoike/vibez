@@ -332,6 +332,7 @@ pub enum Message {
 
     // File menu
     NewProject,
+    NewProjectFromTemplate(&'static str),
     OpenProject,
     SaveProject,
     SaveProjectAs,
