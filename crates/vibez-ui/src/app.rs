@@ -995,6 +995,90 @@ impl App {
         );
     }
 
+    fn generate_phrase_variations(&mut self, track_id: TrackId, clip_id: ClipId) {
+        let source_info = {
+            let Some(track) = self.state.find_track(track_id) else {
+                self.state.status_text = "Track not found".to_string();
+                return;
+            };
+            let Some(source) = track.note_clips.iter().find(|c| c.id == clip_id) else {
+                self.state.status_text = "Note clip not found".to_string();
+                return;
+            };
+            vibez_core::midi::NoteClipInfo {
+                id: source.id,
+                track_id,
+                name: source.name.clone(),
+                position_beats: source.position_beats,
+                duration_beats: source.duration_beats,
+                loop_enabled: source.loop_enabled,
+                loop_start_beats: source.loop_start_beats,
+                loop_end_beats: source.loop_end_beats,
+                notes: source.notes.clone(),
+            }
+        };
+
+        let preset = vibez_core::phrase_variation::GenrePreset::from_bpm(self.state.bpm);
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let count = 3usize;
+        let variants = vibez_core::phrase_variation::generate_variants(
+            &source_info,
+            preset,
+            seed,
+            count,
+        );
+
+        let phrase_length = source_info.duration_beats.max(1.0);
+        let base_position = source_info.position_beats + phrase_length;
+
+        for (i, mut variant) in variants.into_iter().enumerate() {
+            variant.position_beats = base_position + phrase_length * i as f64;
+            let new_clip_id = variant.id;
+
+            self.send_command(EngineCommand::AddNoteClip {
+                track_id,
+                clip_id: new_clip_id,
+                position_beats: variant.position_beats,
+                duration_beats: variant.duration_beats,
+                loop_enabled: variant.loop_enabled,
+                loop_start_beats: variant.loop_start_beats,
+                loop_end_beats: variant.loop_end_beats,
+            });
+            for note in &variant.notes {
+                self.send_command(EngineCommand::AddNote {
+                    track_id,
+                    clip_id: new_clip_id,
+                    note: *note,
+                });
+            }
+
+            if let Some(track) = self.state.find_track_mut(track_id) {
+                track.note_clips.push(UiNoteClip {
+                    id: new_clip_id,
+                    name: variant.name.clone(),
+                    position_beats: variant.position_beats,
+                    duration_beats: variant.duration_beats,
+                    notes: variant.notes.clone(),
+                    selected_notes: HashSet::new(),
+                    loop_enabled: variant.loop_enabled,
+                    loop_start_beats: variant.loop_start_beats,
+                    loop_end_beats: variant.loop_end_beats,
+                });
+            }
+        }
+
+        self.mark_project_dirty();
+        self.state.status_text = format!(
+            "Generated {} {} variation(s) after '{}'",
+            count,
+            preset.name(),
+            source_info.name
+        );
+    }
+
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
@@ -3994,6 +4078,12 @@ impl App {
             Message::BounceComplete(Err(err)) => {
                 self.state.status_text = format!("Bounce error: {err}");
             }
+
+            // -- Phrase variation --
+            Message::GenerateVariations { track_id, clip_id } => {
+                self.state.context_menu = None;
+                self.generate_phrase_variations(track_id, clip_id);
+            }
         }
         Task::none()
     }
@@ -5005,6 +5095,15 @@ impl App {
                         is_note_clip,
                     },
                 ));
+
+                // Phrase variation (note clips only)
+                if is_note_clip {
+                    col = col.push(menu_btn(
+                        icons::REPEAT,
+                        "Generate Variations".into(),
+                        Message::GenerateVariations { track_id, clip_id },
+                    ));
+                }
 
                 col.into()
             }

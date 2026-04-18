@@ -391,4 +391,10 @@ pub enum Message {
         is_note_clip: bool,
     },
     BounceComplete(Result<BounceOutcome, String>),
+
+    // Phrase variation
+    GenerateVariations {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
 }
