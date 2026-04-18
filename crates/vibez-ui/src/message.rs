@@ -46,6 +46,16 @@ pub struct SampleLibraryScanResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct BounceOutcome {
+    pub audio: Arc<DecodedAudio>,
+    pub source: MediaSourceRef,
+    pub path: PathBuf,
+    pub clip_name: String,
+    pub insert_position_samples: u64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub enum BrowserImportTarget {
     ArrangementClip(Option<TrackId>),
     Sampler(TrackId),
@@ -371,4 +381,13 @@ pub enum Message {
     // Plugin GUI windows
     OpenPluginGui(PluginGuiKey),
     ClosePluginGui(PluginGuiKey),
+
+    // Bounce / resample
+    BounceSelectionToAudio,
+    BounceClipToAudio {
+        track_id: TrackId,
+        clip_id: ClipId,
+        is_note_clip: bool,
+    },
+    BounceComplete(Result<BounceOutcome, String>),
 }

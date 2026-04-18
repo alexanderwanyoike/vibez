@@ -70,6 +70,18 @@ struct PluginInstrumentLoadResult {
     sample_rate: f64,
 }
 
+struct BounceAssets {
+    clips: std::collections::HashMap<ClipId, Arc<vibez_core::audio_buffer::DecodedAudio>>,
+    samplers: std::collections::HashMap<
+        TrackId,
+        (Arc<vibez_core::audio_buffer::DecodedAudio>, String),
+    >,
+    pads: std::collections::HashMap<
+        (TrackId, usize),
+        (Arc<vibez_core::audio_buffer::DecodedAudio>, String),
+    >,
+}
+
 struct App {
     state: AppState,
     cmd_tx: Option<Producer<EngineCommand>>,
@@ -269,6 +281,7 @@ impl App {
         if let Some(track) = self.state.find_track_mut(track_id) {
             track.sample_name = Some(name.clone());
             track.sample_source = Some(source.clone());
+            track.sample_audio = Some(Arc::clone(&audio));
         }
         self.send_command(EngineCommand::LoadSamplerSample {
             track_id,
@@ -290,6 +303,7 @@ impl App {
             if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
                 pad.name = Some(name.clone());
                 pad.source = Some(source.clone());
+                pad.audio = Some(Arc::clone(&audio));
             }
         }
         self.sync_drum_rack_pad_state(track_id, pad_index);
@@ -709,6 +723,7 @@ impl App {
             if let Some(track) = self.state.find_track_mut(sampler.track_id) {
                 track.sample_name = Some(sampler.name.clone());
                 track.sample_source = Some(sampler.source.clone());
+                track.sample_audio = Some(Arc::clone(&sampler.audio));
             }
             self.send_command(EngineCommand::LoadSamplerSample {
                 track_id: sampler.track_id,
@@ -720,10 +735,9 @@ impl App {
         for pad in loaded.drum_rack_pad_samples {
             if let Some(track) = self.state.find_track_mut(pad.track_id) {
                 if let Some(slot) = track.drum_rack_pads.get_mut(pad.pad_index) {
-                    slot.name = Some(pad.name.clone());
-                    slot.source = Some(pad.source.clone());
                     *slot = UiDrumPad::from_state(&pad.state);
                     slot.name = Some(pad.name.clone());
+                    slot.audio = Some(Arc::clone(&pad.audio));
                 }
             }
             self.send_command(EngineCommand::SetDrumRackPadState {
@@ -751,6 +765,153 @@ impl App {
                 loaded.warnings.len()
             )
         };
+    }
+
+    fn collect_bounce_assets(&self) -> BounceAssets {
+        let mut clips = std::collections::HashMap::new();
+        let mut samplers = std::collections::HashMap::new();
+        let mut pads = std::collections::HashMap::new();
+        for track in &self.state.tracks {
+            for clip in &track.clips {
+                clips.insert(clip.id, Arc::clone(&clip.audio));
+            }
+            if let Some(audio) = &track.sample_audio {
+                samplers.insert(
+                    track.id,
+                    (
+                        Arc::clone(audio),
+                        track.sample_name.clone().unwrap_or_default(),
+                    ),
+                );
+            }
+            for (i, pad) in track.drum_rack_pads.iter().enumerate() {
+                if let Some(audio) = &pad.audio {
+                    pads.insert(
+                        (track.id, i),
+                        (Arc::clone(audio), pad.name.clone().unwrap_or_default()),
+                    );
+                }
+            }
+        }
+        BounceAssets {
+            clips,
+            samplers,
+            pads,
+        }
+    }
+
+    fn next_bounce_path(&self) -> PathBuf {
+        let base = match &self.state.current_project_path {
+            Some(project_path) => project_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("renders"),
+            None => std::env::temp_dir().join("vibez-renders"),
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        base.join(format!("bounce-{stamp}.wav"))
+    }
+
+    fn dispatch_bounce(
+        &mut self,
+        mode: vibez_engine::render::BounceMode,
+        range_samples: (u64, u64),
+        insert_position_samples: u64,
+        clip_name: String,
+    ) -> Task<Message> {
+        if range_samples.1 <= range_samples.0 {
+            self.state.status_text = "Empty range — nothing to bounce".to_string();
+            return Task::none();
+        }
+
+        let assets = self.collect_bounce_assets();
+        let project = self.project_from_state();
+        let wav_path = self.next_bounce_path();
+        let sample_rate = self.state.sample_rate;
+        let bpm = self.state.bpm;
+
+        let request = vibez_engine::render::BounceRequest {
+            tracks: project.tracks,
+            audio_clips: project.clips,
+            note_clips: project.note_clips,
+            clip_audio: assets.clips,
+            sampler_audio: assets.samplers,
+            drum_pad_audio: assets.pads,
+            mode,
+            range_samples,
+            bpm,
+            sample_rate,
+        };
+
+        self.state.status_text = format!("Bouncing {clip_name}...");
+        Task::perform(
+            bounce_async(request, wav_path, clip_name, insert_position_samples),
+            Message::BounceComplete,
+        )
+    }
+
+    fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
+        let track_num = self.state.next_track_number;
+        self.state.next_track_number += 1;
+        let color_index = (track_num.wrapping_sub(1) % 8) as u8;
+        let track_id = TrackId::new();
+        let track_name = format!("Bounce {track_num}");
+
+        self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
+        self.state
+            .tracks
+            .push(UiTrack::new(track_id, track_name, color_index));
+
+        let clip_id = ClipId::new();
+        let duration = outcome.audio.num_frames() as u64;
+        self.send_command(EngineCommand::AddClip {
+            track_id,
+            clip_id,
+            audio: Arc::clone(&outcome.audio),
+            position: outcome.insert_position_samples,
+            source_offset: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.clips.push(UiClip {
+                id: clip_id,
+                name: outcome.clip_name.clone(),
+                audio: Arc::clone(&outcome.audio),
+                source: Some(outcome.source.clone()),
+                position: outcome.insert_position_samples,
+                source_offset: 0,
+                duration,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+            });
+        }
+
+        self.state.selected_track = Some(track_id);
+        self.state.selected_clips.clear();
+        self.state
+            .selected_clips
+            .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+        self.mark_project_dirty();
+
+        let warnings_note = if outcome.warnings.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} warning(s))", outcome.warnings.len())
+        };
+        self.state.status_text = format!(
+            "Bounced '{}' to {}{}",
+            outcome.clip_name,
+            outcome.path.display(),
+            warnings_note
+        );
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -3107,6 +3268,7 @@ impl App {
                     track.instrument_kind = Some(instrument_kind);
                     track.sample_name = None;
                     track.sample_source = None;
+                    track.sample_audio = None;
                     track.instrument_params = instrument_params.clone();
                     track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
                     track.selected_drum_pad = 0;
@@ -3666,6 +3828,80 @@ impl App {
                 if let Some(ref mut mgr) = self.plugin_window_manager {
                     mgr.close(key);
                 }
+            }
+
+            // -- Bounce / resample --
+            Message::BounceSelectionToAudio => {
+                self.state.context_menu = None;
+                if !self.state.time_selection_active
+                    || self.state.selection_end_beats <= self.state.selection_start_beats
+                {
+                    self.state.status_text = "No time selection active".to_string();
+                    return Task::none();
+                }
+                let start = self.state.beats_to_samples(self.state.selection_start_beats);
+                let end = self.state.beats_to_samples(self.state.selection_end_beats);
+                return self.dispatch_bounce(
+                    vibez_engine::render::BounceMode::Master,
+                    (start, end),
+                    start,
+                    format!(
+                        "Selection {:.2}–{:.2}",
+                        self.state.selection_start_beats, self.state.selection_end_beats
+                    ),
+                );
+            }
+            Message::BounceClipToAudio {
+                track_id,
+                clip_id,
+                is_note_clip,
+            } => {
+                self.state.context_menu = None;
+                let (range, insert_pos, name) = if is_note_clip {
+                    let spb = self.state.sample_rate as f64 * 60.0 / self.state.bpm;
+                    let track_opt = self.state.find_track(track_id);
+                    let nc = track_opt
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
+                    match nc {
+                        Some(nc) => {
+                            let start = (nc.position_beats * spb) as u64;
+                            let end = ((nc.position_beats + nc.duration_beats) * spb) as u64;
+                            (Some((start, end)), start, nc.name.clone())
+                        }
+                        None => (None, 0, String::new()),
+                    }
+                } else {
+                    let track_opt = self.state.find_track(track_id);
+                    let ac = track_opt.and_then(|t| t.clips.iter().find(|c| c.id == clip_id));
+                    match ac {
+                        Some(ac) => (
+                            Some((ac.position, ac.position + ac.duration)),
+                            ac.position,
+                            ac.name.clone(),
+                        ),
+                        None => (None, 0, String::new()),
+                    }
+                };
+                let Some(range) = range else {
+                    self.state.status_text = "Clip not found".to_string();
+                    return Task::none();
+                };
+                return self.dispatch_bounce(
+                    vibez_engine::render::BounceMode::Clip {
+                        track_id,
+                        clip_id,
+                        is_note_clip,
+                    },
+                    range,
+                    insert_pos,
+                    name,
+                );
+            }
+            Message::BounceComplete(Ok(outcome)) => {
+                self.finalize_bounce(outcome);
+            }
+            Message::BounceComplete(Err(err)) => {
+                self.state.status_text = format!("Bounce error: {err}");
             }
         }
         Task::none()
@@ -4627,6 +4863,17 @@ impl App {
                     Message::StartEditingClipName(track_id, clip_id),
                 ));
 
+                // Bounce to audio
+                col = col.push(menu_btn(
+                    icons::AUDIO_WAVEFORM,
+                    "Bounce to Audio".into(),
+                    Message::BounceClipToAudio {
+                        track_id,
+                        clip_id,
+                        is_note_clip,
+                    },
+                ));
+
                 col.into()
             }
             ContextMenuTarget::TimeSelection {
@@ -4672,6 +4919,11 @@ impl App {
                     icons::REPEAT,
                     "Set as Loop Region".into(),
                     Message::SetSelectionAsLoop,
+                ));
+                col = col.push(menu_btn(
+                    icons::AUDIO_WAVEFORM,
+                    "Bounce Selection".into(),
+                    Message::BounceSelectionToAudio,
                 ));
 
                 col.into()
@@ -7011,6 +7263,31 @@ async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, 
     })
     .await
     .map_err(|err| format!("save task failed: {err}"))?
+}
+
+async fn bounce_async(
+    request: vibez_engine::render::BounceRequest,
+    wav_path: PathBuf,
+    clip_name: String,
+    insert_position_samples: u64,
+) -> Result<crate::message::BounceOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let result = vibez_engine::render::render_offline(&request);
+        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
+            .map_err(|e| format!("WAV write error: {e}"))?;
+        Ok(crate::message::BounceOutcome {
+            audio: Arc::new(result.audio),
+            source: MediaSourceRef::LocalFile {
+                path: wav_path.clone(),
+            },
+            path: wav_path,
+            clip_name,
+            insert_position_samples,
+            warnings: result.warnings,
+        })
+    })
+    .await
+    .map_err(|err| format!("bounce task failed: {err}"))?
 }
 
 async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> {

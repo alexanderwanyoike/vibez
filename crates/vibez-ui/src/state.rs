@@ -33,6 +33,9 @@ pub struct UiClip {
 pub struct UiDrumPad {
     pub name: Option<String>,
     pub source: Option<MediaSourceRef>,
+    /// Decoded audio kept on the UI side so offline bounce can re-seed a
+    /// drum rack without a round-trip through the audio thread.
+    pub audio: Option<Arc<DecodedAudio>>,
     pub gain: f32,
     pub pan: f32,
     pub start: f32,
@@ -48,6 +51,7 @@ impl Default for UiDrumPad {
         Self {
             name: None,
             source: None,
+            audio: None,
             gain: 1.0,
             pan: 0.0,
             start: 0.0,
@@ -79,6 +83,7 @@ impl UiDrumPad {
         Self {
             name: state.source.as_ref().map(MediaSourceRef::display_name),
             source: state.source.clone(),
+            audio: None,
             gain: state.gain,
             pan: state.pan,
             start: state.start,
@@ -149,6 +154,9 @@ pub struct UiTrack {
     pub instrument_kind: Option<InstrumentKind>,
     pub sample_name: Option<String>,
     pub sample_source: Option<MediaSourceRef>,
+    /// Decoded audio for the sampler, kept UI-side so offline bounce can
+    /// re-seed a fresh sampler instance.
+    pub sample_audio: Option<Arc<DecodedAudio>>,
     pub instrument_params: Vec<f32>,
     pub drum_rack_pads: Vec<UiDrumPad>,
     pub selected_drum_pad: usize,
@@ -178,6 +186,7 @@ impl UiTrack {
             instrument_kind: None,
             sample_name: None,
             sample_source: None,
+            sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
             selected_drum_pad: 0,
@@ -209,6 +218,7 @@ impl UiTrack {
             instrument_kind,
             sample_name: None,
             sample_source: None,
+            sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
             selected_drum_pad: 0,
