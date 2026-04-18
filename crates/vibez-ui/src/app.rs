@@ -19,6 +19,10 @@ use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
+use vibez_dropbox::{
+    load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry,
+    DropboxSettings,
+};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance};
 use vibez_project::Project;
@@ -95,6 +99,11 @@ struct App {
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
+
+    // Dropbox
+    dropbox_settings: DropboxSettings,
+    dropbox_cache: DropboxCache,
+    dropbox_client: Option<Arc<DropboxClient>>,
 }
 
 pub fn run() -> iced::Result {
@@ -125,10 +134,28 @@ impl App {
             }
         };
 
+        let dropbox_settings = DropboxSettings::load();
+        let dropbox_cache = DropboxCache::new();
+        let resolved_key = load_app_key_with_env_override(&dropbox_settings);
+        let dropbox_client = match (&resolved_key, &dropbox_settings.tokens) {
+            (Some(key), Some(tokens)) => {
+                Some(Arc::new(DropboxClient::new(key.clone(), tokens.clone())))
+            }
+            _ => None,
+        };
+        let dropbox_ui_state = crate::state::DropboxUiState {
+            connected: dropbox_client.is_some(),
+            account_email: dropbox_settings.account_email.clone(),
+            app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
+            has_app_key: resolved_key.is_some(),
+            ..Default::default()
+        };
+
         let state = AppState {
             sample_rate,
             sample_browser_open: ui_settings.sample_browser_open,
             sample_browser_roots: ui_settings.sample_library_roots,
+            dropbox: dropbox_ui_state,
             ..Default::default()
         };
 
@@ -152,6 +179,9 @@ impl App {
             plugin_instrument_tx,
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
+            dropbox_settings,
+            dropbox_cache,
+            dropbox_client,
         };
 
         // Inform the engine of the actual sample rate
@@ -3781,7 +3811,14 @@ impl App {
             Message::ProjectOpenPathSelected(path) => {
                 if let Some(path) = path {
                     self.state.status_text = format!("Opening {}...", path.display());
-                    return Task::perform(load_project_async(path), Message::ProjectLoaded);
+                    let dropbox = self
+                        .dropbox_client
+                        .clone()
+                        .map(|client| (client, self.dropbox_cache.clone()));
+                    return Task::perform(
+                        load_project_async(path, dropbox),
+                        Message::ProjectLoaded,
+                    );
                 }
             }
             Message::ProjectSavePathSelected(path) => {
@@ -4083,6 +4120,209 @@ impl App {
             Message::GenerateVariations { track_id, clip_id } => {
                 self.state.context_menu = None;
                 self.generate_phrase_variations(track_id, clip_id);
+            }
+
+            // -- Sample browser mode --
+            Message::SetSampleBrowserMode(mode) => {
+                self.state.sample_browser_mode = mode;
+                if mode == crate::state::SampleBrowserMode::Dropbox
+                    && self.dropbox_client.is_some()
+                    && !self.state.dropbox.folders.contains_key("")
+                    && !self.state.dropbox.listing_in_progress.contains("")
+                {
+                    return self.update(Message::DropboxExpandFolder(String::new()));
+                }
+            }
+
+            // -- Dropbox --
+            Message::SetDropboxAppKey(key) => {
+                self.state.dropbox.app_key_input = key;
+            }
+            Message::SaveDropboxAppKey => {
+                let value = self.state.dropbox.app_key_input.trim().to_string();
+                self.dropbox_settings.app_key = if value.is_empty() {
+                    None
+                } else {
+                    Some(value)
+                };
+                if let Err(err) = self.dropbox_settings.save() {
+                    self.state.dropbox.last_error = Some(format!("save settings: {err}"));
+                }
+                self.state.dropbox.has_app_key =
+                    load_app_key_with_env_override(&self.dropbox_settings).is_some();
+                self.state.status_text = "Dropbox app key saved".to_string();
+            }
+            Message::ConnectDropbox => {
+                let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings)
+                else {
+                    self.state.dropbox.last_error = Some(
+                        "No Dropbox app key set. Register an app at dropbox.com/developers/apps \
+                        and paste the App key above."
+                            .into(),
+                    );
+                    return Task::none();
+                };
+                if self.state.dropbox.auth_in_progress {
+                    return Task::none();
+                }
+                self.state.dropbox.auth_in_progress = true;
+                self.state.dropbox.last_error = None;
+                self.state.status_text = "Opening Dropbox authorisation...".to_string();
+                return Task::perform(connect_dropbox_async(app_key), |result| {
+                    Message::DropboxConnected(result.map(|(info, tokens)| {
+                        crate::message::DropboxConnectOutcome { info, tokens }
+                    }))
+                });
+            }
+            Message::DropboxConnected(Ok(outcome)) => {
+                self.state.dropbox.auth_in_progress = false;
+                if let Some(app_key) =
+                    load_app_key_with_env_override(&self.dropbox_settings)
+                {
+                    let client = DropboxClient::new(app_key, outcome.tokens.clone());
+                    self.dropbox_client = Some(Arc::new(client));
+                }
+                self.dropbox_settings.tokens = Some(outcome.tokens.clone());
+                self.dropbox_settings.account_email = Some(outcome.info.email.clone());
+                if let Err(err) = self.dropbox_settings.save() {
+                    self.state.dropbox.last_error = Some(format!("save settings: {err}"));
+                }
+                self.state.dropbox.connected = true;
+                self.state.dropbox.account_email = Some(outcome.info.email.clone());
+                self.state.status_text =
+                    format!("Dropbox connected: {}", outcome.info.email);
+            }
+            Message::DropboxConnected(Err(err)) => {
+                self.state.dropbox.auth_in_progress = false;
+                self.state.dropbox.last_error = Some(err.clone());
+                self.state.status_text = format!("Dropbox connect failed: {err}");
+            }
+            Message::DisconnectDropbox => {
+                self.dropbox_client = None;
+                self.dropbox_settings.clear_tokens();
+                let _ = self.dropbox_settings.save();
+                self.state.dropbox = crate::state::DropboxUiState {
+                    app_key_input: self.state.dropbox.app_key_input.clone(),
+                    has_app_key: self.state.dropbox.has_app_key,
+                    ..Default::default()
+                };
+                self.state.status_text = "Dropbox disconnected".to_string();
+            }
+            Message::DropboxExpandFolder(path) => {
+                self.state.dropbox.expanded.insert(path.clone());
+                if self.state.dropbox.folders.contains_key(&path)
+                    || self.state.dropbox.listing_in_progress.contains(&path)
+                {
+                    return Task::none();
+                }
+                let Some(client) = self.dropbox_client.clone() else {
+                    self.state.dropbox.last_error =
+                        Some("Not connected to Dropbox".into());
+                    return Task::none();
+                };
+                self.state.dropbox.listing_in_progress.insert(path.clone());
+                return Task::perform(
+                    list_dropbox_folder_async(client, path),
+                    |result| match result {
+                        Ok((path, entries)) => Message::DropboxFolderListed {
+                            path,
+                            result: Ok(entries),
+                        },
+                        Err(err) => Message::DropboxFolderListed {
+                            path: String::new(),
+                            result: Err(err),
+                        },
+                    },
+                );
+            }
+            Message::DropboxCollapseFolder(path) => {
+                self.state.dropbox.expanded.remove(&path);
+            }
+            Message::DropboxFolderListed { path, result } => {
+                self.state.dropbox.listing_in_progress.remove(&path);
+                match result {
+                    Ok(entries) => {
+                        self.state.dropbox.folders.insert(path, entries);
+                    }
+                    Err(err) => {
+                        self.state.dropbox.last_error = Some(err.clone());
+                        self.state.status_text = format!("Dropbox error: {err}");
+                    }
+                }
+            }
+            Message::DropboxSelectEntry(entry) => {
+                self.state.dropbox.selected_path = Some(entry.path_lower.clone());
+                self.state.sample_browser_selected_source = Some(MediaSourceRef::DropboxFile {
+                    path_lower: entry.path_lower,
+                    display_path: entry.path_display,
+                    rev: entry.rev,
+                });
+            }
+            Message::DropboxPreview(entry) => {
+                let Some(client) = self.dropbox_client.clone() else {
+                    self.state.dropbox.last_error =
+                        Some("Not connected to Dropbox".into());
+                    return Task::none();
+                };
+                let cache = self.dropbox_cache.clone();
+                self.state.dropbox.preview_in_progress = true;
+                self.state.status_text = format!("Fetching preview: {}", entry.name);
+                return Task::perform(
+                    fetch_dropbox_sample_async(client, cache, entry),
+                    |result| Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio)),
+                );
+            }
+            Message::DropboxPreviewReady(Ok(audio)) => {
+                self.state.dropbox.preview_in_progress = false;
+                self.send_command(EngineCommand::StartPreview(audio));
+                self.state.status_text = "Preview playing".to_string();
+            }
+            Message::DropboxPreviewReady(Err(err)) => {
+                self.state.dropbox.preview_in_progress = false;
+                self.state.dropbox.last_error = Some(err.clone());
+                self.state.status_text = format!("Preview error: {err}");
+            }
+            Message::DropboxImportToArrangement(entry) => {
+                let Some(client) = self.dropbox_client.clone() else {
+                    self.state.dropbox.last_error =
+                        Some("Not connected to Dropbox".into());
+                    return Task::none();
+                };
+                let cache = self.dropbox_cache.clone();
+                let target = BrowserImportTarget::ArrangementClip(self.state.selected_track);
+                self.state.status_text = format!("Importing {}...", entry.name);
+                return Task::perform(
+                    fetch_dropbox_sample_async(client, cache, entry),
+                    move |result| match result {
+                        Ok((audio, name, source)) => {
+                            Message::BrowserSampleDecoded(target.clone(), audio, name, source)
+                        }
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                );
+            }
+            Message::DropboxImportToDevice(entry) => {
+                let Some(client) = self.dropbox_client.clone() else {
+                    self.state.dropbox.last_error =
+                        Some("Not connected to Dropbox".into());
+                    return Task::none();
+                };
+                let Some(target) = self.selected_browser_device_target() else {
+                    self.state.status_text =
+                        "Select a Sampler or Drum Pad track first".into();
+                    return Task::none();
+                };
+                let cache = self.dropbox_cache.clone();
+                self.state.status_text = format!("Importing {}...", entry.name);
+                return Task::perform(
+                    fetch_dropbox_sample_async(client, cache, entry),
+                    move |result| match result {
+                        Ok((audio, name, source)) => {
+                            Message::BrowserSampleDecoded(target.clone(), audio, name, source)
+                        }
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                );
             }
         }
         Task::none()
@@ -4708,6 +4948,11 @@ impl App {
                 SettingsTab::Plugins,
                 active == SettingsTab::Plugins
             ),
+            make_tab_btn(
+                "Dropbox",
+                SettingsTab::Dropbox,
+                active == SettingsTab::Dropbox
+            ),
         ]
         .spacing(0);
 
@@ -4715,6 +4960,7 @@ impl App {
         let tab_body: Element<'_, Message> = match self.state.settings_tab {
             SettingsTab::Audio => self.view_settings_audio_tab(),
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
+            SettingsTab::Dropbox => self.view_settings_dropbox_tab(),
         };
 
         let content = column![
@@ -4964,6 +5210,144 @@ impl App {
             status,
         ]
         .spacing(8)
+        .into()
+    }
+
+    fn view_settings_dropbox_tab(&self) -> Element<'_, Message> {
+        let title = text("Dropbox").size(14).color(th::TEXT);
+        let hint = text(
+            "Register an app at https://www.dropbox.com/developers/apps \
+            (Scoped access, Full Dropbox). Paste the App key below.",
+        )
+        .size(11)
+        .color(th::TEXT_DIM);
+
+        let app_key_input = text_input("App key", &self.state.dropbox.app_key_input)
+            .on_input(Message::SetDropboxAppKey)
+            .on_submit(Message::SaveDropboxAppKey)
+            .size(13)
+            .width(Length::Fill);
+        let save_key_btn = button(text("Save").size(12).color(th::TEXT))
+            .on_press(Message::SaveDropboxAppKey)
+            .padding([6, 12])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::ACCENT_DIM,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        let key_row = row![app_key_input, save_key_btn]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+
+        let account_line: Element<'_, Message> = if self.state.dropbox.connected {
+            let email = self
+                .state
+                .dropbox
+                .account_email
+                .clone()
+                .unwrap_or_else(|| "connected".into());
+            text(format!("Connected: {email}"))
+                .size(12)
+                .color(th::ACCENT)
+                .into()
+        } else if self.state.dropbox.auth_in_progress {
+            text("Waiting for browser authorisation...")
+                .size(12)
+                .color(th::TEXT_DIM)
+                .into()
+        } else {
+            text("Not connected").size(12).color(th::TEXT_DIM).into()
+        };
+
+        let can_connect =
+            self.state.dropbox.has_app_key && !self.state.dropbox.auth_in_progress;
+        let connect_label = if self.state.dropbox.auth_in_progress {
+            "Connecting..."
+        } else if self.state.dropbox.connected {
+            "Reconnect"
+        } else {
+            "Connect"
+        };
+        let connect_btn = {
+            let mut btn = button(text(connect_label).size(12).color(th::ACCENT));
+            if can_connect {
+                btn = btn.on_press(Message::ConnectDropbox);
+            }
+            btn.padding([6, 12]).style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::ACCENT,
+                    border: iced::Border {
+                        color: th::ACCENT_DIM,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+        };
+
+        let disconnect_btn: Element<'_, Message> = if self.state.dropbox.connected {
+            button(text("Disconnect").size(12).color(th::TEXT_DIM))
+                .on_press(Message::DisconnectDropbox)
+                .padding([6, 12])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT_DIM,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                })
+                .into()
+        } else {
+            horizontal_space().width(Length::Shrink).into()
+        };
+
+        let error_line: Element<'_, Message> =
+            if let Some(err) = self.state.dropbox.last_error.clone() {
+                text(err).size(11).color(th::DANGER).into()
+            } else {
+                horizontal_space().width(Length::Shrink).into()
+            };
+
+        column![
+            title,
+            hint,
+            key_row,
+            account_line,
+            row![connect_btn, disconnect_btn]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            error_line,
+        ]
+        .spacing(10)
         .into()
     }
 
@@ -5363,6 +5747,76 @@ impl App {
     }
 
     fn view_sample_browser_panel(&self) -> Element<'_, Message> {
+        let tab_bar = {
+            let local_active = matches!(
+                self.state.sample_browser_mode,
+                crate::state::SampleBrowserMode::Local
+            );
+            let dropbox_active = !local_active;
+            let tab_btn = |label: &'static str, active: bool, mode| {
+                button(
+                    text(label)
+                        .size(11)
+                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                )
+                .on_press(Message::SetSampleBrowserMode(mode))
+                .padding([4, 12])
+                .style(move |_theme: &Theme, status| {
+                    let bg = if active {
+                        Some(th::ACCENT_DIM.into())
+                    } else {
+                        match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
+                            }
+                            _ => None,
+                        }
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: if active { th::ACCENT } else { th::TEXT_DIM },
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                })
+            };
+            row![
+                tab_btn("Local", local_active, crate::state::SampleBrowserMode::Local),
+                tab_btn(
+                    "Dropbox",
+                    dropbox_active,
+                    crate::state::SampleBrowserMode::Dropbox,
+                ),
+            ]
+            .spacing(0)
+        };
+
+        let body: Element<'_, Message> = match self.state.sample_browser_mode {
+            crate::state::SampleBrowserMode::Local => self.view_local_sample_browser(),
+            crate::state::SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
+        };
+
+        container(
+            column![tab_bar, body]
+                .spacing(4)
+                .padding([4, 0])
+                .height(Length::Fill),
+        )
+        .width(Length::Fixed(320.0))
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            border: iced::Border {
+                color: th::BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+    }
+
+    fn view_local_sample_browser(&self) -> Element<'_, Message> {
         let title = text("Sample Browser").size(14).color(th::ACCENT);
         let mut add_root_btn = button(text("Add Root").size(11).color(th::TEXT))
             .padding([4, 10])
@@ -5701,7 +6155,7 @@ impl App {
         ]
         .spacing(6);
 
-        let content = column![
+        column![
             header,
             roots_col,
             search,
@@ -5713,21 +6167,267 @@ impl App {
         ]
         .spacing(8)
         .padding(10)
-        .height(Length::Fill);
+        .height(Length::Fill)
+        .into()
+    }
 
-        container(content)
-            .width(Length::Fixed(320.0))
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+    fn view_dropbox_browser(&self) -> Element<'_, Message> {
+        let title = text("Dropbox").size(14).color(th::ACCENT);
+
+        if !self.state.dropbox.connected {
+            let hint = if self.state.dropbox.auth_in_progress {
+                "Waiting for browser authorisation..."
+            } else {
+                "Connect in Settings > Dropbox to browse your library."
+            };
+            return column![title, text(hint).size(12).color(th::TEXT_DIM)]
+                .spacing(10)
+                .padding(10)
+                .height(Length::Fill)
+                .into();
+        }
+
+        let account = self
+            .state
+            .dropbox
+            .account_email
+            .clone()
+            .unwrap_or_default();
+        let header = column![
+            title,
+            text(account).size(11).color(th::TEXT_DIM),
+        ]
+        .spacing(2);
+
+        let mut rows: Vec<Element<'_, Message>> = Vec::new();
+        self.render_dropbox_tree(String::new(), 0, &mut rows);
+        if rows.is_empty() {
+            let msg = if self.state.dropbox.listing_in_progress.contains("") {
+                "Listing your Dropbox..."
+            } else {
+                "Empty (or still fetching)."
+            };
+            rows.push(text(msg).size(11).color(th::TEXT_DIM).into());
+        }
+        let mut entries_col = column![].spacing(2);
+        for row in rows {
+            entries_col = entries_col.push(row);
+        }
+
+        let selected_entry = self.selected_dropbox_entry();
+        let selected_label = selected_entry
+            .as_ref()
+            .map(|e| e.path_display.clone())
+            .unwrap_or_else(|| "Select a file".to_string());
+
+        let preview_btn: Element<'_, Message> = {
+            let mut btn = button(text("Preview").size(11).color(th::TEXT))
+                .padding([6, 10])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            if let Some(entry) = selected_entry
+                .as_ref()
+                .filter(|e| e.is_supported_audio())
+            {
+                btn = btn.on_press(Message::DropboxPreview(entry.clone()));
+            }
+            btn.into()
+        };
+
+        let add_clip_btn: Element<'_, Message> = {
+            let mut btn = button(text("Add Clip").size(11).color(th::TEXT))
+                .padding([6, 10])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            if let Some(entry) = selected_entry
+                .as_ref()
+                .filter(|e| e.is_supported_audio())
+            {
+                btn = btn.on_press(Message::DropboxImportToArrangement(entry.clone()));
+            }
+            btn.into()
+        };
+
+        let load_device_btn: Element<'_, Message> = {
+            let mut btn = button(text("Load Device").size(11).color(th::TEXT))
+                .padding([6, 10])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            if let (Some(entry), Some(_)) = (
+                selected_entry
+                    .as_ref()
+                    .filter(|e| e.is_supported_audio()),
+                self.selected_browser_device_target(),
+            ) {
+                btn = btn.on_press(Message::DropboxImportToDevice(entry.clone()));
+            }
+            btn.into()
+        };
+
+        let error_line: Element<'_, Message> =
+            if let Some(err) = self.state.dropbox.last_error.clone() {
+                text(err).size(10).color(th::DANGER).into()
+            } else {
+                horizontal_space().width(Length::Shrink).into()
+            };
+
+        let footer = column![
+            text(selected_label).size(11).color(th::TEXT),
+            row![preview_btn, add_clip_btn, load_device_btn].spacing(6),
+            error_line,
+        ]
+        .spacing(6);
+
+        column![
+            header,
+            scrollable(entries_col).height(Length::Fill).direction(
+                scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+            ),
+            footer,
+        ]
+        .spacing(8)
+        .padding(10)
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn render_dropbox_tree(
+        &self,
+        path: String,
+        depth: usize,
+        rows: &mut Vec<Element<'_, Message>>,
+    ) {
+        let Some(entries) = self.state.dropbox.folders.get(&path) else {
+            return;
+        };
+        let mut sorted: Vec<&DropboxEntry> = entries.iter().collect();
+        sorted.sort_by(|a, b| {
+            (!a.is_folder, a.name.to_lowercase())
+                .cmp(&(!b.is_folder, b.name.to_lowercase()))
+        });
+        for entry in sorted {
+            let expanded = self
+                .state
+                .dropbox
+                .expanded
+                .contains(&entry.path_lower);
+            let selected =
+                self.state.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
+
+            let prefix = if entry.is_folder {
+                if expanded {
+                    "v "
+                } else {
+                    "> "
+                }
+            } else if entry.is_supported_audio() {
+                "· "
+            } else {
+                "  "
+            };
+            let indent = "  ".repeat(depth);
+            let label = format!("{indent}{prefix}{}", entry.name);
+            let msg = if entry.is_folder {
+                if expanded {
+                    Message::DropboxCollapseFolder(entry.path_lower.clone())
+                } else {
+                    Message::DropboxExpandFolder(entry.path_lower.clone())
+                }
+            } else {
+                Message::DropboxSelectEntry(entry.clone())
+            };
+            let btn = button(text(label).size(11).color(if selected {
+                th::ACCENT
+            } else if entry.is_folder || entry.is_supported_audio() {
+                th::TEXT
+            } else {
+                th::TEXT_DIM
+            }))
+            .on_press(msg)
+            .padding([3, 6])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                let bg = if selected {
+                    Some(th::ACCENT_DIM.into())
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    }
+                };
+                button::Style {
+                    background: bg,
+                    text_color: if selected { th::ACCENT } else { th::TEXT },
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            });
+            rows.push(btn.into());
+
+            if entry.is_folder && expanded {
+                self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
+            }
+        }
+    }
+
+    fn selected_dropbox_entry(&self) -> Option<DropboxEntry> {
+        let selected = self.state.dropbox.selected_path.as_ref()?;
+        for entries in self.state.dropbox.folders.values() {
+            if let Some(entry) = entries.iter().find(|e| &e.path_lower == selected) {
+                return Some(entry.clone());
+            }
+        }
+        None
     }
 
     // ── Arrangement view ──
@@ -7496,6 +8196,50 @@ async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, 
     .map_err(|err| format!("save task failed: {err}"))?
 }
 
+async fn connect_dropbox_async(
+    app_key: String,
+) -> Result<(vibez_dropbox::AccountInfo, vibez_dropbox::Tokens), String> {
+    let opener: Arc<dyn vibez_dropbox::BrowserOpener> =
+        Arc::new(vibez_dropbox::SystemBrowserOpener);
+    let tokens = vibez_dropbox::run_oauth_flow(&app_key, opener)
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = DropboxClient::new(app_key, tokens);
+    let info = client.current_account().await.map_err(|e| e.to_string())?;
+    let tokens = client.tokens().await;
+    Ok((info, tokens))
+}
+
+async fn list_dropbox_folder_async(
+    client: Arc<DropboxClient>,
+    path: String,
+) -> Result<(String, Vec<DropboxEntry>), String> {
+    let entries = client.list_folder(&path).await.map_err(|e| e.to_string())?;
+    Ok((path, entries))
+}
+
+async fn fetch_dropbox_sample_async(
+    client: Arc<DropboxClient>,
+    cache: DropboxCache,
+    entry: DropboxEntry,
+) -> Result<(Arc<vibez_core::audio_buffer::DecodedAudio>, String, MediaSourceRef), String> {
+    let local = client
+        .download_to_cache(&entry, &cache)
+        .await
+        .map_err(|e| e.to_string())?;
+    let decoded = tokio::task::spawn_blocking(move || {
+        vibez_audio_io::file_io::decode_audio_file(&local).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("decode task failed: {e}"))??;
+    let source = MediaSourceRef::DropboxFile {
+        path_lower: entry.path_lower.clone(),
+        display_path: entry.path_display.clone(),
+        rev: entry.rev.clone(),
+    };
+    Ok((Arc::new(decoded), entry.name, source))
+}
+
 async fn bounce_async(
     request: vibez_engine::render::BounceRequest,
     wav_path: PathBuf,
@@ -7521,115 +8265,199 @@ async fn bounce_async(
     .map_err(|err| format!("bounce task failed: {err}"))?
 }
 
-async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let project = Project::load_from_file(&path).map_err(|err| err.to_string())?;
-        let mut clips = Vec::new();
-        let mut sampler_samples = Vec::new();
-        let mut drum_rack_pad_samples = Vec::new();
-        let mut warnings = Vec::new();
-
-        for clip in &project.clips {
-            match clip.resolved_source().cloned() {
-                Some(MediaSourceRef::LocalFile { path: clip_path }) => {
-                    match file_io::decode_audio_file(&clip_path) {
-                        Ok(audio) => clips.push(LoadedClipData {
-                            info: clip.clone(),
-                            audio: Arc::new(audio),
-                        }),
-                        Err(err) => warnings.push(format!(
-                            "Skipped clip '{}' ({})",
-                            clip.name, err
-                        )),
-                    }
-                }
-                Some(MediaSourceRef::DropboxFile { .. }) => warnings.push(format!(
-                    "Skipped clip '{}' (Dropbox sources are not available yet)",
-                    clip.name
-                )),
-                None => warnings.push(format!(
-                    "Skipped clip '{}' (missing source reference)",
-                    clip.name
-                )),
-            }
-        }
-
-        for track in &project.tracks {
-            if let Some(native) = &track.native_instrument {
-                match native {
-                    InstrumentStateInfo::Sampler {
-                        source: Some(source),
-                        ..
-                    } => match source {
-                        MediaSourceRef::LocalFile { path: sample_path } => {
-                            match file_io::decode_audio_file(sample_path) {
-                                Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                    track_id: track.id,
-                                    source: source.clone(),
-                                    audio: Arc::new(audio),
-                                    name: source.display_name(),
-                                }),
-                                Err(err) => warnings.push(format!(
-                                    "Skipped sampler source on '{}' ({})",
-                                    track.name, err
-                                )),
-                            }
-                        }
-                        MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
-                            "Skipped sampler source on '{}' (Dropbox sources are not available yet)",
-                            track.name
-                        )),
-                    },
-                    InstrumentStateInfo::DrumRack { pads } => {
-                        for (pad_index, pad) in pads.iter().enumerate() {
-                            let Some(source) = &pad.source else {
-                                continue;
-                            };
-                            match source {
-                                MediaSourceRef::LocalFile { path: sample_path } => {
-                                    match file_io::decode_audio_file(sample_path) {
-                                        Ok(audio) => drum_rack_pad_samples.push(
-                                            LoadedDrumRackPadData {
-                                                track_id: track.id,
-                                                pad_index,
-                                                source: source.clone(),
-                                                audio: Arc::new(audio),
-                                                name: source.display_name(),
-                                                state: pad.clone(),
-                                            },
-                                        ),
-                                        Err(err) => warnings.push(format!(
-                                            "Skipped drum pad {} on '{}' ({})",
-                                            pad_index + 1,
-                                            track.name,
-                                            err
-                                        )),
-                                    }
-                                }
-                                MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
-                                    "Skipped drum pad {} on '{}' (Dropbox sources are not available yet)",
-                                    pad_index + 1,
-                                    track.name
-                                )),
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Ok(ProjectLoadResult {
-            path,
-            project,
-            clips,
-            sampler_samples,
-            drum_rack_pad_samples,
-            warnings,
-        })
+async fn load_project_async(
+    path: PathBuf,
+    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+) -> Result<ProjectLoadResult, String> {
+    let load_path = path.clone();
+    let project = tokio::task::spawn_blocking(move || {
+        Project::load_from_file(&load_path).map_err(|err| err.to_string())
     })
     .await
-    .map_err(|err| format!("load task failed: {err}"))?
+    .map_err(|err| format!("load task failed: {err}"))??;
+
+    let mut clips = Vec::new();
+    let mut sampler_samples = Vec::new();
+    let mut drum_rack_pad_samples = Vec::new();
+    let mut warnings = Vec::new();
+
+    for clip in &project.clips {
+        match clip.resolved_source().cloned() {
+            Some(MediaSourceRef::LocalFile { path: clip_path }) => {
+                match decode_blocking(clip_path).await {
+                    Ok(audio) => clips.push(LoadedClipData {
+                        info: clip.clone(),
+                        audio: Arc::new(audio),
+                    }),
+                    Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
+                }
+            }
+            Some(source @ MediaSourceRef::DropboxFile { .. }) => {
+                match hydrate_dropbox_source(dropbox.as_ref(), &source, &clip.name).await {
+                    Ok(audio) => clips.push(LoadedClipData {
+                        info: clip.clone(),
+                        audio: Arc::new(audio),
+                    }),
+                    Err(err) => warnings.push(err),
+                }
+            }
+            None => warnings.push(format!(
+                "Skipped clip '{}' (missing source reference)",
+                clip.name
+            )),
+        }
+    }
+
+    for track in &project.tracks {
+        if let Some(native) = &track.native_instrument {
+            match native {
+                InstrumentStateInfo::Sampler {
+                    source: Some(source),
+                    ..
+                } => match source {
+                    MediaSourceRef::LocalFile { path: sample_path } => {
+                        match decode_blocking(sample_path.clone()).await {
+                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                                track_id: track.id,
+                                source: source.clone(),
+                                audio: Arc::new(audio),
+                                name: source.display_name(),
+                            }),
+                            Err(err) => warnings.push(format!(
+                                "Skipped sampler source on '{}' ({})",
+                                track.name, err
+                            )),
+                        }
+                    }
+                    MediaSourceRef::DropboxFile { .. } => match hydrate_dropbox_source(
+                        dropbox.as_ref(),
+                        source,
+                        &track.name,
+                    )
+                    .await
+                    {
+                        Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                            track_id: track.id,
+                            source: source.clone(),
+                            audio: Arc::new(audio),
+                            name: source.display_name(),
+                        }),
+                        Err(err) => warnings.push(err),
+                    },
+                },
+                InstrumentStateInfo::DrumRack { pads } => {
+                    for (pad_index, pad) in pads.iter().enumerate() {
+                        let Some(source) = &pad.source else {
+                            continue;
+                        };
+                        let label =
+                            format!("drum pad {} on '{}'", pad_index + 1, track.name);
+                        match source {
+                            MediaSourceRef::LocalFile { path: sample_path } => {
+                                match decode_blocking(sample_path.clone()).await {
+                                    Ok(audio) => {
+                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
+                                            track_id: track.id,
+                                            pad_index,
+                                            source: source.clone(),
+                                            audio: Arc::new(audio),
+                                            name: source.display_name(),
+                                            state: pad.clone(),
+                                        })
+                                    }
+                                    Err(err) => {
+                                        warnings.push(format!("Skipped {label} ({err})"))
+                                    }
+                                }
+                            }
+                            MediaSourceRef::DropboxFile { .. } => {
+                                match hydrate_dropbox_source(
+                                    dropbox.as_ref(),
+                                    source,
+                                    &label,
+                                )
+                                .await
+                                {
+                                    Ok(audio) => {
+                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
+                                            track_id: track.id,
+                                            pad_index,
+                                            source: source.clone(),
+                                            audio: Arc::new(audio),
+                                            name: source.display_name(),
+                                            state: pad.clone(),
+                                        })
+                                    }
+                                    Err(err) => warnings.push(err),
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(ProjectLoadResult {
+        path,
+        project,
+        clips,
+        sampler_samples,
+        drum_rack_pad_samples,
+        warnings,
+    })
+}
+
+async fn decode_blocking(
+    path: PathBuf,
+) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
+    tokio::task::spawn_blocking(move || {
+        file_io::decode_audio_file(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("decode task failed: {e}"))?
+}
+
+async fn hydrate_dropbox_source(
+    dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
+    source: &MediaSourceRef,
+    label: &str,
+) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
+    let MediaSourceRef::DropboxFile {
+        path_lower,
+        display_path,
+        rev,
+    } = source
+    else {
+        return Err(format!(
+            "Skipped '{label}' (expected Dropbox source reference)"
+        ));
+    };
+    let Some((client, cache)) = dropbox else {
+        return Err(format!(
+            "Skipped '{label}' (not connected to Dropbox - reconnect in Settings)"
+        ));
+    };
+    let file_name = display_path
+        .rsplit_once('/')
+        .map(|(_, n)| n.to_string())
+        .unwrap_or_else(|| display_path.clone());
+    let entry = DropboxEntry {
+        path_lower: path_lower.clone(),
+        path_display: display_path.clone(),
+        name: file_name,
+        is_folder: false,
+        rev: rev.clone(),
+        size: None,
+    };
+    let local_path = client
+        .download_to_cache(&entry, cache)
+        .await
+        .map_err(|e| format!("Skipped '{label}' ({e})"))?;
+    decode_blocking(local_path)
+        .await
+        .map_err(|e| format!("Skipped '{label}' ({e})"))
 }
 
 async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryScanResult, String> {

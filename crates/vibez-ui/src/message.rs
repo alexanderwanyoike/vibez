@@ -6,6 +6,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
+use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginId, PluginInfo};
 use vibez_project::Project;
@@ -53,6 +54,13 @@ pub struct BounceOutcome {
     pub clip_name: String,
     pub insert_position_samples: u64,
     pub warnings: Vec<String>,
+}
+
+/// OAuth flow success payload passed to the UI as `Message::DropboxConnected`.
+#[derive(Debug, Clone)]
+pub struct DropboxConnectOutcome {
+    pub info: AccountInfo,
+    pub tokens: DropboxTokens,
 }
 
 #[derive(Debug, Clone)]
@@ -397,4 +405,25 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
+
+    // Sample browser mode
+    SetSampleBrowserMode(crate::state::SampleBrowserMode),
+
+    // Dropbox
+    SetDropboxAppKey(String),
+    SaveDropboxAppKey,
+    ConnectDropbox,
+    DropboxConnected(Result<DropboxConnectOutcome, String>),
+    DisconnectDropbox,
+    DropboxExpandFolder(String),
+    DropboxCollapseFolder(String),
+    DropboxFolderListed {
+        path: String,
+        result: Result<Vec<DropboxEntry>, String>,
+    },
+    DropboxSelectEntry(DropboxEntry),
+    DropboxPreview(DropboxEntry),
+    DropboxPreviewReady(Result<Arc<DecodedAudio>, String>),
+    DropboxImportToArrangement(DropboxEntry),
+    DropboxImportToDevice(DropboxEntry),
 }

@@ -186,6 +186,14 @@ pub enum EngineCommand {
         loop_end_beats: f64,
     },
 
+    // -- Preview (sample auditioning) --
+    /// Start previewing a decoded audio buffer on the hidden preview
+    /// channel. Bypasses transport, mute, and solo; one-shot; the
+    /// previous preview is cut if still playing.
+    StartPreview(Arc<DecodedAudio>),
+    /// Stop any in-progress preview.
+    StopPreview,
+
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
     AddPluginEffect {

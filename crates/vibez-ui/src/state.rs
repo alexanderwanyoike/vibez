@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_core::track::{DrumPadState, MediaSourceRef};
+use vibez_dropbox::DropboxEntry;
 use vibez_plugin_host::PluginSettings;
 
 /// A clip as represented in the UI.
@@ -327,6 +328,38 @@ pub enum SettingsTab {
     #[default]
     Audio,
     Plugins,
+    Dropbox,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SampleBrowserMode {
+    #[default]
+    Local,
+    Dropbox,
+}
+
+/// UI-side state for the Dropbox browser and Settings tab.
+#[derive(Debug, Default, Clone)]
+pub struct DropboxUiState {
+    pub connected: bool,
+    pub account_email: Option<String>,
+    /// App key entered in settings (may be empty until the user pastes one).
+    pub app_key_input: String,
+    /// Whether any source of app key is present (settings, env, build-time).
+    pub has_app_key: bool,
+    /// An OAuth flow is in progress; Connect button is disabled.
+    pub auth_in_progress: bool,
+    pub last_error: Option<String>,
+    /// Listing cache keyed by Dropbox folder path (`""` for root).
+    pub folders: HashMap<String, Vec<DropboxEntry>>,
+    /// Paths for which a list_folder call is currently in flight.
+    pub listing_in_progress: HashSet<String>,
+    /// Paths expanded in the tree UI.
+    pub expanded: HashSet<String>,
+    /// `path_lower` of the currently-selected Dropbox entry, if any.
+    pub selected_path: Option<String>,
+    /// A preview fetch / playback is in flight.
+    pub preview_in_progress: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,11 +463,15 @@ pub struct AppState {
     pub sample_browser_root_filter: Option<PathBuf>,
     pub sample_browser_selected_source: Option<MediaSourceRef>,
     pub sample_browser_scan_in_progress: bool,
+    pub sample_browser_mode: SampleBrowserMode,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
     pub plugin_scan_in_progress: bool,
     pub plugin_scan_status: String,
+
+    // Dropbox
+    pub dropbox: DropboxUiState,
 }
 
 impl Default for AppState {
@@ -487,9 +524,11 @@ impl Default for AppState {
             sample_browser_root_filter: None,
             sample_browser_selected_source: None,
             sample_browser_scan_in_progress: false,
+            sample_browser_mode: SampleBrowserMode::default(),
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
+            dropbox: DropboxUiState::default(),
         }
     }
 }

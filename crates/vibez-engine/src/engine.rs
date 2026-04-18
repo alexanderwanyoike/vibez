@@ -39,9 +39,19 @@ pub struct AudioEngine {
     audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
     tracks: Vec<EngineTrack>,
+    /// One-shot sample preview, bypasses transport and soloed/muted state.
+    preview: Option<PreviewVoice>,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
+}
+
+/// Dedicated single-voice preview channel used by the sample browser.
+/// Plays `audio` start-to-end irrespective of transport state and is
+/// interrupted whenever a new preview starts.
+struct PreviewVoice {
+    audio: Arc<DecodedAudio>,
+    position: u64,
 }
 
 impl AudioEngine {
@@ -58,6 +68,7 @@ impl AudioEngine {
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
+            preview: None,
             sample_rate: 44100,
             cmd_rx,
             event_tx,
@@ -98,6 +109,9 @@ impl AudioEngine {
             // ---- 4. Legacy single-audio path ----------------------------
             self.process_legacy(output, frames, channels);
         }
+
+        // ---- 4.5 Preview channel (bypasses transport) -------------------
+        self.process_preview(output, frames, channels);
 
         // ---- 5. Advance transport and send events -----------------------
         let new_pos = self.transport.advance(frames as u64);
@@ -230,6 +244,44 @@ impl AudioEngine {
                 peak_l: track_peak_l,
                 peak_r: track_peak_r,
             });
+        }
+    }
+
+    /// Render the preview voice into the output buffer on top of whatever
+    /// the main graph produced. Bypasses transport, solo, and mute; a
+    /// `StartPreview` command during playback simply overlays the preview.
+    fn process_preview(&mut self, output: &mut [f32], frames: usize, channels: usize) {
+        let Some(preview) = self.preview.as_mut() else {
+            return;
+        };
+        let audio_channels = preview.audio.num_channels();
+        let audio_frames = preview.audio.num_frames();
+        if audio_channels == 0 || audio_frames == 0 {
+            self.preview = None;
+            return;
+        }
+
+        let start = preview.position as usize;
+        let mut consumed = 0usize;
+        for frame in 0..frames {
+            let source = start + frame;
+            if source >= audio_frames {
+                break;
+            }
+            for ch in 0..channels {
+                let sample = if ch < audio_channels {
+                    preview.audio.sample(ch, source)
+                } else {
+                    preview.audio.sample(audio_channels - 1, source)
+                };
+                output[frame * channels + ch] += sample;
+            }
+            consumed += 1;
+        }
+
+        preview.position = preview.position.saturating_add(consumed as u64);
+        if preview.position as usize >= audio_frames {
+            self.preview = None;
         }
     }
 
@@ -639,6 +691,14 @@ impl AudioEngine {
                             clip.loop_end_beats = loop_end_beats;
                         }
                     }
+                }
+
+                // -- Preview --
+                EngineCommand::StartPreview(audio) => {
+                    self.preview = Some(PreviewVoice { audio, position: 0 });
+                }
+                EngineCommand::StopPreview => {
+                    self.preview = None;
                 }
 
                 // -- External plugins --
@@ -1545,6 +1605,73 @@ mod tests {
             "frame 150 L after resize: expected ~{expected}, got {}",
             buf[150 * 2]
         );
+    }
+
+    #[test]
+    fn preview_plays_even_when_transport_stopped() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let audio = make_constant_audio(64, 0.4);
+
+        cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
+
+        // Transport is stopped: regular tracks would produce silence,
+        // but the preview voice should still render.
+        let mut buf = vec![0.0f32; 16];
+        engine.process(&mut buf, 2);
+
+        let peak = buf.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+        assert!(peak > 0.3, "preview should be audible: peak {peak}");
+    }
+
+    #[test]
+    fn stop_preview_silences_playback() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let audio = make_constant_audio(1024, 0.5);
+
+        cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
+        cmd_tx.push(EngineCommand::StopPreview).unwrap();
+
+        let mut buf = vec![0.0f32; 16];
+        engine.process(&mut buf, 2);
+        assert!(buf.iter().all(|s| s.abs() < 1e-6));
+    }
+
+    #[test]
+    fn preview_auto_completes_at_end_of_audio() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let audio = make_constant_audio(8, 0.6);
+
+        cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
+
+        // First 4 frames: audible
+        let mut buf = vec![0.0f32; 8];
+        engine.process(&mut buf, 2);
+        assert!(buf.iter().any(|s| s.abs() > 0.5));
+
+        // Next 16 frames: past end of 8-frame audio. Preview auto-clears.
+        let mut buf = vec![0.0f32; 32];
+        engine.process(&mut buf, 2);
+        // First 8 samples of buf correspond to frames 4-7 of preview (audible).
+        // The remaining should be silence.
+        let tail = &buf[16..];
+        assert!(tail.iter().all(|s| s.abs() < 1e-6));
+    }
+
+    #[test]
+    fn starting_new_preview_interrupts_previous() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let a = make_constant_audio(1024, 0.8);
+        let b = make_constant_audio(1024, 0.2);
+
+        cmd_tx.push(EngineCommand::StartPreview(a)).unwrap();
+        let mut buf = vec![0.0f32; 16];
+        engine.process(&mut buf, 2);
+        assert!(buf[0].abs() > 0.7);
+
+        cmd_tx.push(EngineCommand::StartPreview(b)).unwrap();
+        let mut buf = vec![0.0f32; 16];
+        engine.process(&mut buf, 2);
+        assert!(buf[0].abs() < 0.3);
     }
 
     #[test]
