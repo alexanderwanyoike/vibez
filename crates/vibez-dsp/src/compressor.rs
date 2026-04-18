@@ -183,10 +183,16 @@ mod tests {
         fx.set_param(4, 0.0);
         fx.set_param(5, 1.0);
 
-        let mut buf = vec![0.5_f32; 4_410];
+        // 1 second buffer so the envelope has time to settle.
+        let mut buf = vec![0.5_f32; 44_100];
         fx.process(&mut buf, 2);
-        let peak_out = buf.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
-        assert!(peak_out < 0.5, "expected compression, got peak {peak_out}");
+        // After the envelope catches up the tail should be heavily reduced.
+        let tail = &buf[buf.len() - 1024..];
+        let peak_tail = tail.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+        assert!(
+            peak_tail < 0.3,
+            "expected compression in tail, got peak {peak_tail}"
+        );
     }
 
     #[test]

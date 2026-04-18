@@ -117,6 +117,7 @@ impl AudioEffect for DriveEffect {
         let frames = buffer.len() / ch;
         let drive = self.drive_gain();
         let norm = drive.tanh();
+        let amount = self.amount.clamp(0.0, 1.0);
         let tilt = self.tone * 2.0 - 1.0; // -1 darker, +1 brighter
 
         for frame in 0..frames {
@@ -129,7 +130,10 @@ impl AudioEffect for DriveEffect {
                 let shelved = sat + tilt * (sat - self.z[c]);
                 self.z[c] = sat;
 
-                buffer[idx] = (dry * (1.0 - self.mix) + shelved * self.mix) * self.output;
+                // `Amount` blends between dry and saturated so amount=0 is
+                // true passthrough; `Mix` then wet/dries the result.
+                let processed = dry * (1.0 - amount) + shelved * amount;
+                buffer[idx] = (dry * (1.0 - self.mix) + processed * self.mix) * self.output;
             }
         }
     }
