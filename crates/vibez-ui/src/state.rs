@@ -7,7 +7,7 @@ use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
-use vibez_core::track::MediaSourceRef;
+use vibez_core::track::{DrumPadState, MediaSourceRef};
 use vibez_plugin_host::PluginSettings;
 
 /// A clip as represented in the UI.
@@ -27,6 +27,77 @@ pub struct UiClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiDrumPad {
+    pub name: Option<String>,
+    pub source: Option<MediaSourceRef>,
+    pub gain: f32,
+    pub pan: f32,
+    pub start: f32,
+    pub end: f32,
+    pub coarse_tune: i8,
+    pub fine_tune: f32,
+    pub one_shot: bool,
+    pub choke_group: Option<u8>,
+}
+
+impl Default for UiDrumPad {
+    fn default() -> Self {
+        Self {
+            name: None,
+            source: None,
+            gain: 1.0,
+            pan: 0.0,
+            start: 0.0,
+            end: 1.0,
+            coarse_tune: 0,
+            fine_tune: 0.0,
+            one_shot: true,
+            choke_group: None,
+        }
+    }
+}
+
+impl UiDrumPad {
+    pub fn to_state(&self) -> DrumPadState {
+        DrumPadState {
+            source: self.source.clone(),
+            gain: self.gain,
+            pan: self.pan,
+            start: self.start,
+            end: self.end,
+            coarse_tune: self.coarse_tune,
+            fine_tune: self.fine_tune,
+            one_shot: self.one_shot,
+            choke_group: self.choke_group,
+        }
+    }
+
+    pub fn from_state(state: &DrumPadState) -> Self {
+        Self {
+            name: state.source.as_ref().map(MediaSourceRef::display_name),
+            source: state.source.clone(),
+            gain: state.gain,
+            pan: state.pan,
+            start: state.start,
+            end: state.end,
+            coarse_tune: state.coarse_tune,
+            fine_tune: state.fine_tune,
+            one_shot: state.one_shot,
+            choke_group: state.choke_group,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SampleBrowserEntry {
+    pub source: MediaSourceRef,
+    pub name: String,
+    pub root_path: PathBuf,
+    pub relative_path: PathBuf,
+    pub search_text: String,
 }
 
 /// An effect instance as represented in the UI.
@@ -79,6 +150,8 @@ pub struct UiTrack {
     pub sample_name: Option<String>,
     pub sample_source: Option<MediaSourceRef>,
     pub instrument_params: Vec<f32>,
+    pub drum_rack_pads: Vec<UiDrumPad>,
+    pub selected_drum_pad: usize,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
     /// Whether the plugin instrument has a native GUI.
@@ -106,6 +179,8 @@ impl UiTrack {
             sample_name: None,
             sample_source: None,
             instrument_params: Vec::new(),
+            drum_rack_pads: default_drum_rack_pads(),
+            selected_drum_pad: 0,
             plugin_instrument_name: None,
             has_plugin_instrument_gui: false,
         }
@@ -135,6 +210,8 @@ impl UiTrack {
             sample_name: None,
             sample_source: None,
             instrument_params: Vec::new(),
+            drum_rack_pads: default_drum_rack_pads(),
+            selected_drum_pad: 0,
             plugin_instrument_name: None,
             has_plugin_instrument_gui: false,
         }
@@ -336,13 +413,19 @@ pub struct AppState {
     pub settings_buffer_size: u32,
     pub current_project_path: Option<PathBuf>,
     pub project_dirty: bool,
+    pub sample_browser_open: bool,
+    pub sample_browser_search: String,
+    pub sample_browser_roots: Vec<PathBuf>,
+    pub sample_browser_entries: Vec<SampleBrowserEntry>,
+    pub sample_browser_root_filter: Option<PathBuf>,
+    pub sample_browser_selected_source: Option<MediaSourceRef>,
+    pub sample_browser_scan_in_progress: bool,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
     pub plugin_scan_in_progress: bool,
     pub plugin_scan_status: String,
 }
-
 
 impl Default for AppState {
     fn default() -> Self {
@@ -387,11 +470,22 @@ impl Default for AppState {
             settings_buffer_size: 512,
             current_project_path: None,
             project_dirty: false,
+            sample_browser_open: true,
+            sample_browser_search: String::new(),
+            sample_browser_roots: Vec::new(),
+            sample_browser_entries: Vec::new(),
+            sample_browser_root_filter: None,
+            sample_browser_selected_source: None,
+            sample_browser_scan_in_progress: false,
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
         }
     }
+}
+
+pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
+    (0..16).map(|_| UiDrumPad::default()).collect()
 }
 
 impl AppState {
@@ -584,11 +678,7 @@ mod tests {
 
     #[test]
     fn move_first_track_up_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id0 = state.tracks[0].id;
 
         if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
@@ -601,11 +691,7 @@ mod tests {
 
     #[test]
     fn move_last_track_down_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id0 = state.tracks[0].id;
 
         if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
@@ -618,11 +704,7 @@ mod tests {
 
     #[test]
     fn rename_track() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id = state.tracks[0].id;
 
         if let Some(track) = state.find_track_mut(id) {
@@ -687,11 +769,7 @@ mod tests {
 
     #[test]
     fn rename_empty_rejected() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id = state.tracks[0].id;
 
         // Simulate the FinishEditing guard: empty name doesn't rename

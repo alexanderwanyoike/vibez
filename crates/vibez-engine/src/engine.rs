@@ -300,7 +300,10 @@ impl AudioEngine {
                 }
                 EngineCommand::ReorderTracks(order) => {
                     self.tracks.sort_by_key(|t| {
-                        order.iter().position(|id| *id == t.id).unwrap_or(usize::MAX)
+                        order
+                            .iter()
+                            .position(|id| *id == t.id)
+                            .unwrap_or(usize::MAX)
                     });
                 }
                 EngineCommand::AddClip {
@@ -440,8 +443,7 @@ impl AudioEngine {
                 // -- Instrument tracks --
                 EngineCommand::AddInstrumentTrack(id, _name, kind) => {
                     let mut track = EngineTrack::new(id);
-                    track.instrument =
-                        Some(create_instrument(kind, self.sample_rate as f32));
+                    track.instrument = Some(create_instrument(kind, self.sample_rate as f32));
                     self.tracks.push(track);
                     self.recalculate_audio_length();
                 }
@@ -451,8 +453,7 @@ impl AudioEngine {
                 }
                 EngineCommand::SetTrackInstrument(track_id, kind) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.instrument =
-                            Some(create_instrument(kind, self.sample_rate as f32));
+                        track.instrument = Some(create_instrument(kind, self.sample_rate as f32));
                     }
                 }
                 EngineCommand::RemoveTrackInstrument(track_id) => {
@@ -466,9 +467,7 @@ impl AudioEngine {
                     duration_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) =
-                            track.note_clips.iter_mut().find(|c| c.id == clip_id)
-                        {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                             clip.duration_beats = duration_beats;
                         }
                     }
@@ -567,6 +566,39 @@ impl AudioEngine {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         if let Some(ref mut instrument) = track.instrument {
                             instrument.load_sample(sample, sample_name);
+                        }
+                    }
+                }
+                EngineCommand::LoadDrumRackPadSample {
+                    track_id,
+                    pad_index,
+                    sample,
+                    sample_name,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(ref mut instrument) = track.instrument {
+                            instrument.load_drum_pad_sample(pad_index, sample, sample_name);
+                        }
+                    }
+                }
+                EngineCommand::ClearDrumRackPad {
+                    track_id,
+                    pad_index,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(ref mut instrument) = track.instrument {
+                            instrument.clear_drum_pad(pad_index);
+                        }
+                    }
+                }
+                EngineCommand::SetDrumRackPadState {
+                    track_id,
+                    pad_index,
+                    state,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(ref mut instrument) = track.instrument {
+                            instrument.set_drum_pad_state(pad_index, state);
                         }
                     }
                 }

@@ -5,14 +5,14 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
-use vibez_core::track::{ClipInfo, MediaSourceRef};
+use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginId, PluginInfo};
 use vibez_project::Project;
 
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory, SettingsTab,
-    SnapGrid, Workspace,
+    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory,
+    SampleBrowserEntry, SettingsTab, SnapGrid, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -30,11 +30,35 @@ pub struct LoadedSamplerData {
 }
 
 #[derive(Debug, Clone)]
+pub struct LoadedDrumRackPadData {
+    pub track_id: TrackId,
+    pub pad_index: usize,
+    pub source: MediaSourceRef,
+    pub audio: Arc<DecodedAudio>,
+    pub name: String,
+    pub state: DrumPadState,
+}
+
+#[derive(Debug, Clone)]
+pub struct SampleLibraryScanResult {
+    pub entries: Vec<SampleBrowserEntry>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum BrowserImportTarget {
+    ArrangementClip(Option<TrackId>),
+    Sampler(TrackId),
+    DrumRackPad { track_id: TrackId, pad_index: usize },
+}
+
+#[derive(Debug, Clone)]
 pub struct ProjectLoadResult {
     pub path: PathBuf,
     pub project: Project,
     pub clips: Vec<LoadedClipData>,
     pub sampler_samples: Vec<LoadedSamplerData>,
+    pub drum_rack_pad_samples: Vec<LoadedDrumRackPadData>,
     pub warnings: Vec<String>,
 }
 
@@ -102,6 +126,12 @@ pub enum Message {
     SamplerFileSelected(TrackId, Option<PathBuf>),
     SamplerSampleDecoded(TrackId, Arc<DecodedAudio>, String, MediaSourceRef),
     SamplerDecodeError(TrackId, String),
+    LoadDrumRackPadSample(TrackId, usize),
+    DrumRackPadFileSelected(TrackId, usize, Option<PathBuf>),
+    DrumRackPadSampleDecoded(TrackId, usize, Arc<DecodedAudio>, String, MediaSourceRef),
+    DrumRackPadDecodeError(TrackId, usize, String),
+    ClearDrumRackPad(TrackId, usize),
+    SelectDrumRackPad(TrackId, usize),
 
     // Zoom / scroll
     ZoomIn,
@@ -301,6 +331,24 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Result<ProjectLoadResult, String>),
     ProjectSaved(Result<PathBuf, String>),
+    ToggleSampleBrowser,
+    AddSampleLibraryRoot,
+    SampleLibraryRootSelected(Option<PathBuf>),
+    RemoveSampleLibraryRoot(PathBuf),
+    RescanSampleLibrary,
+    SampleLibraryScanned(Result<SampleLibraryScanResult, String>),
+    SampleBrowserSearchChanged(String),
+    SelectSampleBrowserRoot(Option<PathBuf>),
+    SelectSampleBrowserEntry(MediaSourceRef),
+    ImportSelectedBrowserSampleToArrangement,
+    LoadSelectedBrowserSampleToDevice,
+    BrowserSampleDecoded(
+        BrowserImportTarget,
+        Arc<DecodedAudio>,
+        String,
+        MediaSourceRef,
+    ),
+    BrowserSampleDecodeError(String),
 
     // Settings
     OpenSettings,

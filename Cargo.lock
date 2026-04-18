@@ -4311,9 +4311,12 @@ dependencies = [
 name = "vibez-ui"
 version = "0.1.0"
 dependencies = [
+ "dirs 5.0.1",
  "iced",
  "rfd",
  "rtrb",
+ "serde",
+ "serde_json",
  "tokio",
  "vibez-audio-io",
  "vibez-core",

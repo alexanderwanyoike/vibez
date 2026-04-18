@@ -24,13 +24,17 @@ use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance
 use vibez_project::Project;
 
 use crate::icons;
-use crate::message::{LoadedClipData, LoadedSamplerData, Message, ProjectLoadResult};
+use crate::message::{
+    BrowserImportTarget, LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message,
+    ProjectLoadResult, SampleLibraryScanResult,
+};
 use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
-    AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, SettingsTab, UiClip,
-    UiEffect, UiNoteClip, UiTrack, Workspace,
+    AppState, ArrangementSelection, ContextMenuTarget, DetailPanelTab, SampleBrowserEntry,
+    SettingsTab, UiClip, UiDrumPad, UiEffect, UiNoteClip, UiTrack, Workspace,
 };
 use crate::theme as th;
+use crate::ui_settings::UiSettings;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
 use crate::widgets::effect_slot::view_effect_slot;
 use crate::widgets::mixer_strip::view_mixer_strip;
@@ -93,6 +97,7 @@ pub fn run() -> iced::Result {
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (engine, cmd_tx, event_rx) = AudioEngine::new();
+        let ui_settings = UiSettings::load();
 
         let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
             Ok(s) => {
@@ -110,6 +115,8 @@ impl App {
 
         let state = AppState {
             sample_rate,
+            sample_browser_open: ui_settings.sample_browser_open,
+            sample_browser_roots: ui_settings.sample_library_roots,
             ..Default::default()
         };
 
@@ -138,7 +145,17 @@ impl App {
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.bpm));
 
-        (app, Task::none())
+        let startup_task = if app.state.sample_browser_roots.is_empty() {
+            Task::none()
+        } else {
+            app.state.sample_browser_scan_in_progress = true;
+            Task::perform(
+                scan_sample_library_async(app.state.sample_browser_roots.clone()),
+                Message::SampleLibraryScanned,
+            )
+        };
+
+        (app, startup_task)
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {
@@ -192,6 +209,199 @@ impl App {
         self.state.status_text = "New project".to_string();
     }
 
+    fn persist_ui_settings(&mut self) {
+        let settings = UiSettings {
+            sample_library_roots: self.state.sample_browser_roots.clone(),
+            sample_browser_open: self.state.sample_browser_open,
+        };
+        if let Err(err) = settings.save() {
+            self.state.status_text = format!("UI settings save error: {err}");
+        }
+    }
+
+    fn selected_sample_browser_entry(&self) -> Option<&SampleBrowserEntry> {
+        let selected = self.state.sample_browser_selected_source.as_ref()?;
+        self.state
+            .sample_browser_entries
+            .iter()
+            .find(|entry| &entry.source == selected)
+    }
+
+    fn selected_browser_device_target(&self) -> Option<BrowserImportTarget> {
+        let track = self
+            .state
+            .selected_track
+            .and_then(|track_id| self.state.find_track(track_id))?;
+        match track.instrument_kind {
+            Some(InstrumentKind::Sampler) => Some(BrowserImportTarget::Sampler(track.id)),
+            Some(InstrumentKind::DrumRack) => Some(BrowserImportTarget::DrumRackPad {
+                track_id: track.id,
+                pad_index: track
+                    .selected_drum_pad
+                    .min(track.drum_rack_pads.len().saturating_sub(1)),
+            }),
+            _ => None,
+        }
+    }
+
+    fn sync_drum_rack_pad_state(&mut self, track_id: TrackId, pad_index: usize) {
+        let state = self
+            .state
+            .find_track(track_id)
+            .and_then(|track| track.drum_rack_pads.get(pad_index))
+            .map(UiDrumPad::to_state);
+        if let Some(state) = state {
+            self.send_command(EngineCommand::SetDrumRackPadState {
+                track_id,
+                pad_index,
+                state,
+            });
+        }
+    }
+
+    fn apply_sampler_sample_loaded(
+        &mut self,
+        track_id: TrackId,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        name: String,
+        source: MediaSourceRef,
+    ) {
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.sample_name = Some(name.clone());
+            track.sample_source = Some(source.clone());
+        }
+        self.send_command(EngineCommand::LoadSamplerSample {
+            track_id,
+            sample: audio,
+            sample_name: name.clone(),
+        });
+        self.state.status_text = format!("Loaded sample: {name}");
+    }
+
+    fn apply_drum_rack_pad_loaded(
+        &mut self,
+        track_id: TrackId,
+        pad_index: usize,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        name: String,
+        source: MediaSourceRef,
+    ) {
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                pad.name = Some(name.clone());
+                pad.source = Some(source.clone());
+            }
+        }
+        self.sync_drum_rack_pad_state(track_id, pad_index);
+        self.send_command(EngineCommand::LoadDrumRackPadSample {
+            track_id,
+            pad_index,
+            sample: audio,
+            sample_name: name.clone(),
+        });
+        self.state.status_text = format!("Loaded pad {}: {name}", pad_index + 1);
+    }
+
+    fn ensure_audio_track_for_import(&mut self, preferred: Option<TrackId>) -> TrackId {
+        if let Some(track_id) = preferred {
+            if self
+                .state
+                .find_track(track_id)
+                .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
+            {
+                return track_id;
+            }
+        }
+
+        let track_num = self.state.next_track_number;
+        self.state.next_track_number += 1;
+        let id = TrackId::new();
+        let color_index = ((track_num - 1) % 8) as u8;
+        let name = format!("Audio {track_num}");
+
+        self.send_command(EngineCommand::AddTrack(id, name.clone()));
+        self.state.tracks.push(UiTrack::new(id, name, color_index));
+        self.state.selected_track = Some(id);
+        id
+    }
+
+    fn add_audio_clip_to_track(
+        &mut self,
+        track_id: TrackId,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        name: String,
+        source: MediaSourceRef,
+    ) {
+        let clip_id = ClipId::new();
+        let existing_end = self
+            .state
+            .find_track(track_id)
+            .map(|track| {
+                track
+                    .clips
+                    .iter()
+                    .map(|clip| clip.position.saturating_add(clip.duration))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        let duration = audio.num_frames() as u64;
+
+        self.send_command(EngineCommand::AddClip {
+            track_id,
+            clip_id,
+            audio: Arc::clone(&audio),
+            position: existing_end,
+            source_offset: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.clips.push(UiClip {
+                id: clip_id,
+                name: name.clone(),
+                audio,
+                source: Some(source),
+                position: existing_end,
+                source_offset: 0,
+                duration,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+            });
+        }
+
+        self.state.selected_track = Some(track_id);
+        self.state.status_text = format!("Added clip: {name}");
+    }
+
+    fn apply_browser_sample_decoded(
+        &mut self,
+        target: BrowserImportTarget,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        name: String,
+        source: MediaSourceRef,
+    ) {
+        match target {
+            BrowserImportTarget::ArrangementClip(preferred_track) => {
+                let track_id = self.ensure_audio_track_for_import(preferred_track);
+                self.add_audio_clip_to_track(track_id, audio, name, source);
+            }
+            BrowserImportTarget::Sampler(track_id) => {
+                self.apply_sampler_sample_loaded(track_id, audio, name, source);
+            }
+            BrowserImportTarget::DrumRackPad {
+                track_id,
+                pad_index,
+            } => {
+                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+            }
+        }
+    }
+
     fn track_info_from_ui(&self, track: &UiTrack) -> TrackInfo {
         let effects = track
             .effects
@@ -212,6 +422,13 @@ impl App {
             Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
                 params: track.instrument_params.clone(),
                 source: track.sample_source.clone(),
+            }),
+            Some(InstrumentKind::DrumRack) => Some(InstrumentStateInfo::DrumRack {
+                pads: track
+                    .drum_rack_pads
+                    .iter()
+                    .map(UiDrumPad::to_state)
+                    .collect(),
             }),
             None => None,
         };
@@ -268,17 +485,20 @@ impl App {
             .tracks
             .iter()
             .flat_map(|track| {
-                track.note_clips.iter().map(|clip| vibez_core::midi::NoteClipInfo {
-                    id: clip.id,
-                    track_id: track.id,
-                    name: clip.name.clone(),
-                    position_beats: clip.position_beats,
-                    duration_beats: clip.duration_beats,
-                    notes: clip.notes.clone(),
-                    loop_enabled: clip.loop_enabled,
-                    loop_start_beats: clip.loop_start_beats,
-                    loop_end_beats: clip.loop_end_beats,
-                })
+                track
+                    .note_clips
+                    .iter()
+                    .map(|clip| vibez_core::midi::NoteClipInfo {
+                        id: clip.id,
+                        track_id: track.id,
+                        name: clip.name.clone(),
+                        position_beats: clip.position_beats,
+                        duration_beats: clip.duration_beats,
+                        notes: clip.notes.clone(),
+                        loop_enabled: clip.loop_enabled,
+                        loop_start_beats: clip.loop_start_beats,
+                        loop_end_beats: clip.loop_end_beats,
+                    })
             })
             .collect();
 
@@ -366,7 +586,17 @@ impl App {
                             });
                         }
                     }
-                    InstrumentStateInfo::DrumRack { .. } => {}
+                    InstrumentStateInfo::DrumRack { pads } => {
+                        track.drum_rack_pads = pads.iter().map(UiDrumPad::from_state).collect();
+                        track.selected_drum_pad = 0;
+                        for (pad_index, pad) in pads.iter().cloned().enumerate() {
+                            self.send_command(EngineCommand::SetDrumRackPadState {
+                                track_id: track_info.id,
+                                pad_index,
+                                state: pad,
+                            });
+                        }
+                    }
                 }
             }
 
@@ -407,9 +637,10 @@ impl App {
                 });
             }
 
-            self.state.next_track_number = self.state.next_track_number.max(
-                self.state.tracks.len() as u32 + 1,
-            );
+            self.state.next_track_number = self
+                .state
+                .next_track_number
+                .max(self.state.tracks.len() as u32 + 1);
             self.state.tracks.push(track);
         }
 
@@ -483,6 +714,28 @@ impl App {
                 track_id: sampler.track_id,
                 sample: sampler.audio,
                 sample_name: sampler.name,
+            });
+        }
+
+        for pad in loaded.drum_rack_pad_samples {
+            if let Some(track) = self.state.find_track_mut(pad.track_id) {
+                if let Some(slot) = track.drum_rack_pads.get_mut(pad.pad_index) {
+                    slot.name = Some(pad.name.clone());
+                    slot.source = Some(pad.source.clone());
+                    *slot = UiDrumPad::from_state(&pad.state);
+                    slot.name = Some(pad.name.clone());
+                }
+            }
+            self.send_command(EngineCommand::SetDrumRackPadState {
+                track_id: pad.track_id,
+                pad_index: pad.pad_index,
+                state: pad.state,
+            });
+            self.send_command(EngineCommand::LoadDrumRackPadSample {
+                track_id: pad.track_id,
+                pad_index: pad.pad_index,
+                sample: pad.audio,
+                sample_name: pad.name,
             });
         }
 
@@ -593,6 +846,9 @@ impl App {
                 | Message::AddInstrumentTrack
                 | Message::SetInstrumentParam(..)
                 | Message::SamplerSampleDecoded(..)
+                | Message::DrumRackPadSampleDecoded(..)
+                | Message::ClearDrumRackPad(..)
+                | Message::BrowserSampleDecoded(..)
                 | Message::ToggleClipLoop(..)
                 | Message::SetClipLoopRegion { .. }
                 | Message::ToggleNoteClipLoop(..)
@@ -746,8 +1002,7 @@ impl App {
                     // Use cursor_x relative to a conservative right boundary
                     let right_boundary = 1600.0_f32; // reasonable default
                     if self.state.cursor_x > right_boundary - edge_zone {
-                        let overshoot = ((self.state.cursor_x
-                            - (right_boundary - edge_zone))
+                        let overshoot = ((self.state.cursor_x - (right_boundary - edge_zone))
                             / edge_zone)
                             .clamp(0.0, 3.0) as f64;
                         let delta = overshoot * 2.0;
@@ -798,11 +1053,10 @@ impl App {
                 if let Some(ref mut mgr) = self.plugin_window_manager {
                     mgr.close_track_effects(track_id);
                 }
-                self.plugin_gui_raw_ptrs
-                    .retain(|k, _| match k {
-                        PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
-                        PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
-                    });
+                self.plugin_gui_raw_ptrs.retain(|k, _| match k {
+                    PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
+                    PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
+                });
 
                 self.send_command(EngineCommand::RemoveTrack(track_id));
                 self.state.tracks.retain(|t| t.id != track_id);
@@ -1128,35 +1382,84 @@ impl App {
                     self.state.status_text = format!("Loading {file_name}...");
                     let source = MediaSourceRef::LocalFile { path: path.clone() };
 
-                    return Task::perform(
-                        decode_file_async(path),
-                        move |result| match result {
-                            Ok(audio) => Message::SamplerSampleDecoded(
-                                track_id,
-                                Arc::new(audio),
-                                file_name.clone(),
-                                source.clone(),
-                            ),
-                            Err(e) => Message::SamplerDecodeError(track_id, e),
-                        },
-                    );
+                    return Task::perform(decode_file_async(path), move |result| match result {
+                        Ok(audio) => Message::SamplerSampleDecoded(
+                            track_id,
+                            Arc::new(audio),
+                            file_name.clone(),
+                            source.clone(),
+                        ),
+                        Err(e) => Message::SamplerDecodeError(track_id, e),
+                    });
                 }
             }
             Message::SamplerSampleDecoded(track_id, audio, name, source) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.sample_name = Some(name.clone());
-                    track.sample_source = Some(source);
-                }
-                self.send_command(EngineCommand::LoadSamplerSample {
-                    track_id,
-                    sample: audio,
-                    sample_name: name.clone(),
-                });
-                self.state.status_text = format!("Loaded sample: {name}");
+                self.apply_sampler_sample_loaded(track_id, audio, name, source);
             }
             Message::SamplerDecodeError(track_id, err) => {
-                let _ = track_id;
+                self.state.selected_track = Some(track_id);
                 self.state.status_text = format!("Sample load error: {err}");
+            }
+            Message::LoadDrumRackPadSample(track_id, pad_index) => {
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Load Drum Pad Sample")
+                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
+                            .pick_file()
+                            .await;
+                        handle.map(|h| h.path().to_path_buf())
+                    },
+                    move |path| Message::DrumRackPadFileSelected(track_id, pad_index, path),
+                );
+            }
+            Message::DrumRackPadFileSelected(track_id, pad_index, path) => {
+                if let Some(path) = path {
+                    let file_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    self.state.status_text = format!("Loading {file_name}...");
+                    let source = MediaSourceRef::LocalFile { path: path.clone() };
+
+                    return Task::perform(decode_file_async(path), move |result| match result {
+                        Ok(audio) => Message::DrumRackPadSampleDecoded(
+                            track_id,
+                            pad_index,
+                            Arc::new(audio),
+                            file_name.clone(),
+                            source.clone(),
+                        ),
+                        Err(e) => Message::DrumRackPadDecodeError(track_id, pad_index, e),
+                    });
+                }
+            }
+            Message::DrumRackPadSampleDecoded(track_id, pad_index, audio, name, source) => {
+                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+            }
+            Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
+                self.state.selected_track = Some(track_id);
+                self.state.status_text = format!("Drum pad load error: {err}");
+            }
+            Message::ClearDrumRackPad(track_id, pad_index) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        *pad = UiDrumPad::default();
+                    }
+                }
+                self.sync_drum_rack_pad_state(track_id, pad_index);
+                self.send_command(EngineCommand::ClearDrumRackPad {
+                    track_id,
+                    pad_index,
+                });
+                self.state.status_text = format!("Cleared pad {}", pad_index + 1);
+            }
+            Message::SelectDrumRackPad(track_id, pad_index) => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    let max_index = track.drum_rack_pads.len().saturating_sub(1);
+                    track.selected_drum_pad = pad_index.min(max_index);
+                }
+                self.state.selected_track = Some(track_id);
             }
 
             // -- Clip looping --
@@ -1318,7 +1621,9 @@ impl App {
                             clip.notes.remove(note_index);
                             // Re-index: remove deleted index, shift down any higher indices
                             clip.selected_notes.remove(&note_index);
-                            clip.selected_notes = clip.selected_notes.iter()
+                            clip.selected_notes = clip
+                                .selected_notes
+                                .iter()
                                 .map(|&i| if i > note_index { i - 1 } else { i })
                                 .collect();
                         }
@@ -1377,19 +1682,23 @@ impl App {
             }
             Message::RemoveSelectedNotes(track_id, clip_id) => {
                 // Collect indices to remove in reverse order
-                let indices_to_remove: Vec<usize> = if let Some(track) = self.state.find_track(track_id) {
-                    if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
-                        let mut indices: Vec<usize> = clip.selected_notes.iter().copied()
-                            .filter(|&i| i < clip.notes.len())
-                            .collect();
-                        indices.sort_unstable_by(|a, b| b.cmp(a));
-                        indices
+                let indices_to_remove: Vec<usize> =
+                    if let Some(track) = self.state.find_track(track_id) {
+                        if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
+                            let mut indices: Vec<usize> = clip
+                                .selected_notes
+                                .iter()
+                                .copied()
+                                .filter(|&i| i < clip.notes.len())
+                                .collect();
+                            indices.sort_unstable_by(|a, b| b.cmp(a));
+                            indices
+                        } else {
+                            Vec::new()
+                        }
                     } else {
                         Vec::new()
-                    }
-                } else {
-                    Vec::new()
-                };
+                    };
 
                 // Remove from engine in reverse order (indices stay valid)
                 for &idx in &indices_to_remove {
@@ -1412,18 +1721,26 @@ impl App {
                     }
                 }
             }
-            Message::NudgeSelectedNotes { track_id, clip_id, delta_beats, delta_semitones } => {
+            Message::NudgeSelectedNotes {
+                track_id,
+                clip_id,
+                delta_beats,
+                delta_semitones,
+            } => {
                 let mut updates: Vec<(usize, MidiNote)> = Vec::new();
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let indices: Vec<usize> = clip.selected_notes.iter().copied()
+                        let indices: Vec<usize> = clip
+                            .selected_notes
+                            .iter()
+                            .copied()
                             .filter(|&i| i < clip.notes.len())
                             .collect();
                         for &idx in &indices {
                             let note = &mut clip.notes[idx];
                             note.start_beat = (note.start_beat + delta_beats).max(0.0);
-                            note.pitch = (note.pitch as i16 + delta_semitones as i16)
-                                .clamp(0, 127) as u8;
+                            note.pitch =
+                                (note.pitch as i16 + delta_semitones as i16).clamp(0, 127) as u8;
                             updates.push((idx, *note));
                         }
                     }
@@ -1438,7 +1755,11 @@ impl App {
                 }
             }
 
-            Message::MoveNotesAbsolute { track_id, clip_id, moves } => {
+            Message::MoveNotesAbsolute {
+                track_id,
+                clip_id,
+                moves,
+            } => {
                 let mut updates: Vec<(usize, MidiNote)> = Vec::new();
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
@@ -1687,8 +2008,7 @@ impl App {
                         } else {
                             clip.duration = new_duration;
                         }
-                        clip_end_beat =
-                            Some((clip.position + clip.duration) as f64 / spb);
+                        clip_end_beat = Some((clip.position + clip.duration) as f64 / spb);
                         sync_data = Some((
                             Arc::clone(&clip.audio),
                             clip.position,
@@ -1756,8 +2076,7 @@ impl App {
                             }
                         }
 
-                        clip_end_beat =
-                            Some(clip.position_beats + clip.duration_beats);
+                        clip_end_beat = Some(clip.position_beats + clip.duration_beats);
                         sync_data = Some((
                             clip.position_beats,
                             clip.duration_beats,
@@ -2207,8 +2526,14 @@ impl App {
                                         ));
                                     }
                                 }
-                                if let Some((audio, name, source, position, source_offset, duration)) =
-                                    dup_data
+                                if let Some((
+                                    audio,
+                                    name,
+                                    source,
+                                    position,
+                                    source_offset,
+                                    duration,
+                                )) = dup_data
                                 {
                                     let new_id = ClipId::new();
                                     self.send_command(EngineCommand::AddClip {
@@ -2654,10 +2979,9 @@ impl App {
                 });
                 self.state.selected_note_clip = Some((track_id, clip_id));
                 self.state.selected_clips.clear();
-                self.state.selected_clips.insert(ArrangementSelection::NoteClip {
-                    track_id,
-                    clip_id,
-                });
+                self.state
+                    .selected_clips
+                    .insert(ArrangementSelection::NoteClip { track_id, clip_id });
                 self.state.status_text = "Created note clip from selection".to_string();
             }
 
@@ -2666,8 +2990,7 @@ impl App {
                 if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
                     if idx > 0 {
                         self.state.tracks.swap(idx, idx - 1);
-                        let order: Vec<TrackId> =
-                            self.state.tracks.iter().map(|t| t.id).collect();
+                        let order: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
                         self.send_command(EngineCommand::ReorderTracks(order));
                     }
                 }
@@ -2676,8 +2999,7 @@ impl App {
                 if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
                     if idx + 1 < self.state.tracks.len() {
                         self.state.tracks.swap(idx, idx + 1);
-                        let order: Vec<TrackId> =
-                            self.state.tracks.iter().map(|t| t.id).collect();
+                        let order: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
                         self.send_command(EngineCommand::ReorderTracks(order));
                     }
                 }
@@ -2786,6 +3108,8 @@ impl App {
                     track.sample_name = None;
                     track.sample_source = None;
                     track.instrument_params = instrument_params.clone();
+                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.selected_drum_pad = 0;
                 }
                 self.send_command(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
                 for (param_index, value) in instrument_params.into_iter().enumerate() {
@@ -2812,6 +3136,8 @@ impl App {
                     track.sample_name = None;
                     track.sample_source = None;
                     track.instrument_params.clear();
+                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
                     track.has_plugin_instrument_gui = false;
                 }
@@ -2880,6 +3206,192 @@ impl App {
                 if let Some(ref mut menu) = self.state.device_context_menu {
                     menu.search = query;
                 }
+            }
+
+            // -- Sample browser --
+            Message::ToggleSampleBrowser => {
+                self.state.sample_browser_open = !self.state.sample_browser_open;
+                self.persist_ui_settings();
+            }
+            Message::AddSampleLibraryRoot => {
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Add Sample Library Root")
+                            .pick_folder()
+                            .await;
+                        handle.map(|folder| folder.path().to_path_buf())
+                    },
+                    Message::SampleLibraryRootSelected,
+                );
+            }
+            Message::SampleLibraryRootSelected(path) => {
+                if let Some(path) = path {
+                    if !self
+                        .state
+                        .sample_browser_roots
+                        .iter()
+                        .any(|root| root == &path)
+                    {
+                        self.state.sample_browser_roots.push(path.clone());
+                        self.state.sample_browser_roots.sort();
+                        self.persist_ui_settings();
+                    }
+                    self.state.sample_browser_scan_in_progress = true;
+                    self.state.status_text = format!("Scanning {}...", path.display());
+                    return Task::perform(
+                        scan_sample_library_async(self.state.sample_browser_roots.clone()),
+                        Message::SampleLibraryScanned,
+                    );
+                }
+            }
+            Message::RemoveSampleLibraryRoot(path) => {
+                self.state.sample_browser_roots.retain(|root| root != &path);
+                if self
+                    .state
+                    .sample_browser_root_filter
+                    .as_ref()
+                    .is_some_and(|root| root == &path)
+                {
+                    self.state.sample_browser_root_filter = None;
+                }
+                self.state
+                    .sample_browser_entries
+                    .retain(|entry| entry.root_path != path);
+                if self
+                    .state
+                    .sample_browser_selected_source
+                    .as_ref()
+                    .and_then(|selected| {
+                        self.state
+                            .sample_browser_entries
+                            .iter()
+                            .find(|entry| &entry.source == selected)
+                    })
+                    .is_none()
+                {
+                    self.state.sample_browser_selected_source = None;
+                }
+                self.persist_ui_settings();
+                self.state.status_text = "Removed sample root".to_string();
+            }
+            Message::RescanSampleLibrary => {
+                self.state.sample_browser_scan_in_progress = true;
+                self.state.status_text = "Rescanning sample library...".to_string();
+                return Task::perform(
+                    scan_sample_library_async(self.state.sample_browser_roots.clone()),
+                    Message::SampleLibraryScanned,
+                );
+            }
+            Message::SampleLibraryScanned(result) => {
+                self.state.sample_browser_scan_in_progress = false;
+                match result {
+                    Ok(scan) => {
+                        self.state.sample_browser_entries = scan.entries;
+                        if self
+                            .state
+                            .sample_browser_selected_source
+                            .as_ref()
+                            .and_then(|selected| {
+                                self.state
+                                    .sample_browser_entries
+                                    .iter()
+                                    .find(|entry| &entry.source == selected)
+                            })
+                            .is_none()
+                        {
+                            self.state.sample_browser_selected_source = self
+                                .state
+                                .sample_browser_entries
+                                .first()
+                                .map(|entry| entry.source.clone());
+                        }
+                        self.state.status_text = if scan.warnings.is_empty() {
+                            format!(
+                                "Indexed {} samples",
+                                self.state.sample_browser_entries.len()
+                            )
+                        } else {
+                            format!(
+                                "Indexed {} samples with {} warning(s)",
+                                self.state.sample_browser_entries.len(),
+                                scan.warnings.len()
+                            )
+                        };
+                    }
+                    Err(err) => {
+                        self.state.status_text = format!("Sample scan error: {err}");
+                    }
+                }
+            }
+            Message::SampleBrowserSearchChanged(query) => {
+                self.state.sample_browser_search = query;
+            }
+            Message::SelectSampleBrowserRoot(root) => {
+                self.state.sample_browser_root_filter = root;
+            }
+            Message::SelectSampleBrowserEntry(source) => {
+                self.state.sample_browser_selected_source = Some(source);
+            }
+            Message::ImportSelectedBrowserSampleToArrangement => {
+                if let Some(entry) = self.selected_sample_browser_entry().cloned() {
+                    let target = BrowserImportTarget::ArrangementClip(
+                        self.state.selected_track.filter(|track_id| {
+                            self.state
+                                .find_track(*track_id)
+                                .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
+                        }),
+                    );
+                    if let MediaSourceRef::LocalFile { path } = &entry.source {
+                        let source = entry.source.clone();
+                        let name = entry.name.clone();
+                        self.state.status_text = format!("Loading {name}...");
+                        return Task::perform(decode_file_async(path.clone()), move |result| {
+                            match result {
+                                Ok(audio) => Message::BrowserSampleDecoded(
+                                    target.clone(),
+                                    Arc::new(audio),
+                                    name.clone(),
+                                    source.clone(),
+                                ),
+                                Err(err) => Message::BrowserSampleDecodeError(err),
+                            }
+                        });
+                    }
+                }
+            }
+            Message::LoadSelectedBrowserSampleToDevice => {
+                let Some(entry) = self.selected_sample_browser_entry().cloned() else {
+                    return Task::none();
+                };
+                let Some(target) = self.selected_browser_device_target() else {
+                    self.state.status_text =
+                        "Select a sampler or drum rack track to load from the browser".to_string();
+                    return Task::none();
+                };
+                if let MediaSourceRef::LocalFile { path } = &entry.source {
+                    let source = entry.source.clone();
+                    let name = entry.name.clone();
+                    self.state.status_text = format!("Loading {name}...");
+                    return Task::perform(
+                        decode_file_async(path.clone()),
+                        move |result| match result {
+                            Ok(audio) => Message::BrowserSampleDecoded(
+                                target.clone(),
+                                Arc::new(audio),
+                                name.clone(),
+                                source.clone(),
+                            ),
+                            Err(err) => Message::BrowserSampleDecodeError(err),
+                        },
+                    );
+                }
+            }
+            Message::BrowserSampleDecoded(target, audio, name, source) => {
+                self.apply_browser_sample_decoded(target, audio, name, source);
+            }
+            Message::BrowserSampleDecodeError(err) => {
+                self.state.status_text = format!("Browser load error: {err}");
             }
 
             // -- File menu --
@@ -3140,16 +3652,14 @@ impl App {
                         if mgr.open(key, raw_ptr, title) {
                             self.state.status_text = "Plugin GUI opened".to_string();
                         } else {
-                            self.state.status_text =
-                                "Failed to open plugin GUI".to_string();
+                            self.state.status_text = "Failed to open plugin GUI".to_string();
                         }
                     } else {
                         self.state.status_text =
                             "No X11 display — plugin GUI unavailable".to_string();
                     }
                 } else {
-                    self.state.status_text =
-                        "Plugin GUI handle not available".to_string();
+                    self.state.status_text = "Plugin GUI handle not available".to_string();
                 }
             }
             Message::ClosePluginGui(key) => {
@@ -3551,10 +4061,18 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let header = self.view_header();
 
-        let content = match self.state.workspace {
+        let workspace_content = match self.state.workspace {
             Workspace::Arrange => self.view_arrangement(),
             Workspace::Mix => self.view_mixer(),
         };
+        let content: Element<'_, Message> =
+            if self.state.workspace == Workspace::Arrange && self.state.sample_browser_open {
+                row![self.view_sample_browser_panel(), workspace_content]
+                    .height(Length::FillPortion(5))
+                    .into()
+            } else {
+                workspace_content
+            };
 
         let detail_panel = self.view_detail_panel();
         let transport_bar = self.view_transport();
@@ -3583,34 +4101,31 @@ impl App {
     }
 
     fn view_file_menu_overlay(&self) -> Element<'_, Message> {
-        let make_menu_btn =
-            |label: &'static str, icon: char, msg: Message| {
-                button(
-                    row![
-                        icons::icon(icon).size(12).color(th::TEXT),
-                        text(label).size(12).color(th::TEXT)
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(msg)
-                .padding([8, 16])
-                .width(Length::Fill)
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::TEXT,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                })
-            };
+        let make_menu_btn = |label: &'static str, icon: char, msg: Message| {
+            button(
+                row![
+                    icons::icon(icon).size(12).color(th::TEXT),
+                    text(label).size(12).color(th::TEXT)
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(msg)
+            .padding([8, 16])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            })
+        };
 
         let new_btn = make_menu_btn("New Project", icons::PLUS, Message::NewProject);
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
@@ -3623,7 +4138,9 @@ impl App {
         let save_as_btn = make_menu_btn("Save As...", icons::COPY, Message::SaveProjectAs);
         let settings_btn = button(
             row![
-                icons::icon(icons::SLIDERS_VERTICAL).size(12).color(th::TEXT),
+                icons::icon(icons::SLIDERS_VERTICAL)
+                    .size(12)
+                    .color(th::TEXT),
                 text("Settings...").size(12).color(th::TEXT)
             ]
             .spacing(6)
@@ -3634,9 +4151,7 @@ impl App {
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(th::BG_HOVER.into())
-                }
+                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                 _ => None,
             };
             button::Style {
@@ -3665,84 +4180,76 @@ impl App {
         // Position below the header, near the File button
         let padded = column![
             vertical_space().height(Length::Fixed(42.0)),
-            row![
-                horizontal_space().width(Length::Fixed(60.0)),
-                menu_card,
-            ]
+            row![horizontal_space().width(Length::Fixed(60.0)), menu_card,]
         ];
 
-        mouse_area(
-            container(padded)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .on_press(Message::DismissFileMenu)
-        .into()
+        mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
+            .on_press(Message::DismissFileMenu)
+            .into()
     }
 
     fn view_settings_modal(&self) -> Element<'_, Message> {
         let title = text("Settings").size(18).color(th::ACCENT);
-        let close_btn = button(
-            icons::icon(icons::X).size(14).color(th::TEXT_DIM),
-        )
-        .on_press(Message::CloseSettings)
-        .padding([4, 8])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(th::BG_HOVER.into())
+        let close_btn = button(icons::icon(icons::X).size(14).color(th::TEXT_DIM))
+            .on_press(Message::CloseSettings)
+            .padding([4, 8])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
                 }
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: th::TEXT_DIM,
-                border: iced::Border::default(),
-                ..Default::default()
-            }
-        });
+            });
 
         let header = row![title, horizontal_space(), close_btn].align_y(iced::Alignment::Center);
 
         // -- Tab bar --
-        let make_tab_btn =
-            |label: &'static str, tab: SettingsTab, is_active: bool| {
-                let color = if is_active { th::ACCENT } else { th::TEXT_DIM };
-                button(text(label).size(13).color(color))
-                    .on_press(Message::SelectSettingsTab(tab))
-                    .padding([6, 16])
-                    .style(move |_theme: &Theme, status| {
-                        let bg = if is_active {
-                            None
-                        } else {
-                            match status {
-                                button::Status::Hovered | button::Status::Pressed => {
-                                    Some(th::BG_HOVER.into())
-                                }
-                                _ => None,
+        let make_tab_btn = |label: &'static str, tab: SettingsTab, is_active: bool| {
+            let color = if is_active { th::ACCENT } else { th::TEXT_DIM };
+            button(text(label).size(13).color(color))
+                .on_press(Message::SelectSettingsTab(tab))
+                .padding([6, 16])
+                .style(move |_theme: &Theme, status| {
+                    let bg = if is_active {
+                        None
+                    } else {
+                        match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
                             }
-                        };
-                        button::Style {
-                            background: bg,
-                            text_color: color,
-                            border: iced::Border {
-                                color: if is_active {
-                                    th::ACCENT
-                                } else {
-                                    Color::TRANSPARENT
-                                },
-                                width: if is_active { 2.0 } else { 0.0 },
-                                radius: 0.0.into(),
-                            },
-                            ..Default::default()
+                            _ => None,
                         }
-                    })
-            };
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: color,
+                        border: iced::Border {
+                            color: if is_active {
+                                th::ACCENT
+                            } else {
+                                Color::TRANSPARENT
+                            },
+                            width: if is_active { 2.0 } else { 0.0 },
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                })
+        };
 
         let active = self.state.settings_tab;
         let tab_bar = row![
             make_tab_btn("Audio", SettingsTab::Audio, active == SettingsTab::Audio),
-            make_tab_btn("Plugins", SettingsTab::Plugins, active == SettingsTab::Plugins),
+            make_tab_btn(
+                "Plugins",
+                SettingsTab::Plugins,
+                active == SettingsTab::Plugins
+            ),
         ]
         .spacing(0);
 
@@ -3754,17 +4261,19 @@ impl App {
 
         let content = column![
             header,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
-                .style(|_theme: &Theme| container::Style {
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
+                |_theme: &Theme| container::Style {
                     background: Some(th::BORDER.into()),
                     ..Default::default()
-                }),
+                }
+            ),
             tab_bar,
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill))
-                .style(|_theme: &Theme| container::Style {
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
+                |_theme: &Theme| container::Style {
                     background: Some(th::BORDER.into()),
                     ..Default::default()
-                }),
+                }
+            ),
             tab_body,
         ]
         .spacing(8)
@@ -3783,17 +4292,13 @@ impl App {
 
         // Centered overlay with dimmed background
         mouse_area(
-            container(
-                center(dialog)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
-                ..Default::default()
-            }),
+            container(center(dialog).width(Length::Fill).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                    ..Default::default()
+                }),
         )
         .on_press(Message::CloseSettings)
         .into()
@@ -3890,27 +4395,33 @@ impl App {
 
         // Scan paths list
         let mut paths_col = column![].spacing(4);
-        for (i, path) in self.state.plugin_settings.extra_scan_paths.iter().enumerate() {
-            let path_text = text(path.display().to_string()).size(11).color(th::TEXT_DIM);
-            let remove_btn = button(
-                icons::icon(icons::X).size(10).color(th::DANGER),
-            )
-            .on_press(Message::RemovePluginScanPath(i))
-            .padding([2, 6])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
+        for (i, path) in self
+            .state
+            .plugin_settings
+            .extra_scan_paths
+            .iter()
+            .enumerate()
+        {
+            let path_text = text(path.display().to_string())
+                .size(11)
+                .color(th::TEXT_DIM);
+            let remove_btn = button(icons::icon(icons::X).size(10).color(th::DANGER))
+                .on_press(Message::RemovePluginScanPath(i))
+                .padding([2, 6])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::DANGER,
+                        border: iced::Border::default(),
+                        ..Default::default()
                     }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::DANGER,
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            });
+                });
             paths_col = paths_col.push(
                 row![path_text, horizontal_space(), remove_btn]
                     .align_y(iced::Alignment::Center)
@@ -3930,9 +4441,7 @@ impl App {
         .padding([6, 12])
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(th::BG_HOVER.into())
-                }
+                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                 _ => None,
             };
             button::Style {
@@ -3953,36 +4462,38 @@ impl App {
         } else {
             "Scan Plugins"
         };
-        let scan_btn = button(
-            text(scan_label).size(12).color(th::TEXT),
-        )
-        .on_press(Message::ScanPlugins)
-        .padding([8, 16])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(th::ACCENT_DIM.into())
+        let scan_btn = button(text(scan_label).size(12).color(th::TEXT))
+            .on_press(Message::ScanPlugins)
+            .padding([8, 16])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::ACCENT_DIM.into())
+                    }
+                    _ => Some(th::BG_ELEVATED.into()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
                 }
-                _ => Some(th::BG_ELEVATED.into()),
-            };
-            button::Style {
-                background: bg,
-                text_color: th::TEXT,
-                border: iced::Border {
-                    color: th::BORDER,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+            });
 
         // Status
         let cache_count = self.state.plugin_settings.cache.len();
         let status = if !self.state.plugin_scan_status.is_empty() {
-            text(&self.state.plugin_scan_status).size(11).color(th::TEXT_DIM)
+            text(&self.state.plugin_scan_status)
+                .size(11)
+                .color(th::TEXT_DIM)
         } else {
-            text(format!("{cache_count} plugins cached")).size(11).color(th::TEXT_DIM)
+            text(format!("{cache_count} plugins cached"))
+                .size(11)
+                .color(th::TEXT_DIM)
         };
 
         column![
@@ -4025,9 +4536,7 @@ impl App {
 
         let centered = center(dialog).width(Length::Fill).height(Length::Fill);
 
-        mouse_area(centered)
-            .on_press(Message::CancelEditing)
-            .into()
+        mouse_area(centered).on_press(Message::CancelEditing).into()
     }
 
     fn view_context_menu_overlay(&self) -> Element<'_, Message> {
@@ -4286,27 +4795,73 @@ impl App {
 
         let tabs = row![arrange_tab, mix_tab].spacing(4);
 
-        let file_btn = button(
-            text("File").size(13).color(th::TEXT_DIM),
-        )
-        .on_press(Message::ToggleFileMenu)
-        .padding([6, 14])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    Some(th::BG_HOVER.into())
+        let file_btn = button(text("File").size(13).color(th::TEXT_DIM))
+            .on_press(Message::ToggleFileMenu)
+            .padding([6, 14])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
                 }
-                _ => None,
+            });
+
+        let browser_active = self.state.sample_browser_open;
+        let browser_btn = button(
+            row![
+                icons::icon(icons::AUDIO_WAVEFORM)
+                    .size(13)
+                    .color(if browser_active {
+                        th::ACCENT
+                    } else {
+                        th::TEXT_DIM
+                    }),
+                text("Browser").size(13).color(if browser_active {
+                    th::ACCENT
+                } else {
+                    th::TEXT_DIM
+                })
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::ToggleSampleBrowser)
+        .padding([6, 14])
+        .style(move |_theme: &Theme, status| {
+            let bg = if browser_active {
+                Some(th::BG_ELEVATED.into())
+            } else {
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => None,
+                }
             };
             button::Style {
                 background: bg,
-                text_color: th::TEXT_DIM,
-                border: iced::Border::default(),
+                text_color: if browser_active {
+                    th::ACCENT
+                } else {
+                    th::TEXT_DIM
+                },
+                border: iced::Border {
+                    color: if browser_active {
+                        th::ACCENT_DIM
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    width: if browser_active { 1.0 } else { 0.0 },
+                    radius: 4.0.into(),
+                },
                 ..Default::default()
             }
         });
 
-        let header_row = row![title, file_btn, tabs, horizontal_space()].spacing(8);
+        let header_row = row![title, file_btn, browser_btn, tabs, horizontal_space()].spacing(8);
 
         let header = header_row.padding(10).align_y(iced::Alignment::Center);
 
@@ -4317,6 +4872,374 @@ impl App {
                 border: iced::Border {
                     color: th::BORDER,
                     width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view_sample_browser_panel(&self) -> Element<'_, Message> {
+        let title = text("Sample Browser").size(14).color(th::ACCENT);
+        let mut add_root_btn = button(text("Add Root").size(11).color(th::TEXT))
+            .padding([4, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_ELEVATED.into()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+        add_root_btn = add_root_btn.on_press(Message::AddSampleLibraryRoot);
+
+        let mut rescan_btn = button(text("Rescan").size(11).color(th::TEXT))
+            .padding([4, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_ELEVATED.into()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+        if !self.state.sample_browser_roots.is_empty()
+            && !self.state.sample_browser_scan_in_progress
+        {
+            rescan_btn = rescan_btn.on_press(Message::RescanSampleLibrary);
+        }
+
+        let header = row![title, horizontal_space(), add_root_btn, rescan_btn]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+
+        if self.state.sample_browser_roots.is_empty() {
+            let empty = column![
+                header,
+                text("Add a root folder to index your sample library.")
+                    .size(12)
+                    .color(th::TEXT_DIM)
+            ]
+            .spacing(10)
+            .padding(10);
+            return container(empty)
+                .width(Length::Fixed(320.0))
+                .height(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BG_SURFACE.into()),
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into();
+        }
+
+        let root_label = |path: &PathBuf| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string())
+        };
+
+        let mut roots_col = column![].spacing(4);
+        let all_active = self.state.sample_browser_root_filter.is_none();
+        let mut all_btn = button(text("All Roots").size(11).color(if all_active {
+            th::ACCENT
+        } else {
+            th::TEXT_DIM
+        }))
+        .padding([4, 8])
+        .style(move |_theme: &Theme, status| {
+            let bg = if all_active {
+                Some(th::ACCENT_DIM.into())
+            } else {
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_ELEVATED.into()),
+                }
+            };
+            button::Style {
+                background: bg,
+                text_color: if all_active { th::ACCENT } else { th::TEXT_DIM },
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+        all_btn = all_btn.on_press(Message::SelectSampleBrowserRoot(None));
+        roots_col = roots_col.push(all_btn);
+
+        for root in &self.state.sample_browser_roots {
+            let active = self
+                .state
+                .sample_browser_root_filter
+                .as_ref()
+                .is_some_and(|selected| selected == root);
+            let mut filter_btn = button(text(root_label(root)).size(11).color(if active {
+                th::ACCENT
+            } else {
+                th::TEXT
+            }))
+            .padding([4, 8])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                let bg = if active {
+                    Some(th::ACCENT_DIM.into())
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    }
+                };
+                button::Style {
+                    background: bg,
+                    text_color: if active { th::ACCENT } else { th::TEXT },
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+            filter_btn = filter_btn.on_press(Message::SelectSampleBrowserRoot(Some(root.clone())));
+
+            let remove_btn = button(icons::icon(icons::X).size(10).color(th::DANGER))
+                .on_press(Message::RemoveSampleLibraryRoot(root.clone()))
+                .padding([3, 6])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::DANGER,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                });
+
+            roots_col = roots_col.push(
+                row![filter_btn, remove_btn]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+            );
+        }
+
+        let search = text_input("Search samples...", &self.state.sample_browser_search)
+            .on_input(Message::SampleBrowserSearchChanged)
+            .size(12)
+            .width(Length::Fill);
+
+        let search_lower = self.state.sample_browser_search.to_lowercase();
+        let mut filtered_entries: Vec<&SampleBrowserEntry> = self
+            .state
+            .sample_browser_entries
+            .iter()
+            .filter(|entry| {
+                self.state
+                    .sample_browser_root_filter
+                    .as_ref()
+                    .is_none_or(|root| &entry.root_path == root)
+            })
+            .filter(|entry| search_lower.is_empty() || entry.search_text.contains(&search_lower))
+            .collect();
+        filtered_entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+
+        let selected_source = self.state.sample_browser_selected_source.as_ref();
+        let selected_entry = self.selected_sample_browser_entry();
+        let selected_target = self.selected_browser_device_target();
+
+        let mut entries_col = column![].spacing(2);
+        for entry in filtered_entries.iter().take(400) {
+            let selected = selected_source.is_some_and(|source| &entry.source == source);
+            let mut entry_btn = button(
+                column![
+                    text(entry.name.as_str()).size(12).color(if selected {
+                        th::ACCENT
+                    } else {
+                        th::TEXT
+                    }),
+                    text(entry.relative_path.display().to_string())
+                        .size(10)
+                        .color(th::TEXT_DIM)
+                ]
+                .spacing(2)
+                .width(Length::Fill),
+            )
+            .padding([6, 8])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                let bg = if selected {
+                    Some(th::ACCENT_DIM.into())
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    }
+                };
+                button::Style {
+                    background: bg,
+                    text_color: if selected { th::ACCENT } else { th::TEXT },
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+            entry_btn = entry_btn.on_press(Message::SelectSampleBrowserEntry(entry.source.clone()));
+            entries_col = entries_col.push(entry_btn);
+        }
+
+        if filtered_entries.is_empty() {
+            entries_col = entries_col.push(
+                container(
+                    text("No samples match the current filters")
+                        .size(11)
+                        .color(th::TEXT_DIM),
+                )
+                .padding([8, 4]),
+            );
+        }
+
+        let count_label = text(format!(
+            "{} shown / {} indexed{}",
+            filtered_entries.len().min(400),
+            self.state.sample_browser_entries.len(),
+            if self.state.sample_browser_scan_in_progress {
+                " (scanning...)"
+            } else {
+                ""
+            }
+        ))
+        .size(10)
+        .color(th::TEXT_DIM);
+
+        let selected_text = selected_entry
+            .map(|entry| entry.relative_path.display().to_string())
+            .unwrap_or_else(|| "Select a sample".to_string());
+        let selected_hint = match selected_target {
+            Some(BrowserImportTarget::Sampler(track_id)) => self
+                .state
+                .find_track(track_id)
+                .map(|track| format!("Load to {}", track.name))
+                .unwrap_or_else(|| "Load to sampler".to_string()),
+            Some(BrowserImportTarget::DrumRackPad {
+                track_id,
+                pad_index,
+            }) => self
+                .state
+                .find_track(track_id)
+                .map(|track| format!("Load to {} pad {}", track.name, pad_index + 1))
+                .unwrap_or_else(|| "Load to drum rack".to_string()),
+            _ => "No sampler or drum rack selected".to_string(),
+        };
+
+        let mut add_clip_btn = button(text("Add Clip").size(11).color(th::TEXT))
+            .padding([6, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_ELEVATED.into()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+        if selected_entry.is_some() {
+            add_clip_btn = add_clip_btn.on_press(Message::ImportSelectedBrowserSampleToArrangement);
+        }
+
+        let mut load_device_btn = button(text("Load Device").size(11).color(th::TEXT))
+            .padding([6, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_ELEVATED.into()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+        if selected_entry.is_some() && selected_target.is_some() {
+            load_device_btn = load_device_btn.on_press(Message::LoadSelectedBrowserSampleToDevice);
+        }
+
+        let footer = column![
+            text(selected_text).size(11).color(th::TEXT),
+            text(selected_hint).size(10).color(th::TEXT_DIM),
+            row![add_clip_btn, load_device_btn]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(6);
+
+        let content = column![
+            header,
+            roots_col,
+            search,
+            count_label,
+            scrollable(entries_col).height(Length::Fill).direction(
+                scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+            ),
+            footer
+        ]
+        .spacing(8)
+        .padding(10)
+        .height(Length::Fill);
+
+        container(content)
+            .width(Length::Fixed(320.0))
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
                     radius: 0.0.into(),
                 },
                 ..Default::default()
@@ -4442,12 +5365,7 @@ impl App {
 
         // Collect track IDs and kinds for cross-track drag
         let track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
-        let track_kinds: Vec<bool> = self
-            .state
-            .tracks
-            .iter()
-            .map(|t| t.kind.is_midi())
-            .collect();
+        let track_kinds: Vec<bool> = self.state.tracks.iter().map(|t| t.kind.is_midi()).collect();
         let total_track_count = self.state.tracks.len();
 
         // Track rows: header widgets + clip canvas
@@ -4777,9 +5695,7 @@ impl App {
             .size(13)
             .color(th::TEXT);
 
-        let hint_label = text("Right-click to add")
-            .size(10)
-            .color(th::TEXT_MUTED);
+        let hint_label = text("Right-click to add").size(10).color(th::TEXT_MUTED);
 
         let header = row![track_label, horizontal_space(), hint_label]
             .spacing(8)
@@ -4792,13 +5708,16 @@ impl App {
         if track.has_instrument {
             if track.plugin_instrument_name.is_some() {
                 // External plugin instrument — clickable card
-                let card =
-                    self.view_plugin_instrument_device(track_id, track, track_color);
+                let card = self.view_plugin_instrument_device(track_id, track, track_color);
                 devices_row = devices_row.push(card);
             } else {
                 match track.instrument_kind {
                     Some(vibez_core::midi::InstrumentKind::Sampler) => {
                         let card = self.view_sampler_device(track_id, track, track_color);
+                        devices_row = devices_row.push(card);
+                    }
+                    Some(vibez_core::midi::InstrumentKind::DrumRack) => {
+                        let card = self.view_drum_rack_device(track_id, track, track_color);
                         devices_row = devices_row.push(card);
                     }
                     _ => {
@@ -4903,44 +5822,39 @@ impl App {
         track_color: Color,
     ) -> Element<'a, Message> {
         let dot = text("\u{25CF}").size(9).color(track_color);
-        let plugin_name = track
-            .plugin_instrument_name
-            .as_deref()
-            .unwrap_or("Plugin");
+        let plugin_name = track.plugin_instrument_name.as_deref().unwrap_or("Plugin");
 
         let name_section =
             container(text(plugin_name).size(11).color(th::TEXT)).width(Length::Fill);
 
         // Edit button for plugins with a native GUI
-        let edit_btn: Option<iced::widget::Button<'_, Message>> =
-            if track.has_plugin_instrument_gui {
-                let gui_key = PluginGuiKey::Instrument { track_id };
-                Some(
-                    button(text("Edit").size(9).color(th::TEXT_DIM))
-                        .on_press(Message::OpenPluginGui(gui_key))
-                        .padding([2, 5])
-                        .style(|_theme: &Theme, status| {
-                            let (bg, tc) = match status {
-                                button::Status::Hovered => {
-                                    (Some(th::BG_HOVER.into()), th::ACCENT)
-                                }
-                                _ => (None, th::TEXT_DIM),
-                            };
-                            button::Style {
-                                background: bg,
-                                text_color: tc,
-                                border: iced::Border {
-                                    color: th::BORDER,
-                                    width: 1.0,
-                                    radius: 3.0.into(),
-                                },
-                                ..Default::default()
-                            }
-                        }),
-                )
-            } else {
-                None
-            };
+        let edit_btn: Option<iced::widget::Button<'_, Message>> = if track.has_plugin_instrument_gui
+        {
+            let gui_key = PluginGuiKey::Instrument { track_id };
+            Some(
+                button(text("Edit").size(9).color(th::TEXT_DIM))
+                    .on_press(Message::OpenPluginGui(gui_key))
+                    .padding([2, 5])
+                    .style(|_theme: &Theme, status| {
+                        let (bg, tc) = match status {
+                            button::Status::Hovered => (Some(th::BG_HOVER.into()), th::ACCENT),
+                            _ => (None, th::TEXT_DIM),
+                        };
+                        button::Style {
+                            background: bg,
+                            text_color: tc,
+                            border: iced::Border {
+                                color: th::BORDER,
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    }),
+            )
+        } else {
+            None
+        };
 
         let remove: Element<'a, Message> = Self::device_icon_btn(
             icons::X,
@@ -4968,9 +5882,8 @@ impl App {
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Synth").size(11).color(th::TEXT);
 
-        let title = Self::device_title_bar(
-            row![dot, name].spacing(4).align_y(iced::Alignment::Center),
-        );
+        let title =
+            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
 
         let param_names = ["Attack", "Decay", "Sustain", "Release"];
         let mut params_col = column![].spacing(3);
@@ -4994,9 +5907,8 @@ impl App {
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Sampler").size(11).color(th::TEXT);
 
-        let title = Self::device_title_bar(
-            row![dot, name].spacing(4).align_y(iced::Alignment::Center),
-        );
+        let title =
+            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
 
         let sample_label = match &track.sample_name {
             Some(name) => text(name.as_str()).size(10).color(th::TEXT),
@@ -5042,16 +5954,164 @@ impl App {
         Self::device_card(column![title, body].width(Length::Fixed(140.0)))
     }
 
+    fn view_drum_rack_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        let dot = text("\u{25CF}").size(8).color(track_color);
+        let name = text("Drum Rack").size(11).color(th::TEXT);
+        let selected_pad = track
+            .selected_drum_pad
+            .min(track.drum_rack_pads.len().saturating_sub(1));
+
+        let remove: Element<'a, Message> = Self::device_icon_btn(
+            icons::X,
+            th::TEXT_DIM,
+            th::DANGER,
+            Message::RemoveTrackInstrument(track_id),
+        )
+        .into();
+
+        let title = Self::device_title_bar(
+            row![dot, name, horizontal_space(), remove]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        );
+
+        let mut grid = column![].spacing(4);
+        for row_index in 0..4 {
+            let mut pad_row = row![].spacing(4);
+            for col_index in 0..4 {
+                let pad_index = row_index * 4 + col_index;
+                let pad = &track.drum_rack_pads[pad_index];
+                let active = selected_pad == pad_index;
+                let label = pad
+                    .name
+                    .as_deref()
+                    .map(|name| {
+                        if name.len() > 10 {
+                            format!("{}...", &name[..10])
+                        } else {
+                            name.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| format!("Pad {}", pad_index + 1));
+                let mut pad_btn = button(
+                    column![
+                        text(format!("{:02}", pad_index + 1))
+                            .size(9)
+                            .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                        text(label)
+                            .size(10)
+                            .color(if active { th::ACCENT } else { th::TEXT })
+                    ]
+                    .spacing(2)
+                    .align_x(iced::Alignment::Center),
+                )
+                .padding([8, 6])
+                .width(Length::Fixed(60.0))
+                .style(move |_theme: &Theme, status| {
+                    let bg = if active {
+                        Some(th::ACCENT_DIM.into())
+                    } else {
+                        match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
+                            }
+                            _ => Some(th::BG_DARK.into()),
+                        }
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: if active { th::ACCENT } else { th::TEXT },
+                        border: iced::Border {
+                            color: if active { th::ACCENT_DIM } else { th::BORDER },
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+                pad_btn = pad_btn.on_press(Message::SelectDrumRackPad(track_id, pad_index));
+                pad_row = pad_row.push(pad_btn);
+            }
+            grid = grid.push(pad_row);
+        }
+
+        let selected_name = track.drum_rack_pads[selected_pad]
+            .name
+            .clone()
+            .unwrap_or_else(|| "No sample loaded".to_string());
+        let source_hint = track.drum_rack_pads[selected_pad]
+            .source
+            .as_ref()
+            .map(MediaSourceRef::display_name)
+            .unwrap_or_else(|| "Use the browser or Load".to_string());
+
+        let load_btn = button(text("Load").size(9).color(th::TEXT))
+            .on_press(Message::LoadDrumRackPadSample(track_id, selected_pad))
+            .padding([2, 8])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => th::BG_HOVER,
+                    _ => th::BG_DARK,
+                };
+                button::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    text_color: th::TEXT,
+                    ..Default::default()
+                }
+            });
+
+        let clear_btn = button(text("Clear").size(9).color(th::TEXT_DIM))
+            .on_press(Message::ClearDrumRackPad(track_id, selected_pad))
+            .padding([2, 8])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => Some(th::BG_DARK.into()),
+                };
+                button::Style {
+                    background: bg,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    text_color: th::TEXT_DIM,
+                    ..Default::default()
+                }
+            });
+
+        let footer = column![
+            text(selected_name).size(10).color(th::TEXT),
+            text(source_hint).size(9).color(th::TEXT_DIM),
+            row![load_btn, clear_btn]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(4);
+
+        let body = container(column![grid, footer].spacing(8))
+            .padding([6, 6])
+            .width(Length::Fill);
+
+        Self::device_card(column![title, body].width(Length::Fixed(300.0)))
+    }
+
     /// Placeholder card for MIDI tracks with no instrument attached.
     fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
-        let title = Self::device_title_bar(
-            text("No Instrument").size(11).color(th::TEXT_DIM),
-        );
-        let body = container(
-            text("Right-click to add").size(9).color(th::TEXT_MUTED),
-        )
-        .padding([8, 6])
-        .width(Length::Fill);
+        let title = Self::device_title_bar(text("No Instrument").size(11).color(th::TEXT_DIM));
+        let body = container(text("Right-click to add").size(9).color(th::TEXT_MUTED))
+            .padding([8, 6])
+            .width(Length::Fill);
 
         Self::device_card(
             column![title, body]
@@ -5081,7 +6141,9 @@ impl App {
                 (th::BG_ELEVATED, th::TEXT_DIM)
             };
             let inst_tab = button(text("Instruments").size(11).color(tc))
-                .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Instruments))
+                .on_press(Message::SetDeviceMenuCategory(
+                    DeviceMenuCategory::Instruments,
+                ))
                 .padding([4, 10])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(bg.into()),
@@ -5290,13 +6352,9 @@ impl App {
             ]
         ];
 
-        mouse_area(
-            container(padded)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .on_press(Message::DismissDeviceContextMenu)
-        .into()
+        mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
+            .on_press(Message::DismissDeviceContextMenu)
+            .into()
     }
 
     /// Piano roll panel for the detail panel split view.
@@ -5373,11 +6431,7 @@ impl App {
                 .color(th::TEXT_DIM);
 
             // Loop toggle
-            let loop_icon_color = if clip_loop {
-                th::ACCENT
-            } else {
-                th::TEXT_DIM
-            };
+            let loop_icon_color = if clip_loop { th::ACCENT } else { th::TEXT_DIM };
             let loop_btn = button(icons::icon(icons::REPEAT).size(10).color(loop_icon_color))
                 .on_press(Message::ToggleNoteClipLoop(tid, cid))
                 .padding([2, 4])
@@ -5447,13 +6501,7 @@ impl App {
             .style(op_btn_style);
 
             let props_row = row![
-                clip_name,
-                pos_label,
-                dur_label,
-                loop_btn,
-                dup_btn,
-                double_btn,
-                halve_btn,
+                clip_name, pos_label, dur_label, loop_btn, dup_btn, double_btn, halve_btn,
                 crop_btn,
             ]
             .spacing(6)
@@ -5551,10 +6599,9 @@ impl App {
             snap_row = snap_row.push(btn);
         }
         let snap_label = text("Snap:").size(10).color(th::TEXT_DIM);
-        let header_row =
-            row![label, mode_row, horizontal_space(), snap_label, snap_row]
-                .spacing(4)
-                .align_y(iced::Alignment::Center);
+        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_row]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
 
         content_col = content_col.push(header_row).push(piano_canvas);
 
@@ -5809,10 +6856,7 @@ impl App {
 /// Phase 1 of plugin loading (runs on background thread).
 /// For CLAP: only loads the DSO — NO CLAP API calls (not even create_plugin).
 /// For VST3: fully loads (VST3 doesn't have JUCE MessageManager issues).
-fn load_plugin_effect_bg(
-    info: &PluginInfo,
-    sample_rate: f64,
-) -> Result<PluginLoadResult, String> {
+fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLoadResult, String> {
     match info.format {
         PluginFormat::Clap => {
             let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
@@ -5885,8 +6929,7 @@ fn load_plugin_instrument_bg(
             )?;
             let gui_raw_ptr = Some(PluginRawPtr::Vst3(vst3_inst.component_ptr()));
             let name = vst3_inst.name().to_string();
-            let wrapper =
-                vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
+            let wrapper = vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
             Ok(PluginInstrumentLoadResult {
                 track_id: TrackId::default(),
                 plugin_name: name,
@@ -5975,6 +7018,7 @@ async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> 
         let project = Project::load_from_file(&path).map_err(|err| err.to_string())?;
         let mut clips = Vec::new();
         let mut sampler_samples = Vec::new();
+        let mut drum_rack_pad_samples = Vec::new();
         let mut warnings = Vec::new();
 
         for clip in &project.clips {
@@ -6003,30 +7047,66 @@ async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> 
         }
 
         for track in &project.tracks {
-            if let Some(InstrumentStateInfo::Sampler {
-                source: Some(source),
-                ..
-            }) = &track.native_instrument
-            {
-                match source {
-                    MediaSourceRef::LocalFile { path: sample_path } => {
-                        match file_io::decode_audio_file(sample_path) {
-                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                track_id: track.id,
-                                source: source.clone(),
-                                audio: Arc::new(audio),
-                                name: source.display_name(),
-                            }),
-                            Err(err) => warnings.push(format!(
-                                "Skipped sampler source on '{}' ({})",
-                                track.name, err
-                            )),
+            if let Some(native) = &track.native_instrument {
+                match native {
+                    InstrumentStateInfo::Sampler {
+                        source: Some(source),
+                        ..
+                    } => match source {
+                        MediaSourceRef::LocalFile { path: sample_path } => {
+                            match file_io::decode_audio_file(sample_path) {
+                                Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                                    track_id: track.id,
+                                    source: source.clone(),
+                                    audio: Arc::new(audio),
+                                    name: source.display_name(),
+                                }),
+                                Err(err) => warnings.push(format!(
+                                    "Skipped sampler source on '{}' ({})",
+                                    track.name, err
+                                )),
+                            }
+                        }
+                        MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
+                            "Skipped sampler source on '{}' (Dropbox sources are not available yet)",
+                            track.name
+                        )),
+                    },
+                    InstrumentStateInfo::DrumRack { pads } => {
+                        for (pad_index, pad) in pads.iter().enumerate() {
+                            let Some(source) = &pad.source else {
+                                continue;
+                            };
+                            match source {
+                                MediaSourceRef::LocalFile { path: sample_path } => {
+                                    match file_io::decode_audio_file(sample_path) {
+                                        Ok(audio) => drum_rack_pad_samples.push(
+                                            LoadedDrumRackPadData {
+                                                track_id: track.id,
+                                                pad_index,
+                                                source: source.clone(),
+                                                audio: Arc::new(audio),
+                                                name: source.display_name(),
+                                                state: pad.clone(),
+                                            },
+                                        ),
+                                        Err(err) => warnings.push(format!(
+                                            "Skipped drum pad {} on '{}' ({})",
+                                            pad_index + 1,
+                                            track.name,
+                                            err
+                                        )),
+                                    }
+                                }
+                                MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
+                                    "Skipped drum pad {} on '{}' (Dropbox sources are not available yet)",
+                                    pad_index + 1,
+                                    track.name
+                                )),
+                            }
                         }
                     }
-                    MediaSourceRef::DropboxFile { .. } => warnings.push(format!(
-                        "Skipped sampler source on '{}' (Dropbox sources are not available yet)",
-                        track.name
-                    )),
+                    _ => {}
                 }
             }
         }
@@ -6036,11 +7116,99 @@ async fn load_project_async(path: PathBuf) -> Result<ProjectLoadResult, String> 
             project,
             clips,
             sampler_samples,
+            drum_rack_pad_samples,
             warnings,
         })
     })
     .await
     .map_err(|err| format!("load task failed: {err}"))?
+}
+
+async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryScanResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut entries = Vec::new();
+        let mut warnings = Vec::new();
+
+        for root in roots {
+            if !root.exists() {
+                warnings.push(format!("Missing root: {}", root.display()));
+                continue;
+            }
+            scan_root_into(&root, &root, &mut entries, &mut warnings);
+        }
+
+        entries.sort_by(|a, b| {
+            a.relative_path
+                .cmp(&b.relative_path)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        Ok(SampleLibraryScanResult { entries, warnings })
+    })
+    .await
+    .map_err(|err| format!("scan task failed: {err}"))?
+}
+
+fn scan_root_into(
+    root: &PathBuf,
+    dir: &PathBuf,
+    entries: &mut Vec<SampleBrowserEntry>,
+    warnings: &mut Vec<String>,
+) {
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(read_dir) => read_dir,
+        Err(err) => {
+            warnings.push(format!("Failed to read {} ({err})", dir.display()));
+            return;
+        }
+    };
+
+    for item in read_dir {
+        let Ok(item) = item else {
+            continue;
+        };
+        let path = item.path();
+        if path.is_dir() {
+            scan_root_into(root, &path, entries, warnings);
+            continue;
+        }
+        if !is_supported_audio_file(&path) {
+            continue;
+        }
+        let relative_path = path
+            .strip_prefix(root)
+            .map(|rel| rel.to_path_buf())
+            .unwrap_or_else(|_| path.clone());
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let search_text = format!(
+            "{} {} {}",
+            name.to_lowercase(),
+            relative_path.display().to_string().to_lowercase(),
+            root.display().to_string().to_lowercase()
+        );
+        entries.push(SampleBrowserEntry {
+            source: MediaSourceRef::LocalFile { path },
+            name,
+            root_path: root.clone(),
+            relative_path,
+            search_text,
+        });
+    }
+}
+
+fn is_supported_audio_file(path: &PathBuf) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "wav" | "wave" | "mp3" | "flac" | "ogg" | "aac" | "m4a" | "aif" | "aiff"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<f32> {

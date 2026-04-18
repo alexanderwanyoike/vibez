@@ -3,6 +3,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
@@ -145,6 +146,21 @@ pub enum EngineCommand {
         track_id: TrackId,
         sample: Arc<DecodedAudio>,
         sample_name: String,
+    },
+    LoadDrumRackPadSample {
+        track_id: TrackId,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        sample_name: String,
+    },
+    ClearDrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
+    SetDrumRackPadState {
+        track_id: TrackId,
+        pad_index: usize,
+        state: DrumPadState,
     },
 
     // -- Arrangement loop --

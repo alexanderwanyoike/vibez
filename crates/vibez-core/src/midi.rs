@@ -40,6 +40,7 @@ pub struct NoteClipInfo {
 pub enum InstrumentKind {
     SubtractiveSynth,
     Sampler,
+    DrumRack,
 }
 
 impl InstrumentKind {
@@ -47,11 +48,16 @@ impl InstrumentKind {
         match self {
             InstrumentKind::SubtractiveSynth => "Subtractive Synth",
             InstrumentKind::Sampler => "Sampler",
+            InstrumentKind::DrumRack => "Drum Rack",
         }
     }
 
     pub fn all() -> &'static [InstrumentKind] {
-        &[InstrumentKind::SubtractiveSynth, InstrumentKind::Sampler]
+        &[
+            InstrumentKind::SubtractiveSynth,
+            InstrumentKind::Sampler,
+            InstrumentKind::DrumRack,
+        ]
     }
 }
 
@@ -176,8 +182,9 @@ mod tests {
     #[test]
     fn instrument_kind_all() {
         let all = InstrumentKind::all();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 3);
         assert_eq!(all[0], InstrumentKind::SubtractiveSynth);
         assert_eq!(all[1], InstrumentKind::Sampler);
+        assert_eq!(all[2], InstrumentKind::DrumRack);
     }
 }
