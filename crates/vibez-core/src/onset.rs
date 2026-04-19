@@ -174,8 +174,15 @@ const BPM_FOLD_PREF: f64 = 120.0;
 // precision of ~0.5 BPM at 120 BPM, further refined by parabolic
 // interpolation around the ACF peak.
 const ODF_DOWNSAMPLE_HZ: u32 = 500;
-// Minimum clip length to attempt detection (2 seconds).
-const MIN_SECONDS_FOR_BPM: u32 = 2;
+// Minimum clip length to attempt detection, in samples at a
+// reference 44.1 kHz. Scaled per-call by the actual sample rate.
+// 44_100 samples ≈ 1.0 s, which covers single-bar dance-music loops
+// down to 120 BPM (a 1-bar loop at 120 BPM is exactly 2 s; at
+// 140 BPM it is ~1.71 s; at 174 BPM it is ~1.38 s). Using 2 s as
+// the previous threshold rejected almost every 1-bar drum loop the
+// user is likely to drop in, which is why the detector was
+// returning `None` so often.
+const MIN_SECONDS_FOR_BPM_F64: f64 = 1.0;
 
 /// Detect the tempo of `audio`. Returns `None` when the audio is too
 /// short, too sparse, or the autocorrelation is not strong enough to
@@ -186,7 +193,7 @@ pub fn detect_bpm(audio: &DecodedAudio, sample_rate: u32) -> Option<BpmEstimate>
     if sample_rate == 0 {
         return None;
     }
-    let min_frames = sample_rate.saturating_mul(MIN_SECONDS_FOR_BPM) as usize;
+    let min_frames = (sample_rate as f64 * MIN_SECONDS_FOR_BPM_F64) as usize;
     if frames < min_frames {
         return None;
     }
@@ -639,9 +646,36 @@ mod tests {
     }
 
     #[test]
-    fn short_audio_returns_none() {
-        let audio = make_audio(vec![vec![0.1; 44_100]; 2], 44_100);
+    fn very_short_audio_returns_none() {
+        // 0.5 s of silence is well below our 1-second floor.
+        let audio = make_audio(vec![vec![0.1; 22_050]; 2], 44_100);
         assert!(detect_bpm(&audio, 44_100).is_none());
+    }
+
+    #[test]
+    fn detects_single_bar_at_122_bpm() {
+        // A single bar at 122 BPM is ~1.97 s. The old 2-second
+        // floor rejected this outright; lowering to 1 s lets us
+        // pick up the tempo from 4 beats in a single bar.
+        let audio = synthetic_kick_track(44_100, 122.0, 1.97);
+        let est = detect_bpm(&audio, 44_100).expect("expected detection");
+        assert!(
+            (est.bpm - 122.0).abs() < 2.0,
+            "expected ~122 BPM, got {}",
+            est.bpm
+        );
+    }
+
+    #[test]
+    fn detects_single_bar_at_140_bpm() {
+        // 1 bar at 140 BPM ≈ 1.71 s.
+        let audio = synthetic_kick_track(44_100, 140.0, 1.71);
+        let est = detect_bpm(&audio, 44_100).expect("expected detection");
+        assert!(
+            (est.bpm - 140.0).abs() < 2.0,
+            "expected ~140 BPM, got {}",
+            est.bpm
+        );
     }
 
     #[test]

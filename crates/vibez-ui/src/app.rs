@@ -1672,9 +1672,12 @@ impl App {
         use crate::message::AutoWarpOutcome;
         match outcome {
             AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Leave a breadcrumb in the status
-                // line so the user knows auto-warp ran and abstained.
-                self.state.status_text = "Auto-warp: could not detect BPM".to_string();
+                // Nothing to apply. Point the user at the manual
+                // workflow in the clip detail panel.
+                self.state.status_text =
+                    "Auto-warp: could not detect BPM. Select the clip and type the source \
+                     BPM in the Warp row, then press Enter and click Warp."
+                        .to_string();
             }
             AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -5103,7 +5106,9 @@ impl App {
                 }
                 None => {
                     self.state.status_text =
-                        "Could not detect BPM (silence or too short / sparse)".to_string();
+                        "Could not detect BPM. Type the source BPM in the Warp row and \
+                         press Enter, then click Warp."
+                            .to_string();
                 }
             },
             Message::ClipBpmInputChanged {
