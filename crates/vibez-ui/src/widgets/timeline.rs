@@ -860,15 +860,22 @@ impl canvas::Program<Message> for TrackClipCanvas {
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
         let ppb = self.pixels_per_beat();
 
+        // True when a sample drag is active and the cursor is hovering this
+        // lane. Used to paint a drop indicator.
+        let drop_hover =
+            self.sample_drop_active && cursor.position_in(bounds).is_some();
+
         // Background
-        let bg_color = if self.selected {
+        let bg_color = if drop_hover {
+            theme::ACCENT_DIM
+        } else if self.selected {
             theme::TRACK_BG_SELECTED
         } else {
             theme::TRACK_BG
@@ -1304,6 +1311,37 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 .with_width(1.0),
         );
 
+        // Drop-target indicator: bold accent border + vertical bar at the
+        // cursor x to show exactly where the dropped clip will start.
+        if drop_hover {
+            let outline = canvas::Path::rectangle(
+                iced::Point::new(1.0, 1.0),
+                iced::Size::new(w - 2.0, h - 2.0),
+            );
+            frame.stroke(
+                &outline,
+                canvas::Stroke::default()
+                    .with_color(theme::ACCENT)
+                    .with_width(2.0),
+            );
+            if let Some(local) = cursor.position_in(bounds) {
+                let beat = self.x_to_beat(local.x).max(0.0);
+                let snapped_x = self.beat_to_x(beat.round());
+                if snapped_x >= 0.0 && snapped_x <= w {
+                    let drop_line = canvas::Path::line(
+                        iced::Point::new(snapped_x, 0.0),
+                        iced::Point::new(snapped_x, h),
+                    );
+                    frame.stroke(
+                        &drop_line,
+                        canvas::Stroke::default()
+                            .with_color(theme::ACCENT)
+                            .with_width(2.0),
+                    );
+                }
+            }
+        }
+
         vec![frame.into_geometry()]
     }
 
@@ -1402,7 +1440,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         );
                     }
 
-                    // No clip hit — PendingSeek (may become RegionSelect on drag)
+                    // No clip hit. Start a PendingSeek (may become RegionSelect on drag).
+                    // Also surface the track as the selection target so subsequent
+                    // browser imports / dropdowns know which lane is "active".
                     if bounds.width > 0.0 {
                         let ppb = self.pixels_per_beat();
                         let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
@@ -1410,7 +1450,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             beat,
                             start_x: pos.x,
                         });
-                        return (canvas::event::Status::Captured, None);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::SelectTrack(track_id)),
+                        );
                     }
                 }
             }
@@ -1637,7 +1680,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 // inside this lane on release, emit a drop message.
                 if self.sample_drop_active {
                     if let Some(pos) = cursor.position_in(bounds) {
-                        let beat = self.x_to_beat(pos.x).max(0.0);
+                        // Snap the drop position to the nearest beat so it
+                        // matches the indicator drawn in `draw`.
+                        let beat = self.x_to_beat(pos.x).max(0.0).round();
                         let spb = self.spb();
                         let position_samples = if spb > 0.0 {
                             (beat * spb) as u64
