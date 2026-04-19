@@ -415,6 +415,13 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
+    /// Quantize an audio clip with an explicit grid, bypassing the
+    /// piano-roll snap setting.
+    QuantizeAudioClipAt {
+        track_id: TrackId,
+        clip_id: ClipId,
+        grid: crate::state::SnapGrid,
+    },
 
     // Undo / redo
     Undo,

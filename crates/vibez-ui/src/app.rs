@@ -1220,7 +1220,12 @@ impl App {
         self.state.status_text = "Redo".to_string();
     }
 
-    fn quantize_audio_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
+    fn quantize_audio_clip_at(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        grid: crate::state::SnapGrid,
+    ) {
         const DEFAULT_SENSITIVITY: f32 = 1.5;
 
         let (audio, original_name, clip_position, clip_source_offset, clip_duration) = {
@@ -1263,7 +1268,6 @@ impl App {
                 0.0
             }
         };
-        let grid = self.state.snap_grid;
 
         struct NewSlice {
             clip_id: ClipId,
@@ -1604,6 +1608,7 @@ impl App {
                 | Message::HalveNoteClip(..)
                 | Message::QuantizeNoteClip { .. }
                 | Message::QuantizeAudioClip { .. }
+                | Message::QuantizeAudioClipAt { .. }
         );
         if should_mark_dirty {
             self.push_undo_snapshot();
@@ -4488,7 +4493,15 @@ impl App {
             }
             Message::QuantizeAudioClip { track_id, clip_id } => {
                 self.state.context_menu = None;
-                self.quantize_audio_clip(track_id, clip_id);
+                let grid = self.state.snap_grid;
+                self.quantize_audio_clip_at(track_id, clip_id, grid);
+            }
+            Message::QuantizeAudioClipAt {
+                track_id,
+                clip_id,
+                grid,
+            } => {
+                self.quantize_audio_clip_at(track_id, clip_id, grid);
             }
 
             // -- Undo / redo --
@@ -7274,7 +7287,7 @@ impl App {
                         });
                         if let Some(sel_cid) = audio_sel {
                             if let Some(clip) = track.clips.iter().find(|c| c.id == sel_cid) {
-                                self.view_audio_clip_panel(clip, track_color)
+                                self.view_audio_clip_panel(track_id, clip, track_color)
                             } else {
                                 self.view_clip_placeholder()
                             }
@@ -8260,7 +8273,12 @@ impl App {
     }
 
     /// Audio clip waveform panel for the detail panel split view.
-    fn view_audio_clip_panel(&self, clip: &UiClip, track_color: Color) -> Element<'_, Message> {
+    fn view_audio_clip_panel(
+        &self,
+        track_id: TrackId,
+        clip: &UiClip,
+        track_color: Color,
+    ) -> Element<'_, Message> {
         let playhead_samples = self.state.position_samples;
         let playhead_normalized = if clip.duration > 0
             && playhead_samples >= clip.position
@@ -8290,7 +8308,7 @@ impl App {
 
         let label = text("Waveform").size(11).color(th::TEXT_DIM);
         let clip_info = text(format!(
-            "{} — {:.1}s",
+            "{}: {:.1}s",
             clip.name,
             clip.duration as f64 / self.state.sample_rate as f64
         ))
@@ -8301,7 +8319,11 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
-        let content = column![header_row, waveform_canvas].spacing(4).padding(4);
+        let quantize_row = self.view_audio_quantize_row(track_id, clip.id);
+
+        let content = column![header_row, quantize_row, waveform_canvas]
+            .spacing(6)
+            .padding(4);
 
         container(content)
             .width(Length::FillPortion(1))
@@ -8316,6 +8338,53 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    fn view_audio_quantize_row(
+        &self,
+        track_id: TrackId,
+        clip_id: ClipId,
+    ) -> Element<'_, Message> {
+        let label = text("Quantize").size(11).color(th::TEXT_DIM);
+        let grid_btn = |grid: crate::state::SnapGrid| -> Element<'_, Message> {
+            button(text(grid.label()).size(11).color(th::TEXT))
+                .on_press(Message::QuantizeAudioClipAt {
+                    track_id,
+                    clip_id,
+                    grid,
+                })
+                .padding([4, 10])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                })
+                .into()
+        };
+
+        row![
+            label,
+            grid_btn(crate::state::SnapGrid::Quarter),
+            grid_btn(crate::state::SnapGrid::Eighth),
+            grid_btn(crate::state::SnapGrid::Sixteenth),
+            grid_btn(crate::state::SnapGrid::ThirtySecond),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into()
     }
 
     // ── Transport bar ──
