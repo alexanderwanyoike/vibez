@@ -544,6 +544,11 @@ pub struct AppState {
     // Drag-and-drop from sample browser
     pub drag_source: Option<MediaSourceRef>,
     pub drag_label: Option<String>,
+    /// Most recent track the cursor has been confirmed over while a drag
+    /// is in flight. Used as the drop target if the release happens on a
+    /// sub-pixel boundary between lanes.
+    pub drag_hover_track: Option<TrackId>,
+    pub drag_hover_beat: f64,
 }
 
 impl Default for AppState {
@@ -604,6 +609,8 @@ impl Default for AppState {
             dropbox: DropboxUiState::default(),
             drag_source: None,
             drag_label: None,
+            drag_hover_track: None,
+            drag_hover_beat: 0.0,
         }
     }
 }

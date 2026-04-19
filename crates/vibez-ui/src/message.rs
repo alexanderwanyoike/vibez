@@ -391,6 +391,12 @@ pub enum Message {
         label: String,
     },
     EndDragSample,
+    /// Fired by a clip canvas whenever the cursor moves while a sample
+    /// drag is in flight and the cursor is inside that lane.
+    DragHoverTrack {
+        track_id: TrackId,
+        beat: f64,
+    },
     DropSampleOnArrangement {
         track_id: TrackId,
         position_samples: u64,

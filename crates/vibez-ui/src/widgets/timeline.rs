@@ -1529,6 +1529,21 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                // If a sample drag from the browser is in flight and the
+                // cursor is over this lane, publish a hover update so the
+                // global drop handler can route a release here even if
+                // the release lands on a sub-pixel boundary outside
+                // `cursor.position_in(bounds)`.
+                if self.sample_drop_active {
+                    if let Some(local) = cursor.position_in(bounds) {
+                        let beat = self.x_to_beat(local.x).max(0.0).round();
+                        return (
+                            canvas::event::Status::Ignored,
+                            Some(Message::DragHoverTrack { track_id, beat }),
+                        );
+                    }
+                }
+
                 if let Some(ref drag) = state.drag {
                     if let Some(pos) = cursor.position() {
                         let local_x = pos.x - bounds.x;

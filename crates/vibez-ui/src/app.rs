@@ -433,6 +433,22 @@ impl App {
         self.state.status_text = format!("Loaded pad {}: {name}", pad_index + 1);
     }
 
+    /// Walk `next_track_number` forward past any names already in use so
+    /// that `format!("{prefix} {n}")` is unique. Prevents e.g. two lanes
+    /// both named "Track 2" when numbering gets out of sync after loads,
+    /// deletes, or undo chains.
+    fn next_unique_track_number(&mut self, prefix: &str) -> u32 {
+        loop {
+            let candidate = self.state.next_track_number;
+            let name = format!("{prefix} {candidate}");
+            let clash = self.state.tracks.iter().any(|t| t.name == name);
+            if !clash {
+                return candidate;
+            }
+            self.state.next_track_number += 1;
+        }
+    }
+
     fn ensure_audio_track_for_import(&mut self, preferred: Option<TrackId>) -> TrackId {
         if let Some(track_id) = preferred {
             if self
@@ -444,8 +460,8 @@ impl App {
             }
         }
 
-        let track_num = self.state.next_track_number;
-        self.state.next_track_number += 1;
+        let track_num = self.next_unique_track_number("Audio");
+        self.state.next_track_number = track_num + 1;
         let id = TrackId::new();
         let color_index = ((track_num - 1) % 8) as u8;
         let name = format!("Audio {track_num}");
@@ -1121,8 +1137,8 @@ impl App {
     }
 
     fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
-        let track_num = self.state.next_track_number;
-        self.state.next_track_number += 1;
+        let track_num = self.next_unique_track_number("Bounce");
+        self.state.next_track_number = track_num + 1;
         let color_index = (track_num.wrapping_sub(1) % 8) as u8;
         let track_id = TrackId::new();
         let track_name = format!("Bounce {track_num}");
@@ -1873,9 +1889,9 @@ impl App {
 
             // -- Multi-track messages --
             Message::AddTrack => {
-                let track_num = self.state.next_track_number;
+                let track_num = self.next_unique_track_number("Track");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number += 1;
+                self.state.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("Track {track_num}");
 
@@ -2175,9 +2191,9 @@ impl App {
 
             // -- Instrument tracks --
             Message::AddInstrumentTrack => {
-                let track_num = self.state.next_track_number;
+                let track_num = self.next_unique_track_number("MIDI");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number += 1;
+                self.state.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("MIDI {track_num}");
                 let kind = TrackKind::Midi;
@@ -3947,9 +3963,9 @@ impl App {
 
             // -- MIDI track (no auto-synth) --
             Message::AddMidiTrack => {
-                let track_num = self.state.next_track_number;
+                let track_num = self.next_unique_track_number("MIDI");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number += 1;
+                self.state.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("MIDI {track_num}");
                 let kind = TrackKind::Midi;
@@ -4220,10 +4236,30 @@ impl App {
                     format!("Dragging {label} - drop on a lane or drum pad");
                 self.state.drag_source = Some(source);
                 self.state.drag_label = Some(label);
+                self.state.drag_hover_track = None;
+                self.state.drag_hover_beat = 0.0;
+            }
+            Message::DragHoverTrack { track_id, beat } => {
+                self.state.drag_hover_track = Some(track_id);
+                self.state.drag_hover_beat = beat;
             }
             Message::EndDragSample => {
-                if self.state.drag_source.take().is_some() {
+                if let Some(source) = self.state.drag_source.take() {
                     self.state.drag_label = None;
+                    // If a drop target was hovered recently, route the drop
+                    // there instead of cancelling. Protects against
+                    // sub-pixel release-outside-bounds misses.
+                    if let Some(track_id) = self.state.drag_hover_track.take() {
+                        let position_samples =
+                            self.state.beats_to_samples(self.state.drag_hover_beat);
+                        self.state.drag_hover_beat = 0.0;
+                        return self.dispatch_drop_on_arrangement(
+                            track_id,
+                            position_samples,
+                            source,
+                        );
+                    }
+                    self.state.drag_hover_beat = 0.0;
                     self.state.status_text = "Drag cancelled".to_string();
                 }
             }
