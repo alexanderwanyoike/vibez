@@ -9752,7 +9752,17 @@ fn compute_warp(input: WarpClipInput) -> Result<crate::message::ClipWarpSuccess,
     if input.clip_bpm <= 0.0 || input.project_bpm <= 0.0 {
         return Err("Invalid BPM".into());
     }
-    let ratio = input.project_bpm / input.clip_bpm;
+    // Ratio = target_frames / source_frames, derived from the
+    // "same number of beats at a different tempo" identity:
+    //
+    //   source_frames = beats * 60 / clip_bpm * sample_rate
+    //   target_frames = beats * 60 / project_bpm * sample_rate
+    //   => target / source = clip_bpm / project_bpm
+    //
+    // For a 130 BPM clip dropped into a 135 BPM project, ratio is
+    // 130/135 ≈ 0.963: the warped output is *shorter* because the
+    // same bar now plays faster.
+    let ratio = input.clip_bpm / input.project_bpm;
     let total_frames = input.audio.num_frames();
     if total_frames == 0 {
         return Err("Empty audio".into());
