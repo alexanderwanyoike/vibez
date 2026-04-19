@@ -1227,8 +1227,9 @@ impl App {
         grid: crate::state::SnapGrid,
     ) {
         const DEFAULT_SENSITIVITY: f32 = 1.5;
+        const MIN_SLICE_FRAMES: usize = 64;
 
-        let (audio, original_name, clip_position, clip_source_offset, clip_duration) = {
+        let (source_audio, original_name, clip_position, clip_source_offset, clip_duration) = {
             let Some(track) = self.state.find_track(track_id) else {
                 self.state.status_text = "Track not found".to_string();
                 return;
@@ -1246,12 +1247,14 @@ impl App {
             )
         };
 
-        let onsets_all = vibez_core::onset::detect_onsets(&audio, DEFAULT_SENSITIVITY);
         let clip_end_src = clip_source_offset.saturating_add(clip_duration);
-        let onsets: Vec<u64> = onsets_all
-            .into_iter()
-            .filter(|&o| o >= clip_source_offset && o < clip_end_src)
-            .collect();
+        let onsets: Vec<u64> = vibez_core::onset::detect_onsets(
+            &source_audio,
+            DEFAULT_SENSITIVITY,
+        )
+        .into_iter()
+        .filter(|&o| o >= clip_source_offset && o < clip_end_src)
+        .collect();
 
         if onsets.is_empty() {
             self.state.status_text =
@@ -1261,48 +1264,93 @@ impl App {
 
         let bpm = self.state.bpm;
         let sr = self.state.sample_rate as f64;
-        let samples_to_beats = |s: u64| -> f64 {
-            if bpm > 0.0 && sr > 0.0 {
-                s as f64 * bpm / (sr * 60.0)
-            } else {
-                0.0
-            }
-        };
-
-        struct NewSlice {
-            clip_id: ClipId,
-            name: String,
-            position: u64,
-            source_offset: u64,
-            duration: u64,
+        if bpm <= 0.0 || sr <= 0.0 {
+            self.state.status_text = "Cannot quantize at zero BPM".to_string();
+            return;
         }
-        let slice_count = onsets.len();
-        let mut new_slices: Vec<NewSlice> = Vec::with_capacity(slice_count);
-        for (i, &onset) in onsets.iter().enumerate() {
-            let slice_end = onsets.get(i + 1).copied().unwrap_or(clip_end_src);
-            if slice_end <= onset {
+        let samples_to_beats =
+            |s: u64| -> f64 { s as f64 * bpm / (sr * 60.0) };
+
+        // Source slice boundaries: [onset_0, onset_1, ..., onset_{N-1}, clip_end].
+        // Produces N source slices.
+        let mut source_bounds: Vec<u64> = onsets.clone();
+        source_bounds.push(clip_end_src);
+
+        // Target timeline positions for each boundary: onset_i snaps to grid;
+        // final boundary snaps the clip end to grid.
+        let mut target_positions: Vec<u64> = Vec::with_capacity(source_bounds.len());
+        for &b in &source_bounds {
+            let original_timeline_pos =
+                clip_position.saturating_add(b - clip_source_offset);
+            let snapped_beats =
+                grid.snap_beat(samples_to_beats(original_timeline_pos)).max(0.0);
+            target_positions.push(self.state.beats_to_samples(snapped_beats));
+        }
+
+        // Ensure monotonically non-decreasing target positions so slice
+        // lengths are non-negative; snap collisions fall through as zero
+        // and get skipped.
+        for i in 1..target_positions.len() {
+            if target_positions[i] < target_positions[i - 1] {
+                target_positions[i] = target_positions[i - 1];
+            }
+        }
+
+        // Build and stretch each slice into per-channel output buffers.
+        let channel_count = source_audio.channels.len().max(1);
+        let mut output_channels: Vec<Vec<f32>> =
+            (0..channel_count).map(|_| Vec::new()).collect();
+
+        let mut total_out_len: usize = 0;
+        let mut stretched_slices = 0usize;
+        for i in 0..onsets.len() {
+            let src_start = source_bounds[i] as usize;
+            let src_end = source_bounds[i + 1] as usize;
+            let src_len = src_end.saturating_sub(src_start);
+            let target_len =
+                target_positions[i + 1].saturating_sub(target_positions[i]) as usize;
+            if src_len < MIN_SLICE_FRAMES || target_len == 0 {
                 continue;
             }
-            let original_timeline_pos =
-                clip_position.saturating_add(onset - clip_source_offset);
-            let snapped_beats = grid.snap_beat(samples_to_beats(original_timeline_pos));
-            let snapped_pos = self.state.beats_to_samples(snapped_beats.max(0.0));
-            new_slices.push(NewSlice {
-                clip_id: ClipId::new(),
-                name: format!("{original_name} {}", i + 1),
-                position: snapped_pos,
-                source_offset: onset,
-                duration: slice_end - onset,
-            });
+
+            for (ch, out) in output_channels.iter_mut().enumerate() {
+                let src_buf = source_audio
+                    .channels
+                    .get(ch)
+                    .map(|c| &c[src_start.min(c.len())..src_end.min(c.len())])
+                    .unwrap_or(&[]);
+                let stretched =
+                    vibez_dsp::time_stretch::stretch_mono(src_buf, target_len);
+                out.extend_from_slice(&stretched);
+            }
+            total_out_len += target_len;
+            stretched_slices += 1;
         }
 
-        if new_slices.is_empty() {
+        if stretched_slices == 0 || total_out_len == 0 {
             self.state.status_text =
-                "Transients detected but slices collapsed to zero length".to_string();
+                "Transients detected but all slices collapsed to zero length".to_string();
             return;
         }
 
-        // Remove the original clip from the engine and UI track.
+        // Pad shorter channels with zeros so all are equal length.
+        for ch in output_channels.iter_mut() {
+            if ch.len() < total_out_len {
+                ch.resize(total_out_len, 0.0);
+            } else {
+                ch.truncate(total_out_len);
+            }
+        }
+
+        let new_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+            channels: output_channels,
+            sample_rate: source_audio.sample_rate,
+        });
+
+        let new_clip_id = ClipId::new();
+        let new_position = target_positions[0];
+        let new_duration = total_out_len as u64;
+
         self.send_command(EngineCommand::RemoveClip(track_id, clip_id));
         if let Some(track) = self.state.find_track_mut(track_id) {
             track.clips.retain(|c| c.id != clip_id);
@@ -1315,41 +1363,43 @@ impl App {
             _ => true,
         });
 
-        // Add each slice.
-        for slice in &new_slices {
-            self.send_command(EngineCommand::AddClip {
-                track_id,
-                clip_id: slice.clip_id,
-                audio: Arc::clone(&audio),
-                position: slice.position,
-                source_offset: slice.source_offset,
-                duration: slice.duration,
+        self.send_command(EngineCommand::AddClip {
+            track_id,
+            clip_id: new_clip_id,
+            audio: Arc::clone(&new_audio),
+            position: new_position,
+            source_offset: 0,
+            duration: new_duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.clips.push(UiClip {
+                id: new_clip_id,
+                name: format!("{original_name} (Q {})", grid.label()),
+                audio: new_audio,
+                source: None,
+                position: new_position,
+                source_offset: 0,
+                duration: new_duration,
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
             });
         }
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            for slice in new_slices.iter() {
-                track.clips.push(UiClip {
-                    id: slice.clip_id,
-                    name: slice.name.clone(),
-                    audio: Arc::clone(&audio),
-                    source: None,
-                    position: slice.position,
-                    source_offset: slice.source_offset,
-                    duration: slice.duration,
-                    loop_enabled: false,
-                    loop_start: 0,
-                    loop_end: 0,
-                });
-            }
-        }
+        self.state
+            .selected_clips
+            .insert(ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: new_clip_id,
+            });
 
         self.state.status_text = format!(
-            "Quantized {} slice(s) to {}",
-            new_slices.len(),
-            grid.label()
+            "Quantized {} slice(s) to {} ({:.1}s)",
+            stretched_slices,
+            grid.label(),
+            total_out_len as f64 / sr,
         );
     }
 

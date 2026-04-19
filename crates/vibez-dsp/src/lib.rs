@@ -11,3 +11,4 @@ pub mod gain;
 pub mod gate;
 pub mod phaser;
 pub mod reverb;
+pub mod time_stretch;
