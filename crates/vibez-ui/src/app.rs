@@ -521,6 +521,18 @@ impl App {
                 let track_id = self.ensure_audio_track_for_import(preferred_track);
                 self.add_audio_clip_to_track(track_id, audio, name, source);
             }
+            BrowserImportTarget::ArrangementClipAt {
+                track_id,
+                position_samples,
+            } => {
+                self.add_audio_clip_to_track_at(
+                    track_id,
+                    position_samples,
+                    audio,
+                    name,
+                    source,
+                );
+            }
             BrowserImportTarget::Sampler(track_id) => {
                 self.apply_sampler_sample_loaded(track_id, audio, name, source);
             }
@@ -529,6 +541,124 @@ impl App {
                 pad_index,
             } => {
                 self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+            }
+        }
+    }
+
+    fn add_audio_clip_to_track_at(
+        &mut self,
+        track_id: TrackId,
+        position_samples: u64,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        name: String,
+        source: MediaSourceRef,
+    ) {
+        let clip_id = ClipId::new();
+        let duration = audio.num_frames() as u64;
+
+        self.send_command(EngineCommand::AddClip {
+            track_id,
+            clip_id,
+            audio: Arc::clone(&audio),
+            position: position_samples,
+            source_offset: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            track.clips.push(UiClip {
+                id: clip_id,
+                name: name.clone(),
+                audio,
+                source: Some(source),
+                position: position_samples,
+                source_offset: 0,
+                duration,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+            });
+        }
+        self.state.selected_track = Some(track_id);
+        self.state.status_text = format!("Dropped clip: {name}");
+    }
+
+    fn dispatch_drop_on_arrangement(
+        &mut self,
+        track_id: TrackId,
+        position_samples: u64,
+        source: MediaSourceRef,
+    ) -> Task<Message> {
+        let target = BrowserImportTarget::ArrangementClipAt {
+            track_id,
+            position_samples,
+        };
+        self.dispatch_drop_for_target(source, target)
+    }
+
+    fn dispatch_drop_for_target(
+        &mut self,
+        source: MediaSourceRef,
+        target: BrowserImportTarget,
+    ) -> Task<Message> {
+        match source {
+            MediaSourceRef::LocalFile { path } => {
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let ret_source = MediaSourceRef::LocalFile { path: path.clone() };
+                self.state.status_text = format!("Dropping {name}...");
+                Task::perform(decode_file_async(path), move |result| match result {
+                    Ok(audio) => Message::BrowserSampleDecoded(
+                        target.clone(),
+                        Arc::new(audio),
+                        name.clone(),
+                        ret_source.clone(),
+                    ),
+                    Err(err) => Message::BrowserSampleDecodeError(err),
+                })
+            }
+            MediaSourceRef::DropboxFile {
+                path_lower,
+                display_path,
+                rev,
+            } => {
+                let Some(client) = self.dropbox_client.clone() else {
+                    self.state.status_text =
+                        "Not connected to Dropbox for this drop".to_string();
+                    return Task::none();
+                };
+                let cache = self.dropbox_cache.clone();
+                let name = display_path
+                    .rsplit_once('/')
+                    .map(|(_, n)| n.to_string())
+                    .unwrap_or_else(|| display_path.clone());
+                let entry = DropboxEntry {
+                    path_lower,
+                    path_display: display_path,
+                    name: name.clone(),
+                    is_folder: false,
+                    rev,
+                    size: None,
+                };
+                self.state.status_text = format!("Dropping {name}...");
+                Task::perform(
+                    fetch_dropbox_sample_async(client, cache, entry),
+                    move |result| match result {
+                        Ok((audio, decoded_name, source)) => {
+                            Message::BrowserSampleDecoded(
+                                target.clone(),
+                                audio,
+                                decoded_name,
+                                source,
+                            )
+                        }
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
             }
         }
     }
@@ -3570,7 +3700,7 @@ impl App {
                         self.state
                             .tracks
                             .iter()
-                            .filter(|t| target_track.map_or(true, |tid| t.id == tid))
+                            .filter(|t| target_track.is_none_or(|tid| t.id == tid))
                             .flat_map(|t| {
                                 t.clips.iter().filter_map(|c| {
                                     let cs = c.position as f64 / spb;
@@ -3591,7 +3721,7 @@ impl App {
                         .state
                         .tracks
                         .iter()
-                        .filter(|t| target_track.map_or(true, |tid| t.id == tid))
+                        .filter(|t| target_track.is_none_or(|tid| t.id == tid))
                         .flat_map(|t| {
                             t.note_clips.iter().filter_map(|c| {
                                 let ce = c.position_beats + c.duration_beats;
@@ -4056,6 +4186,52 @@ impl App {
                         Message::LocalSamplePreviewReady,
                     );
                 }
+            }
+            // -- Drag-and-drop from sample browser --
+            Message::StartDragSample { source, label } => {
+                self.state.status_text =
+                    format!("Dragging {label} - drop on a lane or drum pad");
+                self.state.drag_source = Some(source);
+                self.state.drag_label = Some(label);
+            }
+            Message::EndDragSample => {
+                if self.state.drag_source.take().is_some() {
+                    self.state.drag_label = None;
+                    self.state.status_text = "Drag cancelled".to_string();
+                }
+            }
+            Message::DropSampleOnArrangement {
+                track_id,
+                position_samples,
+            } => {
+                let Some(source) = self.state.drag_source.take() else {
+                    return Task::none();
+                };
+                self.state.drag_label = None;
+                return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
+            }
+            Message::DropSampleOnDrumPad {
+                track_id,
+                pad_index,
+            } => {
+                let Some(source) = self.state.drag_source.take() else {
+                    return Task::none();
+                };
+                self.state.drag_label = None;
+                return self.dispatch_drop_for_target(
+                    source,
+                    BrowserImportTarget::DrumRackPad { track_id, pad_index },
+                );
+            }
+            Message::DropSampleOnSampler { track_id } => {
+                let Some(source) = self.state.drag_source.take() else {
+                    return Task::none();
+                };
+                self.state.drag_label = None;
+                return self.dispatch_drop_for_target(
+                    source,
+                    BrowserImportTarget::Sampler(track_id),
+                );
             }
             Message::LocalSamplePreviewReady(Ok(audio)) => {
                 self.send_command(EngineCommand::StartPreview(audio));
@@ -5209,9 +5385,11 @@ impl App {
 
         let layout = column![header, transport_bar, content, detail_panel, status_bar];
 
-        let base_layout: Element<'_, Message> = container(layout)
-            .width(Length::Fill)
-            .height(Length::Fill)
+        let layout_container = container(layout).width(Length::Fill).height(Length::Fill);
+        // Outer mouse_area cancels an active sample-drag on any release
+        // that wasn't captured by a drop target (clip canvas, drum pad).
+        let base_layout: Element<'_, Message> = mouse_area(layout_container)
+            .on_release(Message::EndDragSample)
             .into();
 
         if self.state.settings_open {
@@ -6546,6 +6724,12 @@ impl App {
                 }
             });
             entry_btn = entry_btn.on_press(Message::ClickLocalBrowserEntry(entry.source.clone()));
+            let entry_dragger: Element<'_, Message> = mouse_area(entry_btn)
+                .on_press(Message::StartDragSample {
+                    source: entry.source.clone(),
+                    label: entry.name.clone(),
+                })
+                .into();
             let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::TEXT_DIM))
                 .on_press(Message::PreviewLocalEntry(entry.source.clone()))
                 .padding([6, 8])
@@ -6568,7 +6752,7 @@ impl App {
                     }
                 });
             entries_col = entries_col.push(
-                row![entry_btn, preview_btn]
+                row![entry_dragger, preview_btn]
                     .spacing(4)
                     .align_y(iced::Alignment::Center),
             );
@@ -6902,6 +7086,17 @@ impl App {
                 }
             });
             if entry.is_supported_audio() {
+                let source = MediaSourceRef::DropboxFile {
+                    path_lower: entry.path_lower.clone(),
+                    display_path: entry.path_display.clone(),
+                    rev: entry.rev.clone(),
+                };
+                let dragger: Element<'_, Message> = mouse_area(btn)
+                    .on_press(Message::StartDragSample {
+                        source,
+                        label: entry.name.clone(),
+                    })
+                    .into();
                 let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::ACCENT))
                     .on_press(Message::DropboxPreview(entry.clone()))
                     .padding([3, 6])
@@ -6920,7 +7115,7 @@ impl App {
                         }
                     });
                 rows.push(
-                    row![btn, speaker]
+                    row![dragger, speaker]
                         .spacing(2)
                         .align_y(iced::Alignment::Center)
                         .into(),
@@ -7121,6 +7316,7 @@ impl App {
                 self.state.selection_start_beats,
                 self.state.selection_end_beats,
                 self.state.time_selection_track,
+                self.state.drag_source.is_some(),
             );
             let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
                 .width(Length::Fill)
@@ -7734,7 +7930,15 @@ impl App {
                     }
                 });
                 pad_btn = pad_btn.on_press(Message::SelectDrumRackPad(track_id, pad_index));
-                pad_row = pad_row.push(pad_btn);
+                // Drop zone: on mouse release while a sample is being
+                // dragged from the browser, load it onto this pad.
+                let pad_cell: Element<'a, Message> = mouse_area(pad_btn)
+                    .on_release(Message::DropSampleOnDrumPad {
+                        track_id,
+                        pad_index,
+                    })
+                    .into();
+                pad_row = pad_row.push(pad_cell);
             }
             grid = grid.push(pad_row);
         }

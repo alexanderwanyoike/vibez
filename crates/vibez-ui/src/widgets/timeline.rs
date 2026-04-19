@@ -691,6 +691,9 @@ pub struct TrackClipCanvas {
     /// (selection was drawn on the ruler); `Some` means show it only on
     /// that lane.
     pub time_selection_track: Option<TrackId>,
+    /// True while a sample is being drag-dropped from the browser.
+    /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
+    pub sample_drop_active: bool,
 }
 
 impl TrackClipCanvas {
@@ -718,6 +721,7 @@ impl TrackClipCanvas {
         selection_start_beats: f64,
         selection_end_beats: f64,
         time_selection_track: Option<TrackId>,
+        sample_drop_active: bool,
     ) -> Self {
         let clips = track
             .clips
@@ -776,6 +780,7 @@ impl TrackClipCanvas {
             selection_start_beats,
             selection_end_beats,
             time_selection_track,
+            sample_drop_active,
         }
     }
 
@@ -1257,7 +1262,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
         // show across every lane.
         let show_selection_on_this_lane = self
             .time_selection_track
-            .map_or(true, |tid| tid == self.track_id);
+            .is_none_or(|tid| tid == self.track_id);
         if show_selection_on_this_lane
             && self.time_selection_active
             && self.selection_end_beats > self.selection_start_beats
@@ -1625,8 +1630,31 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Release: end drag --
+            // -- Release: end drag or drop sample --
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                // Drag-and-drop from the sample browser wins over a local
+                // drag: if a sample is being dragged and the cursor is
+                // inside this lane on release, emit a drop message.
+                if self.sample_drop_active {
+                    if let Some(pos) = cursor.position_in(bounds) {
+                        let beat = self.x_to_beat(pos.x).max(0.0);
+                        let spb = self.spb();
+                        let position_samples = if spb > 0.0 {
+                            (beat * spb) as u64
+                        } else {
+                            0
+                        };
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::DropSampleOnArrangement {
+                                track_id,
+                                position_samples,
+                            }),
+                        );
+                    }
+                }
+
                 if let Some(ref drag) = state.drag {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {

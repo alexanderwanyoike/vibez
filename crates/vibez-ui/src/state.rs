@@ -540,6 +540,10 @@ pub struct AppState {
 
     // Dropbox
     pub dropbox: DropboxUiState,
+
+    // Drag-and-drop from sample browser
+    pub drag_source: Option<MediaSourceRef>,
+    pub drag_label: Option<String>,
 }
 
 impl Default for AppState {
@@ -598,6 +602,8 @@ impl Default for AppState {
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
             dropbox: DropboxUiState::default(),
+            drag_source: None,
+            drag_label: None,
         }
     }
 }

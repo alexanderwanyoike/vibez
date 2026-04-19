@@ -78,6 +78,11 @@ pub struct AudioQuantizeSuccess {
 #[derive(Debug, Clone)]
 pub enum BrowserImportTarget {
     ArrangementClip(Option<TrackId>),
+    /// Drop a sample as an arrangement clip at a specific sample position.
+    ArrangementClipAt {
+        track_id: TrackId,
+        position_samples: u64,
+    },
     Sampler(TrackId),
     DrumRackPad { track_id: TrackId, pad_index: usize },
 }
@@ -379,6 +384,24 @@ pub enum Message {
     /// Speaker-icon click on a Local browser row: audition.
     PreviewLocalEntry(MediaSourceRef),
     LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
+
+    // Drag-and-drop from sample browser
+    StartDragSample {
+        source: MediaSourceRef,
+        label: String,
+    },
+    EndDragSample,
+    DropSampleOnArrangement {
+        track_id: TrackId,
+        position_samples: u64,
+    },
+    DropSampleOnDrumPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
+    DropSampleOnSampler {
+        track_id: TrackId,
+    },
     ImportSelectedBrowserSampleToArrangement,
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
