@@ -63,6 +63,18 @@ pub struct DropboxConnectOutcome {
     pub tokens: DropboxTokens,
 }
 
+/// Successful background result from `quantize_audio_clip_async`.
+#[derive(Debug, Clone)]
+pub struct AudioQuantizeSuccess {
+    pub new_clip_id: ClipId,
+    pub new_audio: Arc<DecodedAudio>,
+    pub new_name: String,
+    pub new_position: u64,
+    pub new_duration: u64,
+    pub slice_count: usize,
+    pub grid_label: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum BrowserImportTarget {
     ArrangementClip(Option<TrackId>),
@@ -359,6 +371,10 @@ pub enum Message {
     SampleBrowserSearchChanged(String),
     SelectSampleBrowserRoot(Option<PathBuf>),
     SelectSampleBrowserEntry(MediaSourceRef),
+    /// Click in the Local sample browser: select the entry and preview it
+    /// through the hidden preview channel.
+    ClickLocalBrowserEntry(MediaSourceRef),
+    LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
     ImportSelectedBrowserSampleToArrangement,
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
@@ -421,6 +437,12 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
         grid: crate::state::SnapGrid,
+    },
+    /// Background audio-quantize computation finished.
+    AudioQuantizeReady {
+        track_id: TrackId,
+        old_clip_id: ClipId,
+        result: Result<AudioQuantizeSuccess, String>,
     },
 
     // Undo / redo

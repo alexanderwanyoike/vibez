@@ -51,17 +51,32 @@ pub fn detect_onsets(audio: &DecodedAudio, sensitivity: f32) -> Vec<u64> {
     let threshold_window = ((THRESHOLD_WINDOW_MS * 0.001) * sr) as usize;
     let sensitivity = sensitivity.clamp(0.25, 5.0);
 
+    // O(N) adaptive threshold via running prefix sums. The old O(N * W)
+    // path turned into a multi-second hang on long clips.
+    let mut prefix_sum = vec![0.0f64; odf.len() + 1];
+    let mut prefix_sq = vec![0.0f64; odf.len() + 1];
+    for i in 0..odf.len() {
+        let v = odf[i] as f64;
+        prefix_sum[i + 1] = prefix_sum[i] + v;
+        prefix_sq[i + 1] = prefix_sq[i] + v * v;
+    }
+
     let mut onsets = Vec::new();
     let mut last_peak: Option<usize> = None;
 
     for i in 1..frames.saturating_sub(1) {
         let window_start = i.saturating_sub(threshold_window);
-        let window = &odf[window_start..i];
-        if window.is_empty() {
+        let window_end = i;
+        let n = (window_end - window_start) as f64;
+        if n < 1.0 {
             continue;
         }
-        let (mean, std) = mean_std(window);
-        let threshold = mean + sensitivity * std.max(1e-6);
+        let sum = prefix_sum[window_end] - prefix_sum[window_start];
+        let sum_sq = prefix_sq[window_end] - prefix_sq[window_start];
+        let mean = sum / n;
+        let variance = (sum_sq / n - mean * mean).max(0.0);
+        let std = variance.sqrt() as f32;
+        let threshold = mean as f32 + sensitivity * std.max(1e-6);
 
         let current = odf[i];
         let prev = odf[i - 1];
@@ -130,13 +145,6 @@ fn onset_flux(env: &[f32]) -> Vec<f32> {
         odf[i] = diff.max(0.0);
     }
     odf
-}
-
-fn mean_std(window: &[f32]) -> (f32, f32) {
-    let n = window.len() as f32;
-    let mean = window.iter().sum::<f32>() / n;
-    let variance = window.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / n;
-    (mean, variance.sqrt())
 }
 
 #[cfg(test)]

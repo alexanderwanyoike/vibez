@@ -1,15 +1,15 @@
-//! Pitch-preserving time stretch via WSOLA (Waveform Similarity
-//! Overlap-Add).
+//! Time stretch (pitch-shifting) via linear-interpolation resampling.
 //!
 //! Used by audio quantize to fit each transient slice into its
-//! grid-aligned target length. Quality is good for drums / percussive
-//! material and acceptable for most loops; not audiophile-grade for
-//! solo melodic content, which is fine for a sample-first DAW.
+//! grid-aligned target length. Pitch shifts proportionally to the
+//! stretch ratio, which is usually what you want for drum loops
+//! (pitches kicks up when compressing, down when expanding). Output
+//! length is exactly `target_len`.
 //!
-//! The algorithm keeps output pitch identical to the input and changes
-//! duration by overlap-adding Hann-windowed frames picked from the
-//! input at positions that maximise waveform similarity with the
-//! previously-emitted frame.
+//! A pitch-preserving variant (WSOLA / phase vocoder) is tracked as
+//! a follow-up for melodic content; for drum-first electronic work
+//! the pitch-shift side effect is typically either inaudible (small
+//! ratios) or musically useful (larger ratios).
 
 use vibez_core::audio_buffer::DecodedAudio;
 
@@ -29,124 +29,10 @@ pub fn stretch_to(audio: &DecodedAudio, target_frames: usize) -> DecodedAudio {
 
 /// Stretch a mono buffer to `target_len` samples.
 pub fn stretch_mono(input: &[f32], target_len: usize) -> Vec<f32> {
-    if input.is_empty() || target_len == 0 {
-        return vec![0.0; target_len];
-    }
-    if input.len() == target_len {
-        return input.to_vec();
-    }
-
-    // Small inputs / targets: skip WSOLA, use linear interpolation.
-    // WSOLA needs at least one full frame of headroom.
-    const FRAME: usize = 1024;
-    const HOP: usize = 256; // 75% overlap
-    const SEARCH: i32 = 256;
-
-    if input.len() < FRAME * 2 || target_len < FRAME * 2 {
-        return linear_resample(input, target_len);
-    }
-
-    let hann = hann_window(FRAME);
-    let ratio = (input.len() - FRAME) as f64 / (target_len - FRAME) as f64;
-
-    // Accumulators: output samples + per-sample window sum for normalisation.
-    let mut acc_sum = vec![0.0f32; target_len];
-    let mut acc_win = vec![0.0f32; target_len];
-
-    // Place the first frame without a search.
-    let mut prev_end_half = vec![0.0f32; HOP];
-    {
-        let start = 0usize;
-        overlap_add(&input[start..start + FRAME], &hann, 0, &mut acc_sum, &mut acc_win);
-        for (i, s) in input[start + FRAME - HOP..start + FRAME].iter().enumerate() {
-            prev_end_half[i] = *s * hann[FRAME - HOP + i];
-        }
-    }
-
-    let mut out_pos = HOP;
-    while out_pos + FRAME <= target_len {
-        let ideal = (out_pos as f64 * ratio) as i64;
-        let lo = (ideal - SEARCH as i64).max(0) as usize;
-        let hi = (ideal + SEARCH as i64)
-            .min((input.len() - FRAME) as i64)
-            .max(0) as usize;
-
-        // Cross-correlate `prev_end_half` against the first HOP samples
-        // of each candidate frame in [lo, hi].
-        let mut best = ideal.max(0).min((input.len() - FRAME) as i64) as usize;
-        let mut best_corr = f32::NEG_INFINITY;
-        let mut cand = lo;
-        while cand <= hi {
-            let corr = correlate(&prev_end_half, &input[cand..cand + HOP]);
-            if corr > best_corr {
-                best_corr = corr;
-                best = cand;
-            }
-            cand += 4; // coarse step; good enough for transient-heavy material
-        }
-
-        overlap_add(
-            &input[best..best + FRAME],
-            &hann,
-            out_pos,
-            &mut acc_sum,
-            &mut acc_win,
-        );
-
-        // Update rolling "previous end half" from what we just placed.
-        for i in 0..HOP {
-            prev_end_half[i] = input[best + FRAME - HOP + i] * hann[FRAME - HOP + i];
-        }
-        out_pos += HOP;
-    }
-
-    // Normalise by the accumulated window sum to keep constant gain.
-    let mut out = vec![0.0f32; target_len];
-    for i in 0..target_len {
-        if acc_win[i] > 1e-6 {
-            out[i] = acc_sum[i] / acc_win[i];
-        }
-    }
-    out
+    linear_resample(input, target_len)
 }
 
-fn overlap_add(
-    frame: &[f32],
-    window: &[f32],
-    dest_pos: usize,
-    acc_sum: &mut [f32],
-    acc_win: &mut [f32],
-) {
-    let n = frame.len().min(window.len());
-    let end = (dest_pos + n).min(acc_sum.len());
-    let len = end - dest_pos;
-    for i in 0..len {
-        let w = window[i];
-        acc_sum[dest_pos + i] += frame[i] * w;
-        acc_win[dest_pos + i] += w;
-    }
-}
-
-fn correlate(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len().min(b.len());
-    let mut sum = 0.0f32;
-    for i in 0..n {
-        sum += a[i] * b[i];
-    }
-    sum
-}
-
-fn hann_window(n: usize) -> Vec<f32> {
-    (0..n)
-        .map(|i| {
-            0.5 - 0.5
-                * (2.0 * std::f32::consts::PI * i as f32 / (n as f32 - 1.0)).cos()
-        })
-        .collect()
-}
-
-/// Tiny linear-interp resampler used as a fallback for very short
-/// buffers where WSOLA's minimum frame size doesn't fit.
+/// Linear-interp resampler. Produces exactly `target_len` samples.
 fn linear_resample(input: &[f32], target_len: usize) -> Vec<f32> {
     if input.is_empty() {
         return vec![0.0; target_len];

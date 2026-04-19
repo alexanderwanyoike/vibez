@@ -1220,169 +1220,86 @@ impl App {
         self.state.status_text = "Redo".to_string();
     }
 
-    fn quantize_audio_clip_at(
+    fn dispatch_audio_quantize(
         &mut self,
         track_id: TrackId,
         clip_id: ClipId,
         grid: crate::state::SnapGrid,
-    ) {
-        const DEFAULT_SENSITIVITY: f32 = 1.5;
-        const MIN_SLICE_FRAMES: usize = 64;
+    ) -> Task<Message> {
+        let Some(track) = self.state.find_track(track_id) else {
+            self.state.status_text = "Track not found".to_string();
+            return Task::none();
+        };
+        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+            self.state.status_text = "Clip not found".to_string();
+            return Task::none();
+        };
+        if self.state.bpm <= 0.0 || self.state.sample_rate == 0 {
+            self.state.status_text = "Cannot quantize at zero BPM".to_string();
+            return Task::none();
+        }
 
-        let (source_audio, original_name, clip_position, clip_source_offset, clip_duration) = {
-            let Some(track) = self.state.find_track(track_id) else {
-                self.state.status_text = "Track not found".to_string();
-                return;
-            };
-            let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
-                self.state.status_text = "Clip not found".to_string();
-                return;
-            };
-            (
-                Arc::clone(&clip.audio),
-                clip.name.clone(),
-                clip.position,
-                clip.source_offset,
-                clip.duration,
-            )
+        let input = QuantizeInput {
+            audio: Arc::clone(&clip.audio),
+            bpm: self.state.bpm,
+            sample_rate: self.state.sample_rate,
+            grid,
+            clip_position: clip.position,
+            clip_source_offset: clip.source_offset,
+            clip_duration: clip.duration,
+            original_name: clip.name.clone(),
+            new_clip_id: ClipId::new(),
         };
 
-        let clip_end_src = clip_source_offset.saturating_add(clip_duration);
-        let onsets: Vec<u64> = vibez_core::onset::detect_onsets(
-            &source_audio,
-            DEFAULT_SENSITIVITY,
+        self.state.status_text = format!("Quantizing {}...", input.original_name);
+        Task::perform(
+            quantize_audio_clip_async(input),
+            move |result| Message::AudioQuantizeReady {
+                track_id,
+                old_clip_id: clip_id,
+                result,
+            },
         )
-        .into_iter()
-        .filter(|&o| o >= clip_source_offset && o < clip_end_src)
-        .collect();
+    }
 
-        if onsets.is_empty() {
-            self.state.status_text =
-                "No transients detected in clip; nothing to quantize".to_string();
-            return;
-        }
-
-        let bpm = self.state.bpm;
-        let sr = self.state.sample_rate as f64;
-        if bpm <= 0.0 || sr <= 0.0 {
-            self.state.status_text = "Cannot quantize at zero BPM".to_string();
-            return;
-        }
-        let samples_to_beats =
-            |s: u64| -> f64 { s as f64 * bpm / (sr * 60.0) };
-
-        // Source slice boundaries: [onset_0, onset_1, ..., onset_{N-1}, clip_end].
-        // Produces N source slices.
-        let mut source_bounds: Vec<u64> = onsets.clone();
-        source_bounds.push(clip_end_src);
-
-        // Target timeline positions for each boundary: onset_i snaps to grid;
-        // final boundary snaps the clip end to grid.
-        let mut target_positions: Vec<u64> = Vec::with_capacity(source_bounds.len());
-        for &b in &source_bounds {
-            let original_timeline_pos =
-                clip_position.saturating_add(b - clip_source_offset);
-            let snapped_beats =
-                grid.snap_beat(samples_to_beats(original_timeline_pos)).max(0.0);
-            target_positions.push(self.state.beats_to_samples(snapped_beats));
-        }
-
-        // Ensure monotonically non-decreasing target positions so slice
-        // lengths are non-negative; snap collisions fall through as zero
-        // and get skipped.
-        for i in 1..target_positions.len() {
-            if target_positions[i] < target_positions[i - 1] {
-                target_positions[i] = target_positions[i - 1];
-            }
-        }
-
-        // Build and stretch each slice into per-channel output buffers.
-        let channel_count = source_audio.channels.len().max(1);
-        let mut output_channels: Vec<Vec<f32>> =
-            (0..channel_count).map(|_| Vec::new()).collect();
-
-        let mut total_out_len: usize = 0;
-        let mut stretched_slices = 0usize;
-        for i in 0..onsets.len() {
-            let src_start = source_bounds[i] as usize;
-            let src_end = source_bounds[i + 1] as usize;
-            let src_len = src_end.saturating_sub(src_start);
-            let target_len =
-                target_positions[i + 1].saturating_sub(target_positions[i]) as usize;
-            if src_len < MIN_SLICE_FRAMES || target_len == 0 {
-                continue;
-            }
-
-            for (ch, out) in output_channels.iter_mut().enumerate() {
-                let src_buf = source_audio
-                    .channels
-                    .get(ch)
-                    .map(|c| &c[src_start.min(c.len())..src_end.min(c.len())])
-                    .unwrap_or(&[]);
-                let stretched =
-                    vibez_dsp::time_stretch::stretch_mono(src_buf, target_len);
-                out.extend_from_slice(&stretched);
-            }
-            total_out_len += target_len;
-            stretched_slices += 1;
-        }
-
-        if stretched_slices == 0 || total_out_len == 0 {
-            self.state.status_text =
-                "Transients detected but all slices collapsed to zero length".to_string();
-            return;
-        }
-
-        // Pad shorter channels with zeros so all are equal length.
-        for ch in output_channels.iter_mut() {
-            if ch.len() < total_out_len {
-                ch.resize(total_out_len, 0.0);
-            } else {
-                ch.truncate(total_out_len);
-            }
-        }
-
-        let new_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
-            channels: output_channels,
-            sample_rate: source_audio.sample_rate,
-        });
-
-        let new_clip_id = ClipId::new();
-        let new_position = target_positions[0];
-        let new_duration = total_out_len as u64;
-
-        self.send_command(EngineCommand::RemoveClip(track_id, clip_id));
+    fn apply_audio_quantize_success(
+        &mut self,
+        track_id: TrackId,
+        old_clip_id: ClipId,
+        success: crate::message::AudioQuantizeSuccess,
+    ) {
+        self.send_command(EngineCommand::RemoveClip(track_id, old_clip_id));
         if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.retain(|c| c.id != clip_id);
+            track.clips.retain(|c| c.id != old_clip_id);
         }
         self.state.selected_clips.retain(|sel| match sel {
             ArrangementSelection::AudioClip {
                 clip_id: cid,
                 track_id: tid,
-            } => !(*tid == track_id && *cid == clip_id),
+            } => !(*tid == track_id && *cid == old_clip_id),
             _ => true,
         });
 
         self.send_command(EngineCommand::AddClip {
             track_id,
-            clip_id: new_clip_id,
-            audio: Arc::clone(&new_audio),
-            position: new_position,
+            clip_id: success.new_clip_id,
+            audio: Arc::clone(&success.new_audio),
+            position: success.new_position,
             source_offset: 0,
-            duration: new_duration,
+            duration: success.new_duration,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
         });
         if let Some(track) = self.state.find_track_mut(track_id) {
             track.clips.push(UiClip {
-                id: new_clip_id,
-                name: format!("{original_name} (Q {})", grid.label()),
-                audio: new_audio,
+                id: success.new_clip_id,
+                name: success.new_name,
+                audio: Arc::clone(&success.new_audio),
                 source: None,
-                position: new_position,
+                position: success.new_position,
                 source_offset: 0,
-                duration: new_duration,
+                duration: success.new_duration,
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
@@ -1392,14 +1309,14 @@ impl App {
             .selected_clips
             .insert(ArrangementSelection::AudioClip {
                 track_id,
-                clip_id: new_clip_id,
+                clip_id: success.new_clip_id,
             });
 
+        let duration_seconds =
+            success.new_duration as f64 / self.state.sample_rate as f64;
         self.state.status_text = format!(
             "Quantized {} slice(s) to {} ({:.1}s)",
-            stretched_slices,
-            grid.label(),
-            total_out_len as f64 / sr,
+            success.slice_count, success.grid_label, duration_seconds
         );
     }
 
@@ -1657,8 +1574,7 @@ impl App {
                 | Message::RemoveTrackInstrument(_)
                 | Message::HalveNoteClip(..)
                 | Message::QuantizeNoteClip { .. }
-                | Message::QuantizeAudioClip { .. }
-                | Message::QuantizeAudioClipAt { .. }
+                | Message::AudioQuantizeReady { .. }
         );
         if should_mark_dirty {
             self.push_undo_snapshot();
@@ -4104,6 +4020,23 @@ impl App {
             Message::SelectSampleBrowserEntry(source) => {
                 self.state.sample_browser_selected_source = Some(source);
             }
+            Message::ClickLocalBrowserEntry(source) => {
+                self.state.sample_browser_selected_source = Some(source.clone());
+                if let MediaSourceRef::LocalFile { path } = source {
+                    self.state.status_text = "Previewing...".to_string();
+                    return Task::perform(
+                        decode_local_for_preview_async(path),
+                        Message::LocalSamplePreviewReady,
+                    );
+                }
+            }
+            Message::LocalSamplePreviewReady(Ok(audio)) => {
+                self.send_command(EngineCommand::StartPreview(audio));
+                self.state.status_text = "Preview playing".to_string();
+            }
+            Message::LocalSamplePreviewReady(Err(err)) => {
+                self.state.status_text = format!("Preview error: {err}");
+            }
             Message::ImportSelectedBrowserSampleToArrangement => {
                 if let Some(entry) = self.selected_sample_browser_entry().cloned() {
                     let target = BrowserImportTarget::ArrangementClip(
@@ -4544,15 +4477,25 @@ impl App {
             Message::QuantizeAudioClip { track_id, clip_id } => {
                 self.state.context_menu = None;
                 let grid = self.state.snap_grid;
-                self.quantize_audio_clip_at(track_id, clip_id, grid);
+                return self.dispatch_audio_quantize(track_id, clip_id, grid);
             }
             Message::QuantizeAudioClipAt {
                 track_id,
                 clip_id,
                 grid,
             } => {
-                self.quantize_audio_clip_at(track_id, clip_id, grid);
+                return self.dispatch_audio_quantize(track_id, clip_id, grid);
             }
+            Message::AudioQuantizeReady {
+                track_id,
+                old_clip_id,
+                result,
+            } => match result {
+                Ok(success) => self.apply_audio_quantize_success(track_id, old_clip_id, success),
+                Err(err) => {
+                    self.state.status_text = format!("Quantize failed: {err}");
+                }
+            },
 
             // -- Undo / redo --
             Message::Undo => {
@@ -4755,10 +4698,23 @@ impl App {
             Message::DropboxSelectEntry(entry) => {
                 self.state.dropbox.selected_path = Some(entry.path_lower.clone());
                 self.state.sample_browser_selected_source = Some(MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower,
-                    display_path: entry.path_display,
-                    rev: entry.rev,
+                    path_lower: entry.path_lower.clone(),
+                    display_path: entry.path_display.clone(),
+                    rev: entry.rev.clone(),
                 });
+                if entry.is_supported_audio() {
+                    if let Some(client) = self.dropbox_client.clone() {
+                        let cache = self.dropbox_cache.clone();
+                        self.state.dropbox.preview_in_progress = true;
+                        self.state.status_text = format!("Previewing {}...", entry.name);
+                        return Task::perform(
+                            fetch_dropbox_sample_async(client, cache, entry),
+                            |result| Message::DropboxPreviewReady(
+                                result.map(|(audio, _, _)| audio),
+                            ),
+                        );
+                    }
+                }
             }
             Message::DropboxPreview(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
@@ -6573,7 +6529,7 @@ impl App {
                     ..Default::default()
                 }
             });
-            entry_btn = entry_btn.on_press(Message::SelectSampleBrowserEntry(entry.source.clone()));
+            entry_btn = entry_btn.on_press(Message::ClickLocalBrowserEntry(entry.source.clone()));
             entries_col = entries_col.push(entry_btn);
         }
 
@@ -6739,35 +6695,8 @@ impl App {
             .map(|e| e.path_display.clone())
             .unwrap_or_else(|| "Select a file".to_string());
 
-        let preview_btn: Element<'_, Message> = {
-            let mut btn = button(text("Preview").size(11).color(th::TEXT))
-                .padding([6, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
-                        }
-                        _ => Some(th::BG_ELEVATED.into()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::TEXT,
-                        border: iced::Border {
-                            color: th::BORDER,
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                });
-            if let Some(entry) = selected_entry
-                .as_ref()
-                .filter(|e| e.is_supported_audio())
-            {
-                btn = btn.on_press(Message::DropboxPreview(entry.clone()));
-            }
-            btn.into()
-        };
+        // Preview is triggered by click-to-audition on the tree row itself;
+        // no dedicated button here.
 
         let add_clip_btn: Element<'_, Message> = {
             let mut btn = button(text("Add Clip").size(11).color(th::TEXT))
@@ -6840,7 +6769,7 @@ impl App {
 
         let footer = column![
             text(selected_label).size(11).color(th::TEXT),
-            row![preview_btn, add_clip_btn, load_device_btn].spacing(6),
+            row![add_clip_btn, load_device_btn].spacing(6),
             error_line,
         ]
         .spacing(6);
@@ -8757,6 +8686,13 @@ fn global_key_handler(
     }
 }
 
+async fn decode_local_for_preview_async(
+    path: PathBuf,
+) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
+    let audio = decode_file_async(path).await?;
+    Ok(Arc::new(audio))
+}
+
 async fn decode_file_async(
     path: PathBuf,
 ) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
@@ -8777,6 +8713,134 @@ async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, 
     })
     .await
     .map_err(|err| format!("save task failed: {err}"))?
+}
+
+struct QuantizeInput {
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    bpm: f64,
+    sample_rate: u32,
+    grid: crate::state::SnapGrid,
+    clip_position: u64,
+    clip_source_offset: u64,
+    clip_duration: u64,
+    original_name: String,
+    new_clip_id: ClipId,
+}
+
+async fn quantize_audio_clip_async(
+    input: QuantizeInput,
+) -> Result<crate::message::AudioQuantizeSuccess, String> {
+    tokio::task::spawn_blocking(move || compute_audio_quantize(input))
+        .await
+        .map_err(|e| format!("quantize task failed: {e}"))?
+}
+
+fn compute_audio_quantize(
+    input: QuantizeInput,
+) -> Result<crate::message::AudioQuantizeSuccess, String> {
+    const DEFAULT_SENSITIVITY: f32 = 1.5;
+    const MIN_SLICE_FRAMES: usize = 64;
+
+    let QuantizeInput {
+        audio,
+        bpm,
+        sample_rate,
+        grid,
+        clip_position,
+        clip_source_offset,
+        clip_duration,
+        original_name,
+        new_clip_id,
+    } = input;
+
+    let sr = sample_rate as f64;
+    let clip_end_src = clip_source_offset.saturating_add(clip_duration);
+    let onsets: Vec<u64> = vibez_core::onset::detect_onsets(&audio, DEFAULT_SENSITIVITY)
+        .into_iter()
+        .filter(|&o| o >= clip_source_offset && o < clip_end_src)
+        .collect();
+    if onsets.is_empty() {
+        return Err("No transients detected in clip".into());
+    }
+
+    let samples_to_beats = |s: u64| -> f64 { s as f64 * bpm / (sr * 60.0) };
+    let beats_to_samples = |beats: f64| -> u64 {
+        if bpm > 0.0 && sr > 0.0 {
+            (beats * sr * 60.0 / bpm) as u64
+        } else {
+            0
+        }
+    };
+
+    let mut source_bounds: Vec<u64> = onsets.clone();
+    source_bounds.push(clip_end_src);
+
+    let mut target_positions: Vec<u64> = Vec::with_capacity(source_bounds.len());
+    for &b in &source_bounds {
+        let original_timeline_pos = clip_position.saturating_add(b - clip_source_offset);
+        let snapped_beats = grid.snap_beat(samples_to_beats(original_timeline_pos)).max(0.0);
+        target_positions.push(beats_to_samples(snapped_beats));
+    }
+    for i in 1..target_positions.len() {
+        if target_positions[i] < target_positions[i - 1] {
+            target_positions[i] = target_positions[i - 1];
+        }
+    }
+
+    let channel_count = audio.channels.len().max(1);
+    let mut output_channels: Vec<Vec<f32>> =
+        (0..channel_count).map(|_| Vec::new()).collect();
+    let mut total_out_len: usize = 0;
+    let mut stretched_slices = 0usize;
+
+    for i in 0..onsets.len() {
+        let src_start = source_bounds[i] as usize;
+        let src_end = source_bounds[i + 1] as usize;
+        let src_len = src_end.saturating_sub(src_start);
+        let target_len =
+            target_positions[i + 1].saturating_sub(target_positions[i]) as usize;
+        if src_len < MIN_SLICE_FRAMES || target_len == 0 {
+            continue;
+        }
+        for (ch, out) in output_channels.iter_mut().enumerate() {
+            let src_buf = audio
+                .channels
+                .get(ch)
+                .map(|c| &c[src_start.min(c.len())..src_end.min(c.len())])
+                .unwrap_or(&[]);
+            let stretched = vibez_dsp::time_stretch::stretch_mono(src_buf, target_len);
+            out.extend_from_slice(&stretched);
+        }
+        total_out_len += target_len;
+        stretched_slices += 1;
+    }
+
+    if stretched_slices == 0 || total_out_len == 0 {
+        return Err("All slices collapsed to zero length after snapping".into());
+    }
+
+    for ch in output_channels.iter_mut() {
+        if ch.len() < total_out_len {
+            ch.resize(total_out_len, 0.0);
+        } else {
+            ch.truncate(total_out_len);
+        }
+    }
+
+    let new_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: output_channels,
+        sample_rate,
+    });
+
+    Ok(crate::message::AudioQuantizeSuccess {
+        new_clip_id,
+        new_audio,
+        new_name: format!("{original_name} (Q {})", grid.label()),
+        new_position: target_positions[0],
+        new_duration: total_out_len as u64,
+        slice_count: stretched_slices,
+        grid_label: grid.label().to_string(),
+    })
 }
 
 async fn connect_dropbox_async(
