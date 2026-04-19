@@ -482,6 +482,7 @@ impl canvas::Program<Message> for RulerWidget {
                                             Some(Message::SetTimeSelection {
                                                 start_beats: start,
                                                 end_beats: end,
+                                                track_id: None,
                                             }),
                                         );
                                     }
@@ -497,6 +498,7 @@ impl canvas::Program<Message> for RulerWidget {
                                         Some(Message::SetTimeSelection {
                                             start_beats: start,
                                             end_beats: end,
+                                            track_id: None,
                                         }),
                                     );
                                 }
@@ -685,6 +687,10 @@ pub struct TrackClipCanvas {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Track the selection originated on. `None` means arrangement-wide
+    /// (selection was drawn on the ruler); `Some` means show it only on
+    /// that lane.
+    pub time_selection_track: Option<TrackId>,
 }
 
 impl TrackClipCanvas {
@@ -711,6 +717,7 @@ impl TrackClipCanvas {
         time_selection_active: bool,
         selection_start_beats: f64,
         selection_end_beats: f64,
+        time_selection_track: Option<TrackId>,
     ) -> Self {
         let clips = track
             .clips
@@ -768,6 +775,7 @@ impl TrackClipCanvas {
             time_selection_active,
             selection_start_beats,
             selection_end_beats,
+            time_selection_track,
         }
     }
 
@@ -1244,8 +1252,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
             }
         }
 
-        // Selection region tint (separate from loop)
-        if self.time_selection_active && self.selection_end_beats > self.selection_start_beats {
+        // Selection region tint. Only drawn on the lane the selection
+        // originated on; ruler-drawn selections (track_id = None) still
+        // show across every lane.
+        let show_selection_on_this_lane = self
+            .time_selection_track
+            .map_or(true, |tid| tid == self.track_id);
+        if show_selection_on_this_lane
+            && self.time_selection_active
+            && self.selection_end_beats > self.selection_start_beats
+        {
             let sel_x1 = self.beat_to_x(self.selection_start_beats);
             let sel_x2 = self.beat_to_x(self.selection_end_beats);
             let fill_x = sel_x1.max(0.0);
@@ -1479,6 +1495,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                             Some(Message::SetTimeSelection {
                                                 start_beats: start,
                                                 end_beats: end,
+                                                track_id: Some(track_id),
                                             }),
                                         );
                                     }
@@ -1496,6 +1513,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         Some(Message::SetTimeSelection {
                                             start_beats: start,
                                             end_beats: end,
+                                            track_id: Some(track_id),
                                         }),
                                     );
                                 }

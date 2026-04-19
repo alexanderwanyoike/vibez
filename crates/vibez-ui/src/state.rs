@@ -492,6 +492,9 @@ pub struct AppState {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Track whose lane was dragged to create the current time selection,
+    /// if any. `None` means the selection is arrangement-wide (ruler drag).
+    pub time_selection_track: Option<TrackId>,
 
     // Context menu
     pub context_menu: Option<ContextMenu>,
@@ -567,6 +570,7 @@ impl Default for AppState {
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
+            time_selection_track: None,
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,

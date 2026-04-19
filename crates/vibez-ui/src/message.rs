@@ -286,6 +286,7 @@ pub enum Message {
     SetTimeSelection {
         start_beats: f64,
         end_beats: f64,
+        track_id: Option<TrackId>,
     },
     SetSelectionAsLoop,
     SetTimeSelectionActive(bool),
@@ -298,10 +299,12 @@ pub enum Message {
     DeleteClipsInRegion {
         start_beats: f64,
         end_beats: f64,
+        track_id: Option<TrackId>,
     },
     SplitClipsAtRegion {
         start_beats: f64,
         end_beats: f64,
+        track_id: Option<TrackId>,
     },
 
     // Clip creation from region
@@ -371,9 +374,10 @@ pub enum Message {
     SampleBrowserSearchChanged(String),
     SelectSampleBrowserRoot(Option<PathBuf>),
     SelectSampleBrowserEntry(MediaSourceRef),
-    /// Click in the Local sample browser: select the entry and preview it
-    /// through the hidden preview channel.
+    /// Click in the Local sample browser: select only, no preview.
     ClickLocalBrowserEntry(MediaSourceRef),
+    /// Speaker-icon click on a Local browser row: audition.
+    PreviewLocalEntry(MediaSourceRef),
     LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
     ImportSelectedBrowserSampleToArrangement,
     LoadSelectedBrowserSampleToDevice,

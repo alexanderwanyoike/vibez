@@ -1608,6 +1608,7 @@ impl App {
                 }
                 // Simple click clears the time selection
                 self.state.time_selection_active = false;
+                self.state.time_selection_track = None;
             }
             Message::BpmChanged(val) => {
                 self.state.bpm_text = val;
@@ -3328,6 +3329,7 @@ impl App {
                     return self.update(Message::SplitClipsAtRegion {
                         start_beats: self.state.selection_start_beats,
                         end_beats: self.state.selection_end_beats,
+                        track_id: self.state.time_selection_track,
                     });
                 }
 
@@ -3412,10 +3414,15 @@ impl App {
             Message::SetTimeSelection {
                 start_beats,
                 end_beats,
+                track_id,
             } => {
                 self.state.selection_start_beats = start_beats;
                 self.state.selection_end_beats = end_beats;
                 self.state.time_selection_active = true;
+                self.state.time_selection_track = track_id;
+                if let Some(tid) = track_id {
+                    self.state.selected_track = Some(tid);
+                }
             }
             Message::SetSelectionAsLoop => {
                 self.state.context_menu = None;
@@ -3431,6 +3438,9 @@ impl App {
             }
             Message::SetTimeSelectionActive(active) => {
                 self.state.time_selection_active = active;
+                if !active {
+                    self.state.time_selection_track = None;
+                }
             }
             Message::CursorMoved(x, y) => {
                 self.state.cursor_x = x;
@@ -3483,6 +3493,7 @@ impl App {
             Message::DeleteClipsInRegion {
                 start_beats,
                 end_beats,
+                track_id: target_track,
             } => {
                 self.state.context_menu = None;
                 let spb = if self.state.bpm > 0.0 {
@@ -3494,6 +3505,11 @@ impl App {
                 let mut audio_removals: Vec<(TrackId, ClipId)> = Vec::new();
                 let mut note_removals: Vec<(TrackId, ClipId)> = Vec::new();
                 for track in &self.state.tracks {
+                    if let Some(tid) = target_track {
+                        if track.id != tid {
+                            continue;
+                        }
+                    }
                     if spb > 0.0 {
                         for clip in &track.clips {
                             let clip_start = clip.position as f64 / spb;
@@ -3531,6 +3547,7 @@ impl App {
             Message::SplitClipsAtRegion {
                 start_beats,
                 end_beats,
+                track_id: target_track,
             } => {
                 self.state.context_menu = None;
                 let spb = if self.state.bpm > 0.0 {
@@ -3546,11 +3563,14 @@ impl App {
                 for boundary_beats in [start_beats, end_beats] {
                     let boundary_sample = (boundary_beats * spb) as u64;
 
-                    // Collect audio splits for this boundary
+                    // Collect audio splits for this boundary, limited to
+                    // the originating track when the selection was drawn
+                    // on a single lane.
                     let audio_hits: Vec<(TrackId, ClipId)> = if spb > 0.0 {
                         self.state
                             .tracks
                             .iter()
+                            .filter(|t| target_track.map_or(true, |tid| t.id == tid))
                             .flat_map(|t| {
                                 t.clips.iter().filter_map(|c| {
                                     let cs = c.position as f64 / spb;
@@ -3571,6 +3591,7 @@ impl App {
                         .state
                         .tracks
                         .iter()
+                        .filter(|t| target_track.map_or(true, |tid| t.id == tid))
                         .flat_map(|t| {
                             t.note_clips.iter().filter_map(|c| {
                                 let ce = c.position_beats + c.duration_beats;
@@ -4021,6 +4042,12 @@ impl App {
                 self.state.sample_browser_selected_source = Some(source);
             }
             Message::ClickLocalBrowserEntry(source) => {
+                // Previously auto-previewed on click; now click only
+                // selects. Preview fires via the speaker icon (see
+                // `Message::PreviewLocalEntry`).
+                self.state.sample_browser_selected_source = Some(source);
+            }
+            Message::PreviewLocalEntry(source) => {
                 self.state.sample_browser_selected_source = Some(source.clone());
                 if let MediaSourceRef::LocalFile { path } = source {
                     self.state.status_text = "Previewing...".to_string();
@@ -4698,23 +4725,10 @@ impl App {
             Message::DropboxSelectEntry(entry) => {
                 self.state.dropbox.selected_path = Some(entry.path_lower.clone());
                 self.state.sample_browser_selected_source = Some(MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower.clone(),
-                    display_path: entry.path_display.clone(),
-                    rev: entry.rev.clone(),
+                    path_lower: entry.path_lower,
+                    display_path: entry.path_display,
+                    rev: entry.rev,
                 });
-                if entry.is_supported_audio() {
-                    if let Some(client) = self.dropbox_client.clone() {
-                        let cache = self.dropbox_cache.clone();
-                        self.state.dropbox.preview_in_progress = true;
-                        self.state.status_text = format!("Previewing {}...", entry.name);
-                        return Task::perform(
-                            fetch_dropbox_sample_async(client, cache, entry),
-                            |result| Message::DropboxPreviewReady(
-                                result.map(|(audio, _, _)| audio),
-                            ),
-                        );
-                    }
-                }
             }
             Message::DropboxPreview(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
@@ -5995,6 +6009,7 @@ impl App {
                     Message::SplitClipsAtRegion {
                         start_beats: start,
                         end_beats: end,
+                        track_id: *track_id,
                     },
                 ));
                 col = col.push(menu_btn(
@@ -6003,6 +6018,7 @@ impl App {
                     Message::DeleteClipsInRegion {
                         start_beats: start,
                         end_beats: end,
+                        track_id: *track_id,
                     },
                 ));
                 col = col.push(menu_btn(
@@ -6530,7 +6546,32 @@ impl App {
                 }
             });
             entry_btn = entry_btn.on_press(Message::ClickLocalBrowserEntry(entry.source.clone()));
-            entries_col = entries_col.push(entry_btn);
+            let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::TEXT_DIM))
+                .on_press(Message::PreviewLocalEntry(entry.source.clone()))
+                .padding([6, 8])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => Some(th::BG_ELEVATED.into()),
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::ACCENT,
+                        border: iced::Border {
+                            color: th::BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            entries_col = entries_col.push(
+                row![entry_btn, preview_btn]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+            );
         }
 
         if filtered_entries.is_empty() {
@@ -6860,7 +6901,33 @@ impl App {
                     ..Default::default()
                 }
             });
-            rows.push(btn.into());
+            if entry.is_supported_audio() {
+                let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::ACCENT))
+                    .on_press(Message::DropboxPreview(entry.clone()))
+                    .padding([3, 6])
+                    .style(|_theme: &Theme, status| {
+                        let bg = match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
+                            }
+                            _ => None,
+                        };
+                        button::Style {
+                            background: bg,
+                            text_color: th::ACCENT,
+                            border: iced::Border::default(),
+                            ..Default::default()
+                        }
+                    });
+                rows.push(
+                    row![btn, speaker]
+                        .spacing(2)
+                        .align_y(iced::Alignment::Center)
+                        .into(),
+                );
+            } else {
+                rows.push(btn.into());
+            }
 
             if entry.is_folder && expanded {
                 self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
@@ -7053,6 +7120,7 @@ impl App {
                 self.state.time_selection_active,
                 self.state.selection_start_beats,
                 self.state.selection_end_beats,
+                self.state.time_selection_track,
             );
             let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
                 .width(Length::Fill)
