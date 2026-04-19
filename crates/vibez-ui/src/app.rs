@@ -4594,7 +4594,29 @@ impl App {
                         );
                     }
                     None => {
-                        // No active drag: treat release as a plain click.
+                        // No active drag: treat release as a click.
+                        // Select the pad AND audition its loaded sample
+                        // via the engine's preview channel (bypasses
+                        // transport + mute + solo; one-shot). This is
+                        // the fastest way to hear what's on a pad
+                        // without drawing notes into the piano roll.
+                        let audition = self
+                            .state
+                            .find_track(track_id)
+                            .and_then(|track| track.drum_rack_pads.get(pad_index))
+                            .and_then(|pad| {
+                                pad.audio.as_ref().map(|audio| {
+                                    (
+                                        Arc::clone(audio),
+                                        pad.name.clone().unwrap_or_else(|| "sample".into()),
+                                    )
+                                })
+                            });
+                        if let Some((audio, name)) = audition {
+                            self.send_command(EngineCommand::StartPreview(audio));
+                            self.state.status_text =
+                                format!("Pad {}: {}", pad_index + 1, name);
+                        }
                         return self.update(Message::SelectDrumRackPad(track_id, pad_index));
                     }
                 }
