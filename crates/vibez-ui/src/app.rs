@@ -553,6 +553,25 @@ impl App {
         name: String,
         source: MediaSourceRef,
     ) {
+        // Guard: if the target is not an audio track, refuse rather than
+        // silently redirecting the drop. Prevents the "clip lands on the
+        // wrong lane" surprise.
+        let track_name = match self.state.find_track(track_id) {
+            Some(t) if matches!(t.kind, TrackKind::Audio) => t.name.clone(),
+            Some(t) => {
+                self.state.status_text = format!(
+                    "Can't drop audio on non-audio track '{}'; drag to an audio lane.",
+                    t.name
+                );
+                return;
+            }
+            None => {
+                self.state.status_text =
+                    "Drop target not found; drag cancelled".to_string();
+                return;
+            }
+        };
+
         let clip_id = ClipId::new();
         let duration = audio.num_frames() as u64;
 
@@ -582,7 +601,7 @@ impl App {
             });
         }
         self.state.selected_track = Some(track_id);
-        self.state.status_text = format!("Dropped clip: {name}");
+        self.state.status_text = format!("Dropped '{name}' on {track_name}");
     }
 
     fn dispatch_drop_on_arrangement(
@@ -1866,6 +1885,15 @@ impl App {
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
             }
             Message::RemoveTrack(track_id) => {
+                // Capture identity before mutating so we can report exactly
+                // which track was removed. Helps diagnose the "deleted the
+                // wrong track" reports.
+                let removed_name = self
+                    .state
+                    .find_track(track_id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| format!("{track_id}"));
+
                 // Close all plugin GUI windows for this track
                 if let Some(ref mut mgr) = self.plugin_window_manager {
                     mgr.close_track_effects(track_id);
@@ -1894,11 +1922,10 @@ impl App {
                     };
                     sel_track != track_id
                 });
-                if self.state.tracks.is_empty() {
-                    self.state.status_text = "Ready — Add a track to get started".to_string();
-                } else {
-                    self.state.status_text = format!("{} tracks", self.state.tracks.len());
-                }
+                self.state.status_text = format!(
+                    "Removed {removed_name}. {} track(s) remain.",
+                    self.state.tracks.len()
+                );
             }
             Message::SelectTrack(track_id) => {
                 self.state.selected_track = Some(track_id);

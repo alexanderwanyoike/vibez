@@ -694,6 +694,9 @@ pub struct TrackClipCanvas {
     /// True while a sample is being drag-dropped from the browser.
     /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
     pub sample_drop_active: bool,
+    /// The track name this canvas was constructed with. Drawn on the drop
+    /// indicator so the user can verify which lane will receive the drop.
+    pub track_name: String,
 }
 
 impl TrackClipCanvas {
@@ -781,6 +784,7 @@ impl TrackClipCanvas {
             selection_end_beats,
             time_selection_track,
             sample_drop_active,
+            track_name: track.name.clone(),
         }
     }
 
@@ -1312,7 +1316,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
         );
 
         // Drop-target indicator: bold accent border + vertical bar at the
-        // cursor x to show exactly where the dropped clip will start.
+        // cursor x + the track name overlaid so the user can verify which
+        // lane will receive the drop.
         if drop_hover {
             let outline = canvas::Path::rectangle(
                 iced::Point::new(1.0, 1.0),
@@ -1340,6 +1345,14 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     );
                 }
             }
+            // "Dropping to <track>" label inside the lane.
+            frame.fill_text(canvas::Text {
+                content: format!("Drop on: {}", self.track_name),
+                position: iced::Point::new(8.0, 8.0),
+                color: theme::ACCENT,
+                size: 14.0.into(),
+                ..Default::default()
+            });
         }
 
         vec![frame.into_geometry()]
