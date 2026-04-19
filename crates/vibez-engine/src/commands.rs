@@ -48,6 +48,21 @@ pub enum EngineCommand {
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
+    /// Swap the audio buffer backing an existing clip in place. Used
+    /// by the warp / quantize pipelines to install a stretched buffer
+    /// without round-tripping through RemoveClip + AddClip (which
+    /// would break playback continuity and lose selection state).
+    /// The caller is responsible for scaling `duration`,
+    /// `source_offset`, and loop bounds by the stretch ratio.
+    ReplaceClipAudio {
+        track_id: TrackId,
+        clip_id: ClipId,
+        audio: Arc<DecodedAudio>,
+        duration: u64,
+        source_offset: u64,
+        loop_start: u64,
+        loop_end: u64,
+    },
     /// Move a clip to a new position on the timeline.
     MoveClip {
         track_id: TrackId,

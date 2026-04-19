@@ -117,6 +117,9 @@ mod tests {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
             }],
             note_clips: Vec::new(),
         };

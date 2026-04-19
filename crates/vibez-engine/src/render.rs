@@ -319,6 +319,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
 
         let mut clip_audio = HashMap::new();
@@ -365,6 +368,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid, audio);
@@ -404,6 +410,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid, audio);
@@ -444,6 +453,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
         let clip_b = ClipInfo {
             id: cid_b,
@@ -457,6 +469,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid_a, audio_a);
@@ -592,6 +607,9 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
         };
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid, audio);

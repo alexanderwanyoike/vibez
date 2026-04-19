@@ -389,6 +389,26 @@ impl AudioEngine {
                     }
                     self.recalculate_audio_length();
                 }
+                EngineCommand::ReplaceClipAudio {
+                    track_id,
+                    clip_id,
+                    audio,
+                    duration,
+                    source_offset,
+                    loop_start,
+                    loop_end,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.audio = audio;
+                            clip.duration = duration;
+                            clip.source_offset = source_offset;
+                            clip.loop_start = loop_start;
+                            clip.loop_end = loop_end;
+                        }
+                    }
+                    self.recalculate_audio_length();
+                }
                 EngineCommand::MoveClip {
                     track_id,
                     clip_id,

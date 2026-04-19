@@ -129,6 +129,23 @@ pub struct ClipInfo {
     pub loop_start: u64,
     #[serde(default)]
     pub loop_end: u64,
+    /// Nominal BPM of the underlying sample, set either by BPM
+    /// detection or manually. Drives warp ratio calculations and is
+    /// independent of the project tempo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_bpm: Option<f64>,
+    /// Whether the clip's audio has been time-stretched to fit the
+    /// project tempo.
+    #[serde(default, skip_serializing_if = "skip_if_false")]
+    pub warped: bool,
+    /// Project BPM the current warped audio was stretched to. Used to
+    /// flag staleness when the project tempo changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warped_to_bpm: Option<f64>,
+}
+
+fn skip_if_false(b: &bool) -> bool {
+    !b
 }
 
 impl ClipInfo {
@@ -164,15 +181,14 @@ mod tests {
         assert!(!track.solo);
     }
 
-    #[test]
-    fn clip_end_position() {
-        let clip = ClipInfo {
+    fn test_clip(position: u64, duration: u64) -> ClipInfo {
+        ClipInfo {
             id: ClipId::new(),
             track_id: TrackId::new(),
             name: "test".into(),
-            position: 1000,
+            position,
             source_offset: 0,
-            duration: 500,
+            duration,
             source: Some(MediaSourceRef::LocalFile {
                 path: PathBuf::from("test.wav"),
             }),
@@ -180,27 +196,21 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
-        };
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        }
+    }
+
+    #[test]
+    fn clip_end_position() {
+        let clip = test_clip(1000, 500);
         assert_eq!(clip.end_position(), 1500);
     }
 
     #[test]
     fn clip_end_position_saturates() {
-        let clip = ClipInfo {
-            id: ClipId::new(),
-            track_id: TrackId::new(),
-            name: "test".into(),
-            position: u64::MAX - 10,
-            source_offset: 0,
-            duration: 100,
-            source: Some(MediaSourceRef::LocalFile {
-                path: PathBuf::from("test.wav"),
-            }),
-            file_path: Some(PathBuf::from("test.wav")),
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        };
+        let clip = test_clip(u64::MAX - 10, 100);
         assert_eq!(clip.end_position(), u64::MAX);
     }
 
@@ -223,21 +233,16 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_clip() {
-        let clip = ClipInfo {
-            id: ClipId::new(),
-            track_id: TrackId::new(),
-            name: "vocal.wav".into(),
-            position: 44100,
-            source_offset: 1000,
-            duration: 88200,
-            source: Some(MediaSourceRef::LocalFile {
-                path: PathBuf::from("/audio/vocal.wav"),
-            }),
-            file_path: Some(PathBuf::from("/audio/vocal.wav")),
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        };
+        let mut clip = test_clip(44_100, 88_200);
+        clip.name = "vocal.wav".into();
+        clip.source_offset = 1_000;
+        clip.source = Some(MediaSourceRef::LocalFile {
+            path: PathBuf::from("/audio/vocal.wav"),
+        });
+        clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
+        clip.original_bpm = Some(174.0);
+        clip.warped = true;
+        clip.warped_to_bpm = Some(140.0);
         let json = serde_json::to_string(&clip).unwrap();
         let deserialized: ClipInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(clip.id, deserialized.id);
@@ -246,6 +251,9 @@ mod tests {
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
         assert_eq!(clip.source, deserialized.source);
+        assert_eq!(clip.original_bpm, deserialized.original_bpm);
+        assert_eq!(clip.warped, deserialized.warped);
+        assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
     }
 
     #[test]
