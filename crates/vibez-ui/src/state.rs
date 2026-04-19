@@ -28,6 +28,20 @@ pub struct UiClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// Nominal BPM of the underlying sample. `None` until detected or
+    /// entered manually.
+    pub original_bpm: Option<f64>,
+    /// Whether `audio` has been time-stretched to fit the project
+    /// tempo.
+    pub warped: bool,
+    /// Project BPM the current warped audio was stretched to. Used to
+    /// flag staleness in the timeline when the project tempo changes.
+    pub warped_to_bpm: Option<f64>,
+    /// Un-warped source audio, retained so the UI can re-warp to a new
+    /// project BPM or clear the warp without re-decoding. Populated on
+    /// import or on first warp. Not persisted: on reload the UI
+    /// re-decodes from the source and re-warps.
+    pub original_audio: Option<Arc<DecodedAudio>>,
 }
 
 #[derive(Debug, Clone)]
@@ -329,6 +343,7 @@ pub enum SettingsTab {
     Audio,
     Plugins,
     Dropbox,
+    Warping,
 }
 
 /// A point-in-time snapshot of the editable project state, used to
@@ -510,6 +525,11 @@ pub struct AppState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+    /// In-progress manual BPM input text keyed by clip id. Only
+    /// populated while the user is actively editing the field in the
+    /// clip detail panel; `None` / missing means show the committed
+    /// `UiClip::original_bpm` value instead.
+    pub clip_bpm_edit: HashMap<ClipId, String>,
 
     // Piano roll edit mode
     pub piano_roll_edit_mode: PianoRollEditMode,
@@ -525,6 +545,12 @@ pub struct AppState {
     pub current_project_path: Option<PathBuf>,
     pub project_dirty: bool,
     pub sample_browser_open: bool,
+    /// Automatically detect sample BPM and warp to project tempo on
+    /// import. Mirrored from `UiSettings::auto_warp_on_import`.
+    pub auto_warp_on_import: bool,
+    /// Minimum BPM-detect confidence required to auto-warp. Mirrored
+    /// from `UiSettings::warp_confidence_threshold`.
+    pub warp_confidence_threshold: f32,
     pub sample_browser_search: String,
     pub sample_browser_roots: Vec<PathBuf>,
     pub sample_browser_entries: Vec<SampleBrowserEntry>,
@@ -587,6 +613,7 @@ impl Default for AppState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            clip_bpm_edit: HashMap::new(),
             piano_roll_edit_mode: PianoRollEditMode::default(),
             device_context_menu: None,
             file_menu_open: false,
@@ -596,6 +623,8 @@ impl Default for AppState {
             current_project_path: None,
             project_dirty: false,
             sample_browser_open: true,
+            auto_warp_on_import: false,
+            warp_confidence_threshold: 0.6,
             sample_browser_search: String::new(),
             sample_browser_roots: Vec::new(),
             sample_browser_entries: Vec::new(),

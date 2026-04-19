@@ -75,6 +75,38 @@ pub struct AudioQuantizeSuccess {
     pub grid_label: String,
 }
 
+/// Successful background result from `warp_clip_async`. The UI
+/// installs the new audio via `EngineCommand::ReplaceClipAudio` and
+/// updates per-clip warp metadata.
+#[derive(Debug, Clone)]
+pub struct ClipWarpSuccess {
+    pub audio: Arc<DecodedAudio>,
+    /// Original un-warped audio captured for later re-warp / undo.
+    pub original_audio: Arc<DecodedAudio>,
+    pub new_duration: u64,
+    pub new_source_offset: u64,
+    pub new_loop_start: u64,
+    pub new_loop_end: u64,
+    pub detected_bpm: f64,
+    pub warped_to_bpm: f64,
+}
+
+/// Outcome of an auto-warp-on-import pass.
+#[derive(Debug, Clone)]
+pub enum AutoWarpOutcome {
+    /// The detector refused to commit to a BPM (silence, sparse pad,
+    /// too short). Nothing to apply.
+    NotDetected,
+    /// Detected a BPM but confidence fell below the user's threshold;
+    /// record it for manual use but do not warp automatically.
+    DetectedOnly { bpm: f64, confidence: f32 },
+    /// Detected and warped.
+    Warped {
+        confidence: f32,
+        success: ClipWarpSuccess,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub enum BrowserImportTarget {
     ArrangementClip(Option<TrackId>),
@@ -371,6 +403,14 @@ pub enum Message {
     ProjectLoaded(Result<ProjectLoadResult, String>),
     ProjectSaved(Result<PathBuf, String>),
     ToggleSampleBrowser,
+    /// Settings: toggle auto-warp-on-import.
+    ToggleAutoWarpOnImport,
+    /// Settings: set warp detection confidence threshold.
+    SetWarpConfidenceThreshold(f32),
+    /// Settings: re-warp every warped clip to the current project
+    /// tempo. Uses each clip's retained `original_audio` when
+    /// available.
+    RewarpAllClips,
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RemoveSampleLibraryRoot(PathBuf),
@@ -476,6 +516,66 @@ pub enum Message {
         track_id: TrackId,
         old_clip_id: ClipId,
         result: Result<AudioQuantizeSuccess, String>,
+    },
+
+    // -- Warping (manual + auto) --
+    /// Kick off a background BPM detection for the given clip.
+    DetectClipBpm {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    /// Background BPM detection result. `bpm` is `None` when the
+    /// detector refused to commit (silence, sparse pad, too short).
+    ClipBpmDetected {
+        track_id: TrackId,
+        clip_id: ClipId,
+        bpm: Option<f64>,
+        confidence: f32,
+    },
+    /// Manual BPM text field input change (ephemeral, before commit).
+    ClipBpmInputChanged {
+        track_id: TrackId,
+        clip_id: ClipId,
+        text: String,
+    },
+    /// Commit a manually-entered nominal BPM for the clip.
+    SetClipNominalBpm {
+        track_id: TrackId,
+        clip_id: ClipId,
+        bpm: f64,
+    },
+    /// Parse the in-progress `clip_bpm_edit` text and commit it as the
+    /// clip's nominal BPM (wired to the BPM text input's Enter key).
+    SubmitClipBpm {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    /// Kick off a background warp-to-project-tempo for the clip.
+    WarpClipToProject {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    /// Background warp result.
+    ClipWarpReady {
+        track_id: TrackId,
+        clip_id: ClipId,
+        result: Result<ClipWarpSuccess, String>,
+    },
+    /// Revert the clip's audio to the un-warped `original_audio` and
+    /// clear warp metadata.
+    ClearClipWarp {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    /// Auto-warp pass completed for a freshly-imported clip. The
+    /// outcome bundles three cases: the detector refused
+    /// (`NotDetected`), detected but confidence below the user's
+    /// threshold (`DetectedOnly`), or detected and warped
+    /// (`Warped`).
+    ClipAutoWarpReady {
+        track_id: TrackId,
+        clip_id: ClipId,
+        outcome: AutoWarpOutcome,
     },
 
     // Undo / redo

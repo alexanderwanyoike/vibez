@@ -22,6 +22,11 @@ pub struct TimelineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// True when this clip is warped but its `warped_to_bpm` no longer
+    /// matches the current project BPM. The canvas draws a diagonal
+    /// stripe overlay so the user can see at a glance that a re-warp
+    /// is needed.
+    pub warp_stale: bool,
 }
 
 /// Lightweight copy of a note clip for timeline rendering.
@@ -738,6 +743,10 @@ impl TrackClipCanvas {
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
+                warp_stale: c.warped
+                    && c.warped_to_bpm
+                        .map(|b| (b - bpm).abs() > 0.01)
+                        .unwrap_or(false),
             })
             .collect();
         let note_clips = track
@@ -1082,6 +1091,48 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         size: iced::Pixels(11.0),
                         ..Default::default()
                     });
+                }
+
+                // Diagonal stripe overlay when the clip's warp is
+                // stale relative to the current project tempo. Low
+                // opacity so the waveform and clip colour remain
+                // legible, but strong enough to catch the eye.
+                if clip.warp_stale && clip_w > 4.0 {
+                    let stripe_color = theme::with_alpha(theme::METER_YELLOW, 0.22);
+                    let stripe_spacing = 8.0f32;
+                    let stripe_stroke = 1.5f32;
+                    let mut offset = -clip_h;
+                    while offset < clip_w {
+                        let x0 = clip_x + offset;
+                        let x1 = clip_x + offset + clip_h;
+                        let a_x = x0.clamp(clip_x, clip_x + clip_w);
+                        let b_x = x1.clamp(clip_x, clip_x + clip_w);
+                        let a_t = if (x1 - x0).abs() > 0.1 {
+                            (a_x - x0) / (x1 - x0)
+                        } else {
+                            0.0
+                        };
+                        let b_t = if (x1 - x0).abs() > 0.1 {
+                            (b_x - x0) / (x1 - x0)
+                        } else {
+                            0.0
+                        };
+                        let a_y = clip_y + a_t * clip_h;
+                        let b_y = clip_y + b_t * clip_h;
+                        if (b_x - a_x).abs() > 0.5 {
+                            let line = canvas::Path::line(
+                                iced::Point::new(a_x, a_y),
+                                iced::Point::new(b_x, b_y),
+                            );
+                            frame.stroke(
+                                &line,
+                                canvas::Stroke::default()
+                                    .with_color(stripe_color)
+                                    .with_width(stripe_stroke),
+                            );
+                        }
+                        offset += stripe_spacing;
+                    }
                 }
             }
         }

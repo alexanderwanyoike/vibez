@@ -2,12 +2,34 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
+    /// Automatically detect each dropped sample's BPM and warp it to
+    /// the project tempo on import. Off by default; users opt in from
+    /// Settings → Warping.
+    #[serde(default)]
+    pub auto_warp_on_import: bool,
+    /// Minimum BPM-detector confidence below which import-time auto-
+    /// warp refuses to stretch. 0.0 warps everything (even bad
+    /// guesses); 1.0 means only stretch when the detector is very
+    /// sure. Default is a moderate gate.
+    #[serde(default = "default_warp_confidence_threshold")]
+    pub warp_confidence_threshold: f32,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            sample_library_roots: Vec::new(),
+            sample_browser_open: default_sample_browser_open(),
+            auto_warp_on_import: false,
+            warp_confidence_threshold: default_warp_confidence_threshold(),
+        }
+    }
 }
 
 impl UiSettings {
@@ -38,4 +60,8 @@ impl UiSettings {
 
 fn default_sample_browser_open() -> bool {
     true
+}
+
+fn default_warp_confidence_threshold() -> f32 {
+    0.6
 }

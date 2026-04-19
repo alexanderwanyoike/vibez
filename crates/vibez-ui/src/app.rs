@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
-    stack, text, text_input, vertical_space,
+    slider, stack, text, text_input, vertical_space,
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
@@ -158,6 +158,8 @@ impl App {
             sample_rate,
             sample_browser_open: ui_settings.sample_browser_open,
             sample_browser_roots: ui_settings.sample_library_roots,
+            auto_warp_on_import: ui_settings.auto_warp_on_import,
+            warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             dropbox: dropbox_ui_state,
             ..Default::default()
         };
@@ -342,6 +344,8 @@ impl App {
         let settings = UiSettings {
             sample_library_roots: self.state.sample_browser_roots.clone(),
             sample_browser_open: self.state.sample_browser_open,
+            auto_warp_on_import: self.state.auto_warp_on_import,
+            warp_confidence_threshold: self.state.warp_confidence_threshold,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -478,7 +482,7 @@ impl App {
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
         name: String,
         source: MediaSourceRef,
-    ) {
+    ) -> Task<Message> {
         let clip_id = ClipId::new();
         let existing_end = self
             .state
@@ -510,7 +514,7 @@ impl App {
             track.clips.push(UiClip {
                 id: clip_id,
                 name: name.clone(),
-                audio,
+                audio: Arc::clone(&audio),
                 source: Some(source),
                 position: existing_end,
                 source_offset: 0,
@@ -518,11 +522,16 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
             });
         }
 
         self.state.selected_track = Some(track_id);
         self.state.status_text = format!("Added clip: {name}");
+        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
     }
 
     fn apply_browser_sample_decoded(
@@ -531,32 +540,27 @@ impl App {
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
         name: String,
         source: MediaSourceRef,
-    ) {
+    ) -> Task<Message> {
         match target {
             BrowserImportTarget::ArrangementClip(preferred_track) => {
                 let track_id = self.ensure_audio_track_for_import(preferred_track);
-                self.add_audio_clip_to_track(track_id, audio, name, source);
+                self.add_audio_clip_to_track(track_id, audio, name, source)
             }
             BrowserImportTarget::ArrangementClipAt {
                 track_id,
                 position_samples,
-            } => {
-                self.add_audio_clip_to_track_at(
-                    track_id,
-                    position_samples,
-                    audio,
-                    name,
-                    source,
-                );
-            }
+            } => self
+                .add_audio_clip_to_track_at(track_id, position_samples, audio, name, source),
             BrowserImportTarget::Sampler(track_id) => {
                 self.apply_sampler_sample_loaded(track_id, audio, name, source);
+                Task::none()
             }
             BrowserImportTarget::DrumRackPad {
                 track_id,
                 pad_index,
             } => {
                 self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+                Task::none()
             }
         }
     }
@@ -568,7 +572,7 @@ impl App {
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
         name: String,
         source: MediaSourceRef,
-    ) {
+    ) -> Task<Message> {
         // Guard: if the target is not an audio track, refuse rather than
         // silently redirecting the drop. Prevents the "clip lands on the
         // wrong lane" surprise.
@@ -579,12 +583,12 @@ impl App {
                     "Can't drop audio on non-audio track '{}'; drag to an audio lane.",
                     t.name
                 );
-                return;
+                return Task::none();
             }
             None => {
                 self.state.status_text =
                     "Drop target not found; drag cancelled".to_string();
-                return;
+                return Task::none();
             }
         };
 
@@ -606,7 +610,7 @@ impl App {
             track.clips.push(UiClip {
                 id: clip_id,
                 name: name.clone(),
-                audio,
+                audio: Arc::clone(&audio),
                 source: Some(source),
                 position: position_samples,
                 source_offset: 0,
@@ -614,10 +618,15 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
             });
         }
         self.state.selected_track = Some(track_id);
         self.state.status_text = format!("Dropped '{name}' on {track_name}");
+        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
     }
 
     fn dispatch_drop_on_arrangement(
@@ -772,6 +781,9 @@ impl App {
                     loop_enabled: clip.loop_enabled,
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
+                    original_bpm: clip.original_bpm,
+                    warped: clip.warped,
+                    warped_to_bpm: clip.warped_to_bpm,
                 })
             })
             .collect();
@@ -966,6 +978,10 @@ impl App {
                     loop_enabled: loaded_clip.info.loop_enabled,
                     loop_start: loaded_clip.info.loop_start,
                     loop_end: loaded_clip.info.loop_end,
+                    original_bpm: loaded_clip.info.original_bpm,
+                    warped: loaded_clip.info.warped,
+                    warped_to_bpm: loaded_clip.info.warped_to_bpm,
+                    original_audio: None,
                 });
             }
         }
@@ -1174,6 +1190,10 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
             });
         }
 
@@ -1468,6 +1488,10 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
             });
         }
         self.state
@@ -1483,6 +1507,230 @@ impl App {
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
         );
+    }
+
+    fn dispatch_detect_clip_bpm(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+    ) -> Task<Message> {
+        let Some(track) = self.state.find_track(track_id) else {
+            self.state.status_text = "Track not found".to_string();
+            return Task::none();
+        };
+        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+            self.state.status_text = "Clip not found".to_string();
+            return Task::none();
+        };
+        // Always detect against the un-warped audio so the result is
+        // the sample's intrinsic tempo, not the warped-to-project tempo.
+        let audio = clip
+            .original_audio
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&clip.audio));
+        let sample_rate = self.state.sample_rate;
+        self.state.status_text = format!("Detecting BPM for {}...", clip.name);
+        Task::perform(
+            detect_clip_bpm_async(audio, sample_rate),
+            move |estimate| Message::ClipBpmDetected {
+                track_id,
+                clip_id,
+                bpm: estimate.map(|e| e.bpm),
+                confidence: estimate.map(|e| e.confidence).unwrap_or(0.0),
+            },
+        )
+    }
+
+    fn dispatch_warp_clip_to_project(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+    ) -> Task<Message> {
+        let project_bpm = self.state.bpm;
+        let sample_rate = self.state.sample_rate;
+        if project_bpm <= 0.0 || sample_rate == 0 {
+            self.state.status_text = "Cannot warp at zero BPM".to_string();
+            return Task::none();
+        }
+        let Some(track) = self.state.find_track(track_id) else {
+            self.state.status_text = "Track not found".to_string();
+            return Task::none();
+        };
+        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+            self.state.status_text = "Clip not found".to_string();
+            return Task::none();
+        };
+        let Some(clip_bpm) = clip.original_bpm else {
+            self.state.status_text =
+                "Set or detect the clip's BPM before warping".to_string();
+            return Task::none();
+        };
+        if clip_bpm <= 0.0 {
+            self.state.status_text = "Invalid BPM".to_string();
+            return Task::none();
+        }
+        // If the clip was already warped once, warp the retained
+        // original_audio. Otherwise the current `audio` is itself the
+        // original.
+        let source_audio = clip
+            .original_audio
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&clip.audio));
+        let input = WarpClipInput {
+            audio: source_audio,
+            source_offset: clip.source_offset,
+            duration: clip.duration,
+            loop_start: clip.loop_start,
+            loop_end: clip.loop_end,
+            clip_bpm,
+            project_bpm,
+        };
+        let _ = sample_rate;
+        self.state.status_text = format!("Warping to {project_bpm:.0} BPM...");
+        Task::perform(
+            warp_clip_async(input),
+            move |result| Message::ClipWarpReady {
+                track_id,
+                clip_id,
+                result,
+            },
+        )
+    }
+
+    fn apply_clip_warp_success(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        success: crate::message::ClipWarpSuccess,
+    ) {
+        self.send_command(EngineCommand::ReplaceClipAudio {
+            track_id,
+            clip_id,
+            audio: Arc::clone(&success.audio),
+            duration: success.new_duration,
+            source_offset: success.new_source_offset,
+            loop_start: success.new_loop_start,
+            loop_end: success.new_loop_end,
+        });
+        if let Some(track) = self.state.find_track_mut(track_id) {
+            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                clip.audio = Arc::clone(&success.audio);
+                clip.duration = success.new_duration;
+                clip.source_offset = success.new_source_offset;
+                clip.loop_start = success.new_loop_start;
+                clip.loop_end = success.new_loop_end;
+                clip.original_bpm = Some(success.detected_bpm);
+                clip.warped = true;
+                clip.warped_to_bpm = Some(success.warped_to_bpm);
+                clip.original_audio = Some(Arc::clone(&success.original_audio));
+            }
+        }
+        self.state.status_text = format!("Warped to {:.0} BPM", success.warped_to_bpm);
+        self.state.project_dirty = true;
+    }
+
+    /// If auto-warp-on-import is enabled, return a background task
+    /// that detects the imported clip's BPM and warps it to the
+    /// project tempo. Call this right after a clip is inserted into
+    /// state / the engine. The caller propagates the Task to the
+    /// iced runtime (helpers return it up through
+    /// `apply_browser_sample_decoded`).
+    fn schedule_auto_warp_if_enabled(
+        &self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    ) -> Task<Message> {
+        if !self.state.auto_warp_on_import
+            || self.state.bpm <= 0.0
+            || self.state.sample_rate == 0
+        {
+            return Task::none();
+        }
+        let input = AutoWarpInput {
+            audio,
+            sample_rate: self.state.sample_rate,
+            project_bpm: self.state.bpm,
+            confidence_threshold: self.state.warp_confidence_threshold,
+        };
+        Task::perform(
+            auto_warp_clip_async(input),
+            move |outcome| Message::ClipAutoWarpReady {
+                track_id,
+                clip_id,
+                outcome,
+            },
+        )
+    }
+
+    fn apply_auto_warp_outcome(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        outcome: crate::message::AutoWarpOutcome,
+    ) {
+        use crate::message::AutoWarpOutcome;
+        match outcome {
+            AutoWarpOutcome::NotDetected => {
+                // Nothing to apply. Leave a breadcrumb in the status
+                // line so the user knows auto-warp ran and abstained.
+                self.state.status_text = "Auto-warp: could not detect BPM".to_string();
+            }
+            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.original_bpm = Some(bpm);
+                    }
+                }
+                self.state.status_text = format!(
+                    "Detected {:.1} BPM (confidence {:.2}, below warp threshold)",
+                    bpm, confidence
+                );
+                self.state.project_dirty = true;
+            }
+            AutoWarpOutcome::Warped { success, .. } => {
+                self.apply_clip_warp_success(track_id, clip_id, success);
+            }
+        }
+    }
+
+    fn apply_clear_clip_warp(&mut self, track_id: TrackId, clip_id: ClipId) {
+        let restore = self
+            .state
+            .find_track(track_id)
+            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
+            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
+        if let Some(original) = restore {
+            let original_frames = original.num_frames() as u64;
+            self.send_command(EngineCommand::ReplaceClipAudio {
+                track_id,
+                clip_id,
+                audio: Arc::clone(&original),
+                duration: original_frames,
+                source_offset: 0,
+                loop_start: 0,
+                loop_end: 0,
+            });
+            if let Some(track) = self.state.find_track_mut(track_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                    clip.audio = original;
+                    clip.duration = original_frames;
+                    clip.source_offset = 0;
+                    clip.loop_start = 0;
+                    clip.loop_end = 0;
+                    clip.warped = false;
+                    clip.warped_to_bpm = None;
+                    clip.original_audio = None;
+                }
+            }
+        } else if let Some(track) = self.state.find_track_mut(track_id) {
+            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                clip.warped = false;
+                clip.warped_to_bpm = None;
+            }
+        }
+        self.state.status_text = "Cleared clip warp".to_string();
+        self.state.project_dirty = true;
     }
 
     fn quantize_note_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
@@ -1740,6 +1988,11 @@ impl App {
                 | Message::HalveNoteClip(..)
                 | Message::QuantizeNoteClip { .. }
                 | Message::AudioQuantizeReady { .. }
+                | Message::SetClipNominalBpm { .. }
+                | Message::SubmitClipBpm { .. }
+                | Message::ClipWarpReady { .. }
+                | Message::ClearClipWarp { .. }
+                | Message::ClipAutoWarpReady { .. }
         );
         if should_mark_dirty {
             self.push_undo_snapshot();
@@ -2028,6 +2281,10 @@ impl App {
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: 0,
+                        original_bpm: None,
+                        warped: false,
+                        warped_to_bpm: None,
+                        original_audio: None,
                     });
                 }
 
@@ -3147,6 +3404,10 @@ impl App {
                             loop_enabled: false,
                             loop_start: 0,
                             loop_end: 0,
+                            original_bpm: None,
+                            warped: false,
+                            warped_to_bpm: None,
+                            original_audio: None,
                         });
                     }
 
@@ -3174,6 +3435,10 @@ impl App {
                             loop_enabled: false,
                             loop_start: 0,
                             loop_end: 0,
+                            original_bpm: None,
+                            warped: false,
+                            warped_to_bpm: None,
+                            original_audio: None,
                         });
                     }
 
@@ -3419,6 +3684,10 @@ impl App {
                                             loop_enabled: false,
                                             loop_start: 0,
                                             loop_end: 0,
+                                            original_bpm: None,
+                                            warped: false,
+                                            warped_to_bpm: None,
+                                            original_audio: None,
                                         });
                                     }
                                     new_selections.insert(ArrangementSelection::AudioClip {
@@ -4094,6 +4363,42 @@ impl App {
                 self.state.sample_browser_open = !self.state.sample_browser_open;
                 self.persist_ui_settings();
             }
+            Message::ToggleAutoWarpOnImport => {
+                self.state.auto_warp_on_import = !self.state.auto_warp_on_import;
+                self.persist_ui_settings();
+            }
+            Message::SetWarpConfidenceThreshold(v) => {
+                self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
+                self.persist_ui_settings();
+            }
+            Message::RewarpAllClips => {
+                // Collect targets first so we don't hold a borrow across dispatch.
+                let targets: Vec<(TrackId, ClipId)> = self
+                    .state
+                    .tracks
+                    .iter()
+                    .flat_map(|track| {
+                        track
+                            .clips
+                            .iter()
+                            .filter(|c| c.warped && c.original_bpm.is_some())
+                            .map(move |c| (track.id, c.id))
+                    })
+                    .collect();
+                if targets.is_empty() {
+                    self.state.status_text =
+                        "Re-warp all: no warped clips to re-warp".to_string();
+                    return Task::none();
+                }
+                let count = targets.len();
+                let tasks: Vec<Task<Message>> = targets
+                    .into_iter()
+                    .map(|(tid, cid)| self.dispatch_warp_clip_to_project(tid, cid))
+                    .collect();
+                self.state.status_text =
+                    format!("Re-warping {count} clip(s) to {:.0} BPM", self.state.bpm);
+                return Task::batch(tasks);
+            }
             Message::AddSampleLibraryRoot => {
                 return Task::perform(
                     async {
@@ -4363,7 +4668,14 @@ impl App {
                 }
             }
             Message::BrowserSampleDecoded(target, audio, name, source) => {
-                self.apply_browser_sample_decoded(target, audio, name, source);
+                return self.apply_browser_sample_decoded(target, audio, name, source);
+            }
+            Message::ClipAutoWarpReady {
+                track_id,
+                clip_id,
+                outcome,
+            } => {
+                self.apply_auto_warp_outcome(track_id, clip_id, outcome);
             }
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser load error: {err}");
@@ -4768,6 +5080,86 @@ impl App {
                 }
             },
 
+            // -- Warping --
+            Message::DetectClipBpm { track_id, clip_id } => {
+                return self.dispatch_detect_clip_bpm(track_id, clip_id);
+            }
+            Message::ClipBpmDetected {
+                track_id,
+                clip_id,
+                bpm,
+                confidence,
+            } => match bpm {
+                Some(b) => {
+                    if let Some(track) = self.state.find_track_mut(track_id) {
+                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.original_bpm = Some(b);
+                        }
+                    }
+                    self.state.clip_bpm_edit.remove(&clip_id);
+                    self.state.status_text =
+                        format!("Detected {:.1} BPM (confidence {:.2})", b, confidence);
+                    self.state.project_dirty = true;
+                }
+                None => {
+                    self.state.status_text =
+                        "Could not detect BPM (silence or too short / sparse)".to_string();
+                }
+            },
+            Message::ClipBpmInputChanged {
+                track_id: _,
+                clip_id,
+                text,
+            } => {
+                self.state.clip_bpm_edit.insert(clip_id, text);
+            }
+            Message::SubmitClipBpm { track_id, clip_id } => {
+                let parsed = self
+                    .state
+                    .clip_bpm_edit
+                    .remove(&clip_id)
+                    .and_then(|t| t.parse::<f64>().ok())
+                    .filter(|b| *b > 0.0 && *b < 1_000.0);
+                if let Some(bpm) = parsed {
+                    if let Some(track) = self.state.find_track_mut(track_id) {
+                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.original_bpm = Some(bpm);
+                        }
+                    }
+                    self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
+                    self.state.project_dirty = true;
+                }
+            }
+            Message::SetClipNominalBpm {
+                track_id,
+                clip_id,
+                bpm,
+            } => {
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.original_bpm = Some(bpm);
+                    }
+                }
+                self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
+                self.state.project_dirty = true;
+            }
+            Message::WarpClipToProject { track_id, clip_id } => {
+                return self.dispatch_warp_clip_to_project(track_id, clip_id);
+            }
+            Message::ClipWarpReady {
+                track_id,
+                clip_id,
+                result,
+            } => match result {
+                Ok(success) => self.apply_clip_warp_success(track_id, clip_id, success),
+                Err(err) => {
+                    self.state.status_text = format!("Warp failed: {err}");
+                }
+            },
+            Message::ClearClipWarp { track_id, clip_id } => {
+                self.apply_clear_clip_warp(track_id, clip_id);
+            }
+
             // -- Undo / redo --
             Message::Undo => {
                 self.undo();
@@ -5151,6 +5543,10 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
             });
         }
 
@@ -5677,6 +6073,11 @@ impl App {
                 SettingsTab::Dropbox,
                 active == SettingsTab::Dropbox
             ),
+            make_tab_btn(
+                "Warping",
+                SettingsTab::Warping,
+                active == SettingsTab::Warping
+            ),
         ]
         .spacing(0);
 
@@ -5685,6 +6086,7 @@ impl App {
             SettingsTab::Audio => self.view_settings_audio_tab(),
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
             SettingsTab::Dropbox => self.view_settings_dropbox_tab(),
+            SettingsTab::Warping => self.view_settings_warping_tab(),
         };
 
         let content = column![
@@ -6550,6 +6952,100 @@ impl App {
             },
             ..Default::default()
         })
+        .into()
+    }
+
+    fn view_settings_warping_tab(&self) -> Element<'_, Message> {
+        let title = text("Sample Warping").size(14).color(th::TEXT);
+        let hint = text(
+            "Auto-warp detects BPM of each dropped sample and time-stretches it to \
+             the project tempo, preserving pitch. Turn this off to keep samples at their \
+             original speed.",
+        )
+        .size(11)
+        .color(th::TEXT_DIM);
+
+        let toggle_icon = if self.state.auto_warp_on_import {
+            icons::icon(icons::CIRCLE_DOT).size(12).color(th::ACCENT)
+        } else {
+            icons::icon(icons::CIRCLE).size(12).color(th::TEXT_DIM)
+        };
+        let toggle_btn = button(
+            row![
+                toggle_icon,
+                text("Auto-warp samples on import").size(12).color(th::TEXT)
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::ToggleAutoWarpOnImport)
+        .padding([4, 8])
+        .style(|_theme: &Theme, _status| button::Style {
+            background: None,
+            text_color: th::TEXT,
+            border: iced::Border::default(),
+            ..Default::default()
+        });
+
+        let conf = self.state.warp_confidence_threshold;
+        let conf_label = text("Detection confidence threshold")
+            .size(12)
+            .color(th::TEXT);
+        let conf_value = text(format!("{:.2}", conf)).size(12).color(th::TEXT_DIM);
+        let conf_hint = text(
+            "Higher = only warp when the detector is very sure. \
+             Lower = warp even ambiguous clips.",
+        )
+        .size(11)
+        .color(th::TEXT_DIM);
+        let conf_slider = slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05);
+
+        let rewarp_btn = button(text("Re-warp all clips to project tempo").size(12).color(th::TEXT))
+            .on_press(Message::RewarpAllClips)
+            .padding([6, 12])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::ACCENT_DIM,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        column![
+            title,
+            hint,
+            toggle_btn,
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
+                |_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }
+            ),
+            conf_label,
+            conf_hint,
+            row![conf_slider, conf_value]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
+                |_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }
+            ),
+            rewarp_btn,
+        ]
+        .spacing(10)
         .into()
     }
 
@@ -8655,8 +9151,9 @@ impl App {
             .align_y(iced::Alignment::Center);
 
         let quantize_row = self.view_audio_quantize_row(track_id, clip.id);
+        let warp_row = self.view_audio_warp_row(track_id, clip);
 
-        let content = column![header_row, quantize_row, waveform_canvas]
+        let content = column![header_row, quantize_row, warp_row, waveform_canvas]
             .spacing(6)
             .padding(4);
 
@@ -8673,6 +9170,92 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    fn view_audio_warp_row(
+        &self,
+        track_id: TrackId,
+        clip: &UiClip,
+    ) -> Element<'_, Message> {
+        let clip_id = clip.id;
+        let label = text("Warp").size(11).color(th::TEXT_DIM);
+
+        let default_text = clip
+            .original_bpm
+            .map(|bpm| format!("{:.1}", bpm))
+            .unwrap_or_default();
+        let text_value = self
+            .state
+            .clip_bpm_edit
+            .get(&clip_id)
+            .cloned()
+            .unwrap_or(default_text);
+
+        let bpm_input = text_input("BPM", &text_value)
+            .on_input(move |t| Message::ClipBpmInputChanged {
+                track_id,
+                clip_id,
+                text: t,
+            })
+            .on_submit(Message::SubmitClipBpm { track_id, clip_id })
+            .size(11)
+            .width(Length::Fixed(70.0));
+
+        let button_style = |_theme: &Theme, status: button::Status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                _ => Some(th::BG_ELEVATED.into()),
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT,
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        };
+
+        let detect_btn = button(text("Detect").size(11).color(th::TEXT))
+            .on_press(Message::DetectClipBpm { track_id, clip_id })
+            .padding([4, 10])
+            .style(button_style);
+
+        let warp_btn = button(
+            text(format!("Warp → {:.0} BPM", self.state.bpm))
+                .size(11)
+                .color(th::TEXT),
+        )
+        .on_press(Message::WarpClipToProject { track_id, clip_id })
+        .padding([4, 10])
+        .style(button_style);
+
+        let mut row_widgets = row![label, bpm_input, detect_btn, warp_btn]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+
+        if clip.warped {
+            let clear_btn = button(text("Clear warp").size(11).color(th::TEXT_DIM))
+                .on_press(Message::ClearClipWarp { track_id, clip_id })
+                .padding([4, 10])
+                .style(button_style);
+            row_widgets = row_widgets.push(clear_btn);
+
+            if let Some(warped_to) = clip.warped_to_bpm {
+                let stale = (warped_to - self.state.bpm).abs() > 0.01;
+                if stale {
+                    row_widgets = row_widgets.push(
+                        text(format!("(was {:.0})", warped_to))
+                            .size(10)
+                            .color(th::METER_YELLOW),
+                    );
+                }
+            }
+        }
+
+        row_widgets.into()
     }
 
     fn view_audio_quantize_row(
@@ -9091,6 +9674,109 @@ async fn quantize_audio_clip_async(
         .map_err(|e| format!("quantize task failed: {e}"))?
 }
 
+async fn detect_clip_bpm_async(
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    sample_rate: u32,
+) -> Option<vibez_core::onset::BpmEstimate> {
+    tokio::task::spawn_blocking(move || vibez_core::onset::detect_bpm(&audio, sample_rate))
+        .await
+        .unwrap_or(None)
+}
+
+struct WarpClipInput {
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    source_offset: u64,
+    duration: u64,
+    loop_start: u64,
+    loop_end: u64,
+    clip_bpm: f64,
+    project_bpm: f64,
+}
+
+async fn warp_clip_async(
+    input: WarpClipInput,
+) -> Result<crate::message::ClipWarpSuccess, String> {
+    tokio::task::spawn_blocking(move || compute_warp(input))
+        .await
+        .map_err(|e| format!("warp task failed: {e}"))?
+}
+
+struct AutoWarpInput {
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    sample_rate: u32,
+    project_bpm: f64,
+    confidence_threshold: f32,
+}
+
+async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpOutcome {
+    use crate::message::AutoWarpOutcome;
+    let audio_for_detect = Arc::clone(&input.audio);
+    let sample_rate = input.sample_rate;
+    let estimate = tokio::task::spawn_blocking(move || {
+        vibez_core::onset::detect_bpm(&audio_for_detect, sample_rate)
+    })
+    .await
+    .unwrap_or(None);
+    let Some(est) = estimate else {
+        return AutoWarpOutcome::NotDetected;
+    };
+    if est.confidence < input.confidence_threshold || est.bpm <= 0.0 {
+        return AutoWarpOutcome::DetectedOnly {
+            bpm: est.bpm,
+            confidence: est.confidence,
+        };
+    }
+    let num_frames = input.audio.num_frames();
+    let warp_input = WarpClipInput {
+        audio: input.audio,
+        source_offset: 0,
+        duration: num_frames as u64,
+        loop_start: 0,
+        loop_end: 0,
+        clip_bpm: est.bpm,
+        project_bpm: input.project_bpm,
+    };
+    match warp_clip_async(warp_input).await {
+        Ok(success) => AutoWarpOutcome::Warped {
+            confidence: est.confidence,
+            success,
+        },
+        Err(_) => AutoWarpOutcome::DetectedOnly {
+            bpm: est.bpm,
+            confidence: est.confidence,
+        },
+    }
+}
+
+fn compute_warp(input: WarpClipInput) -> Result<crate::message::ClipWarpSuccess, String> {
+    if input.clip_bpm <= 0.0 || input.project_bpm <= 0.0 {
+        return Err("Invalid BPM".into());
+    }
+    let ratio = input.project_bpm / input.clip_bpm;
+    let total_frames = input.audio.num_frames();
+    if total_frames == 0 {
+        return Err("Empty audio".into());
+    }
+    let target_total = (total_frames as f64 * ratio) as usize;
+    if target_total == 0 {
+        return Err("Target length collapsed to zero".into());
+    }
+    let stretched =
+        vibez_dsp::time_stretch::pitch_preserving_stretch(&input.audio, target_total);
+    let scale = |x: u64| -> u64 { (x as f64 * ratio) as u64 };
+    Ok(crate::message::ClipWarpSuccess {
+        audio: Arc::new(stretched),
+        original_audio: input.audio,
+        new_duration: scale(input.duration),
+        new_source_offset: scale(input.source_offset),
+        new_loop_start: scale(input.loop_start),
+        new_loop_end: scale(input.loop_end),
+        detected_bpm: input.clip_bpm,
+        warped_to_bpm: input.project_bpm,
+    })
+}
+
+
 fn compute_audio_quantize(
     input: QuantizeInput,
 ) -> Result<crate::message::AudioQuantizeSuccess, String> {
@@ -9158,14 +9844,31 @@ fn compute_audio_quantize(
         if src_len < MIN_SLICE_FRAMES || target_len == 0 {
             continue;
         }
+        // Build a per-slice DecodedAudio so pitch_preserving_stretch
+        // can run a single shared analysis pass across channels.
+        // Extreme ratios (very short/long snap targets) route through
+        // the linear resampler automatically; typical ratios go
+        // through WSOLA and preserve pitch on the bass-loop case the
+        // user reported.
+        let slice_channels: Vec<Vec<f32>> = audio
+            .channels
+            .iter()
+            .map(|c| {
+                let start = src_start.min(c.len());
+                let end = src_end.min(c.len());
+                c[start..end].to_vec()
+            })
+            .collect();
+        let slice_audio = vibez_core::audio_buffer::DecodedAudio {
+            channels: slice_channels,
+            sample_rate,
+        };
+        let stretched_slice =
+            vibez_dsp::time_stretch::pitch_preserving_stretch(&slice_audio, target_len);
         for (ch, out) in output_channels.iter_mut().enumerate() {
-            let src_buf = audio
-                .channels
-                .get(ch)
-                .map(|c| &c[src_start.min(c.len())..src_end.min(c.len())])
-                .unwrap_or(&[]);
-            let stretched = vibez_dsp::time_stretch::stretch_mono(src_buf, target_len);
-            out.extend_from_slice(&stretched);
+            if let Some(s) = stretched_slice.channels.get(ch) {
+                out.extend_from_slice(s);
+            }
         }
         total_out_len += target_len;
         stretched_slices += 1;
