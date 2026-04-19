@@ -19,6 +19,10 @@ pub struct UiSettings {
     /// sure. Default is a moderate gate.
     #[serde(default = "default_warp_confidence_threshold")]
     pub warp_confidence_threshold: f32,
+    /// Name of the external MIDI input port to auto-connect on
+    /// startup. `None` means auto-pick the first visible port.
+    #[serde(default)]
+    pub preferred_midi_input: Option<String>,
 }
 
 impl Default for UiSettings {
@@ -28,6 +32,7 @@ impl Default for UiSettings {
             sample_browser_open: default_sample_browser_open(),
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
+            preferred_midi_input: None,
         }
     }
 }

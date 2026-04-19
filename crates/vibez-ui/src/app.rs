@@ -105,6 +105,14 @@ struct App {
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
 
+    // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
+    // Dropping the handle closes the port.
+    midi_input: Option<vibez_audio_io::midi_input::MidiInputHandle>,
+    /// Cached list of port names last seen by `list_midi_input_ports`.
+    /// Populated when the user opens the MIDI picker; used so the UI
+    /// can show a dropdown without re-scanning on every frame.
+    midi_input_ports: Vec<String>,
+
     // Undo / redo
     undo_history: crate::state::UndoHistory,
 }
@@ -173,6 +181,13 @@ impl App {
 
         let plugin_window_manager = PluginWindowManager::new();
 
+        // Auto-connect to the preferred MIDI input if the saved name
+        // matches one currently visible, else to the first available
+        // port. Silent on failure: the user can still work without
+        // MIDI, and Settings → Audio lets them pick manually later.
+        let midi_input =
+            auto_open_midi_input(ui_settings.preferred_midi_input.as_deref());
+
         let mut app = Self {
             state,
             cmd_tx: Some(cmd_tx),
@@ -187,6 +202,8 @@ impl App {
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
+            midi_input,
+            midi_input_ports: Vec::new(),
             undo_history: crate::state::UndoHistory::default(),
         };
 
@@ -346,6 +363,10 @@ impl App {
             sample_browser_open: self.state.sample_browser_open,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
+            preferred_midi_input: self
+                .midi_input
+                .as_ref()
+                .map(|h| h.port_name.clone()),
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -2097,6 +2118,7 @@ impl App {
                 self.poll_engine_events();
                 self.poll_plugin_loads();
                 self.poll_plugin_windows();
+                self.poll_midi_input();
                 // Pump CLAP plugin timers and FDs (needed for JUCE event loop)
                 vibez_plugin_host::poll_clap_events();
 
@@ -4374,6 +4396,39 @@ impl App {
                 self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
                 self.persist_ui_settings();
             }
+            Message::RescanMidiInputs => {
+                match vibez_audio_io::midi_input::list_midi_input_ports() {
+                    Ok(ports) => {
+                        self.midi_input_ports = ports;
+                        self.state.status_text = format!(
+                            "Found {} MIDI input port(s)",
+                            self.midi_input_ports.len()
+                        );
+                    }
+                    Err(err) => {
+                        self.midi_input_ports.clear();
+                        self.state.status_text =
+                            format!("MIDI scan error: {err}");
+                    }
+                }
+            }
+            Message::OpenMidiInput(name) => {
+                match vibez_audio_io::midi_input::open_midi_input(&name) {
+                    Ok(handle) => {
+                        self.state.status_text = format!("MIDI input: {}", handle.port_name);
+                        self.midi_input = Some(handle);
+                        self.persist_ui_settings();
+                    }
+                    Err(err) => {
+                        self.state.status_text = format!("MIDI open error: {err}");
+                    }
+                }
+            }
+            Message::CloseMidiInput => {
+                self.midi_input = None;
+                self.persist_ui_settings();
+                self.state.status_text = "MIDI input disconnected".to_string();
+            }
             Message::RewarpAllClips => {
                 // Collect targets first so we don't hold a borrow across dispatch.
                 let targets: Vec<(TrackId, ClipId)> = self
@@ -5820,6 +5875,52 @@ impl App {
         }
     }
 
+    /// Drain pending MIDI events from the external input port and
+    /// forward them to the engine. Events route to the currently-
+    /// selected track's instrument; if nothing is selected or the
+    /// track has no instrument attached, events are dropped (no
+    /// passthrough). Called on every UI tick.
+    fn poll_midi_input(&mut self) {
+        let Some(handle) = self.midi_input.as_ref() else {
+            return;
+        };
+        let mut events = Vec::new();
+        while let Ok(event) = handle.rx.try_recv() {
+            events.push(event);
+        }
+        if events.is_empty() {
+            return;
+        }
+        let Some(track_id) = self.state.selected_track else {
+            return;
+        };
+        let has_instrument = self
+            .state
+            .find_track(track_id)
+            .map(|t| t.instrument_kind.is_some())
+            .unwrap_or(false);
+        if !has_instrument {
+            return;
+        }
+        for event in events {
+            match event {
+                vibez_audio_io::midi_input::MidiEvent::NoteOn { pitch, velocity } => {
+                    self.send_command(EngineCommand::ExternalNoteOn {
+                        track_id,
+                        pitch,
+                        velocity,
+                    });
+                }
+                vibez_audio_io::midi_input::MidiEvent::NoteOff { pitch } => {
+                    self.send_command(EngineCommand::ExternalNoteOff { track_id, pitch });
+                }
+                vibez_audio_io::midi_input::MidiEvent::ControlChange { .. } => {
+                    // CC mapping not wired yet.
+                }
+            }
+        }
+    }
+
     fn poll_engine_events(&mut self) {
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
@@ -6218,9 +6319,139 @@ impl App {
             .size(13)
             .color(th::TEXT_DIM);
 
-        column![buf_label, buf_hint, buf_row, sr_label, sr_value]
-            .spacing(8)
-            .into()
+        // ---- MIDI input picker ----
+        let midi_label = text("MIDI Input").size(14).color(th::TEXT);
+        let midi_hint = text(
+            "External MIDI routes to the currently selected instrument track. \
+             Plug your keyboard or Push in, hit Rescan, then pick the port.",
+        )
+        .size(11)
+        .color(th::TEXT_DIM);
+
+        let current_port_line: Element<'_, Message> = match self.midi_input.as_ref() {
+            Some(h) => text(format!("Connected: {}", h.port_name))
+                .size(12)
+                .color(th::ACCENT)
+                .into(),
+            None => text("Not connected")
+                .size(12)
+                .color(th::TEXT_DIM)
+                .into(),
+        };
+
+        let rescan_btn = button(text("Rescan ports").size(11).color(th::TEXT))
+            .on_press(Message::RescanMidiInputs)
+            .padding([4, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        let disconnect_btn = button(text("Disconnect").size(11).color(th::TEXT_DIM))
+            .on_press(Message::CloseMidiInput)
+            .padding([4, 10])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::BG_HOVER.into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        let midi_actions = row![rescan_btn, disconnect_btn]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+
+        let mut port_list = column![].spacing(3);
+        for name in &self.midi_input_ports {
+            let is_current = self
+                .midi_input
+                .as_ref()
+                .map(|h| h.port_name == *name)
+                .unwrap_or(false);
+            let label = name.clone();
+            let port_btn = button(
+                text(if is_current {
+                    format!("● {name}")
+                } else {
+                    name.clone()
+                })
+                .size(11)
+                .color(if is_current { th::ACCENT } else { th::TEXT }),
+            )
+            .on_press(Message::OpenMidiInput(label))
+            .padding([4, 10])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                let bg = if is_current {
+                    Some(th::BG_HOVER.into())
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    }
+                };
+                button::Style {
+                    background: bg,
+                    text_color: if is_current { th::ACCENT } else { th::TEXT },
+                    border: iced::Border {
+                        color: if is_current { th::ACCENT_DIM } else { th::BORDER },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+            port_list = port_list.push(port_btn);
+        }
+
+        column![
+            buf_label,
+            buf_hint,
+            buf_row,
+            sr_label,
+            sr_value,
+            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
+                |_theme: &Theme| container::Style {
+                    background: Some(th::BORDER.into()),
+                    ..Default::default()
+                }
+            ),
+            midi_label,
+            midi_hint,
+            current_port_line,
+            midi_actions,
+            port_list,
+        ]
+        .spacing(8)
+        .into()
     }
 
     fn view_settings_plugins_tab(&self) -> Element<'_, Message> {
@@ -9699,6 +9930,20 @@ async fn quantize_audio_clip_async(
     tokio::task::spawn_blocking(move || compute_audio_quantize(input))
         .await
         .map_err(|e| format!("quantize task failed: {e}"))?
+}
+
+/// Attempt to auto-open an external MIDI input port at startup. If
+/// `preferred` matches a visible port by name, open that; otherwise
+/// open the first port in the list. Silent on failure so an
+/// unavailable MIDI system doesn't block the UI.
+fn auto_open_midi_input(
+    preferred: Option<&str>,
+) -> Option<vibez_audio_io::midi_input::MidiInputHandle> {
+    let ports = vibez_audio_io::midi_input::list_midi_input_ports().ok()?;
+    let target = preferred
+        .and_then(|name| ports.iter().find(|p| p.as_str() == name).cloned())
+        .or_else(|| ports.into_iter().next())?;
+    vibez_audio_io::midi_input::open_midi_input(&target).ok()
 }
 
 async fn detect_clip_bpm_async(

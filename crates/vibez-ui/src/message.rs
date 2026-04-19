@@ -411,6 +411,12 @@ pub enum Message {
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.
     RewarpAllClips,
+    /// Settings: refresh the list of visible MIDI input ports.
+    RescanMidiInputs,
+    /// Settings: open a MIDI input port by name.
+    OpenMidiInput(String),
+    /// Settings: close the currently-open MIDI input port.
+    CloseMidiInput,
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RemoveSampleLibraryRoot(PathBuf),

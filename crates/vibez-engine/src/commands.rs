@@ -209,6 +209,19 @@ pub enum EngineCommand {
     /// Stop any in-progress preview.
     StopPreview,
 
+    // -- External MIDI input --
+    /// Route a live note-on from an external MIDI source (hardware
+    /// keyboard, Push, virtual cable) to the instrument on the named
+    /// track. Routed outside the clip pipeline so it works regardless
+    /// of transport state.
+    ExternalNoteOn {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+    },
+    /// Route a live note-off from an external MIDI source.
+    ExternalNoteOff { track_id: TrackId, pitch: u8 },
+
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
     AddPluginEffect {

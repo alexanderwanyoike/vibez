@@ -35,6 +35,7 @@ symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "aac", "
 rubato = "0.16"
 rtrb = "0.3"
 audio_thread_priority = "0.32"
+midir = "0.10"
 
 # GUI
 iced = { version = "0.13", features = ["canvas", "tokio"] }

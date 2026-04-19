@@ -722,6 +722,26 @@ impl AudioEngine {
                     self.preview = None;
                 }
 
+                // -- External MIDI input --
+                EngineCommand::ExternalNoteOn {
+                    track_id,
+                    pitch,
+                    velocity,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(instrument) = track.instrument.as_mut() {
+                            instrument.note_on(pitch, velocity);
+                        }
+                    }
+                }
+                EngineCommand::ExternalNoteOff { track_id, pitch } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(instrument) = track.instrument.as_mut() {
+                            instrument.note_off(pitch);
+                        }
+                    }
+                }
+
                 // -- External plugins --
                 EngineCommand::AddPluginEffect {
                     track_id,
