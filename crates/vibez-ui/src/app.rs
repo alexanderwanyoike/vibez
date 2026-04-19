@@ -4214,14 +4214,19 @@ impl App {
                 track_id,
                 pad_index,
             } => {
-                let Some(source) = self.state.drag_source.take() else {
-                    return Task::none();
-                };
-                self.state.drag_label = None;
-                return self.dispatch_drop_for_target(
-                    source,
-                    BrowserImportTarget::DrumRackPad { track_id, pad_index },
-                );
+                match self.state.drag_source.take() {
+                    Some(source) => {
+                        self.state.drag_label = None;
+                        return self.dispatch_drop_for_target(
+                            source,
+                            BrowserImportTarget::DrumRackPad { track_id, pad_index },
+                        );
+                    }
+                    None => {
+                        // No active drag: treat release as a plain click.
+                        return self.update(Message::SelectDrumRackPad(track_id, pad_index));
+                    }
+                }
             }
             Message::DropSampleOnSampler { track_id } => {
                 let Some(source) = self.state.drag_source.take() else {
@@ -6685,7 +6690,10 @@ impl App {
         let mut entries_col = column![].spacing(2);
         for entry in filtered_entries.iter().take(400) {
             let selected = selected_source.is_some_and(|source| &entry.source == source);
-            let mut entry_btn = button(
+            // mouse_area returns early if its child captures the event, so
+            // iced Button underneath would swallow press events. Use a
+            // plain container as the click target instead.
+            let entry_body = container(
                 column![
                     text(entry.name.as_str()).size(12).color(if selected {
                         th::ACCENT
@@ -6701,34 +6709,28 @@ impl App {
             )
             .padding([6, 8])
             .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                let bg = if selected {
-                    Some(th::ACCENT_DIM.into())
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
-                        }
-                        _ => Some(th::BG_ELEVATED.into()),
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(
+                    if selected {
+                        th::ACCENT_DIM
+                    } else {
+                        th::BG_ELEVATED
                     }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: if selected { th::ACCENT } else { th::TEXT },
-                    border: iced::Border {
-                        color: th::BORDER,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
+                    .into(),
+                ),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
             });
-            entry_btn = entry_btn.on_press(Message::ClickLocalBrowserEntry(entry.source.clone()));
-            let entry_dragger: Element<'_, Message> = mouse_area(entry_btn)
+            let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
                 .on_press(Message::StartDragSample {
                     source: entry.source.clone(),
                     label: entry.name.clone(),
                 })
+                .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
             let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::TEXT_DIM))
                 .on_press(Message::PreviewLocalEntry(entry.source.clone()))
@@ -7057,45 +7059,37 @@ impl App {
             } else {
                 Message::DropboxSelectEntry(entry.clone())
             };
-            let btn = button(text(label).size(11).color(if selected {
-                th::ACCENT
-            } else if entry.is_folder || entry.is_supported_audio() {
-                th::TEXT
-            } else {
-                th::TEXT_DIM
-            }))
-            .on_press(msg)
-            .padding([3, 6])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                let bg = if selected {
-                    Some(th::ACCENT_DIM.into())
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
-                        }
-                        _ => Some(th::BG_ELEVATED.into()),
-                    }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: if selected { th::ACCENT } else { th::TEXT },
-                    border: iced::Border::default(),
-                    ..Default::default()
-                }
-            });
             if entry.is_supported_audio() {
+                // Audio rows use a container + mouse_area so press events
+                // reach us (iced Button captures ButtonPressed, which would
+                // hide the drag from mouse_area).
+                let text_color = if selected { th::ACCENT } else { th::TEXT };
+                let row_body = container(text(label).size(11).color(text_color))
+                    .padding([3, 6])
+                    .width(Length::Fill)
+                    .style(move |_theme: &Theme| container::Style {
+                        background: Some(
+                            if selected {
+                                th::ACCENT_DIM
+                            } else {
+                                th::BG_ELEVATED
+                            }
+                            .into(),
+                        ),
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    });
                 let source = MediaSourceRef::DropboxFile {
                     path_lower: entry.path_lower.clone(),
                     display_path: entry.path_display.clone(),
                     rev: entry.rev.clone(),
                 };
-                let dragger: Element<'_, Message> = mouse_area(btn)
+                let dragger: Element<'_, Message> = mouse_area(row_body)
                     .on_press(Message::StartDragSample {
                         source,
                         label: entry.name.clone(),
                     })
+                    .on_release(msg)
                     .into();
                 let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::ACCENT))
                     .on_press(Message::DropboxPreview(entry.clone()))
@@ -7121,6 +7115,36 @@ impl App {
                         .into(),
                 );
             } else {
+                // Folders + non-audio entries keep the button path since they
+                // don't participate in drag.
+                let btn = button(text(label).size(11).color(if selected {
+                    th::ACCENT
+                } else if entry.is_folder {
+                    th::TEXT
+                } else {
+                    th::TEXT_DIM
+                }))
+                .on_press(msg)
+                .padding([3, 6])
+                .width(Length::Fill)
+                .style(move |_theme: &Theme, status| {
+                    let bg = if selected {
+                        Some(th::ACCENT_DIM.into())
+                    } else {
+                        match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
+                            }
+                            _ => Some(th::BG_ELEVATED.into()),
+                        }
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: if selected { th::ACCENT } else { th::TEXT },
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                });
                 rows.push(btn.into());
             }
 
@@ -7893,7 +7917,10 @@ impl App {
                         }
                     })
                     .unwrap_or_else(|| format!("Pad {}", pad_index + 1));
-                let mut pad_btn = button(
+                // Use container + mouse_area so press events reach us and
+                // drag-drop works. iced Button would capture ButtonPressed
+                // and hide it from mouse_area.
+                let pad_body = container(
                     column![
                         text(format!("{:02}", pad_index + 1))
                             .size(9)
@@ -7907,32 +7934,26 @@ impl App {
                 )
                 .padding([8, 6])
                 .width(Length::Fixed(60.0))
-                .style(move |_theme: &Theme, status| {
-                    let bg = if active {
-                        Some(th::ACCENT_DIM.into())
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
-                            }
-                            _ => Some(th::BG_DARK.into()),
+                .style(move |_theme: &Theme| container::Style {
+                    background: Some(
+                        if active {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BG_DARK
                         }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: if active { th::ACCENT } else { th::TEXT },
-                        border: iced::Border {
-                            color: if active { th::ACCENT_DIM } else { th::BORDER },
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
+                        .into(),
+                    ),
+                    text_color: Some(if active { th::ACCENT } else { th::TEXT }),
+                    border: iced::Border {
+                        color: if active { th::ACCENT_DIM } else { th::BORDER },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
                 });
-                pad_btn = pad_btn.on_press(Message::SelectDrumRackPad(track_id, pad_index));
-                // Drop zone: on mouse release while a sample is being
-                // dragged from the browser, load it onto this pad.
-                let pad_cell: Element<'a, Message> = mouse_area(pad_btn)
+                // on_release handler selects the pad when no drag is active,
+                // otherwise routes through DropSampleOnDrumPad.
+                let pad_cell: Element<'a, Message> = mouse_area(pad_body)
                     .on_release(Message::DropSampleOnDrumPad {
                         track_id,
                         pad_index,
