@@ -9752,28 +9752,63 @@ fn compute_warp(input: WarpClipInput) -> Result<crate::message::ClipWarpSuccess,
     if input.clip_bpm <= 0.0 || input.project_bpm <= 0.0 {
         return Err("Invalid BPM".into());
     }
-    // Ratio = target_frames / source_frames, derived from the
-    // "same number of beats at a different tempo" identity:
+    let source_frames = input.audio.num_frames();
+    if source_frames == 0 {
+        return Err("Empty audio".into());
+    }
+    let sample_rate = input.audio.sample_rate as f64;
+    if sample_rate <= 0.0 {
+        return Err("Invalid sample rate".into());
+    }
+    // Naive warp ratio derived from the "same number of beats at a
+    // different tempo" identity:
     //
     //   source_frames = beats * 60 / clip_bpm * sample_rate
     //   target_frames = beats * 60 / project_bpm * sample_rate
     //   => target / source = clip_bpm / project_bpm
+    let naive_ratio = input.clip_bpm / input.project_bpm;
+    let naive_target = source_frames as f64 * naive_ratio;
+
+    // Snap the warped length to the nearest whole bar at the project
+    // tempo when the naive result lands close to an integer bar
+    // count. Real drum loops almost always carry a trailing pickup
+    // (the "and" before beat 1 of the next bar) for crossfade
+    // purposes. A naive proportional warp preserves that pickup,
+    // which then leaks past the arrangement loop boundary and
+    // sounds like a double beat. Snapping to the nearest bar
+    // trims / extends the clip so a "1 bar" loop plays as exactly
+    // one bar at the project tempo.
     //
-    // For a 130 BPM clip dropped into a 135 BPM project, ratio is
-    // 130/135 ≈ 0.963: the warped output is *shorter* because the
-    // same bar now plays faster.
-    let ratio = input.clip_bpm / input.project_bpm;
-    let total_frames = input.audio.num_frames();
-    if total_frames == 0 {
-        return Err("Empty audio".into());
-    }
-    let target_total = (total_frames as f64 * ratio) as usize;
+    // The 0.25-bar guard means we only snap when the source is
+    // plausibly "about N bars"; a 1.5-bar clip stays at 1.5 bars
+    // rather than being aggressively remapped.
+    let bar_samples = 4.0 * 60.0 * sample_rate / input.project_bpm;
+    let target_total = if bar_samples >= 1.0 {
+        let naive_bars = naive_target / bar_samples;
+        if naive_bars >= 0.5 {
+            let rounded = naive_bars.round();
+            if (naive_bars - rounded).abs() < 0.25 {
+                (rounded * bar_samples).round() as usize
+            } else {
+                naive_target as usize
+            }
+        } else {
+            naive_target as usize
+        }
+    } else {
+        naive_target as usize
+    };
+
     if target_total == 0 {
         return Err("Target length collapsed to zero".into());
     }
+
     let stretched =
         vibez_dsp::time_stretch::pitch_preserving_stretch(&input.audio, target_total);
-    let scale = |x: u64| -> u64 { (x as f64 * ratio) as u64 };
+    // Effective ratio after snap so source_offset / loop bounds
+    // scale consistently with the actual stretched length.
+    let effective_ratio = target_total as f64 / source_frames as f64;
+    let scale = |x: u64| -> u64 { (x as f64 * effective_ratio) as u64 };
     Ok(crate::message::ClipWarpSuccess {
         audio: Arc::new(stretched),
         original_audio: input.audio,
