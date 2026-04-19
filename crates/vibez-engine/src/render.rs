@@ -216,7 +216,10 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             let produced = if track.instrument.is_some() {
                 track.render_instrument(pos, block, CHANNELS, &tempo)
             } else {
-                track.render(pos, block, CHANNELS)
+                // Offline bounce never loops the arrangement — it
+                // walks the timeline linearly from `range.0` to
+                // `range.1`, so pass `None`.
+                track.render(pos, block, CHANNELS, None)
             };
             if !produced {
                 continue;

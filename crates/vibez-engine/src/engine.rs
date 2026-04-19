@@ -180,11 +180,12 @@ impl AudioEngine {
                 continue;
             }
 
+            let loop_region = self.transport.active_loop_region();
             let rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 track.render_instrument(pos, frames, channels, &tempo_map)
             } else {
-                track.render(pos, frames, channels)
+                track.render(pos, frames, channels, loop_region)
             };
 
             if rendered {

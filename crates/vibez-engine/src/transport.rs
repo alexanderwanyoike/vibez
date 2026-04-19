@@ -107,6 +107,18 @@ impl Transport {
         self.loop_end
     }
 
+    /// The active arrangement loop region as a `(start, end)` pair if
+    /// looping is enabled and the region is non-empty. Used by the
+    /// mixer to wrap clip reads mid-block instead of spilling audio
+    /// past the loop boundary.
+    pub fn active_loop_region(&self) -> Option<(u64, u64)> {
+        if self.loop_enabled && self.loop_end > self.loop_start {
+            Some((self.loop_start, self.loop_end))
+        } else {
+            None
+        }
+    }
+
     /// Enable or disable arrangement-level looping.
     pub fn set_loop_enabled(&mut self, enabled: bool) {
         self.loop_enabled = enabled;
