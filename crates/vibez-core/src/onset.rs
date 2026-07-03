@@ -469,10 +469,12 @@ mod tests {
         let onsets = detect_onsets(&audio, 1.2);
         assert!(!onsets.is_empty());
         for exp in expected.iter() {
-            let found = onsets
-                .iter()
-                .any(|&o| (o as i64 - *exp as i64).abs() < 512);
-            assert!(found, "no onset within 512 samples of {}: {:?}", exp, onsets);
+            let found = onsets.iter().any(|&o| (o as i64 - *exp as i64).abs() < 512);
+            assert!(
+                found,
+                "no onset within 512 samples of {}: {:?}",
+                exp, onsets
+            );
         }
     }
 

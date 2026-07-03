@@ -44,9 +44,7 @@ pub struct DropboxEntry {
 
 impl DropboxEntry {
     pub fn file_extension(&self) -> Option<&str> {
-        self.name
-            .rsplit_once('.')
-            .map(|(_, ext)| ext)
+        self.name.rsplit_once('.').map(|(_, ext)| ext)
     }
 
     /// True if the file extension is one vibez recognises as audio.

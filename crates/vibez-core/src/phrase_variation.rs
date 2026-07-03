@@ -175,14 +175,17 @@ pub fn generate_variants(
     let mutators = preset.mutators();
     (0..count)
         .map(|i| {
-            let seed = seed_base
-                .wrapping_add((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let seed = seed_base.wrapping_add((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
             let mut rng = Rng::new(seed);
             let mut notes = base.notes.clone();
             for mutator in mutators {
                 notes = mutator.apply(notes, base.duration_beats, &mut rng);
             }
-            notes.sort_by(|a, b| a.start_beat.partial_cmp(&b.start_beat).unwrap_or(std::cmp::Ordering::Equal));
+            notes.sort_by(|a, b| {
+                a.start_beat
+                    .partial_cmp(&b.start_beat)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             NoteClipInfo {
                 id: ClipId::new(),
                 track_id: base.track_id,
@@ -219,10 +222,7 @@ fn apply_swing(mut notes: Vec<MidiNote>, amount: f32) -> Vec<MidiNote> {
 
 fn apply_thin(notes: Vec<MidiNote>, probability: f32, rng: &mut Rng) -> Vec<MidiNote> {
     let p = probability.clamp(0.0, 1.0);
-    notes
-        .into_iter()
-        .filter(|_| !rng.chance(p))
-        .collect()
+    notes.into_iter().filter(|_| !rng.chance(p)).collect()
 }
 
 fn apply_densify(
@@ -280,11 +280,7 @@ fn is_backbeat(beat: f64) -> bool {
     on_beat && (integer.rem_euclid(4) == 1 || integer.rem_euclid(4) == 3)
 }
 
-fn apply_end_fill(
-    mut notes: Vec<MidiNote>,
-    phrase_beats: f64,
-    rng: &mut Rng,
-) -> Vec<MidiNote> {
+fn apply_end_fill(mut notes: Vec<MidiNote>, phrase_beats: f64, rng: &mut Rng) -> Vec<MidiNote> {
     if phrase_beats < 2.0 {
         return notes;
     }

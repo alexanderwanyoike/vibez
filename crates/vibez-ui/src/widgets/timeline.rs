@@ -882,8 +882,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
         // True when a sample drag is active and the cursor is hovering this
         // lane. Used to paint a drop indicator.
-        let drop_hover =
-            self.sample_drop_active && cursor.position_in(bounds).is_some();
+        let drop_hover = self.sample_drop_active && cursor.position_in(bounds).is_some();
 
         // Background
         let bg_color = if drop_hover {
@@ -1763,11 +1762,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         // matches the indicator drawn in `draw`.
                         let beat = self.x_to_beat(pos.x).max(0.0).round();
                         let spb = self.spb();
-                        let position_samples = if spb > 0.0 {
-                            (beat * spb) as u64
-                        } else {
-                            0
-                        };
+                        let position_samples = if spb > 0.0 { (beat * spb) as u64 } else { 0 };
                         state.drag = None;
                         return (
                             canvas::event::Status::Captured,

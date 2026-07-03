@@ -147,7 +147,11 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             });
         }
 
-        for clip in req.audio_clips.iter().filter(|c| c.track_id == track_info.id) {
+        for clip in req
+            .audio_clips
+            .iter()
+            .filter(|c| c.track_id == track_info.id)
+        {
             if !clip_included_for_mode(clip.id, req.mode, false) {
                 continue;
             }
@@ -162,14 +166,15 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
                 }),
-                None => warnings.push(format!(
-                    "Clip '{}' audio missing, skipped",
-                    clip.name
-                )),
+                None => warnings.push(format!("Clip '{}' audio missing, skipped", clip.name)),
             }
         }
 
-        for nc in req.note_clips.iter().filter(|c| c.track_id == track_info.id) {
+        for nc in req
+            .note_clips
+            .iter()
+            .filter(|c| c.track_id == track_info.id)
+        {
             if !clip_included_for_mode(nc.id, req.mode, true) {
                 continue;
             }
@@ -516,9 +521,7 @@ mod tests {
             kind: TrackKind::Instrument(InstrumentKind::SubtractiveSynth),
             color_index: 0,
             instrument: Some(InstrumentKind::SubtractiveSynth),
-            native_instrument: Some(InstrumentStateInfo::SubtractiveSynth {
-                params: Vec::new(),
-            }),
+            native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
         };
         let note_clip = NoteClipInfo {
             id: cid,

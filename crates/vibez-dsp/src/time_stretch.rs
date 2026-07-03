@@ -253,11 +253,7 @@ fn wsola_synthesize(input: &[f32], target_len: usize, deltas: &[isize]) -> Vec<f
     for (i, out_sample) in out.iter_mut().enumerate() {
         let src_idx = i + pad;
         let w = out_win[src_idx];
-        *out_sample = if w > 1e-6 {
-            out_sum[src_idx] / w
-        } else {
-            0.0
-        };
+        *out_sample = if w > 1e-6 { out_sum[src_idx] / w } else { 0.0 };
     }
     out
 }
@@ -565,10 +561,7 @@ mod tests {
         }
         assert!(rms_values.len() > 4);
         let max = rms_values.iter().cloned().fold(0.0_f32, f32::max);
-        let min = rms_values
-            .iter()
-            .cloned()
-            .fold(f32::INFINITY, f32::min);
+        let min = rms_values.iter().cloned().fold(f32::INFINITY, f32::min);
         // 0.3 dB ≈ ratio 1.035. WSOLA with per-sample gain
         // normalisation should sit well inside that.
         let ratio_db = 20.0 * (max / min.max(1e-6)).log10();

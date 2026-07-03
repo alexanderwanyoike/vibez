@@ -220,7 +220,10 @@ pub enum EngineCommand {
         velocity: u8,
     },
     /// Route a live note-off from an external MIDI source.
-    ExternalNoteOff { track_id: TrackId, pitch: u8 },
+    ExternalNoteOff {
+        track_id: TrackId,
+        pitch: u8,
+    },
 
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.

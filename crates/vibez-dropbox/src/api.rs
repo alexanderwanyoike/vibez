@@ -164,11 +164,7 @@ impl DropboxClient {
 
     // -- internal helpers ------------------------------------------------
 
-    async fn post_json<T>(
-        &self,
-        url: &str,
-        body: &serde_json::Value,
-    ) -> DropboxResult<T>
+    async fn post_json<T>(&self, url: &str, body: &serde_json::Value) -> DropboxResult<T>
     where
         T: for<'de> Deserialize<'de>,
     {
