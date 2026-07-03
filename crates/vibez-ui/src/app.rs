@@ -16,13 +16,12 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
+use vibez_dropbox::{
+    load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry, DropboxSettings,
+};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
-use vibez_dropbox::{
-    load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry,
-    DropboxSettings,
-};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance};
 use vibez_project::Project;
@@ -76,10 +75,8 @@ struct PluginInstrumentLoadResult {
 
 struct BounceAssets {
     clips: std::collections::HashMap<ClipId, Arc<vibez_core::audio_buffer::DecodedAudio>>,
-    samplers: std::collections::HashMap<
-        TrackId,
-        (Arc<vibez_core::audio_buffer::DecodedAudio>, String),
-    >,
+    samplers:
+        std::collections::HashMap<TrackId, (Arc<vibez_core::audio_buffer::DecodedAudio>, String)>,
     pads: std::collections::HashMap<
         (TrackId, usize),
         (Arc<vibez_core::audio_buffer::DecodedAudio>, String),
@@ -185,8 +182,7 @@ impl App {
         // matches one currently visible, else to the first available
         // port. Silent on failure: the user can still work without
         // MIDI, and Settings → Audio lets them pick manually later.
-        let midi_input =
-            auto_open_midi_input(ui_settings.preferred_midi_input.as_deref());
+        let midi_input = auto_open_midi_input(ui_settings.preferred_midi_input.as_deref());
 
         let mut app = Self {
             state,
@@ -333,8 +329,7 @@ impl App {
                         }
                     }
                     InstrumentStateInfo::DrumRack { pads } => {
-                        ui_track.drum_rack_pads =
-                            pads.iter().map(UiDrumPad::from_state).collect();
+                        ui_track.drum_rack_pads = pads.iter().map(UiDrumPad::from_state).collect();
                         for (i, pad) in pads.iter().cloned().enumerate() {
                             self.send_command(EngineCommand::SetDrumRackPadState {
                                 track_id: track_info.id,
@@ -363,10 +358,7 @@ impl App {
             sample_browser_open: self.state.sample_browser_open,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
-            preferred_midi_input: self
-                .midi_input
-                .as_ref()
-                .map(|h| h.port_name.clone()),
+            preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -570,8 +562,7 @@ impl App {
             BrowserImportTarget::ArrangementClipAt {
                 track_id,
                 position_samples,
-            } => self
-                .add_audio_clip_to_track_at(track_id, position_samples, audio, name, source),
+            } => self.add_audio_clip_to_track_at(track_id, position_samples, audio, name, source),
             BrowserImportTarget::Sampler(track_id) => {
                 self.apply_sampler_sample_loaded(track_id, audio, name, source);
                 Task::none()
@@ -607,8 +598,7 @@ impl App {
                 return Task::none();
             }
             None => {
-                self.state.status_text =
-                    "Drop target not found; drag cancelled".to_string();
+                self.state.status_text = "Drop target not found; drag cancelled".to_string();
                 return Task::none();
             }
         };
@@ -692,8 +682,7 @@ impl App {
                 rev,
             } => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.status_text =
-                        "Not connected to Dropbox for this drop".to_string();
+                    self.state.status_text = "Not connected to Dropbox for this drop".to_string();
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
@@ -713,14 +702,12 @@ impl App {
                 Task::perform(
                     fetch_dropbox_sample_async(client, cache, entry),
                     move |result| match result {
-                        Ok((audio, decoded_name, source)) => {
-                            Message::BrowserSampleDecoded(
-                                target.clone(),
-                                audio,
-                                decoded_name,
-                                source,
-                            )
-                        }
+                        Ok((audio, decoded_name, source)) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            audio,
+                            decoded_name,
+                            source,
+                        ),
                         Err(err) => Message::BrowserSampleDecodeError(err),
                     },
                 )
@@ -1002,7 +989,7 @@ impl App {
                     original_bpm: loaded_clip.info.original_bpm,
                     warped: loaded_clip.info.warped,
                     warped_to_bpm: loaded_clip.info.warped_to_bpm,
-                    original_audio: None,
+                    original_audio: loaded_clip.original_audio,
                 });
             }
         }
@@ -1260,8 +1247,7 @@ impl App {
 
     fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
         // Tear down the engine side.
-        let existing_track_ids: Vec<TrackId> =
-            self.state.tracks.iter().map(|t| t.id).collect();
+        let existing_track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
@@ -1297,10 +1283,7 @@ impl App {
                 self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
             }
             TrackKind::Midi | TrackKind::Instrument(_) => {
-                self.send_command(EngineCommand::AddMidiTrack(
-                    track.id,
-                    track.name.clone(),
-                ));
+                self.send_command(EngineCommand::AddMidiTrack(track.id, track.name.clone()));
             }
         }
         self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
@@ -1458,14 +1441,13 @@ impl App {
         };
 
         self.state.status_text = format!("Quantizing {}...", input.original_name);
-        Task::perform(
-            quantize_audio_clip_async(input),
-            move |result| Message::AudioQuantizeReady {
+        Task::perform(quantize_audio_clip_async(input), move |result| {
+            Message::AudioQuantizeReady {
                 track_id,
                 old_clip_id: clip_id,
                 result,
-            },
-        )
+            }
+        })
     }
 
     fn apply_audio_quantize_success(
@@ -1522,19 +1504,14 @@ impl App {
                 clip_id: success.new_clip_id,
             });
 
-        let duration_seconds =
-            success.new_duration as f64 / self.state.sample_rate as f64;
+        let duration_seconds = success.new_duration as f64 / self.state.sample_rate as f64;
         self.state.status_text = format!(
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
         );
     }
 
-    fn dispatch_detect_clip_bpm(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-    ) -> Task<Message> {
+    fn dispatch_detect_clip_bpm(&mut self, track_id: TrackId, clip_id: ClipId) -> Task<Message> {
         let Some(track) = self.state.find_track(track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
@@ -1551,15 +1528,14 @@ impl App {
             .unwrap_or_else(|| Arc::clone(&clip.audio));
         let sample_rate = self.state.sample_rate;
         self.state.status_text = format!("Detecting BPM for {}...", clip.name);
-        Task::perform(
-            detect_clip_bpm_async(audio, sample_rate),
-            move |estimate| Message::ClipBpmDetected {
+        Task::perform(detect_clip_bpm_async(audio, sample_rate), move |estimate| {
+            Message::ClipBpmDetected {
                 track_id,
                 clip_id,
                 bpm: estimate.map(|e| e.bpm),
                 confidence: estimate.map(|e| e.confidence).unwrap_or(0.0),
-            },
-        )
+            }
+        })
     }
 
     fn dispatch_warp_clip_to_project(
@@ -1582,8 +1558,7 @@ impl App {
             return Task::none();
         };
         let Some(clip_bpm) = clip.original_bpm else {
-            self.state.status_text =
-                "Set or detect the clip's BPM before warping".to_string();
+            self.state.status_text = "Set or detect the clip's BPM before warping".to_string();
             return Task::none();
         };
         if clip_bpm <= 0.0 {
@@ -1592,13 +1567,17 @@ impl App {
         }
         // If the clip was already warped once, warp the retained
         // original_audio. Otherwise the current `audio` is itself the
-        // original.
+        // original. Either way the clip's geometry fields are in
+        // samples of the CURRENT buffer, so `fields_frames` must be
+        // the current buffer's frame count for the rescale to be
+        // idempotent across repeated warps.
         let source_audio = clip
             .original_audio
             .clone()
             .unwrap_or_else(|| Arc::clone(&clip.audio));
-        let input = WarpClipInput {
+        let input = crate::warp::WarpClipInput {
             audio: source_audio,
+            fields_frames: clip.audio.num_frames() as u64,
             source_offset: clip.source_offset,
             duration: clip.duration,
             loop_start: clip.loop_start,
@@ -1608,14 +1587,13 @@ impl App {
         };
         let _ = sample_rate;
         self.state.status_text = format!("Warping to {project_bpm:.0} BPM...");
-        Task::perform(
-            warp_clip_async(input),
-            move |result| Message::ClipWarpReady {
+        Task::perform(crate::warp::warp_clip_async(input), move |result| {
+            Message::ClipWarpReady {
                 track_id,
                 clip_id,
                 result,
-            },
-        )
+            }
+        })
     }
 
     fn apply_clip_warp_success(
@@ -1662,10 +1640,7 @@ impl App {
         clip_id: ClipId,
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     ) -> Task<Message> {
-        if !self.state.auto_warp_on_import
-            || self.state.bpm <= 0.0
-            || self.state.sample_rate == 0
-        {
+        if !self.state.auto_warp_on_import || self.state.bpm <= 0.0 || self.state.sample_rate == 0 {
             return Task::none();
         }
         let input = AutoWarpInput {
@@ -1674,14 +1649,13 @@ impl App {
             project_bpm: self.state.bpm,
             confidence_threshold: self.state.warp_confidence_threshold,
         };
-        Task::perform(
-            auto_warp_clip_async(input),
-            move |outcome| Message::ClipAutoWarpReady {
+        Task::perform(auto_warp_clip_async(input), move |outcome| {
+            Message::ClipAutoWarpReady {
                 track_id,
                 clip_id,
                 outcome,
-            },
-        )
+            }
+        })
     }
 
     fn apply_auto_warp_outcome(
@@ -1783,10 +1757,7 @@ impl App {
             });
         }
         self.mark_project_dirty();
-        self.state.status_text = format!(
-            "Quantized {count} note(s) to {}",
-            grid.label()
-        );
+        self.state.status_text = format!("Quantized {count} note(s) to {}", grid.label());
     }
 
     fn generate_phrase_variations(&mut self, track_id: TrackId, clip_id: ClipId) {
@@ -1818,12 +1789,8 @@ impl App {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let count = 3usize;
-        let variants = vibez_core::phrase_variation::generate_variants(
-            &source_info,
-            preset,
-            seed,
-            count,
-        );
+        let variants =
+            vibez_core::phrase_variation::generate_variants(&source_info, preset, seed, count);
 
         let phrase_length = source_info.duration_beats.max(1.0);
         let base_position = source_info.position_beats + phrase_length;
@@ -4400,15 +4367,12 @@ impl App {
                 match vibez_audio_io::midi_input::list_midi_input_ports() {
                     Ok(ports) => {
                         self.midi_input_ports = ports;
-                        self.state.status_text = format!(
-                            "Found {} MIDI input port(s)",
-                            self.midi_input_ports.len()
-                        );
+                        self.state.status_text =
+                            format!("Found {} MIDI input port(s)", self.midi_input_ports.len());
                     }
                     Err(err) => {
                         self.midi_input_ports.clear();
-                        self.state.status_text =
-                            format!("MIDI scan error: {err}");
+                        self.state.status_text = format!("MIDI scan error: {err}");
                     }
                 }
             }
@@ -4444,8 +4408,7 @@ impl App {
                     })
                     .collect();
                 if targets.is_empty() {
-                    self.state.status_text =
-                        "Re-warp all: no warped clips to re-warp".to_string();
+                    self.state.status_text = "Re-warp all: no warped clips to re-warp".to_string();
                     return Task::none();
                 }
                 let count = targets.len();
@@ -4595,8 +4558,7 @@ impl App {
             }
             // -- Drag-and-drop from sample browser --
             Message::StartDragSample { source, label } => {
-                self.state.status_text =
-                    format!("Dragging {label} - drop on a lane or drum pad");
+                self.state.status_text = format!("Dragging {label} - drop on a lane or drum pad");
                 self.state.drag_source = Some(source);
                 self.state.drag_label = Some(label);
                 self.state.drag_hover_track = None;
@@ -4645,7 +4607,10 @@ impl App {
                         self.state.drag_label = None;
                         return self.dispatch_drop_for_target(
                             source,
-                            BrowserImportTarget::DrumRackPad { track_id, pad_index },
+                            BrowserImportTarget::DrumRackPad {
+                                track_id,
+                                pad_index,
+                            },
                         );
                     }
                     None => {
@@ -4669,8 +4634,7 @@ impl App {
                             });
                         if let Some((audio, name)) = audition {
                             self.send_command(EngineCommand::StartPreview(audio));
-                            self.state.status_text =
-                                format!("Pad {}: {}", pad_index + 1, name);
+                            self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
                         }
                         return self.update(Message::SelectDrumRackPad(track_id, pad_index));
                     }
@@ -4681,10 +4645,8 @@ impl App {
                     return Task::none();
                 };
                 self.state.drag_label = None;
-                return self.dispatch_drop_for_target(
-                    source,
-                    BrowserImportTarget::Sampler(track_id),
-                );
+                return self
+                    .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
             Message::LocalSamplePreviewReady(Ok(audio)) => {
                 self.send_command(EngineCommand::StartPreview(audio));
@@ -5061,7 +5023,9 @@ impl App {
                     self.state.status_text = "No time selection active".to_string();
                     return Task::none();
                 }
-                let start = self.state.beats_to_samples(self.state.selection_start_beats);
+                let start = self
+                    .state
+                    .beats_to_samples(self.state.selection_start_beats);
                 let end = self.state.beats_to_samples(self.state.selection_end_beats);
                 return self.dispatch_bounce(
                     vibez_engine::render::BounceMode::Master,
@@ -5082,8 +5046,7 @@ impl App {
                 let (range, insert_pos, name) = if is_note_clip {
                     let spb = self.state.sample_rate as f64 * 60.0 / self.state.bpm;
                     let track_opt = self.state.find_track(track_id);
-                    let nc = track_opt
-                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
+                    let nc = track_opt.and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
                     match nc {
                         Some(nc) => {
                             let start = (nc.position_beats * spb) as u64;
@@ -5282,8 +5245,7 @@ impl App {
                 }
                 let total = self.state.total_duration_samples();
                 if total == 0 {
-                    self.state.status_text =
-                        "Nothing to export: project is empty".to_string();
+                    self.state.status_text = "Nothing to export: project is empty".to_string();
                     return Task::none();
                 }
                 let assets = self.collect_bounce_assets();
@@ -5330,11 +5292,7 @@ impl App {
             }
             Message::SaveDropboxAppKey => {
                 let value = self.state.dropbox.app_key_input.trim().to_string();
-                self.dropbox_settings.app_key = if value.is_empty() {
-                    None
-                } else {
-                    Some(value)
-                };
+                self.dropbox_settings.app_key = if value.is_empty() { None } else { Some(value) };
                 if let Err(err) = self.dropbox_settings.save() {
                     self.state.dropbox.last_error = Some(format!("save settings: {err}"));
                 }
@@ -5343,8 +5301,7 @@ impl App {
                 self.state.status_text = "Dropbox app key saved".to_string();
             }
             Message::ConnectDropbox => {
-                let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings)
-                else {
+                let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) else {
                     self.state.dropbox.last_error = Some(
                         "No Dropbox app key set. Register an app at dropbox.com/developers/apps \
                         and paste the App key above."
@@ -5366,9 +5323,7 @@ impl App {
             }
             Message::DropboxConnected(Ok(outcome)) => {
                 self.state.dropbox.auth_in_progress = false;
-                if let Some(app_key) =
-                    load_app_key_with_env_override(&self.dropbox_settings)
-                {
+                if let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) {
                     let client = DropboxClient::new(app_key, outcome.tokens.clone());
                     self.dropbox_client = Some(Arc::new(client));
                 }
@@ -5379,8 +5334,7 @@ impl App {
                 }
                 self.state.dropbox.connected = true;
                 self.state.dropbox.account_email = Some(outcome.info.email.clone());
-                self.state.status_text =
-                    format!("Dropbox connected: {}", outcome.info.email);
+                self.state.status_text = format!("Dropbox connected: {}", outcome.info.email);
             }
             Message::DropboxConnected(Err(err)) => {
                 self.state.dropbox.auth_in_progress = false;
@@ -5406,8 +5360,7 @@ impl App {
                     return Task::none();
                 }
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error =
-                        Some("Not connected to Dropbox".into());
+                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 self.state.dropbox.listing_in_progress.insert(path.clone());
@@ -5450,17 +5403,15 @@ impl App {
             }
             Message::DropboxPreview(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error =
-                        Some("Not connected to Dropbox".into());
+                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
                 self.state.dropbox.preview_in_progress = true;
                 self.state.status_text = format!("Fetching preview: {}", entry.name);
-                return Task::perform(
-                    fetch_dropbox_sample_async(client, cache, entry),
-                    |result| Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio)),
-                );
+                return Task::perform(fetch_dropbox_sample_async(client, cache, entry), |result| {
+                    Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio))
+                });
             }
             Message::DropboxPreviewReady(Ok(audio)) => {
                 self.state.dropbox.preview_in_progress = false;
@@ -5474,8 +5425,7 @@ impl App {
             }
             Message::DropboxImportToArrangement(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error =
-                        Some("Not connected to Dropbox".into());
+                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
@@ -5493,13 +5443,11 @@ impl App {
             }
             Message::DropboxImportToDevice(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error =
-                        Some("Not connected to Dropbox".into());
+                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let Some(target) = self.selected_browser_device_target() else {
-                    self.state.status_text =
-                        "Select a Sampler or Drum Pad track first".into();
+                    self.state.status_text = "Select a Sampler or Drum Pad track first".into();
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
@@ -6333,10 +6281,7 @@ impl App {
                 .size(12)
                 .color(th::ACCENT)
                 .into(),
-            None => text("Not connected")
-                .size(12)
-                .color(th::TEXT_DIM)
-                .into(),
+            None => text("Not connected").size(12).color(th::TEXT_DIM).into(),
         };
 
         let rescan_btn = button(text("Rescan ports").size(11).color(th::TEXT))
@@ -6344,9 +6289,7 @@ impl App {
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
-                    }
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                     _ => None,
                 };
                 button::Style {
@@ -6366,9 +6309,7 @@ impl App {
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
-                    }
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                     _ => None,
                 };
                 button::Style {
@@ -6422,7 +6363,11 @@ impl App {
                     background: bg,
                     text_color: if is_current { th::ACCENT } else { th::TEXT },
                     border: iced::Border {
-                        color: if is_current { th::ACCENT_DIM } else { th::BORDER },
+                        color: if is_current {
+                            th::ACCENT_DIM
+                        } else {
+                            th::BORDER
+                        },
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -6616,9 +6561,7 @@ impl App {
             .padding([6, 12])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
-                    }
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                     _ => None,
                 };
                 button::Style {
@@ -6657,8 +6600,7 @@ impl App {
             text("Not connected").size(12).color(th::TEXT_DIM).into()
         };
 
-        let can_connect =
-            self.state.dropbox.has_app_key && !self.state.dropbox.auth_in_progress;
+        let can_connect = self.state.dropbox.has_app_key && !self.state.dropbox.auth_in_progress;
         let connect_label = if self.state.dropbox.auth_in_progress {
             "Connecting..."
         } else if self.state.dropbox.connected {
@@ -6673,9 +6615,7 @@ impl App {
             }
             btn.padding([6, 12]).style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
-                    }
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
                     _ => None,
                 };
                 button::Style {
@@ -7178,7 +7118,11 @@ impl App {
                 })
             };
             row![
-                tab_btn("Local", local_active, crate::state::SampleBrowserMode::Local),
+                tab_btn(
+                    "Local",
+                    local_active,
+                    crate::state::SampleBrowserMode::Local
+                ),
                 tab_btn(
                     "Dropbox",
                     dropbox_active,
@@ -7258,27 +7202,29 @@ impl App {
         .color(th::TEXT_DIM);
         let conf_slider = slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05);
 
-        let rewarp_btn = button(text("Re-warp all clips to project tempo").size(12).color(th::TEXT))
-            .on_press(Message::RewarpAllClips)
-            .padding([6, 12])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::BG_HOVER.into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::TEXT,
-                    border: iced::Border {
-                        color: th::ACCENT_DIM,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
+        let rewarp_btn = button(
+            text("Re-warp all clips to project tempo")
+                .size(12)
+                .color(th::TEXT),
+        )
+        .on_press(Message::RewarpAllClips)
+        .padding([6, 12])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::TEXT,
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
 
         column![
             title,
@@ -7706,17 +7652,8 @@ impl App {
                 .into();
         }
 
-        let account = self
-            .state
-            .dropbox
-            .account_email
-            .clone()
-            .unwrap_or_default();
-        let header = column![
-            title,
-            text(account).size(11).color(th::TEXT_DIM),
-        ]
-        .spacing(2);
+        let account = self.state.dropbox.account_email.clone().unwrap_or_default();
+        let header = column![title, text(account).size(11).color(th::TEXT_DIM),].spacing(2);
 
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
         self.render_dropbox_tree(String::new(), 0, &mut rows);
@@ -7763,10 +7700,7 @@ impl App {
                         ..Default::default()
                     }
                 });
-            if let Some(entry) = selected_entry
-                .as_ref()
-                .filter(|e| e.is_supported_audio())
-            {
+            if let Some(entry) = selected_entry.as_ref().filter(|e| e.is_supported_audio()) {
                 btn = btn.on_press(Message::DropboxImportToArrangement(entry.clone()));
             }
             btn.into()
@@ -7794,9 +7728,7 @@ impl App {
                     }
                 });
             if let (Some(entry), Some(_)) = (
-                selected_entry
-                    .as_ref()
-                    .filter(|e| e.is_supported_audio()),
+                selected_entry.as_ref().filter(|e| e.is_supported_audio()),
                 self.selected_browser_device_target(),
             ) {
                 btn = btn.on_press(Message::DropboxImportToDevice(entry.clone()));
@@ -7842,17 +7774,11 @@ impl App {
         };
         let mut sorted: Vec<&DropboxEntry> = entries.iter().collect();
         sorted.sort_by(|a, b| {
-            (!a.is_folder, a.name.to_lowercase())
-                .cmp(&(!b.is_folder, b.name.to_lowercase()))
+            (!a.is_folder, a.name.to_lowercase()).cmp(&(!b.is_folder, b.name.to_lowercase()))
         });
         for entry in sorted {
-            let expanded = self
-                .state
-                .dropbox
-                .expanded
-                .contains(&entry.path_lower);
-            let selected =
-                self.state.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
+            let expanded = self.state.dropbox.expanded.contains(&entry.path_lower);
+            let selected = self.state.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
 
             let prefix = if entry.is_folder {
                 if expanded {
@@ -8752,14 +8678,7 @@ impl App {
                 .padding([8, 6])
                 .width(Length::Fixed(60.0))
                 .style(move |_theme: &Theme| container::Style {
-                    background: Some(
-                        if active {
-                            th::ACCENT_DIM
-                        } else {
-                            th::BG_DARK
-                        }
-                        .into(),
-                    ),
+                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
                     text_color: Some(if active { th::ACCENT } else { th::TEXT }),
                     border: iced::Border {
                         color: if active { th::ACCENT_DIM } else { th::BORDER },
@@ -9430,11 +9349,7 @@ impl App {
             .into()
     }
 
-    fn view_audio_warp_row(
-        &self,
-        track_id: TrackId,
-        clip: &UiClip,
-    ) -> Element<'_, Message> {
+    fn view_audio_warp_row(&self, track_id: TrackId, clip: &UiClip) -> Element<'_, Message> {
         let clip_id = clip.id;
         let label = text("Warp").size(11).color(th::TEXT_DIM);
 
@@ -9516,11 +9431,7 @@ impl App {
         row_widgets.into()
     }
 
-    fn view_audio_quantize_row(
-        &self,
-        track_id: TrackId,
-        clip_id: ClipId,
-    ) -> Element<'_, Message> {
+    fn view_audio_quantize_row(&self, track_id: TrackId, clip_id: ClipId) -> Element<'_, Message> {
         let label = text("Quantize").size(11).color(th::TEXT_DIM);
         let grid_btn = |grid: crate::state::SnapGrid| -> Element<'_, Message> {
             button(text(grid.label()).size(11).color(th::TEXT))
@@ -9955,24 +9866,6 @@ async fn detect_clip_bpm_async(
         .unwrap_or(None)
 }
 
-struct WarpClipInput {
-    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-    source_offset: u64,
-    duration: u64,
-    loop_start: u64,
-    loop_end: u64,
-    clip_bpm: f64,
-    project_bpm: f64,
-}
-
-async fn warp_clip_async(
-    input: WarpClipInput,
-) -> Result<crate::message::ClipWarpSuccess, String> {
-    tokio::task::spawn_blocking(move || compute_warp(input))
-        .await
-        .map_err(|e| format!("warp task failed: {e}"))?
-}
-
 struct AutoWarpInput {
     audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     sample_rate: u32,
@@ -9999,8 +9892,9 @@ async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpO
         };
     }
     let num_frames = input.audio.num_frames();
-    let warp_input = WarpClipInput {
+    let warp_input = crate::warp::WarpClipInput {
         audio: input.audio,
+        fields_frames: num_frames as u64,
         source_offset: 0,
         duration: num_frames as u64,
         loop_start: 0,
@@ -10008,7 +9902,7 @@ async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpO
         clip_bpm: est.bpm,
         project_bpm: input.project_bpm,
     };
-    match warp_clip_async(warp_input).await {
+    match crate::warp::warp_clip_async(warp_input).await {
         Ok(success) => AutoWarpOutcome::Warped {
             confidence: est.confidence,
             success,
@@ -10019,80 +9913,6 @@ async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpO
         },
     }
 }
-
-fn compute_warp(input: WarpClipInput) -> Result<crate::message::ClipWarpSuccess, String> {
-    if input.clip_bpm <= 0.0 || input.project_bpm <= 0.0 {
-        return Err("Invalid BPM".into());
-    }
-    let source_frames = input.audio.num_frames();
-    if source_frames == 0 {
-        return Err("Empty audio".into());
-    }
-    let sample_rate = input.audio.sample_rate as f64;
-    if sample_rate <= 0.0 {
-        return Err("Invalid sample rate".into());
-    }
-    // Naive warp ratio derived from the "same number of beats at a
-    // different tempo" identity:
-    //
-    //   source_frames = beats * 60 / clip_bpm * sample_rate
-    //   target_frames = beats * 60 / project_bpm * sample_rate
-    //   => target / source = clip_bpm / project_bpm
-    let naive_ratio = input.clip_bpm / input.project_bpm;
-    let naive_target = source_frames as f64 * naive_ratio;
-
-    // Snap the warped length to the nearest whole bar at the project
-    // tempo when the naive result lands close to an integer bar
-    // count. Real drum loops almost always carry a trailing pickup
-    // (the "and" before beat 1 of the next bar) for crossfade
-    // purposes. A naive proportional warp preserves that pickup,
-    // which then leaks past the arrangement loop boundary and
-    // sounds like a double beat. Snapping to the nearest bar
-    // trims / extends the clip so a "1 bar" loop plays as exactly
-    // one bar at the project tempo.
-    //
-    // The 0.25-bar guard means we only snap when the source is
-    // plausibly "about N bars"; a 1.5-bar clip stays at 1.5 bars
-    // rather than being aggressively remapped.
-    let bar_samples = 4.0 * 60.0 * sample_rate / input.project_bpm;
-    let target_total = if bar_samples >= 1.0 {
-        let naive_bars = naive_target / bar_samples;
-        if naive_bars >= 0.5 {
-            let rounded = naive_bars.round();
-            if (naive_bars - rounded).abs() < 0.25 {
-                (rounded * bar_samples).round() as usize
-            } else {
-                naive_target as usize
-            }
-        } else {
-            naive_target as usize
-        }
-    } else {
-        naive_target as usize
-    };
-
-    if target_total == 0 {
-        return Err("Target length collapsed to zero".into());
-    }
-
-    let stretched =
-        vibez_dsp::time_stretch::pitch_preserving_stretch(&input.audio, target_total);
-    // Effective ratio after snap so source_offset / loop bounds
-    // scale consistently with the actual stretched length.
-    let effective_ratio = target_total as f64 / source_frames as f64;
-    let scale = |x: u64| -> u64 { (x as f64 * effective_ratio) as u64 };
-    Ok(crate::message::ClipWarpSuccess {
-        audio: Arc::new(stretched),
-        original_audio: input.audio,
-        new_duration: scale(input.duration),
-        new_source_offset: scale(input.source_offset),
-        new_loop_start: scale(input.loop_start),
-        new_loop_end: scale(input.loop_end),
-        detected_bpm: input.clip_bpm,
-        warped_to_bpm: input.project_bpm,
-    })
-}
-
 
 fn compute_audio_quantize(
     input: QuantizeInput,
@@ -10137,7 +9957,9 @@ fn compute_audio_quantize(
     let mut target_positions: Vec<u64> = Vec::with_capacity(source_bounds.len());
     for &b in &source_bounds {
         let original_timeline_pos = clip_position.saturating_add(b - clip_source_offset);
-        let snapped_beats = grid.snap_beat(samples_to_beats(original_timeline_pos)).max(0.0);
+        let snapped_beats = grid
+            .snap_beat(samples_to_beats(original_timeline_pos))
+            .max(0.0);
         target_positions.push(beats_to_samples(snapped_beats));
     }
     for i in 1..target_positions.len() {
@@ -10147,8 +9969,7 @@ fn compute_audio_quantize(
     }
 
     let channel_count = audio.channels.len().max(1);
-    let mut output_channels: Vec<Vec<f32>> =
-        (0..channel_count).map(|_| Vec::new()).collect();
+    let mut output_channels: Vec<Vec<f32>> = (0..channel_count).map(|_| Vec::new()).collect();
     let mut total_out_len: usize = 0;
     let mut stretched_slices = 0usize;
 
@@ -10156,8 +9977,7 @@ fn compute_audio_quantize(
         let src_start = source_bounds[i] as usize;
         let src_end = source_bounds[i + 1] as usize;
         let src_len = src_end.saturating_sub(src_start);
-        let target_len =
-            target_positions[i + 1].saturating_sub(target_positions[i]) as usize;
+        let target_len = target_positions[i + 1].saturating_sub(target_positions[i]) as usize;
         if src_len < MIN_SLICE_FRAMES || target_len == 0 {
             continue;
         }
@@ -10245,7 +10065,14 @@ async fn fetch_dropbox_sample_async(
     client: Arc<DropboxClient>,
     cache: DropboxCache,
     entry: DropboxEntry,
-) -> Result<(Arc<vibez_core::audio_buffer::DecodedAudio>, String, MediaSourceRef), String> {
+) -> Result<
+    (
+        Arc<vibez_core::audio_buffer::DecodedAudio>,
+        String,
+        MediaSourceRef,
+    ),
+    String,
+> {
     let local = client
         .download_to_cache(&entry, &cache)
         .await
@@ -10302,6 +10129,41 @@ async fn bounce_async(
     .map_err(|err| format!("bounce task failed: {err}"))?
 }
 
+/// Finish a decoded clip for project load. The project file stores
+/// the raw source reference, but a warped clip's geometry (duration /
+/// offsets / loop bounds) is saved in warped-sample units, so the
+/// deterministic stretch is re-applied here; otherwise every warped
+/// clip reloads at its raw tempo and the whole project plays out of
+/// sync. The stretch runs on a blocking thread (WSOLA over a whole
+/// clip is CPU-heavy).
+async fn finish_loaded_clip(
+    info: ClipInfo,
+    raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
+) -> LoadedClipData {
+    if info.warped {
+        if let (Some(clip_bpm), Some(warped_to_bpm)) = (info.original_bpm, info.warped_to_bpm) {
+            let stretch_src = Arc::clone(&raw);
+            let warped = tokio::task::spawn_blocking(move || {
+                crate::warp::rewarp_for_load(&stretch_src, clip_bpm, warped_to_bpm)
+            })
+            .await
+            .unwrap_or(None);
+            if let Some(warped) = warped {
+                return LoadedClipData {
+                    info,
+                    audio: warped,
+                    original_audio: Some(raw),
+                };
+            }
+        }
+    }
+    LoadedClipData {
+        info,
+        audio: raw,
+        original_audio: None,
+    }
+}
+
 async fn load_project_async(
     path: PathBuf,
     dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
@@ -10322,19 +10184,17 @@ async fn load_project_async(
         match clip.resolved_source().cloned() {
             Some(MediaSourceRef::LocalFile { path: clip_path }) => {
                 match decode_blocking(clip_path).await {
-                    Ok(audio) => clips.push(LoadedClipData {
-                        info: clip.clone(),
-                        audio: Arc::new(audio),
-                    }),
+                    Ok(audio) => {
+                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
+                    }
                     Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
                 }
             }
             Some(source @ MediaSourceRef::DropboxFile { .. }) => {
                 match hydrate_dropbox_source(dropbox.as_ref(), &source, &clip.name).await {
-                    Ok(audio) => clips.push(LoadedClipData {
-                        info: clip.clone(),
-                        audio: Arc::new(audio),
-                    }),
+                    Ok(audio) => {
+                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
+                    }
                     Err(err) => warnings.push(err),
                 }
             }
@@ -10366,29 +10226,24 @@ async fn load_project_async(
                             )),
                         }
                     }
-                    MediaSourceRef::DropboxFile { .. } => match hydrate_dropbox_source(
-                        dropbox.as_ref(),
-                        source,
-                        &track.name,
-                    )
-                    .await
-                    {
-                        Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                            track_id: track.id,
-                            source: source.clone(),
-                            audio: Arc::new(audio),
-                            name: source.display_name(),
-                        }),
-                        Err(err) => warnings.push(err),
-                    },
+                    MediaSourceRef::DropboxFile { .. } => {
+                        match hydrate_dropbox_source(dropbox.as_ref(), source, &track.name).await {
+                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                                track_id: track.id,
+                                source: source.clone(),
+                                audio: Arc::new(audio),
+                                name: source.display_name(),
+                            }),
+                            Err(err) => warnings.push(err),
+                        }
+                    }
                 },
                 InstrumentStateInfo::DrumRack { pads } => {
                     for (pad_index, pad) in pads.iter().enumerate() {
                         let Some(source) = &pad.source else {
                             continue;
                         };
-                        let label =
-                            format!("drum pad {} on '{}'", pad_index + 1, track.name);
+                        let label = format!("drum pad {} on '{}'", pad_index + 1, track.name);
                         match source {
                             MediaSourceRef::LocalFile { path: sample_path } => {
                                 match decode_blocking(sample_path.clone()).await {
@@ -10402,18 +10257,11 @@ async fn load_project_async(
                                             state: pad.clone(),
                                         })
                                     }
-                                    Err(err) => {
-                                        warnings.push(format!("Skipped {label} ({err})"))
-                                    }
+                                    Err(err) => warnings.push(format!("Skipped {label} ({err})")),
                                 }
                             }
                             MediaSourceRef::DropboxFile { .. } => {
-                                match hydrate_dropbox_source(
-                                    dropbox.as_ref(),
-                                    source,
-                                    &label,
-                                )
-                                .await
+                                match hydrate_dropbox_source(dropbox.as_ref(), source, &label).await
                                 {
                                     Ok(audio) => {
                                         drum_rack_pad_samples.push(LoadedDrumRackPadData {
@@ -10446,9 +10294,7 @@ async fn load_project_async(
     })
 }
 
-async fn decode_blocking(
-    path: PathBuf,
-) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
+async fn decode_blocking(path: PathBuf) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
     tokio::task::spawn_blocking(move || {
         file_io::decode_audio_file(&path).map_err(|e| e.to_string())
     })

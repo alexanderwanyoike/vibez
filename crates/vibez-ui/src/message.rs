@@ -19,7 +19,12 @@ use crate::state::{
 #[derive(Debug, Clone)]
 pub struct LoadedClipData {
     pub info: ClipInfo,
+    /// Audio the clip's geometry fields refer to. For warped clips
+    /// this is the re-stretched buffer, not the raw file contents.
     pub audio: Arc<DecodedAudio>,
+    /// Raw un-warped audio, retained when `info.warped` so later
+    /// re-warps stretch from the original.
+    pub original_audio: Option<Arc<DecodedAudio>>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,7 +121,10 @@ pub enum BrowserImportTarget {
         position_samples: u64,
     },
     Sampler(TrackId),
-    DrumRackPad { track_id: TrackId, pad_index: usize },
+    DrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
