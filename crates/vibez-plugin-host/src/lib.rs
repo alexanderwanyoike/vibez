@@ -15,7 +15,7 @@ pub use format::{PluginCategory, PluginFormat, PluginId};
 pub use gui::{PluginGuiHandle, PluginGuiKey};
 pub use info::PluginInfo;
 pub use instance::PluginInstance;
-pub use scanner::scan_plugins;
+pub use scanner::{scan_plugins, scan_plugins_sandboxed, ScanReport};
 pub use settings::PluginSettings;
 pub use wrappers::effect::PluginEffectWrapper;
 pub use wrappers::instrument::PluginInstrumentWrapper;

@@ -4697,7 +4697,7 @@ impl App {
                     return Task::perform(
                         async move {
                             tokio::task::spawn_blocking(move || {
-                                vibez_plugin_host::scan_plugins(&settings)
+                                vibez_plugin_host::scan_plugins_sandboxed(&settings)
                             })
                             .await
                             .unwrap_or_default()
@@ -4706,11 +4706,28 @@ impl App {
                     );
                 }
             }
-            Message::ScanPluginsComplete(plugins) => {
-                let count = plugins.len();
-                self.state.plugin_settings.cache = plugins;
+            Message::ScanPluginsComplete(report) => {
+                let count = report.plugins.len();
+                self.state.plugin_settings.cache = report.plugins;
                 self.state.plugin_scan_in_progress = false;
-                self.state.plugin_scan_status = format!("Found {count} plugins");
+                self.state.plugin_scan_status = if report.failed.is_empty() {
+                    format!("Found {count} plugins")
+                } else {
+                    for (path, reason) in &report.failed {
+                        eprintln!("vibez: plugin skipped: {path:?}: {reason}");
+                    }
+                    let names: Vec<String> = report
+                        .failed
+                        .iter()
+                        .filter_map(|(p, _)| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .collect();
+                    format!(
+                        "Found {count} plugins ({} skipped: {})",
+                        report.failed.len(),
+                        names.join(", ")
+                    )
+                };
                 let _ = self.state.plugin_settings.save();
             }
             Message::AddPluginScanPath => {

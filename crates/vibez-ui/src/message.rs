@@ -479,7 +479,7 @@ pub enum Message {
 
     // Plugin scanning
     ScanPlugins,
-    ScanPluginsComplete(Vec<PluginInfo>),
+    ScanPluginsComplete(vibez_plugin_host::ScanReport),
     AddPluginScanPath,
     PluginScanPathSelected(Option<PathBuf>),
     RemovePluginScanPath(usize),
