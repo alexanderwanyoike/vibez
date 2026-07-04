@@ -109,6 +109,7 @@ impl Vst3PluginInstance {
             libloading::Library::new(&module_path)
                 .map_err(|e| format!("Failed to load VST3 module: {e}"))?
         };
+        let lib = super::scanner::vst3_module_init(lib)?;
 
         type GetFactoryFn = unsafe extern "system" fn() -> *mut std::ffi::c_void;
 
@@ -461,5 +462,6 @@ impl Drop for Vst3PluginInstance {
             let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
             unsafe { release(self.processor) };
         }
+        super::scanner::vst3_module_exit(&self._lib);
     }
 }

@@ -8,7 +8,7 @@ use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
-use vibez_plugin_host::{PluginId, PluginInfo};
+use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
 use crate::state::{
