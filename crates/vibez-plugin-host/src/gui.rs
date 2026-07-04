@@ -429,3 +429,17 @@ impl Drop for Vst3GuiHandle {
         }
     }
 }
+
+#[cfg(test)]
+mod iid_tests {
+    /// See vst3_host::instance::tests — hand-written IIDs must match
+    /// the SDK-generated constants or plugins reject queryInterface.
+    #[test]
+    fn ieditcontroller_iid_matches_sdk() {
+        let sdk: Vec<u8> = vst3::Steinberg::Vst::IEditController_iid
+            .iter()
+            .map(|b| *b as u8)
+            .collect();
+        assert_eq!(super::IEDIT_CONTROLLER_IID.as_slice(), sdk.as_slice());
+    }
+}

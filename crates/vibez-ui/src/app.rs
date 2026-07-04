@@ -1728,6 +1728,7 @@ impl App {
                     | Message::CreateNoteClipFromSelection(_)
                     | Message::EditNameText(_)
                     | Message::CursorMoved(_, _)
+                    | Message::WindowResized(_, _)
                     | Message::MouseReleased
                     | Message::NewProject
                     | Message::OpenProject
@@ -3718,6 +3719,10 @@ impl App {
             Message::CursorMoved(x, y) => {
                 self.state.cursor_x = x;
                 self.state.cursor_y = y;
+            }
+            Message::WindowResized(w, h) => {
+                self.state.window_width = w;
+                self.state.window_height = h;
             }
             Message::MouseReleased => {
                 self.state.drag_resize_active = false;
@@ -8718,13 +8723,31 @@ impl App {
                             .color(th::TEXT_DIM),
                     );
                 } else {
-                    for plugin in &self.state.plugin_settings.cache {
+                    let mut sorted: Vec<&vibez_plugin_host::PluginInfo> =
+                        self.state.plugin_settings.cache.iter().collect();
+                    sorted.sort_by(|a, b| {
+                        a.vendor
+                            .to_lowercase()
+                            .cmp(&b.vendor.to_lowercase())
+                            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                    let mut last_vendor: Option<&str> = None;
+                    for plugin in sorted {
                         let name = &plugin.name;
                         if !search_lower.is_empty()
                             && !name.to_lowercase().contains(&search_lower)
                             && !plugin.vendor.to_lowercase().contains(&search_lower)
                         {
                             continue;
+                        }
+                        if last_vendor != Some(plugin.vendor.as_str()) {
+                            last_vendor = Some(plugin.vendor.as_str());
+                            items_col = items_col.push(
+                                text(plugin.vendor.clone())
+                                    .size(10)
+                                    .color(th::TEXT_DIM)
+                                    .width(Length::Fill),
+                            );
                         }
                         let format_badge = match plugin.format {
                             PluginFormat::Clap => "CLAP",
@@ -8788,7 +8811,18 @@ impl App {
             }
         }
 
-        let menu_content = column![tabs_row, search_input, items_col]
+        // Cap the list height and scroll it: a full plugin library is
+        // hundreds of rows, which would otherwise render past the
+        // bottom of the window and look like an empty menu.
+        const MENU_LIST_MAX_H: f32 = 320.0;
+        let items_scroll = container(scrollable(items_col).width(Length::Fill).direction(
+            scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new().width(6).scroller_width(6),
+            ),
+        ))
+        .max_height(MENU_LIST_MAX_H);
+
+        let menu_content = column![tabs_row, search_input, items_scroll]
             .spacing(6)
             .padding(8)
             .width(Length::Fixed(220.0));
@@ -8803,13 +8837,16 @@ impl App {
             ..Default::default()
         });
 
-        // Position the menu near where it was triggered
+        // Position the menu near where it was triggered, clamped so it
+        // stays on-screen when opened near the window edges (the
+        // devices panel lives at the bottom of the window).
+        const MENU_EST_H: f32 = MENU_LIST_MAX_H + 90.0;
+        const MENU_W: f32 = 236.0;
+        let menu_y = menu.y.min(self.state.window_height - MENU_EST_H).max(0.0);
+        let menu_x = menu.x.min(self.state.window_width - MENU_W).max(0.0);
         let padded = column![
-            vertical_space().height(Length::Fixed(menu.y.max(0.0))),
-            row![
-                horizontal_space().width(Length::Fixed(menu.x.max(0.0))),
-                menu_card,
-            ]
+            vertical_space().height(Length::Fixed(menu_y)),
+            row![horizontal_space().width(Length::Fixed(menu_x)), menu_card,]
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
@@ -9442,6 +9479,9 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                     iced::mouse::Button::Left,
                 )) => Some(Message::MouseReleased),
+                iced::Event::Window(iced::window::Event::Resized(size)) => {
+                    Some(Message::WindowResized(size.width, size.height))
+                }
                 _ => None,
             }),
         ])

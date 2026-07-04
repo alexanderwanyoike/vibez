@@ -39,9 +39,9 @@ const ICOMPONENT_IID: [u8; 16] = [
     0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02,
 ];
 
-// VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33F}
+// VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33D}
 const IAUDIOPROCESSOR_IID: [u8; 16] = [
-    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3F,
+    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3D,
 ];
 
 /// Raw ProcessSetup matching VST3 C layout.
@@ -463,5 +463,30 @@ impl Drop for Vst3PluginInstance {
             unsafe { release(self.processor) };
         }
         super::scanner::vst3_module_exit(&self._lib);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Hand-written IIDs must match the SDK-generated constants in the
+    /// vst3 crate. A single wrong byte makes every plugin reject the
+    /// queryInterface call (a 0x3F-for-0x3D typo in IAudioProcessor
+    /// once broke loading of ALL VST3 plugins).
+    fn assert_iid(ours: [u8; 16], sdk: [::std::os::raw::c_char; 16]) {
+        let sdk_bytes: Vec<u8> = sdk.iter().map(|b| *b as u8).collect();
+        assert_eq!(ours.as_slice(), sdk_bytes.as_slice());
+    }
+
+    #[test]
+    fn icomponent_iid_matches_sdk() {
+        assert_iid(super::ICOMPONENT_IID, vst3::Steinberg::Vst::IComponent_iid);
+    }
+
+    #[test]
+    fn iaudioprocessor_iid_matches_sdk() {
+        assert_iid(
+            super::IAUDIOPROCESSOR_IID,
+            vst3::Steinberg::Vst::IAudioProcessor_iid,
+        );
     }
 }

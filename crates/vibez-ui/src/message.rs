@@ -396,6 +396,7 @@ pub enum Message {
 
     // Cursor tracking
     CursorMoved(f32, f32),
+    WindowResized(f32, f32),
     MouseReleased,
 
     // File menu
