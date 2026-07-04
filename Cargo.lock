@@ -4738,6 +4738,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "libloading 0.8.9",
+ "vibez-plugin-host",
  "vibez-ui",
 ]
 

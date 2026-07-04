@@ -5,6 +5,7 @@ pub mod gui;
 pub mod info;
 pub mod instance;
 pub mod paths;
+pub mod scan_helper;
 pub mod scanner;
 pub mod settings;
 pub mod vst3_host;
