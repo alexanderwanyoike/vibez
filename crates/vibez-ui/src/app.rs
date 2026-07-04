@@ -271,87 +271,6 @@ impl App {
         self.state.status_text = "New project".to_string();
     }
 
-    fn apply_template(&mut self, template: &vibez_project::templates::GenreTemplate) {
-        let project = template.build();
-        self.clear_project_runtime();
-        self.undo_history.clear();
-        self.state.bpm = project.bpm;
-        self.state.bpm_text = format!("{:.0}", project.bpm);
-        self.send_command(EngineCommand::SetBpm(project.bpm));
-
-        for track_info in &project.tracks {
-            let mut ui_track = UiTrack::new_instrument(
-                track_info.id,
-                track_info.name.clone(),
-                track_info.kind,
-                track_info.color_index,
-            );
-            ui_track.gain = track_info.gain;
-            ui_track.pan = track_info.pan;
-            ui_track.mute = track_info.mute;
-            ui_track.solo = track_info.solo;
-            ui_track.instrument_kind = track_info.instrument;
-            ui_track.has_instrument = track_info.instrument.is_some();
-
-            match track_info.kind {
-                TrackKind::Audio => {
-                    self.send_command(EngineCommand::AddTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
-                }
-                TrackKind::Midi | TrackKind::Instrument(_) => {
-                    self.send_command(EngineCommand::AddMidiTrack(
-                        track_info.id,
-                        track_info.name.clone(),
-                    ));
-                }
-            }
-
-            self.send_command(EngineCommand::SetTrackGain(track_info.id, track_info.gain));
-            self.send_command(EngineCommand::SetTrackPan(track_info.id, track_info.pan));
-
-            if let Some(kind) = track_info.instrument {
-                self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
-            }
-
-            if let Some(state) = &track_info.native_instrument {
-                match state {
-                    InstrumentStateInfo::SubtractiveSynth { params }
-                    | InstrumentStateInfo::Sampler { params, .. } => {
-                        ui_track.instrument_params = params.clone();
-                        for (i, v) in params.iter().copied().enumerate() {
-                            self.send_command(EngineCommand::SetInstrumentParam {
-                                track_id: track_info.id,
-                                param_index: i,
-                                value: v,
-                            });
-                        }
-                    }
-                    InstrumentStateInfo::DrumRack { pads } => {
-                        ui_track.drum_rack_pads = pads.iter().map(UiDrumPad::from_state).collect();
-                        for (i, pad) in pads.iter().cloned().enumerate() {
-                            self.send_command(EngineCommand::SetDrumRackPadState {
-                                track_id: track_info.id,
-                                pad_index: i,
-                                state: pad,
-                            });
-                        }
-                    }
-                }
-            }
-
-            self.state.tracks.push(ui_track);
-            self.state.next_track_number =
-                (self.state.tracks.len() as u32).max(self.state.next_track_number);
-        }
-
-        self.state.selected_track = self.state.tracks.first().map(|t| t.id);
-        self.state.current_project_path = None;
-        self.state.project_dirty = false;
-        self.state.status_text = format!("New project from template: {}", template.name);
-    }
-
     fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
             sample_library_roots: self.state.sample_browser_roots.clone(),
@@ -1758,86 +1677,6 @@ impl App {
         }
         self.mark_project_dirty();
         self.state.status_text = format!("Quantized {count} note(s) to {}", grid.label());
-    }
-
-    fn generate_phrase_variations(&mut self, track_id: TrackId, clip_id: ClipId) {
-        let source_info = {
-            let Some(track) = self.state.find_track(track_id) else {
-                self.state.status_text = "Track not found".to_string();
-                return;
-            };
-            let Some(source) = track.note_clips.iter().find(|c| c.id == clip_id) else {
-                self.state.status_text = "Note clip not found".to_string();
-                return;
-            };
-            vibez_core::midi::NoteClipInfo {
-                id: source.id,
-                track_id,
-                name: source.name.clone(),
-                position_beats: source.position_beats,
-                duration_beats: source.duration_beats,
-                loop_enabled: source.loop_enabled,
-                loop_start_beats: source.loop_start_beats,
-                loop_end_beats: source.loop_end_beats,
-                notes: source.notes.clone(),
-            }
-        };
-
-        let preset = vibez_core::phrase_variation::GenrePreset::from_bpm(self.state.bpm);
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let count = 3usize;
-        let variants =
-            vibez_core::phrase_variation::generate_variants(&source_info, preset, seed, count);
-
-        let phrase_length = source_info.duration_beats.max(1.0);
-        let base_position = source_info.position_beats + phrase_length;
-
-        for (i, mut variant) in variants.into_iter().enumerate() {
-            variant.position_beats = base_position + phrase_length * i as f64;
-            let new_clip_id = variant.id;
-
-            self.send_command(EngineCommand::AddNoteClip {
-                track_id,
-                clip_id: new_clip_id,
-                position_beats: variant.position_beats,
-                duration_beats: variant.duration_beats,
-                loop_enabled: variant.loop_enabled,
-                loop_start_beats: variant.loop_start_beats,
-                loop_end_beats: variant.loop_end_beats,
-            });
-            for note in &variant.notes {
-                self.send_command(EngineCommand::AddNote {
-                    track_id,
-                    clip_id: new_clip_id,
-                    note: *note,
-                });
-            }
-
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                track.note_clips.push(UiNoteClip {
-                    id: new_clip_id,
-                    name: variant.name.clone(),
-                    position_beats: variant.position_beats,
-                    duration_beats: variant.duration_beats,
-                    notes: variant.notes.clone(),
-                    selected_notes: HashSet::new(),
-                    loop_enabled: variant.loop_enabled,
-                    loop_start_beats: variant.loop_start_beats,
-                    loop_end_beats: variant.loop_end_beats,
-                });
-            }
-        }
-
-        self.mark_project_dirty();
-        self.state.status_text = format!(
-            "Generated {} {} variation(s) after '{}'",
-            count,
-            preset.name(),
-            source_info.name
-        );
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -4728,15 +4567,6 @@ impl App {
                 self.state.file_menu_open = false;
                 self.reset_to_new_project();
             }
-            Message::NewProjectFromTemplate(id) => {
-                self.state.file_menu_open = false;
-                match vibez_project::templates::find(id) {
-                    Some(template) => self.apply_template(template),
-                    None => {
-                        self.state.status_text = format!("Unknown template: {id}");
-                    }
-                }
-            }
             Message::OpenProject => {
                 self.state.file_menu_open = false;
                 return Task::perform(
@@ -5087,12 +4917,6 @@ impl App {
             }
             Message::BounceComplete(Err(err)) => {
                 self.state.status_text = format!("Bounce error: {err}");
-            }
-
-            // -- Phrase variation --
-            Message::GenerateVariations { track_id, clip_id } => {
-                self.state.context_menu = None;
-                self.generate_phrase_variations(track_id, clip_id);
             }
 
             // -- Quantize --
@@ -5981,39 +5805,6 @@ impl App {
             Message::ExportProject,
         );
 
-        let mut template_rows: Vec<Element<'_, Message>> = Vec::new();
-        for template in vibez_project::templates::TEMPLATES {
-            let label = format!("New: {} {}", template.name, template.bpm as u32);
-            template_rows.push(
-                button(
-                    row![
-                        icons::icon(icons::MUSIC).size(12).color(th::TEXT_DIM),
-                        text(label).size(12).color(th::TEXT)
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::NewProjectFromTemplate(template.id))
-                .padding([8, 16])
-                .width(Length::Fill)
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::TEXT,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                })
-                .into(),
-            );
-        }
-
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
         let save_label = if self.state.project_dirty {
             "Save*"
@@ -6048,11 +5839,8 @@ impl App {
             }
         });
 
-        let mut menu_content = column![new_btn].spacing(2);
-        for row in template_rows {
-            menu_content = menu_content.push(row);
-        }
-        let menu_content = menu_content
+        let menu_content = column![new_btn]
+            .spacing(2)
             .push(open_btn)
             .push(save_btn)
             .push(save_as_btn)
@@ -6804,13 +6592,8 @@ impl App {
                     },
                 ));
 
-                // Phrase variation + quantize (note clips only)
+                // Quantize (grid follows the snap setting)
                 if is_note_clip {
-                    col = col.push(menu_btn(
-                        icons::REPEAT,
-                        "Generate Variations".into(),
-                        Message::GenerateVariations { track_id, clip_id },
-                    ));
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
                         format!("Quantize ({})", self.state.snap_grid.label()),

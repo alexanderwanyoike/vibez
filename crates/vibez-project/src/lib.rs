@@ -1,5 +1,3 @@
-pub mod templates;
-
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

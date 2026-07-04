@@ -3,6 +3,14 @@
 Date: 2026-04-18
 Branch: `feature/sample-first-track-factory`
 
+> **Amendment 2026-07-04**: after real dogfood use, genre starter
+> templates and the phrase variation engine were REMOVED. Neither was
+> reached for while actually making tracks; both failed the decision
+> filter below. This supersedes "Variation Is Essential" and the
+> genre-template items in this doc. The variation idea may return
+> later, but only if real use demands it. Focus is the core loop:
+> browse, chop, warp, arrange, resample.
+
 ## Mission
 
 Turn Vibez into a `tune-making machine` for fast electronic music production.
