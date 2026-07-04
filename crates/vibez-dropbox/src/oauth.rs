@@ -37,10 +37,7 @@ impl BrowserOpener for SystemBrowserOpener {
 }
 
 /// Run the full PKCE flow and return fresh tokens.
-pub async fn run_flow(
-    app_key: &str,
-    opener: Arc<dyn BrowserOpener>,
-) -> DropboxResult<Tokens> {
+pub async fn run_flow(app_key: &str, opener: Arc<dyn BrowserOpener>) -> DropboxResult<Tokens> {
     let verifier = random_url_safe_string(64);
     let challenge = code_challenge(&verifier);
     let state = random_url_safe_string(32);
@@ -74,9 +71,9 @@ pub async fn run_flow(
             "Dropbox returned authorisation error: {err}"
         )));
     }
-    let code = callback.code.ok_or_else(|| {
-        DropboxError::Oauth("no `code` parameter in callback URL".into())
-    })?;
+    let code = callback
+        .code
+        .ok_or_else(|| DropboxError::Oauth("no `code` parameter in callback URL".into()))?;
 
     exchange_code_for_tokens(app_key, &verifier, &code, &redirect_uri).await
 }
@@ -84,10 +81,7 @@ pub async fn run_flow(
 /// Exchange a long-lived refresh token for a new access token.
 /// Dropbox may or may not return a new refresh token; preserve the
 /// existing one if absent.
-pub async fn refresh_access_token(
-    app_key: &str,
-    existing_refresh: &str,
-) -> DropboxResult<Tokens> {
+pub async fn refresh_access_token(app_key: &str, existing_refresh: &str) -> DropboxResult<Tokens> {
     let client = reqwest::Client::new();
     let response = client
         .post("https://api.dropboxapi.com/oauth2/token")
@@ -143,8 +137,7 @@ async fn exchange_code_for_tokens(
     let parsed: TokenResponse = response.json().await?;
     let refresh = parsed.refresh_token.clone().ok_or_else(|| {
         DropboxError::Oauth(
-            "Dropbox did not return a refresh_token; is `token_access_type=offline` set?"
-                .into(),
+            "Dropbox did not return a refresh_token; is `token_access_type=offline` set?".into(),
         )
     })?;
     Ok(tokens_from_response(parsed, &refresh))
@@ -157,7 +150,9 @@ fn tokens_from_response(resp: TokenResponse, fallback_refresh: &str) -> Tokens {
         .unwrap_or(0);
     Tokens {
         access_token: resp.access_token,
-        refresh_token: resp.refresh_token.unwrap_or_else(|| fallback_refresh.to_string()),
+        refresh_token: resp
+            .refresh_token
+            .unwrap_or_else(|| fallback_refresh.to_string()),
         expires_at_secs: now_secs.saturating_add(resp.expires_in),
     }
 }
@@ -182,12 +177,7 @@ async fn bind_loopback() -> DropboxResult<(TcpListener, u16)> {
     )))
 }
 
-fn build_authorize_url(
-    app_key: &str,
-    challenge: &str,
-    state: &str,
-    redirect_uri: &str,
-) -> String {
+fn build_authorize_url(app_key: &str, challenge: &str, state: &str, redirect_uri: &str) -> String {
     let mut url = "https://www.dropbox.com/oauth2/authorize?".to_string();
     let mut append = |key: &str, value: &str| {
         url.push_str(key);
@@ -292,12 +282,7 @@ mod tests {
 
     #[test]
     fn authorize_url_includes_required_params() {
-        let url = build_authorize_url(
-            "abc",
-            "CHALLENGE",
-            "STATE",
-            "http://127.0.0.1:53682",
-        );
+        let url = build_authorize_url("abc", "CHALLENGE", "STATE", "http://127.0.0.1:53682");
         assert!(url.contains("client_id=abc"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("code_challenge=CHALLENGE"));

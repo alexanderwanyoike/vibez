@@ -131,9 +131,7 @@ mod tests {
     fn write_round_trips() {
         let dir = TempDir::new().unwrap();
         let cache = DropboxCache::with_root(dir.path().to_path_buf());
-        let path = cache
-            .write("/kick.wav", Some("abc"), b"hello")
-            .unwrap();
+        let path = cache.write("/kick.wav", Some("abc"), b"hello").unwrap();
         assert!(path.is_file());
         assert!(cache.is_cached("/kick.wav", Some("abc")));
         assert!(!cache.is_cached("/kick.wav", Some("different")));

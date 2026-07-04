@@ -93,9 +93,7 @@ fn drum_track(name: &str, color: u8) -> TrackInfo {
     let mut t = TrackInfo::new(name);
     t.kind = TrackKind::Instrument(InstrumentKind::DrumRack);
     t.instrument = Some(InstrumentKind::DrumRack);
-    t.native_instrument = Some(InstrumentStateInfo::DrumRack {
-        pads: empty_pads(),
-    });
+    t.native_instrument = Some(InstrumentStateInfo::DrumRack { pads: empty_pads() });
     t.color_index = color;
     t
 }

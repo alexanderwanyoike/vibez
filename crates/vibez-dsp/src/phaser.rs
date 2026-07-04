@@ -122,7 +122,10 @@ impl AudioEffect for PhaserEffect {
             let lfo = 0.5 + 0.5 * self.phase.sin();
             let ratio = 8.0_f32.powf(self.depth * lfo);
             let break_hz = CENTER_HZ * ratio;
-            let a = Self::a1(break_hz.clamp(20.0, self.sample_rate * 0.45), self.sample_rate);
+            let a = Self::a1(
+                break_hz.clamp(20.0, self.sample_rate * 0.45),
+                self.sample_rate,
+            );
 
             for c in 0..ch {
                 let idx = frame * ch + c;

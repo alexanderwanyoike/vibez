@@ -28,9 +28,17 @@ pub enum MidiEvent {
     /// Note pressed. Velocity 1..=127 — velocity 0 is normalised to
     /// `NoteOff` by the parser because that is how most hardware
     /// encodes note-off.
-    NoteOn { pitch: u8, velocity: u8 },
-    NoteOff { pitch: u8 },
-    ControlChange { cc: u8, value: u8 },
+    NoteOn {
+        pitch: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        pitch: u8,
+    },
+    ControlChange {
+        cc: u8,
+        value: u8,
+    },
 }
 
 /// Active MIDI input connection. Dropping this closes the port and
@@ -78,7 +86,9 @@ pub fn open_midi_input(target_name: &str) -> Result<MidiInputHandle, String> {
         })
         .ok_or_else(|| format!("MIDI port not found: {target_name}"))?;
 
-    let resolved_name = input.port_name(&port).unwrap_or_else(|_| target_name.to_string());
+    let resolved_name = input
+        .port_name(&port)
+        .unwrap_or_else(|_| target_name.to_string());
     let (tx, rx) = mpsc::channel::<MidiEvent>();
 
     let conn = input
