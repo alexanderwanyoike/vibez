@@ -88,6 +88,13 @@ pub struct EngineTrack {
     timed_note_ons: Vec<(u32, u8, u8)>,
     /// Scratch storage for batch rendering: (frame_offset, pitch)
     timed_note_offs: Vec<(u32, u8)>,
+    /// Bitmask of MIDI pitches currently sounding on the instrument,
+    /// maintained by the note schedulers. Lets the engine kill
+    /// hanging notes when the playhead jumps discontinuously
+    /// (arrangement-loop wrap, seek, stop): the schedulers only see
+    /// adjacent sample positions, so a jump would otherwise strand
+    /// every sounding note in the "held down" state forever.
+    active_notes: u128,
 }
 
 impl EngineTrack {
@@ -105,7 +112,25 @@ impl EngineTrack {
             instrument: None,
             timed_note_ons: Vec::new(),
             timed_note_offs: Vec::new(),
+            active_notes: 0,
         }
+    }
+
+    /// Send note-offs for every sounding note. Call whenever the
+    /// playhead moves discontinuously; the offs reach the instrument
+    /// immediately (built-ins) or on its next render (plugins).
+    pub fn flush_notes(&mut self) {
+        if self.active_notes == 0 {
+            return;
+        }
+        if let Some(instrument) = self.instrument.as_mut() {
+            for pitch in 0..128u8 {
+                if self.active_notes & (1u128 << pitch) != 0 {
+                    instrument.note_off(pitch);
+                }
+            }
+        }
+        self.active_notes = 0;
     }
 
     /// Ensure the mix buffer has at least `size` elements.
@@ -360,6 +385,21 @@ impl EngineTrack {
             instrument.note_on_at(pitch, vel, frame);
             rendered = true;
         }
+        // Update the sounding-note mask in event order: within one
+        // block an off followed by an on at a later frame must leave
+        // the note marked active.
+        for &(_, pitch) in &self.timed_note_offs {
+            self.active_notes &= !(1u128 << pitch);
+        }
+        for &(frame, pitch, _) in &self.timed_note_ons {
+            let killed_later = self
+                .timed_note_offs
+                .iter()
+                .any(|&(off_frame, off_pitch)| off_pitch == pitch && off_frame > frame);
+            if !killed_later {
+                self.active_notes |= 1u128 << pitch;
+            }
+        }
 
         instrument.render(&mut self.mix_buffer[..buf_size], channels);
 
@@ -475,9 +515,11 @@ impl EngineTrack {
             let instrument = self.instrument.as_mut().unwrap();
             for pitch in &note_offs {
                 instrument.note_off(*pitch);
+                self.active_notes &= !(1u128 << *pitch);
             }
             for (pitch, vel) in &note_ons {
                 instrument.note_on(*pitch, *vel);
+                self.active_notes |= 1u128 << *pitch;
                 rendered = true;
             }
 

@@ -2648,9 +2648,20 @@ impl App {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end_beats == 0.0 {
+                        // Default the loop region whenever the stored
+                        // one is unusable: never set, inverted, or
+                        // stale from before a resize. Ableton
+                        // semantics: the loop region covers the
+                        // CONTENT (rounded up to whole bars), so a
+                        // 1-bar pattern inside a longer clip repeats
+                        // bar by bar instead of playing once followed
+                        // by silence. Bug #3 in the dogfood log.
+                        let invalid = clip.loop_end_beats <= clip.loop_start_beats
+                            || clip.loop_end_beats > clip.duration_beats;
+                        if clip.loop_enabled && invalid {
                             clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats = clip.duration_beats;
+                            clip.loop_end_beats =
+                                default_loop_end(&clip.notes, clip.duration_beats);
                         }
                         cmd_data = Some((
                             clip.loop_enabled,
@@ -2983,7 +2994,19 @@ impl App {
                             })
                             .collect();
                         clip.notes.extend_from_slice(&cloned_notes);
+                        let was_full_clip_loop = clip.loop_enabled
+                            && clip.loop_start_beats == 0.0
+                            && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
                         clip.duration_beats *= 2.0;
+                        if was_full_clip_loop {
+                            clip.loop_end_beats = clip.duration_beats;
+                        }
+                        let new_duration = clip.duration_beats;
+                        let loop_sync = (
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
+                        );
 
                         // Send new notes to engine
                         for note in &cloned_notes {
@@ -2993,6 +3016,21 @@ impl App {
                                 note: *note,
                             });
                         }
+                        // The engine clip must grow too, or playback
+                        // still ends at the old boundary and the
+                        // duplicated notes never sound.
+                        self.send_command(EngineCommand::SetNoteClipDuration {
+                            track_id,
+                            clip_id,
+                            duration_beats: new_duration,
+                        });
+                        self.send_command(EngineCommand::SetNoteClipLoop {
+                            track_id,
+                            clip_id,
+                            enabled: loop_sync.0,
+                            loop_start_beats: loop_sync.1,
+                            loop_end_beats: loop_sync.2,
+                        });
                     }
                 }
                 self.state.status_text = "Doubled clip length".to_string();
@@ -3198,18 +3236,26 @@ impl App {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
 
+                        // Keep the loop region inside the clip when
+                        // shrinking. Extending leaves the region
+                        // untouched so the looped pattern repeats to
+                        // fill the new length (the whole point of
+                        // stretching a looped clip).
+                        if clip.loop_enabled && clip.loop_end_beats > new_duration_beats {
+                            clip.loop_end_beats = new_duration_beats;
+                            if clip.loop_start_beats >= clip.loop_end_beats {
+                                clip.loop_start_beats = 0.0;
+                            }
+                        }
+
                         // Auto-enable loop when extending past note content
                         // Only if the clip actually has notes — empty clips don't loop
                         if !clip.notes.is_empty() && !clip.loop_enabled {
-                            let content_end = clip
-                                .notes
-                                .iter()
-                                .map(|n| n.start_beat + n.duration_beats)
-                                .fold(0.0_f64, f64::max);
-                            if content_end > 0.0 && new_duration_beats > content_end {
+                            let loop_end = default_loop_end(&clip.notes, new_duration_beats);
+                            if loop_end > 0.0 && new_duration_beats > loop_end {
                                 clip.loop_enabled = true;
                                 clip.loop_start_beats = 0.0;
-                                clip.loop_end_beats = content_end;
+                                clip.loop_end_beats = loop_end;
                             }
                         }
 
@@ -9801,6 +9847,23 @@ impl App {
             }),
         ])
     }
+}
+
+/// Default clip loop region end: the note content's span rounded up
+/// to whole bars (4/4), capped at the clip duration. This is the
+/// Ableton behavior: loop the PATTERN, not the whole clip, so a
+/// 1-bar pattern in a longer clip repeats bar by bar.
+fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
+    const BEATS_PER_BAR: f64 = 4.0;
+    let content_end = notes
+        .iter()
+        .map(|n| n.start_beat + n.duration_beats)
+        .fold(0.0_f64, f64::max);
+    if content_end <= 0.0 {
+        return duration_beats;
+    }
+    let bars = (content_end / BEATS_PER_BAR).ceil().max(1.0);
+    (bars * BEATS_PER_BAR).min(duration_beats)
 }
 
 /// Persistent identity for a plugin device, built from scan info.
