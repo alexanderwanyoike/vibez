@@ -305,6 +305,7 @@ mod tests {
             color_index: 0,
             instrument: None,
             native_instrument: None,
+            plugin_instrument: None,
         }
     }
 
@@ -522,6 +523,7 @@ mod tests {
             color_index: 0,
             instrument: Some(InstrumentKind::SubtractiveSynth),
             native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
+            plugin_instrument: None,
         };
         let note_clip = NoteClipInfo {
             id: cid,
@@ -570,6 +572,7 @@ mod tests {
             color_index: 0,
             instrument: None,
             native_instrument: None,
+            plugin_instrument: None,
         };
         let req = BounceRequest {
             tracks: vec![track],
@@ -599,6 +602,7 @@ mod tests {
             effect_type: EffectType::Gain,
             bypass: false,
             params: vec![0.5],
+            plugin: None,
         });
         let audio = audio_of(100, 1.0);
         let clip = ClipInfo {

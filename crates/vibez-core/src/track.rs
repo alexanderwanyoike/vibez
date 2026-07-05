@@ -85,6 +85,9 @@ pub struct TrackInfo {
     pub instrument: Option<InstrumentKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_instrument: Option<InstrumentStateInfo>,
+    /// Third-party plugin instrument on this track, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_instrument: Option<crate::effect::PluginDeviceInfo>,
 }
 
 impl TrackInfo {
@@ -101,6 +104,7 @@ impl TrackInfo {
             color_index: 0,
             instrument: None,
             native_instrument: None,
+            plugin_instrument: None,
         }
     }
 }

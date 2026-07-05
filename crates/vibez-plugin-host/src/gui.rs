@@ -31,6 +31,14 @@ pub enum PluginGuiHandle {
 unsafe impl Send for PluginGuiHandle {}
 
 impl PluginGuiHandle {
+    /// Pump per-view host services (VST3 Linux IRunLoop). No-op for
+    /// CLAP, whose timer/fd extensions are pumped by the CLAP host.
+    pub fn service_runloop(&self) {
+        if let PluginGuiHandle::Vst3(h) = self {
+            h.service_runloop();
+        }
+    }
+
     /// Whether the plugin actually supports a GUI.
     pub fn has_gui(&self) -> bool {
         match self {
@@ -234,6 +242,10 @@ pub struct Vst3GuiHandle {
     edit_controller: *mut c_void,
     /// IPlugView COM pointer (created on open, destroyed on close).
     plug_view: *mut c_void,
+    /// Host IPlugFrame + Linux IRunLoop for this view. Alive from
+    /// setFrame until after removed(); the window manager services
+    /// its timers/fds every poll tick.
+    frame: Option<crate::vst3_host::runloop::HostPlugFrame>,
     pub open: bool,
 }
 
@@ -263,8 +275,17 @@ impl Vst3GuiHandle {
         Some(Self {
             edit_controller,
             plug_view: std::ptr::null_mut(),
+            frame: None,
             open: false,
         })
+    }
+
+    /// Pump this view's run loop (timers + fd handlers). JUCE editors
+    /// paint and dispatch input exclusively from these callbacks.
+    pub fn service_runloop(&self) {
+        if let Some(frame) = &self.frame {
+            frame.service();
+        }
     }
 
     fn get_size(&self) -> Option<(u32, u32)> {
@@ -341,6 +362,9 @@ impl Vst3GuiHandle {
             unsafe { release(self.plug_view) };
             self.plug_view = std::ptr::null_mut();
         }
+        // Frame outlives removed(): plugins unregister their handlers
+        // in removed() and need the run loop alive to do it.
+        self.frame = None;
         self.open = false;
     }
 
@@ -389,6 +413,19 @@ impl Vst3GuiHandle {
             self.plug_view = std::ptr::null_mut();
             return false;
         }
+
+        // Provide IPlugFrame/IRunLoop before attaching: JUCE queries
+        // the run loop during attached() and a null frame leaves the
+        // editor frozen (no repaints, no input).
+        let frame = crate::vst3_host::runloop::HostPlugFrame::new();
+        // IPlugView::setFrame(frame) - vtable[12]
+        type SetFrameFn = unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32;
+        let set_frame: SetFrameFn = unsafe { std::mem::transmute(*view_vtbl.add(12)) };
+        let hr = unsafe { set_frame(self.plug_view, frame.as_iplugframe()) };
+        if hr != 0 {
+            eprintln!("vibez: open_view — setFrame returned {hr} (continuing)");
+        }
+        self.frame = Some(frame);
 
         // Attach to X11 window
         eprintln!("vibez: open_view — attaching to X11 window {window_id}");

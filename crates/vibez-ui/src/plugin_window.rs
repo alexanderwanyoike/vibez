@@ -256,6 +256,12 @@ impl PluginWindowManager {
 
     /// Poll for X11 events (non-blocking). Returns events for closed windows.
     pub fn poll_events(&mut self) -> Vec<PluginWindowEvent> {
+        // VST3 Linux GUIs live off the host run loop: fire their
+        // timers and fd handlers every tick or JUCE editors freeze.
+        for window in self.windows.values() {
+            window.gui_handle.service_runloop();
+        }
+
         let mut events = Vec::new();
         loop {
             match self.conn.poll_for_event() {

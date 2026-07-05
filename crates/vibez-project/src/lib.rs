@@ -92,6 +92,65 @@ mod tests {
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
 
     #[test]
+    fn plugin_devices_roundtrip() {
+        use vibez_core::effect::{EffectInfo, EffectType, PluginDeviceInfo};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plugins.vibez");
+
+        let dev = PluginDeviceInfo {
+            format: "vst3".to_string(),
+            uid: "ABCD1234-0000-0000-0000-000000000000".to_string(),
+            path: PathBuf::from("/plugins/ZL Equalizer 2.vst3"),
+            name: "ZL Equalizer 2".to_string(),
+            state_b64: Some("dmliZXogc3RhdGU=".to_string()),
+        };
+        let mut track = TrackInfo::new("FX");
+        track.effects.push(EffectInfo {
+            id: vibez_core::id::EffectId::new(),
+            effect_type: EffectType::Gain,
+            bypass: false,
+            params: Vec::new(),
+            plugin: Some(dev.clone()),
+        });
+        track.plugin_instrument = Some(PluginDeviceInfo {
+            format: "clap".to_string(),
+            uid: "com.surge-synth-team.surge-xt".to_string(),
+            path: PathBuf::from("/plugins/Surge XT.clap"),
+            name: "Surge XT".to_string(),
+            state_b64: None,
+        });
+
+        let mut project = Project::default();
+        project.tracks.push(track);
+        project.save_to_file(&path).unwrap();
+        let loaded = Project::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.tracks[0].effects[0].plugin.as_ref(), Some(&dev));
+        assert_eq!(
+            loaded.tracks[0]
+                .plugin_instrument
+                .as_ref()
+                .map(|d| d.name.as_str()),
+            Some("Surge XT")
+        );
+    }
+
+    #[test]
+    fn pre_plugin_schema_still_loads() {
+        // A track serialized before the plugin fields existed must
+        // deserialize with them defaulted.
+        let json = r#"{
+            "id": 7, "name": "Old", "gain": 1.0, "pan": 0.0,
+            "mute": false, "solo": false,
+            "effects": [{ "id": 9, "effect_type": "Delay",
+                          "bypass": false, "params": [1.0] }]
+        }"#;
+        let track: TrackInfo = serde_json::from_str(json).unwrap();
+        assert!(track.effects[0].plugin.is_none());
+        assert!(track.plugin_instrument.is_none());
+    }
+
+    #[test]
     fn project_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.vibez");
@@ -257,6 +316,7 @@ mod tests {
             effect_type: EffectType::Delay,
             bypass: false,
             params: vec![500.0, 0.5, 0.3],
+            plugin: None,
         });
         track.native_instrument = Some(InstrumentStateInfo::SubtractiveSynth {
             params: vec![0.05, 0.2, 0.8, 0.4],

@@ -27,12 +27,175 @@ pub struct Vst3PluginInstance {
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
     buffer_adapter: AudioBufferAdapter,
+    /// Separate output buffers: VST3 process() is out-of-place by
+    /// default and JUCE plugins do not reliably write in-place.
+    out_adapter: AudioBufferAdapter,
+    /// Audio bus counts reported by the component; process() must
+    /// present an AudioBusBuffers entry per bus, active or not.
+    audio_in_buses: i32,
+    audio_out_buses: i32,
+    /// One-shot latch so a failing process() logs once, not per block.
+    process_error_logged: bool,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     active: bool,
 }
 
 unsafe impl Send for Vst3PluginInstance {}
+
+// ── Stub IParameterChanges ──
+// DPF-based plugins assert on null input/outputParameterChanges and
+// JUCE tolerates but prefers them. This is a stateless, static COM
+// object: no parameters in, additions rejected.
+
+#[repr(C)]
+struct ParamChangesVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u8,
+        *mut *mut std::ffi::c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    get_parameter_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    get_parameter_data:
+        unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> *mut std::ffi::c_void,
+    add_parameter_data: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u32,
+        *mut i32,
+    ) -> *mut std::ffi::c_void,
+}
+
+unsafe extern "system" fn pc_query_interface(
+    this: *mut std::ffi::c_void,
+    _iid: *const u8,
+    obj: *mut *mut std::ffi::c_void,
+) -> i32 {
+    // Static object: answer everything with ourselves; refcounting is
+    // a no-op so over-answering is harmless.
+    unsafe { *obj = this };
+    0
+}
+unsafe extern "system" fn pc_add_ref(_this: *mut std::ffi::c_void) -> u32 {
+    1
+}
+unsafe extern "system" fn pc_release(_this: *mut std::ffi::c_void) -> u32 {
+    1
+}
+unsafe extern "system" fn pc_count(_this: *mut std::ffi::c_void) -> i32 {
+    0
+}
+unsafe extern "system" fn pc_get_data(
+    _this: *mut std::ffi::c_void,
+    _index: i32,
+) -> *mut std::ffi::c_void {
+    std::ptr::null_mut()
+}
+unsafe extern "system" fn pc_add_data(
+    _this: *mut std::ffi::c_void,
+    _id: *const u32,
+    index: *mut i32,
+) -> *mut std::ffi::c_void {
+    // Hand back a discard-queue: DPF asserts on a null return and
+    // then writes its output points into whatever it gets.
+    if !index.is_null() {
+        unsafe { *index = 0 };
+    }
+    &PARAM_QUEUE_STUB as *const ParamQueueStub as *mut std::ffi::c_void
+}
+
+// IParamValueQueue stub: identifies as parameter 0, holds no points,
+// accepts (and discards) added points.
+#[repr(C)]
+struct ParamQueueVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u8,
+        *mut *mut std::ffi::c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    get_parameter_id: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    get_point_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    get_point: unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut i32, *mut f64) -> i32,
+    add_point: unsafe extern "system" fn(*mut std::ffi::c_void, i32, f64, *mut i32) -> i32,
+}
+
+unsafe extern "system" fn pq_parameter_id(_this: *mut std::ffi::c_void) -> u32 {
+    0
+}
+unsafe extern "system" fn pq_point_count(_this: *mut std::ffi::c_void) -> i32 {
+    0
+}
+unsafe extern "system" fn pq_get_point(
+    _this: *mut std::ffi::c_void,
+    _index: i32,
+    _offset: *mut i32,
+    _value: *mut f64,
+) -> i32 {
+    1 // kResultFalse
+}
+unsafe extern "system" fn pq_add_point(
+    _this: *mut std::ffi::c_void,
+    _offset: i32,
+    _value: f64,
+    index: *mut i32,
+) -> i32 {
+    if !index.is_null() {
+        unsafe { *index = 0 };
+    }
+    0
+}
+
+static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
+    query_interface: pc_query_interface,
+    add_ref: pc_add_ref,
+    release: pc_release,
+    get_parameter_id: pq_parameter_id,
+    get_point_count: pq_point_count,
+    get_point: pq_get_point,
+    add_point: pq_add_point,
+};
+
+#[repr(C)]
+struct ParamQueueStub {
+    vtbl: *const ParamQueueVtbl,
+}
+unsafe impl Sync for ParamQueueStub {}
+static PARAM_QUEUE_STUB: ParamQueueStub = ParamQueueStub {
+    vtbl: &PARAM_QUEUE_VTBL,
+};
+
+static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
+    query_interface: pc_query_interface,
+    add_ref: pc_add_ref,
+    release: pc_release,
+    get_parameter_count: pc_count,
+    get_parameter_data: pc_get_data,
+    add_parameter_data: pc_add_data,
+};
+
+#[repr(C)]
+struct ParamChangesStub {
+    vtbl: *const ParamChangesVtbl,
+}
+unsafe impl Sync for ParamChangesStub {}
+static PARAM_CHANGES_STUB: ParamChangesStub = ParamChangesStub {
+    vtbl: &PARAM_CHANGES_VTBL,
+};
+
+fn param_changes_stub() -> *mut std::ffi::c_void {
+    &PARAM_CHANGES_STUB as *const ParamChangesStub as *mut std::ffi::c_void
+}
+
+/// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
+/// with no plugin code executed yet.
+pub struct PartialVst3Plugin {
+    lib: libloading::Library,
+    class_uid: String,
+    is_instrument: bool,
+}
 
 #[allow(dead_code)]
 struct NoteEvent {
@@ -114,6 +277,11 @@ impl Vst3PluginInstance {
     }
 
     /// Load and instantiate a VST3 plugin by its class ID from a `.vst3` bundle.
+    ///
+    /// Everything after the dlopen runs plugin code that may pin
+    /// itself to the calling thread (JUCE creates its MessageManager
+    /// on the instantiating thread); call this on the UI thread, or
+    /// use [`Self::load_partial`] + [`Self::init_on_main_thread`].
     pub fn load(
         path: &Path,
         class_uid: &str,
@@ -121,12 +289,45 @@ impl Vst3PluginInstance {
         sample_rate: f64,
         max_buffer_size: u32,
     ) -> Result<Self, String> {
-        let module_path = super::scanner::find_vst3_module(path)?;
+        let partial = Self::load_partial(path, class_uid, is_instrument)?;
+        Self::init_on_main_thread(partial, sample_rate, max_buffer_size)
+    }
 
+    /// Phase 1: locate and dlopen the module. Safe on a background
+    /// thread; runs no VST3 API calls (mirrors the CLAP two-phase
+    /// load that exists for JUCE MessageManager thread affinity).
+    pub fn load_partial(
+        path: &Path,
+        class_uid: &str,
+        is_instrument: bool,
+    ) -> Result<PartialVst3Plugin, String> {
+        let module_path = super::scanner::find_vst3_module(path)?;
         let lib = unsafe {
             libloading::Library::new(&module_path)
                 .map_err(|e| format!("Failed to load VST3 module: {e}"))?
         };
+        Ok(PartialVst3Plugin {
+            lib,
+            class_uid: class_uid.to_string(),
+            is_instrument,
+        })
+    }
+
+    /// Phase 2: run module init, factory, instantiation, and
+    /// activation. MUST run on the UI thread: JUCE plugins bind their
+    /// MessageManager to this thread, and the GUI plus teardown must
+    /// happen on the same one.
+    pub fn init_on_main_thread(
+        partial: PartialVst3Plugin,
+        sample_rate: f64,
+        max_buffer_size: u32,
+    ) -> Result<Self, String> {
+        let PartialVst3Plugin {
+            lib,
+            class_uid,
+            is_instrument,
+        } = partial;
+        let class_uid = class_uid.as_str();
         let lib = super::scanner::vst3_module_init(lib)?;
 
         type GetFactoryFn = unsafe extern "system" fn() -> *mut std::ffi::c_void;
@@ -139,6 +340,40 @@ impl Vst3PluginInstance {
         let factory_ptr = unsafe { get_factory() };
         if factory_ptr.is_null() {
             return Err("GetPluginFactory returned null".into());
+        }
+
+        // Give the factory our IHostApplication (IPluginFactory3).
+        // DPF-based plugins fall back to this context when initialize
+        // received none; best effort, older factories lack it.
+        unsafe {
+            type QueryInterfaceFn = unsafe extern "system" fn(
+                *mut std::ffi::c_void,
+                *const u8,
+                *mut *mut std::ffi::c_void,
+            ) -> i32;
+            let qi: QueryInterfaceFn =
+                std::mem::transmute(**(factory_ptr as *const *const *const std::ffi::c_void));
+            let mut f3: *mut std::ffi::c_void = std::ptr::null_mut();
+            if qi(
+                factory_ptr,
+                super::host_context::IPLUGINFACTORY3_IID.as_ptr(),
+                &mut f3,
+            ) == 0
+                && !f3.is_null()
+            {
+                // IPluginFactory3::setHostContext - vtable [10]
+                // (FUnknown 0-2, IPluginFactory 3-6, IPluginFactory2
+                // getClassInfo2 [7], IPluginFactory3
+                // getClassInfoUnicode [8]... setHostContext [9]).
+                type SetHostContextFn =
+                    unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32;
+                let f3_vtbl = vtbl(f3);
+                let set_host_context: SetHostContextFn = std::mem::transmute(*f3_vtbl.add(9));
+                set_host_context(f3, super::host_context::host_application());
+                type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+                let release: ReleaseFn = std::mem::transmute(*f3_vtbl.add(2));
+                release(f3);
+            }
         }
 
         let cid_bytes = parse_uid(class_uid)?;
@@ -174,7 +409,7 @@ impl Vst3PluginInstance {
             unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32;
         let comp_vtbl = unsafe { vtbl(component) };
         let initialize: InitializeFn = unsafe { std::mem::transmute(*comp_vtbl.add(3)) };
-        let hr = unsafe { initialize(component, std::ptr::null_mut()) };
+        let hr = unsafe { initialize(component, super::host_context::host_application()) };
         if hr != 0 {
             return Err(format!("Component initialize failed (hr={hr})"));
         }
@@ -269,6 +504,39 @@ impl Vst3PluginInstance {
         unsafe { release(factory_ptr) };
 
         let buffer_adapter = AudioBufferAdapter::new(2, max_buffer_size as usize);
+        let out_adapter = AudioBufferAdapter::new(2, max_buffer_size as usize);
+
+        // Discover audio buses and activate the main ones. JUCE
+        // plugins skip processing entirely while their buses are
+        // inactive, and process() must present one AudioBusBuffers
+        // per reported bus (aux/sidechain entries stay empty).
+        // IComponent: getBusCount [7], activateBus [10].
+        type GetBusCountFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
+        type ActivateBusFn =
+            unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32, i32, u8) -> i32;
+        const K_AUDIO: i32 = 0;
+        const K_EVENT: i32 = 1;
+        const K_INPUT: i32 = 0;
+        const K_OUTPUT: i32 = 1;
+        let get_bus_count: GetBusCountFn = unsafe { std::mem::transmute(*comp_vtbl.add(7)) };
+        let activate_bus: ActivateBusFn = unsafe { std::mem::transmute(*comp_vtbl.add(10)) };
+        let audio_in_buses = unsafe { get_bus_count(component, K_AUDIO, K_INPUT) };
+        let audio_out_buses = unsafe { get_bus_count(component, K_AUDIO, K_OUTPUT) };
+        unsafe {
+            if audio_in_buses > 0 {
+                activate_bus(component, K_AUDIO, K_INPUT, 0, 1);
+            }
+            if audio_out_buses > 0 {
+                activate_bus(component, K_AUDIO, K_OUTPUT, 0, 1);
+            }
+            // Event buses (MIDI in/out for instruments).
+            if get_bus_count(component, K_EVENT, K_INPUT) > 0 {
+                activate_bus(component, K_EVENT, K_INPUT, 0, 1);
+            }
+            if get_bus_count(component, K_EVENT, K_OUTPUT) > 0 {
+                activate_bus(component, K_EVENT, K_OUTPUT, 0, 1);
+            }
+        }
 
         let mut instance = Self {
             name,
@@ -281,6 +549,10 @@ impl Vst3PluginInstance {
             param_descriptors: Vec::new(),
             param_values: Vec::new(),
             buffer_adapter,
+            out_adapter,
+            audio_in_buses,
+            audio_out_buses,
+            process_error_logged: false,
             note_events: Vec::new(),
             sample_rate,
             active: false,
@@ -336,6 +608,14 @@ impl PluginInstance for Vst3PluginInstance {
         &self.name
     }
 
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        unsafe { crate::state::vst3_component_get_state(self.component) }
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        unsafe { crate::state::vst3_set_state(self.component, self.controller, data) }
+    }
+
     fn param_count(&self) -> usize {
         self.param_descriptors.len()
     }
@@ -368,32 +648,74 @@ impl PluginInstance for Vst3PluginInstance {
         }
 
         self.buffer_adapter.deinterleave(buffer, frames);
+        for out in self.out_adapter.channel_buffers_mut() {
+            out[..frames].fill(0.0);
+        }
 
-        let bufs = self.buffer_adapter.channel_buffers_mut();
-        let mut data_ptrs: Vec<*mut f32> = bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
+        let mut in_ptrs: Vec<*mut f32> = self
+            .buffer_adapter
+            .channel_buffers_mut()
+            .iter_mut()
+            .map(|b| b.as_mut_ptr())
+            .collect();
+        let mut out_ptrs: Vec<*mut f32> = self
+            .out_adapter
+            .channel_buffers_mut()
+            .iter_mut()
+            .map(|b| b.as_mut_ptr())
+            .collect();
 
-        let mut input_bus = AudioBusBuffersRaw {
-            num_channels: channels as i32,
-            silence_flags: 0,
-            channel_buffers32: data_ptrs.as_mut_ptr(),
+        // One AudioBusBuffers entry per reported bus. Bus 0 carries
+        // the real audio; aux/sidechain buses are present but empty
+        // (inactive, zero channels), which JUCE maps to silence.
+        let empty_bus = || AudioBusBuffersRaw {
+            num_channels: 0,
+            silence_flags: u64::MAX,
+            channel_buffers32: std::ptr::null_mut(),
         };
-
-        let mut output_bus = AudioBusBuffersRaw {
-            num_channels: channels as i32,
-            silence_flags: 0,
-            channel_buffers32: data_ptrs.as_mut_ptr(),
+        let num_inputs = if self.is_instrument {
+            self.audio_in_buses.max(0)
+        } else {
+            self.audio_in_buses.max(1)
         };
+        let num_outputs = self.audio_out_buses.max(1);
+        let mut input_buses: Vec<AudioBusBuffersRaw> = (0..num_inputs)
+            .map(|i| {
+                if i == 0 && !self.is_instrument {
+                    AudioBusBuffersRaw {
+                        num_channels: channels as i32,
+                        silence_flags: 0,
+                        channel_buffers32: in_ptrs.as_mut_ptr(),
+                    }
+                } else {
+                    empty_bus()
+                }
+            })
+            .collect();
+        let mut output_buses: Vec<AudioBusBuffersRaw> = (0..num_outputs)
+            .map(|i| {
+                if i == 0 {
+                    AudioBusBuffersRaw {
+                        num_channels: channels as i32,
+                        silence_flags: 0,
+                        channel_buffers32: out_ptrs.as_mut_ptr(),
+                    }
+                } else {
+                    empty_bus()
+                }
+            })
+            .collect();
 
         let mut process_data = ProcessDataRaw {
             process_mode: 0,
             symbolic_sample_size: 0,
             num_samples: frames as i32,
-            num_inputs: if self.is_instrument { 0 } else { 1 },
-            num_outputs: 1,
-            inputs: &mut input_bus,
-            outputs: &mut output_bus,
-            input_parameter_changes: std::ptr::null_mut(),
-            output_parameter_changes: std::ptr::null_mut(),
+            num_inputs,
+            num_outputs,
+            inputs: input_buses.as_mut_ptr(),
+            outputs: output_buses.as_mut_ptr(),
+            input_parameter_changes: param_changes_stub(),
+            output_parameter_changes: param_changes_stub(),
             input_events: std::ptr::null_mut(),
             output_events: std::ptr::null_mut(),
             process_context: std::ptr::null_mut(),
@@ -412,9 +734,15 @@ impl PluginInstance for Vst3PluginInstance {
             unsafe extern "system" fn(*mut std::ffi::c_void, *mut ProcessDataRaw) -> i32;
         let proc_vtbl = unsafe { vtbl(self.processor) };
         let process: ProcessFn = unsafe { std::mem::transmute(*proc_vtbl.add(9)) };
-        let _hr = unsafe { process(self.processor, &mut process_data) };
+        let hr = unsafe { process(self.processor, &mut process_data) };
 
-        self.buffer_adapter.interleave(buffer, frames);
+        if hr == 0 {
+            self.out_adapter.interleave(buffer, frames);
+        } else if !self.process_error_logged {
+            self.process_error_logged = true;
+            eprintln!("vibez: {}: process() failed (hr={hr})", self.name);
+        }
+        // On failure the interleaved buffer keeps the dry signal.
         self.note_events.clear();
     }
 
@@ -457,7 +785,10 @@ impl PluginInstance for Vst3PluginInstance {
             let proc_vtbl = unsafe { vtbl(self.processor) };
             let setup_processing: SetupProcessingFn =
                 unsafe { std::mem::transmute(*proc_vtbl.add(7)) };
-            unsafe { setup_processing(self.processor, &mut setup) };
+            let hr = unsafe { setup_processing(self.processor, &mut setup) };
+            if hr != 0 {
+                eprintln!("vibez: {}: setupProcessing failed (hr={hr})", self.name);
+            }
         }
     }
 
@@ -478,6 +809,9 @@ impl PluginInstance for Vst3PluginInstance {
         let comp_vtbl = unsafe { vtbl(self.component) };
         let set_active: SetActiveFn = unsafe { std::mem::transmute(*comp_vtbl.add(11)) };
         let hr = unsafe { set_active(self.component, 1) };
+        if hr != 0 {
+            eprintln!("vibez: {}: setActive(1) failed (hr={hr})", self.name);
+        }
         if hr == 0 {
             if !self.processor.is_null() {
                 // IAudioProcessor::setProcessing - vtable [8]
@@ -531,6 +865,15 @@ impl Drop for Vst3PluginInstance {
             let release: ReleaseFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(2)) };
             unsafe { release(self.controller) };
         }
+        // Release the processor interface before terminating the
+        // component: DPF warns (and may misbehave) if the audio
+        // processor ref is still held at component teardown.
+        if !self.processor.is_null() {
+            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+            let proc_vtbl = unsafe { vtbl(self.processor) };
+            let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
+            unsafe { release(self.processor) };
+        }
         if !self.component.is_null() {
             // IPluginBase::terminate - vtable [4]
             type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
@@ -542,12 +885,6 @@ impl Drop for Vst3PluginInstance {
             type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
             let release: ReleaseFn = unsafe { std::mem::transmute(*comp_vtbl.add(2)) };
             unsafe { release(self.component) };
-        }
-        if !self.processor.is_null() {
-            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
-            let proc_vtbl = unsafe { vtbl(self.processor) };
-            let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
-            unsafe { release(self.processor) };
         }
         super::scanner::vst3_module_exit(&self._lib);
     }

@@ -8,6 +8,7 @@ pub mod paths;
 pub mod scan_helper;
 pub mod scanner;
 pub mod settings;
+pub mod state;
 pub mod vst3_host;
 pub mod wrappers;
 
@@ -18,5 +19,6 @@ pub use info::PluginInfo;
 pub use instance::PluginInstance;
 pub use scanner::{scan_plugins, scan_plugins_sandboxed, ScanReport};
 pub use settings::PluginSettings;
+pub use state::{capture_plugin_state, PluginStatePtr};
 pub use wrappers::effect::PluginEffectWrapper;
 pub use wrappers::instrument::PluginInstrumentWrapper;
