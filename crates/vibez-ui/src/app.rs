@@ -8684,8 +8684,13 @@ impl App {
             .width(Length::Fill);
 
         // Items list
+        const PLUGIN_GRID_COLS: usize = 4;
+        const PLUGIN_GRID_COL_W: f32 = 150.0;
         let mut items_col = column![].spacing(2);
         let search_lower = menu.search.to_lowercase();
+        // Estimated visible rows, used to size and clamp the popup.
+        let mut est_rows: usize = 0;
+        let mut is_grid = false;
 
         match menu.category {
             Some(DeviceMenuCategory::Instruments) => {
@@ -8713,72 +8718,78 @@ impl App {
                             }
                         });
                     items_col = items_col.push(btn);
+                    est_rows += 1;
                 }
             }
             Some(DeviceMenuCategory::Plugins) => {
+                is_grid = true;
                 if self.state.plugin_settings.cache.is_empty() {
                     items_col = items_col.push(
                         text("No plugins scanned yet.\nUse File → Settings to scan.")
                             .size(11)
                             .color(th::TEXT_DIM),
                     );
+                    est_rows = 2;
                 } else {
-                    let mut sorted: Vec<&vibez_plugin_host::PluginInfo> =
-                        self.state.plugin_settings.cache.iter().collect();
-                    sorted.sort_by(|a, b| {
-                        a.vendor
-                            .to_lowercase()
-                            .cmp(&b.vendor.to_lowercase())
-                            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-                    });
-                    let mut last_vendor: Option<&str> = None;
-                    for plugin in sorted {
-                        let name = &plugin.name;
-                        if !search_lower.is_empty()
-                            && !name.to_lowercase().contains(&search_lower)
-                            && !plugin.vendor.to_lowercase().contains(&search_lower)
-                        {
-                            continue;
-                        }
-                        if last_vendor != Some(plugin.vendor.as_str()) {
-                            last_vendor = Some(plugin.vendor.as_str());
-                            items_col = items_col.push(
-                                text(plugin.vendor.clone())
-                                    .size(10)
-                                    .color(th::TEXT_DIM)
-                                    .width(Length::Fill),
-                            );
-                        }
-                        let format_badge = match plugin.format {
-                            PluginFormat::Clap => "CLAP",
-                            PluginFormat::Vst3 => "VST3",
-                        };
-                        let cat_label = match plugin.category {
-                            PluginCategory::Effect => "fx",
-                            PluginCategory::Instrument => "inst",
-                            PluginCategory::Both => "fx+inst",
-                        };
-                        let label_text = format!("{name}  [{format_badge}] {cat_label}");
-                        let plugin_id = plugin.id.clone();
-                        let btn = button(text(label_text).size(11).color(th::TEXT))
-                            .on_press(Message::AddPluginToTrack(track_id, plugin_id))
-                            .padding([6, 10])
-                            .width(Length::Fill)
-                            .style(|_theme: &Theme, status| {
-                                let bg = match status {
-                                    button::Status::Hovered | button::Status::Pressed => {
-                                        Some(th::BG_HOVER.into())
+                    let mut filtered: Vec<&vibez_plugin_host::PluginInfo> = self
+                        .state
+                        .plugin_settings
+                        .cache
+                        .iter()
+                        .filter(|p| {
+                            search_lower.is_empty()
+                                || p.name.to_lowercase().contains(&search_lower)
+                                || p.vendor.to_lowercase().contains(&search_lower)
+                        })
+                        .collect();
+                    filtered.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                    est_rows = filtered.len().div_ceil(PLUGIN_GRID_COLS);
+                    for chunk in filtered.chunks(PLUGIN_GRID_COLS) {
+                        let mut grid_row = row![].spacing(2);
+                        for plugin in chunk {
+                            let format_badge = match plugin.format {
+                                PluginFormat::Clap => "CLAP",
+                                PluginFormat::Vst3 => "VST3",
+                            };
+                            let cat_label = match plugin.category {
+                                PluginCategory::Effect => "fx",
+                                PluginCategory::Instrument => "inst",
+                                PluginCategory::Both => "fx+inst",
+                            };
+                            let display: String = if plugin.name.chars().count() > 20 {
+                                format!("{}...", plugin.name.chars().take(18).collect::<String>())
+                            } else {
+                                plugin.name.clone()
+                            };
+                            let plugin_id = plugin.id.clone();
+                            let cell = column![
+                                text(display).size(11).color(th::TEXT),
+                                text(format!("{format_badge} {cat_label}"))
+                                    .size(9)
+                                    .color(th::TEXT_DIM),
+                            ]
+                            .spacing(1);
+                            let btn = button(cell)
+                                .on_press(Message::AddPluginToTrack(track_id, plugin_id))
+                                .padding([4, 8])
+                                .width(Length::Fixed(PLUGIN_GRID_COL_W))
+                                .style(|_theme: &Theme, status| {
+                                    let bg = match status {
+                                        button::Status::Hovered | button::Status::Pressed => {
+                                            Some(th::BG_HOVER.into())
+                                        }
+                                        _ => None,
+                                    };
+                                    button::Style {
+                                        background: bg,
+                                        text_color: th::TEXT,
+                                        border: iced::Border::default(),
+                                        ..Default::default()
                                     }
-                                    _ => None,
-                                };
-                                button::Style {
-                                    background: bg,
-                                    text_color: th::TEXT,
-                                    border: iced::Border::default(),
-                                    ..Default::default()
-                                }
-                            });
-                        items_col = items_col.push(btn);
+                                });
+                            grid_row = grid_row.push(btn);
+                        }
+                        items_col = items_col.push(grid_row);
                     }
                 }
             }
@@ -8807,14 +8818,23 @@ impl App {
                             }
                         });
                     items_col = items_col.push(btn);
+                    est_rows += 1;
                 }
             }
         }
 
         // Cap the list height and scroll it: a full plugin library is
-        // hundreds of rows, which would otherwise render past the
-        // bottom of the window and look like an empty menu.
-        const MENU_LIST_MAX_H: f32 = 320.0;
+        // hundreds of entries, which would otherwise render past the
+        // bottom of the window and look like an empty menu. The
+        // plugins tab uses a 4-column grid to spend the space on
+        // breadth instead of one skinny endless column.
+        const MENU_LIST_MAX_H: f32 = 380.0;
+        let (menu_w, row_h) = if is_grid {
+            (PLUGIN_GRID_COL_W * PLUGIN_GRID_COLS as f32 + 30.0, 38.0)
+        } else {
+            (220.0, 29.0)
+        };
+        let est_list_h = (est_rows.max(1) as f32 * row_h).min(MENU_LIST_MAX_H);
         let items_scroll = container(scrollable(items_col).width(Length::Fill).direction(
             scrollable::Direction::Vertical(
                 scrollable::Scrollbar::new().width(6).scroller_width(6),
@@ -8825,7 +8845,7 @@ impl App {
         let menu_content = column![tabs_row, search_input, items_scroll]
             .spacing(6)
             .padding(8)
-            .width(Length::Fixed(220.0));
+            .width(Length::Fixed(menu_w));
 
         let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
             background: Some(th::BG_SURFACE.into()),
@@ -8837,13 +8857,12 @@ impl App {
             ..Default::default()
         });
 
-        // Position the menu near where it was triggered, clamped so it
-        // stays on-screen when opened near the window edges (the
+        // Position the menu near where it was triggered, clamped just
+        // enough that the estimated content stays on-screen (the
         // devices panel lives at the bottom of the window).
-        const MENU_EST_H: f32 = MENU_LIST_MAX_H + 90.0;
-        const MENU_W: f32 = 236.0;
-        let menu_y = menu.y.min(self.state.window_height - MENU_EST_H).max(0.0);
-        let menu_x = menu.x.min(self.state.window_width - MENU_W).max(0.0);
+        let est_h = est_list_h + 90.0;
+        let menu_y = menu.y.min(self.state.window_height - est_h).max(0.0);
+        let menu_x = menu.x.min(self.state.window_width - menu_w - 16.0).max(0.0);
         let padded = column![
             vertical_space().height(Length::Fixed(menu_y)),
             row![horizontal_space().width(Length::Fixed(menu_x)), menu_card,]
@@ -9517,7 +9536,14 @@ fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLo
                 sample_rate,
                 4096,
             )?;
-            let gui_raw_ptr = Some(PluginRawPtr::Vst3(vst3_inst.component_ptr()));
+            let gui_raw_ptr = {
+                let ctrl = vst3_inst.controller_ptr();
+                if ctrl.is_null() {
+                    None
+                } else {
+                    Some(PluginRawPtr::Vst3(ctrl))
+                }
+            };
             let name = vst3_inst.name().to_string();
             let wrapper = vibez_plugin_host::PluginEffectWrapper::new(Box::new(vst3_inst));
             Ok(PluginLoadResult {
@@ -9562,7 +9588,14 @@ fn load_plugin_instrument_bg(
                 sample_rate,
                 4096,
             )?;
-            let gui_raw_ptr = Some(PluginRawPtr::Vst3(vst3_inst.component_ptr()));
+            let gui_raw_ptr = {
+                let ctrl = vst3_inst.controller_ptr();
+                if ctrl.is_null() {
+                    None
+                } else {
+                    Some(PluginRawPtr::Vst3(ctrl))
+                }
+            };
             let name = vst3_inst.name().to_string();
             let wrapper = vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
             Ok(PluginInstrumentLoadResult {
