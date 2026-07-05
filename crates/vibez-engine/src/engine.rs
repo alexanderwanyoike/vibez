@@ -114,7 +114,18 @@ impl AudioEngine {
         self.process_preview(output, frames, channels);
 
         // ---- 5. Advance transport and send events -----------------------
+        let was_playing = self.transport.is_playing();
+        let pos_before = self.transport.position();
         let new_pos = self.transport.advance(frames as u64);
+
+        // Discontinuous jump (arrangement-loop wrap or auto-stop):
+        // kill sounding notes, otherwise they hang forever because
+        // the note schedulers only reason about adjacent positions.
+        if was_playing && new_pos != pos_before.saturating_add(frames as u64) {
+            for track in &mut self.tracks {
+                track.flush_notes();
+            }
+        }
 
         // Position event.
         let _ = self.event_tx.push(EngineEvent::PlaybackPosition(new_pos));
@@ -323,10 +334,16 @@ impl AudioEngine {
                 }
                 EngineCommand::Stop => {
                     self.transport.stop();
+                    for track in &mut self.tracks {
+                        track.flush_notes();
+                    }
                     let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
                 }
                 EngineCommand::Seek(pos) => {
                     self.transport.seek(pos);
+                    for track in &mut self.tracks {
+                        track.flush_notes();
+                    }
                 }
                 EngineCommand::SetBpm(bpm) => {
                     self.transport.set_bpm(bpm);
@@ -1823,6 +1840,147 @@ mod tests {
         assert!(
             has_audio_in_loop,
             "Expected synth audio in looped region (beat 2-3)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stuck_note_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::midi::{InstrumentKind, MidiNote};
+
+    /// Instrument that records every note event it receives.
+    struct SpyInstrument {
+        events: Arc<Mutex<Vec<(bool, u8)>>>,
+    }
+
+    impl vibez_instruments::Instrument for SpyInstrument {
+        fn instrument_kind(&self) -> InstrumentKind {
+            InstrumentKind::SubtractiveSynth
+        }
+        fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
+            &[]
+        }
+        fn set_param(&mut self, _index: usize, _value: f32) -> bool {
+            false
+        }
+        fn get_param(&self, _index: usize) -> f32 {
+            0.0
+        }
+        fn note_on(&mut self, pitch: u8, _velocity: u8) {
+            self.events.lock().unwrap().push((true, pitch));
+        }
+        fn note_off(&mut self, pitch: u8) {
+            self.events.lock().unwrap().push((false, pitch));
+        }
+        fn render(&mut self, _buffer: &mut [f32], _channels: usize) {}
+        fn reset(&mut self) {}
+    }
+
+    /// Engine with one MIDI track holding a held note (0..8 beats in
+    /// an 8-beat clip, no clip loop) and a spy instrument.
+    fn engine_with_held_note() -> (
+        AudioEngine,
+        rtrb::Producer<EngineCommand>,
+        Arc<Mutex<Vec<(bool, u8)>>>,
+        TrackId,
+    ) {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        cmd_tx
+            .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::SetPluginInstrument {
+                track_id: tid,
+                instrument: Box::new(SpyInstrument {
+                    events: Arc::clone(&events),
+                }),
+            })
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddNoteClip {
+                track_id: tid,
+                clip_id: cid,
+                position_beats: 0.0,
+                duration_beats: 8.0,
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+            })
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddNote {
+                track_id: tid,
+                clip_id: cid,
+                note: MidiNote {
+                    pitch: 60,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 8.0,
+                },
+            })
+            .unwrap();
+        cmd_tx.push(EngineCommand::Play).unwrap();
+        let mut buf = vec![0.0f32; 512 * 2];
+        engine.process(&mut buf, 2); // drains commands, starts the note
+        assert!(
+            events.lock().unwrap().contains(&(true, 60)),
+            "note-on should have fired"
+        );
+        (engine, cmd_tx, events, tid)
+    }
+
+    #[test]
+    fn arrangement_loop_wrap_kills_sounding_notes() {
+        let (mut engine, mut cmd_tx, events, _tid) = engine_with_held_note();
+        // Tight arrangement loop so the transport wraps mid-note.
+        cmd_tx
+            .push(EngineCommand::SetArrangementLoopRegion {
+                start: 0,
+                end: 2048,
+            })
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::SetArrangementLoop(true))
+            .unwrap();
+
+        let mut buf = vec![0.0f32; 512 * 2];
+        for _ in 0..8 {
+            engine.process(&mut buf, 2); // crosses 2048 and wraps
+        }
+        assert!(
+            events.lock().unwrap().contains(&(false, 60)),
+            "wrap must send a note-off for the sounding note, got {:?}",
+            events.lock().unwrap()
+        );
+    }
+
+    #[test]
+    fn stop_kills_sounding_notes() {
+        let (mut engine, mut cmd_tx, events, _tid) = engine_with_held_note();
+        cmd_tx.push(EngineCommand::Stop).unwrap();
+        let mut buf = vec![0.0f32; 512 * 2];
+        engine.process(&mut buf, 2);
+        assert!(
+            events.lock().unwrap().contains(&(false, 60)),
+            "stop must send a note-off for the sounding note"
+        );
+    }
+
+    #[test]
+    fn seek_kills_sounding_notes() {
+        let (mut engine, mut cmd_tx, events, _tid) = engine_with_held_note();
+        cmd_tx.push(EngineCommand::Seek(96_000)).unwrap();
+        let mut buf = vec![0.0f32; 512 * 2];
+        engine.process(&mut buf, 2);
+        assert!(
+            events.lock().unwrap().contains(&(false, 60)),
+            "seek must send a note-off for the sounding note"
         );
     }
 }

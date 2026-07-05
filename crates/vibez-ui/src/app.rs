@@ -2632,7 +2632,15 @@ impl App {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end_beats == 0.0 {
+                        // Default the loop region to the full clip
+                        // whenever the stored region is unusable:
+                        // never set, inverted, or stale from before a
+                        // resize (an end past the clip's duration
+                        // never wraps, an end before it loops the
+                        // wrong slice). Bug #3 in the dogfood log.
+                        let invalid = clip.loop_end_beats <= clip.loop_start_beats
+                            || clip.loop_end_beats > clip.duration_beats;
+                        if clip.loop_enabled && invalid {
                             clip.loop_start_beats = 0.0;
                             clip.loop_end_beats = clip.duration_beats;
                         }
@@ -2966,7 +2974,19 @@ impl App {
                             })
                             .collect();
                         clip.notes.extend_from_slice(&cloned_notes);
+                        let was_full_clip_loop = clip.loop_enabled
+                            && clip.loop_start_beats == 0.0
+                            && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
                         clip.duration_beats *= 2.0;
+                        if was_full_clip_loop {
+                            clip.loop_end_beats = clip.duration_beats;
+                        }
+                        let new_duration = clip.duration_beats;
+                        let loop_sync = (
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
+                        );
 
                         // Send new notes to engine
                         for note in &cloned_notes {
@@ -2976,6 +2996,21 @@ impl App {
                                 note: *note,
                             });
                         }
+                        // The engine clip must grow too, or playback
+                        // still ends at the old boundary and the
+                        // duplicated notes never sound.
+                        self.send_command(EngineCommand::SetNoteClipDuration {
+                            track_id,
+                            clip_id,
+                            duration_beats: new_duration,
+                        });
+                        self.send_command(EngineCommand::SetNoteClipLoop {
+                            track_id,
+                            clip_id,
+                            enabled: loop_sync.0,
+                            loop_start_beats: loop_sync.1,
+                            loop_end_beats: loop_sync.2,
+                        });
                     }
                 }
                 self.state.status_text = "Doubled clip length".to_string();
@@ -3179,7 +3214,24 @@ impl App {
                 let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        let was_full_clip_loop = clip.loop_enabled
+                            && clip.loop_start_beats == 0.0
+                            && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
                         clip.duration_beats = new_duration_beats;
+
+                        // Keep the loop region inside the clip. A
+                        // full-clip loop follows the new length; a
+                        // partial loop is clamped when shrinking.
+                        if clip.loop_enabled {
+                            if was_full_clip_loop {
+                                clip.loop_end_beats = new_duration_beats;
+                            } else if clip.loop_end_beats > new_duration_beats {
+                                clip.loop_end_beats = new_duration_beats;
+                                if clip.loop_start_beats >= clip.loop_end_beats {
+                                    clip.loop_start_beats = 0.0;
+                                }
+                            }
+                        }
 
                         // Auto-enable loop when extending past note content
                         // Only if the clip actually has notes — empty clips don't loop
