@@ -4836,6 +4836,7 @@ dependencies = [
 name = "vibez-ui"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "dirs 5.0.1",
  "iced",
  "rfd",

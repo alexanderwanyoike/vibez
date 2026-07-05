@@ -59,6 +59,15 @@ struct PluginLoadResult {
     /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
     clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
     sample_rate: f64,
+    /// Persistent identity for project save.
+    device_ref: vibez_core::effect::PluginDeviceInfo,
+    /// Pointer for live state capture at save time.
+    state_ptr: Option<vibez_plugin_host::PluginStatePtr>,
+    /// Saved state to restore (project reload). Applied on the UI
+    /// thread for CLAP; already applied in the loader for VST3.
+    pending_state: Option<Vec<u8>>,
+    /// Chain position to restore (project reload).
+    position: Option<usize>,
 }
 
 /// Result of loading a plugin instrument on a background thread.
@@ -71,6 +80,12 @@ struct PluginInstrumentLoadResult {
     /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
     clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
     sample_rate: f64,
+    /// Persistent identity for project save.
+    device_ref: vibez_core::effect::PluginDeviceInfo,
+    /// Pointer for live state capture at save time.
+    state_ptr: Option<vibez_plugin_host::PluginStatePtr>,
+    /// Saved state to restore (project reload).
+    pending_state: Option<Vec<u8>>,
 }
 
 struct BounceAssets {
@@ -96,6 +111,9 @@ struct App {
     // Plugin GUI support
     plugin_window_manager: Option<PluginWindowManager>,
     plugin_gui_raw_ptrs: std::collections::HashMap<PluginGuiKey, PluginRawPtr>,
+    /// Raw pointers for live state capture at save time, keyed like
+    /// the GUI pointers. Entries live exactly as long as the device.
+    plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
 
     // Dropbox
     dropbox_settings: DropboxSettings,
@@ -195,6 +213,7 @@ impl App {
             plugin_instrument_tx,
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
+            plugin_state_ptrs: std::collections::HashMap::new(),
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
@@ -241,6 +260,10 @@ impl App {
         }
 
         self.state.tracks.clear();
+        // The engine drops all plugin instances with their tracks;
+        // stale raw pointers must go with them.
+        self.plugin_gui_raw_ptrs.clear();
+        self.plugin_state_ptrs.clear();
         self.state.selected_track = None;
         self.state.next_track_number = 1;
         self.state.selected_note_clip = None;
@@ -638,14 +661,31 @@ impl App {
         let effects = track
             .effects
             .iter()
-            .filter(|effect| effect.plugin_name.is_none())
-            .map(|effect| vibez_core::effect::EffectInfo {
-                id: effect.id,
-                effect_type: effect.effect_type,
-                bypass: effect.bypass,
-                params: effect.params.clone(),
+            .map(|effect| {
+                let plugin = effect.plugin_ref.as_ref().map(|dev| {
+                    let mut dev = dev.clone();
+                    dev.state_b64 = self.capture_device_state(PluginGuiKey::Effect {
+                        track_id: track.id,
+                        effect_id: effect.id,
+                    });
+                    dev
+                });
+                vibez_core::effect::EffectInfo {
+                    id: effect.id,
+                    effect_type: effect.effect_type,
+                    bypass: effect.bypass,
+                    params: effect.params.clone(),
+                    plugin,
+                }
             })
             .collect();
+
+        let plugin_instrument = track.plugin_instrument_ref.as_ref().map(|dev| {
+            let mut dev = dev.clone();
+            dev.state_b64 =
+                self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
+            dev
+        });
 
         let native_instrument = match track.instrument_kind {
             Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
@@ -677,7 +717,17 @@ impl App {
             color_index: track.color_index,
             instrument: track.instrument_kind,
             native_instrument,
+            plugin_instrument,
         }
+    }
+
+    /// Base64-encoded live state of a plugin device, captured on the
+    /// UI thread via the pointer stashed at load time.
+    fn capture_device_state(&self, key: PluginGuiKey) -> Option<String> {
+        use base64::Engine;
+        let ptr = self.plugin_state_ptrs.get(&key)?;
+        let data = unsafe { vibez_plugin_host::capture_plugin_state(ptr) }?;
+        Some(base64::engine::general_purpose::STANDARD.encode(data))
     }
 
     fn project_from_state(&self) -> Project {
@@ -755,6 +805,16 @@ impl App {
 
     fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
         self.clear_project_runtime();
+        // Third-party plugin devices load asynchronously after the
+        // built-in rebuild; collected here, spawned at the end.
+        let mut plugin_effect_requests: Vec<(
+            TrackId,
+            EffectId,
+            usize,
+            vibez_core::effect::PluginDeviceInfo,
+        )> = Vec::new();
+        let mut plugin_instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)> =
+            Vec::new();
         self.undo_history.clear();
         self.state.bpm = loaded.project.bpm;
         self.state.bpm_text = format!("{:.0}", loaded.project.bpm);
@@ -773,6 +833,9 @@ impl App {
             track.solo = track_info.solo;
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
+            if let Some(dev) = &track_info.plugin_instrument {
+                plugin_instrument_requests.push((track_info.id, dev.clone()));
+            }
 
             match track.kind {
                 TrackKind::Audio => {
@@ -836,7 +899,16 @@ impl App {
                 }
             }
 
-            for effect_info in &track_info.effects {
+            for (chain_pos, effect_info) in track_info.effects.iter().enumerate() {
+                if let Some(dev) = &effect_info.plugin {
+                    plugin_effect_requests.push((
+                        track_info.id,
+                        effect_info.id,
+                        chain_pos,
+                        dev.clone(),
+                    ));
+                    continue;
+                }
                 let fx = vibez_dsp::factory::create_effect_with_params(
                     effect_info.effect_type,
                     self.state.sample_rate as f32,
@@ -851,6 +923,7 @@ impl App {
                     descriptors,
                     plugin_name: None,
                     has_plugin_gui: false,
+                    plugin_ref: None,
                 });
                 self.send_command(EngineCommand::AddEffect {
                     track_id: track_info.id,
@@ -991,6 +1064,93 @@ impl App {
                 loaded.warnings.len()
             )
         };
+
+        self.spawn_project_plugin_loads(plugin_effect_requests, plugin_instrument_requests);
+    }
+
+    /// Reload persisted plugin devices on one background thread, in
+    /// file order, so results arrive in order and chain positions
+    /// restore deterministically. Results flow through the same
+    /// channels as interactive plugin loads.
+    fn spawn_project_plugin_loads(
+        &mut self,
+        effect_requests: Vec<(
+            TrackId,
+            EffectId,
+            usize,
+            vibez_core::effect::PluginDeviceInfo,
+        )>,
+        instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)>,
+    ) {
+        if effect_requests.is_empty() && instrument_requests.is_empty() {
+            return;
+        }
+        let n = effect_requests.len() + instrument_requests.len();
+        self.state.status_text = format!("Loading {n} plugin(s)...");
+
+        let effect_tx = self.plugin_effect_tx.clone();
+        let instrument_tx = self.plugin_instrument_tx.clone();
+        let sample_rate = self.state.sample_rate as f64;
+
+        std::thread::spawn(move || {
+            use base64::Engine;
+            let decode = |dev: &vibez_core::effect::PluginDeviceInfo| {
+                dev.state_b64.as_ref().and_then(|b64| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(b64)
+                        .map_err(|e| {
+                            eprintln!("vibez: bad plugin state blob for {}: {e}", dev.name)
+                        })
+                        .ok()
+                })
+            };
+            let scan_info =
+                |dev: &vibez_core::effect::PluginDeviceInfo,
+                 category: vibez_plugin_host::PluginCategory| {
+                    let format = match dev.format.as_str() {
+                        "clap" => PluginFormat::Clap,
+                        _ => PluginFormat::Vst3,
+                    };
+                    PluginInfo {
+                        id: vibez_plugin_host::PluginId {
+                            format,
+                            uid: dev.uid.clone(),
+                        },
+                        name: dev.name.clone(),
+                        vendor: String::new(),
+                        category,
+                        format,
+                        path: dev.path.clone(),
+                    }
+                };
+
+            for (track_id, effect_id, chain_pos, dev) in effect_requests {
+                let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Effect);
+                match load_plugin_effect_bg(&info, sample_rate, decode(&dev)) {
+                    Ok(mut result) => {
+                        result.track_id = track_id;
+                        result.effect_id = effect_id;
+                        result.position = Some(chain_pos);
+                        let _ = effect_tx.send(result);
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: failed to reload plugin {}: {e}", dev.name);
+                    }
+                }
+            }
+            for (track_id, dev) in instrument_requests {
+                let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Instrument);
+                match load_plugin_instrument_bg(&info, sample_rate, decode(&dev)) {
+                    Ok(mut result) => {
+                        result.track_id = track_id;
+                        let _ = instrument_tx.send(result);
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: failed to reload plugin {}: {e}", dev.name);
+                    }
+                }
+            }
+        });
     }
 
     fn collect_bounce_assets(&self) -> BounceAssets {
@@ -2003,6 +2163,10 @@ impl App {
                     PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
                     PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
                 });
+                self.plugin_state_ptrs.retain(|k, _| match k {
+                    PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
+                    PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
+                });
 
                 self.send_command(EngineCommand::RemoveTrack(track_id));
                 self.state.tracks.retain(|t| t.id != track_id);
@@ -2191,6 +2355,7 @@ impl App {
                         descriptors,
                         plugin_name: None,
                         has_plugin_gui: false,
+                        plugin_ref: None,
                     });
                 }
                 self.send_command(EngineCommand::AddEffect {
@@ -2212,6 +2377,7 @@ impl App {
                     mgr.close(gui_key);
                 }
                 self.plugin_gui_raw_ptrs.remove(&gui_key);
+                self.plugin_state_ptrs.remove(&gui_key);
 
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.effects.retain(|e| e.id != effect_id);
@@ -4115,6 +4281,7 @@ impl App {
                     mgr.close(gui_key);
                 }
                 self.plugin_gui_raw_ptrs.remove(&gui_key);
+                self.plugin_state_ptrs.remove(&gui_key);
 
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = false;
@@ -4785,7 +4952,7 @@ impl App {
                     if is_instrument {
                         let tx = self.plugin_instrument_tx.clone();
                         std::thread::spawn(move || {
-                            match load_plugin_instrument_bg(&info, sample_rate) {
+                            match load_plugin_instrument_bg(&info, sample_rate, None) {
                                 Ok(mut result) => {
                                     result.track_id = track_id;
                                     let _ = tx.send(result);
@@ -4798,7 +4965,7 @@ impl App {
                     } else {
                         let tx = self.plugin_effect_tx.clone();
                         std::thread::spawn(move || {
-                            match load_plugin_effect_bg(&info, sample_rate) {
+                            match load_plugin_effect_bg(&info, sample_rate, None) {
                                 Ok(mut result) => {
                                     result.track_id = track_id;
                                     let _ = tx.send(result);
@@ -5533,7 +5700,7 @@ impl App {
 
     fn poll_plugin_loads(&mut self) {
         // Poll for loaded plugin effects
-        while let Ok(result) = self.plugin_effect_rx.try_recv() {
+        while let Ok(mut result) = self.plugin_effect_rx.try_recv() {
             let track_id = result.track_id;
             let effect_id = result.effect_id;
             let plugin_name = result.plugin_name.clone();
@@ -5550,8 +5717,17 @@ impl App {
                     result.sample_rate,
                     4096,
                 ) {
-                    Ok(clap_inst) => {
+                    Ok(mut clap_inst) => {
+                        if let Some(ref data) = result.pending_state {
+                            use vibez_plugin_host::PluginInstance;
+                            if !clap_inst.load_state(data) {
+                                eprintln!("vibez: {plugin_name} rejected saved state");
+                            }
+                        }
                         let raw_ptr = Some(PluginRawPtr::Clap(
+                            clap_inst.plugin_ptr() as *const std::ffi::c_void,
+                        ));
+                        result.state_ptr = Some(vibez_plugin_host::PluginStatePtr::Clap(
                             clap_inst.plugin_ptr() as *const std::ffi::c_void,
                         ));
                         let wrapper =
@@ -5579,11 +5755,18 @@ impl App {
                 };
                 self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
             }
+            if let Some(state_ptr) = result.state_ptr {
+                let key = PluginGuiKey::Effect {
+                    track_id,
+                    effect_id,
+                };
+                self.plugin_state_ptrs.insert(key, state_ptr);
+            }
 
             if let Some(track) = self.state.find_track_mut(track_id) {
                 let descriptors: &'static [vibez_core::effect::ParamDescriptor] =
                     Box::leak(Vec::new().into_boxed_slice());
-                track.effects.push(UiEffect {
+                let ui_effect = UiEffect {
                     id: effect_id,
                     effect_type: EffectType::Gain,
                     bypass: false,
@@ -5591,19 +5774,24 @@ impl App {
                     descriptors,
                     plugin_name: Some(plugin_name.clone()),
                     has_plugin_gui: has_gui,
-                });
+                    plugin_ref: Some(result.device_ref.clone()),
+                };
+                match result.position {
+                    Some(pos) if pos < track.effects.len() => track.effects.insert(pos, ui_effect),
+                    _ => track.effects.push(ui_effect),
+                }
             }
             self.send_command(EngineCommand::AddPluginEffect {
                 track_id,
                 effect_id,
                 effect,
-                position: None,
+                position: result.position,
             });
             self.state.status_text = format!("Loaded {plugin_name}");
         }
 
         // Poll for loaded plugin instruments
-        while let Ok(result) = self.plugin_instrument_rx.try_recv() {
+        while let Ok(mut result) = self.plugin_instrument_rx.try_recv() {
             let track_id = result.track_id;
             let plugin_name = result.plugin_name.clone();
 
@@ -5617,8 +5805,17 @@ impl App {
                     result.sample_rate,
                     4096,
                 ) {
-                    Ok(clap_inst) => {
+                    Ok(mut clap_inst) => {
+                        if let Some(ref data) = result.pending_state {
+                            use vibez_plugin_host::PluginInstance;
+                            if !clap_inst.load_state(data) {
+                                eprintln!("vibez: {plugin_name} rejected saved state");
+                            }
+                        }
                         let raw_ptr = Some(PluginRawPtr::Clap(
+                            clap_inst.plugin_ptr() as *const std::ffi::c_void,
+                        ));
+                        result.state_ptr = Some(vibez_plugin_host::PluginStatePtr::Clap(
                             clap_inst.plugin_ptr() as *const std::ffi::c_void,
                         ));
                         let wrapper =
@@ -5643,10 +5840,15 @@ impl App {
                 let key = PluginGuiKey::Instrument { track_id };
                 self.plugin_gui_raw_ptrs.insert(key, raw_ptr);
             }
+            if let Some(state_ptr) = result.state_ptr {
+                let key = PluginGuiKey::Instrument { track_id };
+                self.plugin_state_ptrs.insert(key, state_ptr);
+            }
 
             if let Some(track) = self.state.find_track_mut(track_id) {
                 track.has_instrument = true;
                 track.plugin_instrument_name = Some(plugin_name.clone());
+                track.plugin_instrument_ref = Some(result.device_ref.clone());
                 track.has_plugin_instrument_gui = has_gui;
             }
             self.send_command(EngineCommand::SetPluginInstrument {
@@ -9507,10 +9709,28 @@ impl App {
     }
 }
 
+/// Persistent identity for a plugin device, built from scan info.
+fn plugin_device_ref(info: &PluginInfo) -> vibez_core::effect::PluginDeviceInfo {
+    vibez_core::effect::PluginDeviceInfo {
+        format: match info.format {
+            PluginFormat::Clap => "clap".to_string(),
+            PluginFormat::Vst3 => "vst3".to_string(),
+        },
+        uid: info.id.uid.clone(),
+        path: info.path.clone(),
+        name: info.name.clone(),
+        state_b64: None,
+    }
+}
+
 /// Phase 1 of plugin loading (runs on background thread).
 /// For CLAP: only loads the DSO — NO CLAP API calls (not even create_plugin).
 /// For VST3: fully loads (VST3 doesn't have JUCE MessageManager issues).
-fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLoadResult, String> {
+fn load_plugin_effect_bg(
+    info: &PluginInfo,
+    sample_rate: f64,
+    saved_state: Option<Vec<u8>>,
+) -> Result<PluginLoadResult, String> {
     match info.format {
         PluginFormat::Clap => {
             let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
@@ -9526,16 +9746,27 @@ fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLo
                 gui_raw_ptr: None,
                 clap_partial: Some(partial),
                 sample_rate,
+                device_ref: plugin_device_ref(info),
+                state_ptr: None,
+                // CLAP state must be applied after init_on_main_thread.
+                pending_state: saved_state,
+                position: None,
             })
         }
         PluginFormat::Vst3 => {
-            let vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+            let mut vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
                 &info.path,
                 &info.id.uid,
                 false,
                 sample_rate,
                 4096,
             )?;
+            if let Some(ref data) = saved_state {
+                use vibez_plugin_host::PluginInstance;
+                if !vst3_inst.load_state(data) {
+                    eprintln!("vibez: {} rejected saved state", vst3_inst.name());
+                }
+            }
             let gui_raw_ptr = {
                 let ctrl = vst3_inst.controller_ptr();
                 if ctrl.is_null() {
@@ -9544,6 +9775,9 @@ fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLo
                     Some(PluginRawPtr::Vst3(ctrl))
                 }
             };
+            let state_ptr = Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
+                vst3_inst.component_ptr(),
+            ));
             let name = vst3_inst.name().to_string();
             let wrapper = vibez_plugin_host::PluginEffectWrapper::new(Box::new(vst3_inst));
             Ok(PluginLoadResult {
@@ -9554,6 +9788,10 @@ fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLo
                 gui_raw_ptr,
                 clap_partial: None,
                 sample_rate,
+                device_ref: plugin_device_ref(info),
+                state_ptr,
+                pending_state: None,
+                position: None,
             })
         }
     }
@@ -9563,6 +9801,7 @@ fn load_plugin_effect_bg(info: &PluginInfo, sample_rate: f64) -> Result<PluginLo
 fn load_plugin_instrument_bg(
     info: &PluginInfo,
     sample_rate: f64,
+    saved_state: Option<Vec<u8>>,
 ) -> Result<PluginInstrumentLoadResult, String> {
     match info.format {
         PluginFormat::Clap => {
@@ -9578,16 +9817,25 @@ fn load_plugin_instrument_bg(
                 gui_raw_ptr: None,
                 clap_partial: Some(partial),
                 sample_rate,
+                device_ref: plugin_device_ref(info),
+                state_ptr: None,
+                pending_state: saved_state,
             })
         }
         PluginFormat::Vst3 => {
-            let vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+            let mut vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
                 &info.path,
                 &info.id.uid,
                 true,
                 sample_rate,
                 4096,
             )?;
+            if let Some(ref data) = saved_state {
+                use vibez_plugin_host::PluginInstance;
+                if !vst3_inst.load_state(data) {
+                    eprintln!("vibez: {} rejected saved state", vst3_inst.name());
+                }
+            }
             let gui_raw_ptr = {
                 let ctrl = vst3_inst.controller_ptr();
                 if ctrl.is_null() {
@@ -9596,6 +9844,9 @@ fn load_plugin_instrument_bg(
                     Some(PluginRawPtr::Vst3(ctrl))
                 }
             };
+            let state_ptr = Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
+                vst3_inst.component_ptr(),
+            ));
             let name = vst3_inst.name().to_string();
             let wrapper = vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
             Ok(PluginInstrumentLoadResult {
@@ -9605,6 +9856,9 @@ fn load_plugin_instrument_bg(
                 gui_raw_ptr,
                 clap_partial: None,
                 sample_rate,
+                device_ref: plugin_device_ref(info),
+                state_ptr,
+                pending_state: None,
             })
         }
     }

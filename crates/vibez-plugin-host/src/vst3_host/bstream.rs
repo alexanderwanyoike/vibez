@@ -32,8 +32,7 @@ const K_IB_SEEK_END: i32 = 2;
 #[repr(C)]
 struct Vtbl {
     // FUnknown
-    query_interface:
-        unsafe extern "system" fn(*mut Stream, *const u8, *mut *mut c_void) -> i32,
+    query_interface: unsafe extern "system" fn(*mut Stream, *const u8, *mut *mut c_void) -> i32,
     add_ref: unsafe extern "system" fn(*mut Stream) -> u32,
     release: unsafe extern "system" fn(*mut Stream) -> u32,
     // IBStream

@@ -66,6 +66,25 @@ pub struct EffectInfo {
     pub effect_type: EffectType,
     pub bypass: bool,
     pub params: Vec<f32>,
+    /// Present when this chain slot is a third-party plugin rather
+    /// than a built-in effect. `effect_type`/`params` are ignored for
+    /// plugin slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<PluginDeviceInfo>,
+}
+
+/// Identity and state of a third-party plugin device, as persisted in
+/// a project file. `format` is "clap" or "vst3"; `state_b64` is the
+/// plugin's opaque state blob (CLAP state ext / VST3 IComponent
+/// getState), base64-encoded for JSON.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginDeviceInfo {
+    pub format: String,
+    pub uid: String,
+    pub path: std::path::PathBuf,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_b64: Option<String>,
 }
 
 #[cfg(test)]
@@ -93,6 +112,7 @@ mod tests {
             effect_type: EffectType::Delay,
             bypass: false,
             params: vec![500.0, 0.5, 0.3],
+            plugin: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let loaded: EffectInfo = serde_json::from_str(&json).unwrap();

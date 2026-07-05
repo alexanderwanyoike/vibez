@@ -132,6 +132,8 @@ pub struct UiEffect {
     pub plugin_name: Option<String>,
     /// Whether this effect has a native plugin GUI available.
     pub has_plugin_gui: bool,
+    /// Persistent identity of the plugin backing this slot, if any.
+    pub plugin_ref: Option<vibez_core::effect::PluginDeviceInfo>,
 }
 
 /// A note clip (MIDI pattern) as represented in the UI.
@@ -177,6 +179,8 @@ pub struct UiTrack {
     pub selected_drum_pad: usize,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
+    /// Persistent identity of the plugin instrument, if any.
+    pub plugin_instrument_ref: Option<vibez_core::effect::PluginDeviceInfo>,
     /// Whether the plugin instrument has a native GUI.
     pub has_plugin_instrument_gui: bool,
 }
@@ -206,6 +210,7 @@ impl UiTrack {
             drum_rack_pads: default_drum_rack_pads(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
+            plugin_instrument_ref: None,
             has_plugin_instrument_gui: false,
         }
     }
@@ -238,6 +243,7 @@ impl UiTrack {
             drum_rack_pads: default_drum_rack_pads(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
+            plugin_instrument_ref: None,
             has_plugin_instrument_gui: false,
         }
     }

@@ -285,6 +285,14 @@ impl PluginInstance for ClapPluginInstance {
         &self.name
     }
 
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        unsafe { crate::state::clap_save_state(self.plugin_ptr) }
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        unsafe { crate::state::clap_load_state(self.plugin_ptr, data) }
+    }
+
     fn param_count(&self) -> usize {
         self.param_descriptors.len()
     }

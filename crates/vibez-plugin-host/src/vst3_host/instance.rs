@@ -336,6 +336,14 @@ impl PluginInstance for Vst3PluginInstance {
         &self.name
     }
 
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        unsafe { crate::state::vst3_component_get_state(self.component) }
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        unsafe { crate::state::vst3_set_state(self.component, self.controller, data) }
+    }
+
     fn param_count(&self) -> usize {
         self.param_descriptors.len()
     }
