@@ -2709,6 +2709,7 @@ impl App {
             }
             Message::SelectNoteClip(track_id, clip_id) => {
                 self.state.selected_note_clip = Some((track_id, clip_id));
+                self.state.selected_track = Some(track_id);
             }
             Message::AddNote {
                 track_id,
