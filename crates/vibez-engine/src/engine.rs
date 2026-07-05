@@ -348,7 +348,15 @@ impl AudioEngine {
                     self.recalculate_audio_length();
                 }
                 EngineCommand::RemoveTrack(id) => {
-                    self.tracks.retain(|t| t.id != id);
+                    if let Some(pos) = self.tracks.iter().position(|t| t.id == id) {
+                        let mut track = self.tracks.remove(pos);
+                        for slot in track.effects.drain(..) {
+                            self.dispose_effect(slot.effect);
+                        }
+                        if let Some(instrument) = track.instrument.take() {
+                            self.dispose_instrument(instrument);
+                        }
+                    }
                     self.recalculate_audio_length();
                 }
                 EngineCommand::ReorderTracks(order) => {
@@ -472,7 +480,10 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveEffect(track_id, effect_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.effects.retain(|e| e.id != effect_id);
+                        if let Some(pos) = track.effects.iter().position(|e| e.id == effect_id) {
+                            let slot = track.effects.remove(pos);
+                            self.dispose_effect(slot.effect);
+                        }
                     }
                 }
                 EngineCommand::SetEffectParam {
@@ -526,12 +537,19 @@ impl AudioEngine {
                 }
                 EngineCommand::SetTrackInstrument(track_id, kind) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.instrument = Some(create_instrument(kind, self.sample_rate as f32));
+                        let old = track
+                            .instrument
+                            .replace(create_instrument(kind, self.sample_rate as f32));
+                        if let Some(old) = old {
+                            self.dispose_instrument(old);
+                        }
                     }
                 }
                 EngineCommand::RemoveTrackInstrument(track_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.instrument = None;
+                        if let Some(instrument) = track.instrument.take() {
+                            self.dispose_instrument(instrument);
+                        }
                     }
                 }
                 EngineCommand::SetNoteClipDuration {
@@ -768,7 +786,9 @@ impl AudioEngine {
                     instrument,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.instrument = Some(instrument);
+                        if let Some(old) = track.instrument.replace(instrument) {
+                            self.dispose_instrument(old);
+                        }
                     }
                 }
             }
@@ -776,6 +796,33 @@ impl AudioEngine {
     }
 
     /// Recalculate transport audio length from all track clips.
+    /// Hand a removed device back to the UI thread for teardown. If
+    /// the event ring is full (should never happen for these rare
+    /// events) the device is leaked rather than destroyed here:
+    /// plugin destructors are wildly RT-unsafe (dlclose, COM, JUCE).
+    fn dispose_effect(&mut self, effect: Box<dyn vibez_dsp::effect::AudioEffect>) {
+        if let Err(rtrb::PushError::Full(item)) =
+            self.event_tx
+                .push(crate::events::EngineEvent::DisposeEffect(
+                    crate::events::DisposalCell::new(effect),
+                ))
+        {
+            std::mem::forget(item);
+        }
+    }
+
+    /// See [`Self::dispose_effect`].
+    fn dispose_instrument(&mut self, instrument: Box<dyn vibez_instruments::Instrument>) {
+        if let Err(rtrb::PushError::Full(item)) =
+            self.event_tx
+                .push(crate::events::EngineEvent::DisposeInstrument(
+                    crate::events::DisposalCell::new(instrument),
+                ))
+        {
+            std::mem::forget(item);
+        }
+    }
+
     fn recalculate_audio_length(&mut self) {
         let total = calculate_total_length(&self.tracks);
         if total > 0 {

@@ -34,6 +34,14 @@ pub struct Vst3PluginInstance {
 
 unsafe impl Send for Vst3PluginInstance {}
 
+/// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
+/// with no plugin code executed yet.
+pub struct PartialVst3Plugin {
+    lib: libloading::Library,
+    class_uid: String,
+    is_instrument: bool,
+}
+
 #[allow(dead_code)]
 struct NoteEvent {
     is_on: bool,
@@ -114,6 +122,11 @@ impl Vst3PluginInstance {
     }
 
     /// Load and instantiate a VST3 plugin by its class ID from a `.vst3` bundle.
+    ///
+    /// Everything after the dlopen runs plugin code that may pin
+    /// itself to the calling thread (JUCE creates its MessageManager
+    /// on the instantiating thread); call this on the UI thread, or
+    /// use [`Self::load_partial`] + [`Self::init_on_main_thread`].
     pub fn load(
         path: &Path,
         class_uid: &str,
@@ -121,12 +134,45 @@ impl Vst3PluginInstance {
         sample_rate: f64,
         max_buffer_size: u32,
     ) -> Result<Self, String> {
-        let module_path = super::scanner::find_vst3_module(path)?;
+        let partial = Self::load_partial(path, class_uid, is_instrument)?;
+        Self::init_on_main_thread(partial, sample_rate, max_buffer_size)
+    }
 
+    /// Phase 1: locate and dlopen the module. Safe on a background
+    /// thread; runs no VST3 API calls (mirrors the CLAP two-phase
+    /// load that exists for JUCE MessageManager thread affinity).
+    pub fn load_partial(
+        path: &Path,
+        class_uid: &str,
+        is_instrument: bool,
+    ) -> Result<PartialVst3Plugin, String> {
+        let module_path = super::scanner::find_vst3_module(path)?;
         let lib = unsafe {
             libloading::Library::new(&module_path)
                 .map_err(|e| format!("Failed to load VST3 module: {e}"))?
         };
+        Ok(PartialVst3Plugin {
+            lib,
+            class_uid: class_uid.to_string(),
+            is_instrument,
+        })
+    }
+
+    /// Phase 2: run module init, factory, instantiation, and
+    /// activation. MUST run on the UI thread: JUCE plugins bind their
+    /// MessageManager to this thread, and the GUI plus teardown must
+    /// happen on the same one.
+    pub fn init_on_main_thread(
+        partial: PartialVst3Plugin,
+        sample_rate: f64,
+        max_buffer_size: u32,
+    ) -> Result<Self, String> {
+        let PartialVst3Plugin {
+            lib,
+            class_uid,
+            is_instrument,
+        } = partial;
+        let class_uid = class_uid.as_str();
         let lib = super::scanner::vst3_module_init(lib)?;
 
         type GetFactoryFn = unsafe extern "system" fn() -> *mut std::ffi::c_void;

@@ -23,7 +23,7 @@ use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
 use vibez_plugin_host::gui::PluginGuiKey;
-use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo, PluginInstance};
+use vibez_plugin_host::{PluginCategory, PluginFormat, PluginInfo};
 use vibez_project::Project;
 
 use crate::icons;
@@ -58,13 +58,16 @@ struct PluginLoadResult {
     gui_raw_ptr: Option<PluginRawPtr>,
     /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
     clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
+    /// VST3 two-phase: dlopen'd module to be instantiated on the UI
+    /// thread (JUCE MessageManager binds to the instantiating thread).
+    vst3_partial: Option<vibez_plugin_host::vst3_host::instance::PartialVst3Plugin>,
     sample_rate: f64,
     /// Persistent identity for project save.
     device_ref: vibez_core::effect::PluginDeviceInfo,
     /// Pointer for live state capture at save time.
     state_ptr: Option<vibez_plugin_host::PluginStatePtr>,
-    /// Saved state to restore (project reload). Applied on the UI
-    /// thread for CLAP; already applied in the loader for VST3.
+    /// Saved state to restore (project reload), applied on the UI
+    /// thread after phase-2 init.
     pending_state: Option<Vec<u8>>,
     /// Chain position to restore (project reload).
     position: Option<usize>,
@@ -79,6 +82,8 @@ struct PluginInstrumentLoadResult {
     gui_raw_ptr: Option<PluginRawPtr>,
     /// CLAP two-phase: partially loaded plugin to be finished on UI thread.
     clap_partial: Option<vibez_plugin_host::clap_host::instance::PartialClapPlugin>,
+    /// VST3 two-phase: dlopen'd module to be instantiated on the UI thread.
+    vst3_partial: Option<vibez_plugin_host::vst3_host::instance::PartialVst3Plugin>,
     sample_rate: f64,
     /// Persistent identity for project save.
     device_ref: vibez_core::effect::PluginDeviceInfo,
@@ -5740,6 +5745,39 @@ impl App {
                         continue;
                     }
                 }
+            } else if let Some(partial) = result.vst3_partial.take() {
+                match vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+                    partial,
+                    result.sample_rate,
+                    4096,
+                ) {
+                    Ok(mut vst3_inst) => {
+                        if let Some(ref data) = result.pending_state {
+                            use vibez_plugin_host::PluginInstance;
+                            if !vst3_inst.load_state(data) {
+                                eprintln!("vibez: {plugin_name} rejected saved state");
+                            }
+                        }
+                        let ctrl = vst3_inst.controller_ptr();
+                        let raw_ptr = if ctrl.is_null() {
+                            None
+                        } else {
+                            Some(PluginRawPtr::Vst3(ctrl))
+                        };
+                        result.state_ptr =
+                            Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
+                                vst3_inst.component_ptr(),
+                            ));
+                        let wrapper =
+                            vibez_plugin_host::PluginEffectWrapper::new(Box::new(vst3_inst));
+                        (Box::new(wrapper), raw_ptr)
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: VST3 init failed on UI thread: {e}");
+                        self.state.status_text = format!("Plugin init failed: {e}");
+                        continue;
+                    }
+                }
             } else if let Some(effect) = result.effect {
                 (effect, result.gui_raw_ptr)
             } else {
@@ -5824,6 +5862,39 @@ impl App {
                     }
                     Err(e) => {
                         eprintln!("vibez: CLAP instrument init failed on UI thread: {e}");
+                        self.state.status_text = format!("Plugin init failed: {e}");
+                        continue;
+                    }
+                }
+            } else if let Some(partial) = result.vst3_partial.take() {
+                match vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::init_on_main_thread(
+                    partial,
+                    result.sample_rate,
+                    4096,
+                ) {
+                    Ok(mut vst3_inst) => {
+                        if let Some(ref data) = result.pending_state {
+                            use vibez_plugin_host::PluginInstance;
+                            if !vst3_inst.load_state(data) {
+                                eprintln!("vibez: {plugin_name} rejected saved state");
+                            }
+                        }
+                        let ctrl = vst3_inst.controller_ptr();
+                        let raw_ptr = if ctrl.is_null() {
+                            None
+                        } else {
+                            Some(PluginRawPtr::Vst3(ctrl))
+                        };
+                        result.state_ptr =
+                            Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
+                                vst3_inst.component_ptr(),
+                            ));
+                        let wrapper =
+                            vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
+                        (Box::new(wrapper), raw_ptr)
+                    }
+                    Err(e) => {
+                        eprintln!("vibez: VST3 instrument init failed on UI thread: {e}");
                         self.state.status_text = format!("Plugin init failed: {e}");
                         continue;
                     }
@@ -5921,6 +5992,14 @@ impl App {
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
                 match event {
+                    EngineEvent::DisposeEffect(cell) => {
+                        // Plugin teardown on the UI thread: dlclose,
+                        // COM release, JUCE MessageManager access.
+                        drop(cell.take());
+                    }
+                    EngineEvent::DisposeInstrument(cell) => {
+                        drop(cell.take());
+                    }
                     EngineEvent::PlaybackPosition(pos) => {
                         self.state.position_samples = pos;
                     }
@@ -9743,6 +9822,7 @@ fn load_plugin_effect_bg(
                 effect: None,
                 gui_raw_ptr: None,
                 clap_partial: Some(partial),
+                vst3_partial: None,
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
@@ -9752,43 +9832,23 @@ fn load_plugin_effect_bg(
             })
         }
         PluginFormat::Vst3 => {
-            let mut vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+            let partial = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load_partial(
                 &info.path,
                 &info.id.uid,
                 false,
-                sample_rate,
-                4096,
             )?;
-            if let Some(ref data) = saved_state {
-                use vibez_plugin_host::PluginInstance;
-                if !vst3_inst.load_state(data) {
-                    eprintln!("vibez: {} rejected saved state", vst3_inst.name());
-                }
-            }
-            let gui_raw_ptr = {
-                let ctrl = vst3_inst.controller_ptr();
-                if ctrl.is_null() {
-                    None
-                } else {
-                    Some(PluginRawPtr::Vst3(ctrl))
-                }
-            };
-            let state_ptr = Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
-                vst3_inst.component_ptr(),
-            ));
-            let name = vst3_inst.name().to_string();
-            let wrapper = vibez_plugin_host::PluginEffectWrapper::new(Box::new(vst3_inst));
             Ok(PluginLoadResult {
                 track_id: TrackId::default(),
                 effect_id: EffectId::new(),
-                plugin_name: name,
-                effect: Some(Box::new(wrapper)),
-                gui_raw_ptr,
+                plugin_name: info.name.clone(),
+                effect: None,
+                gui_raw_ptr: None,
                 clap_partial: None,
+                vst3_partial: Some(partial),
                 sample_rate,
                 device_ref: plugin_device_ref(info),
-                state_ptr,
-                pending_state: None,
+                state_ptr: None,
+                pending_state: saved_state,
                 position: None,
             })
         }
@@ -9814,6 +9874,7 @@ fn load_plugin_instrument_bg(
                 instrument: None,
                 gui_raw_ptr: None,
                 clap_partial: Some(partial),
+                vst3_partial: None,
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
@@ -9821,42 +9882,22 @@ fn load_plugin_instrument_bg(
             })
         }
         PluginFormat::Vst3 => {
-            let mut vst3_inst = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load(
+            let partial = vibez_plugin_host::vst3_host::instance::Vst3PluginInstance::load_partial(
                 &info.path,
                 &info.id.uid,
                 true,
-                sample_rate,
-                4096,
             )?;
-            if let Some(ref data) = saved_state {
-                use vibez_plugin_host::PluginInstance;
-                if !vst3_inst.load_state(data) {
-                    eprintln!("vibez: {} rejected saved state", vst3_inst.name());
-                }
-            }
-            let gui_raw_ptr = {
-                let ctrl = vst3_inst.controller_ptr();
-                if ctrl.is_null() {
-                    None
-                } else {
-                    Some(PluginRawPtr::Vst3(ctrl))
-                }
-            };
-            let state_ptr = Some(vibez_plugin_host::PluginStatePtr::Vst3Component(
-                vst3_inst.component_ptr(),
-            ));
-            let name = vst3_inst.name().to_string();
-            let wrapper = vibez_plugin_host::PluginInstrumentWrapper::new(Box::new(vst3_inst));
             Ok(PluginInstrumentLoadResult {
                 track_id: TrackId::default(),
-                plugin_name: name,
-                instrument: Some(Box::new(wrapper)),
-                gui_raw_ptr,
+                plugin_name: info.name.clone(),
+                instrument: None,
+                gui_raw_ptr: None,
                 clap_partial: None,
+                vst3_partial: Some(partial),
                 sample_rate,
                 device_ref: plugin_device_ref(info),
-                state_ptr,
-                pending_state: None,
+                state_ptr: None,
+                pending_state: saved_state,
             })
         }
     }
