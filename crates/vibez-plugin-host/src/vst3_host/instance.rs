@@ -17,6 +17,13 @@ pub struct Vst3PluginInstance {
     component: *mut std::ffi::c_void,
     /// Raw COM pointer to IAudioProcessor
     processor: *mut std::ffi::c_void,
+    /// Raw COM pointer to IEditController. For single-component
+    /// plugins (DPF) this is the component itself; for dual-component
+    /// plugins (JUCE) it is a separate object created from the factory.
+    controller: *mut std::ffi::c_void,
+    /// True when `controller` is a separate object that we created and
+    /// initialized, and therefore must terminate on drop.
+    controller_is_separate: bool,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
     buffer_adapter: AudioBufferAdapter,
@@ -39,9 +46,14 @@ const ICOMPONENT_IID: [u8; 16] = [
     0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02,
 ];
 
-// VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33F}
+// VST3 IAudioProcessor IID: {42043F99-B7DA-453C-A569-E79D9AAEC33D}
 const IAUDIOPROCESSOR_IID: [u8; 16] = [
-    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3F,
+    0x42, 0x04, 0x3F, 0x99, 0xB7, 0xDA, 0x45, 0x3C, 0xA5, 0x69, 0xE7, 0x9D, 0x9A, 0xAE, 0xC3, 0x3D,
+];
+
+// VST3 IConnectionPoint IID: {70A4156F-6E6E-4026-9891-48BFAA60D8D1}
+const ICONNECTIONPOINT_IID: [u8; 16] = [
+    0x70, 0xA4, 0x15, 0x6F, 0x6E, 0x6E, 0x40, 0x26, 0x98, 0x91, 0x48, 0xBF, 0xAA, 0x60, 0xD8, 0xD1,
 ];
 
 /// Raw ProcessSetup matching VST3 C layout.
@@ -89,10 +101,16 @@ impl Vst3PluginInstance {
         self.component
     }
 
+    /// Raw IEditController pointer resolved at load time, or null when
+    /// the plugin exposed none (GUI unavailable).
+    pub fn controller_ptr(&self) -> *mut std::ffi::c_void {
+        self.controller
+    }
+
     /// Extract a GUI handle (IEditController) from this instance.
     /// Must be called on the main thread before wrapping for the audio thread.
     pub fn extract_gui_handle(&self) -> Option<crate::gui::Vst3GuiHandle> {
-        unsafe { crate::gui::Vst3GuiHandle::new(self.component) }
+        unsafe { crate::gui::Vst3GuiHandle::new(self.controller) }
     }
 
     /// Load and instantiate a VST3 plugin by its class ID from a `.vst3` bundle.
@@ -109,6 +127,7 @@ impl Vst3PluginInstance {
             libloading::Library::new(&module_path)
                 .map_err(|e| format!("Failed to load VST3 module: {e}"))?
         };
+        let lib = super::scanner::vst3_module_init(lib)?;
 
         type GetFactoryFn = unsafe extern "system" fn() -> *mut std::ffi::c_void;
 
@@ -186,8 +205,63 @@ impl Vst3PluginInstance {
             return Err("Component does not implement IAudioProcessor".into());
         }
 
+        // Resolve the edit controller while the factory is still alive.
+        // Single-component plugins (DPF: Dragonfly, Surge) expose it on
+        // the component; dual-component plugins (JUCE: ZL, Vital) hand
+        // out a separate class id that must be instantiated from the
+        // factory, initialized, and connected to the component.
+        let mut controller: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut controller_is_separate = false;
+        let hr = unsafe {
+            query_interface(
+                component,
+                crate::gui::IEDIT_CONTROLLER_IID.as_ptr(),
+                &mut controller,
+            )
+        };
+        if hr != 0 || controller.is_null() {
+            controller = std::ptr::null_mut();
+            // IComponent::getControllerClassId(&mut TUID) - vtable [5]
+            type GetControllerClassIdFn =
+                unsafe extern "system" fn(*mut std::ffi::c_void, *mut u8) -> i32;
+            let get_ctrl_cid: GetControllerClassIdFn =
+                unsafe { std::mem::transmute(*comp_vtbl.add(5)) };
+            let mut ctrl_cid = [0u8; 16];
+            if unsafe { get_ctrl_cid(component, ctrl_cid.as_mut_ptr()) } == 0 {
+                let hr = unsafe {
+                    create_instance(
+                        factory_ptr,
+                        ctrl_cid.as_ptr(),
+                        crate::gui::IEDIT_CONTROLLER_IID.as_ptr(),
+                        &mut controller,
+                    )
+                };
+                if hr == 0 && !controller.is_null() {
+                    let ctrl_vtbl = unsafe { vtbl(controller) };
+                    let ctrl_init: InitializeFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(3)) };
+                    if unsafe { ctrl_init(controller, std::ptr::null_mut()) } == 0 {
+                        controller_is_separate = true;
+                        unsafe { connect_component_and_controller(component, controller) };
+                        // TODO: sync state (component getState ->
+                        // controller setComponentState) once we have an
+                        // IBStream implementation.
+                    } else {
+                        type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+                        let release: ReleaseFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(2)) };
+                        unsafe { release(controller) };
+                        controller = std::ptr::null_mut();
+                    }
+                } else {
+                    controller = std::ptr::null_mut();
+                }
+            }
+        }
+
         // Get name
         let name = get_class_name_raw(factory_ptr, &cid_bytes);
+        if controller.is_null() {
+            eprintln!("vibez: no IEditController for {name}: plugin GUI unavailable");
+        }
 
         // Release factory
         type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
@@ -202,6 +276,8 @@ impl Vst3PluginInstance {
             _lib: lib,
             component,
             processor,
+            controller,
+            controller_is_separate,
             param_descriptors: Vec::new(),
             param_values: Vec::new(),
             buffer_adapter,
@@ -443,6 +519,18 @@ impl Drop for Vst3PluginInstance {
         if self.active {
             self.deactivate();
         }
+        if !self.controller.is_null() {
+            let ctrl_vtbl = unsafe { vtbl(self.controller) };
+            if self.controller_is_separate {
+                // IPluginBase::terminate - vtable [4]
+                type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+                let terminate: TerminateFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(4)) };
+                unsafe { terminate(self.controller) };
+            }
+            type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+            let release: ReleaseFn = unsafe { std::mem::transmute(*ctrl_vtbl.add(2)) };
+            unsafe { release(self.controller) };
+        }
         if !self.component.is_null() {
             // IPluginBase::terminate - vtable [4]
             type TerminateFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
@@ -461,5 +549,83 @@ impl Drop for Vst3PluginInstance {
             let release: ReleaseFn = unsafe { std::mem::transmute(*proc_vtbl.add(2)) };
             unsafe { release(self.processor) };
         }
+        super::scanner::vst3_module_exit(&self._lib);
+    }
+}
+
+/// Best-effort IConnectionPoint wiring between a dual-component
+/// plugin's processor and controller. JUCE plugins use this channel to
+/// keep the editor in sync with the processor; opening the GUI works
+/// without it, but parameter changes would not propagate.
+///
+/// # Safety
+/// Both pointers must be valid COM objects.
+unsafe fn connect_component_and_controller(
+    component: *mut std::ffi::c_void,
+    controller: *mut std::ffi::c_void,
+) {
+    type QueryInterfaceFn = unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u8,
+        *mut *mut std::ffi::c_void,
+    ) -> i32;
+    type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+    // IConnectionPoint::connect(other) - vtable [3]
+    type ConnectFn = unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32;
+
+    let get_cp = |obj: *mut std::ffi::c_void| -> Option<*mut std::ffi::c_void> {
+        let v = vtbl(obj);
+        let qi: QueryInterfaceFn = std::mem::transmute(*v.add(0));
+        let mut cp: *mut std::ffi::c_void = std::ptr::null_mut();
+        if qi(obj, ICONNECTIONPOINT_IID.as_ptr(), &mut cp) == 0 && !cp.is_null() {
+            Some(cp)
+        } else {
+            None
+        }
+    };
+
+    let (Some(comp_cp), Some(ctrl_cp)) = (get_cp(component), get_cp(controller)) else {
+        return;
+    };
+    let comp_connect: ConnectFn = std::mem::transmute(*vtbl(comp_cp).add(3));
+    let ctrl_connect: ConnectFn = std::mem::transmute(*vtbl(ctrl_cp).add(3));
+    comp_connect(comp_cp, ctrl_cp);
+    ctrl_connect(ctrl_cp, comp_cp);
+    let release_comp: ReleaseFn = std::mem::transmute(*vtbl(comp_cp).add(2));
+    let release_ctrl: ReleaseFn = std::mem::transmute(*vtbl(ctrl_cp).add(2));
+    release_comp(comp_cp);
+    release_ctrl(ctrl_cp);
+}
+
+#[cfg(test)]
+mod tests {
+    /// Hand-written IIDs must match the SDK-generated constants in the
+    /// vst3 crate. A single wrong byte makes every plugin reject the
+    /// queryInterface call (a 0x3F-for-0x3D typo in IAudioProcessor
+    /// once broke loading of ALL VST3 plugins).
+    fn assert_iid(ours: [u8; 16], sdk: [::std::os::raw::c_char; 16]) {
+        let sdk_bytes: Vec<u8> = sdk.iter().map(|b| *b as u8).collect();
+        assert_eq!(ours.as_slice(), sdk_bytes.as_slice());
+    }
+
+    #[test]
+    fn icomponent_iid_matches_sdk() {
+        assert_iid(super::ICOMPONENT_IID, vst3::Steinberg::Vst::IComponent_iid);
+    }
+
+    #[test]
+    fn iconnectionpoint_iid_matches_sdk() {
+        assert_iid(
+            super::ICONNECTIONPOINT_IID,
+            vst3::Steinberg::Vst::IConnectionPoint_iid,
+        );
+    }
+
+    #[test]
+    fn iaudioprocessor_iid_matches_sdk() {
+        assert_iid(
+            super::IAUDIOPROCESSOR_IID,
+            vst3::Steinberg::Vst::IAudioProcessor_iid,
+        );
     }
 }

@@ -518,6 +518,10 @@ pub struct AppState {
     pub cursor_x: f32,
     pub cursor_y: f32,
 
+    // Last known window size, for clamping popup menus on-screen
+    pub window_width: f32,
+    pub window_height: f32,
+
     // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
     pub drag_resize_active: bool,
 
@@ -609,6 +613,8 @@ impl Default for AppState {
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,
+            window_width: 1400.0,
+            window_height: 900.0,
             drag_resize_active: false,
             editing_track_name: None,
             editing_clip_name: None,

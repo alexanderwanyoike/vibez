@@ -225,7 +225,7 @@ impl ClapGuiHandle {
 // ── VST3 GUI Handle ──
 
 /// VST3 IEditController IID: {DCD7BBE3-7742-448D-A874-AACC979C759E}
-const IEDIT_CONTROLLER_IID: [u8; 16] = [
+pub(crate) const IEDIT_CONTROLLER_IID: [u8; 16] = [
     0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E,
 ];
 
@@ -240,35 +240,26 @@ pub struct Vst3GuiHandle {
 unsafe impl Send for Vst3GuiHandle {}
 
 impl Vst3GuiHandle {
-    /// Extract an IEditController from a VST3 component via queryInterface.
+    /// Wrap the IEditController resolved at plugin load time
+    /// (`Vst3PluginInstance::controller_ptr`). Dual-component plugins
+    /// (JUCE) keep the controller as a separate object, so the GUI can
+    /// no longer be reached by querying the component; the instance
+    /// owns the resolution logic and hands the pointer here.
     ///
     /// # Safety
-    /// `component` must be a valid IComponent COM pointer.
-    pub unsafe fn new(component: *mut c_void) -> Option<Self> {
-        if component.is_null() {
-            eprintln!("vibez: Vst3GuiHandle::new — component is null");
+    /// `edit_controller` must be a valid IEditController COM pointer
+    /// (or null, which returns None). Takes its own reference.
+    pub unsafe fn new(edit_controller: *mut c_void) -> Option<Self> {
+        if edit_controller.is_null() {
+            eprintln!("vibez: Vst3GuiHandle::new — no edit controller (GUI unavailable)");
             return None;
         }
-        // FUnknown::queryInterface(iid, &mut obj) - vtable[0]
-        type QueryInterfaceFn =
-            unsafe extern "system" fn(*mut c_void, *const u8, *mut *mut c_void) -> i32;
-        let vtbl = *(component as *const *const *const c_void);
-        let query_interface: QueryInterfaceFn = std::mem::transmute(*vtbl.add(0));
-
-        let mut edit_controller: *mut c_void = std::ptr::null_mut();
-        let hr = query_interface(
-            component,
-            IEDIT_CONTROLLER_IID.as_ptr(),
-            &mut edit_controller,
-        );
-        if hr != 0 || edit_controller.is_null() {
-            eprintln!(
-                "vibez: Vst3GuiHandle::new — queryInterface(IEditController) failed (hr={hr})"
-            );
-            return None;
-        }
-        eprintln!("vibez: Vst3GuiHandle::new — got IEditController OK");
-        // edit_controller now has its own refcount from queryInterface
+        // FUnknown::addRef - vtable[1]: hold our own reference; the
+        // plugin instance keeps its own and releases it independently.
+        type AddRefFn = unsafe extern "system" fn(*mut c_void) -> u32;
+        let vtbl = *(edit_controller as *const *const *const c_void);
+        let add_ref: AddRefFn = std::mem::transmute(*vtbl.add(1));
+        add_ref(edit_controller);
         Some(Self {
             edit_controller,
             plug_view: std::ptr::null_mut(),
@@ -427,5 +418,19 @@ impl Drop for Vst3GuiHandle {
             unsafe { release(self.edit_controller) };
             self.edit_controller = std::ptr::null_mut();
         }
+    }
+}
+
+#[cfg(test)]
+mod iid_tests {
+    /// See vst3_host::instance::tests — hand-written IIDs must match
+    /// the SDK-generated constants or plugins reject queryInterface.
+    #[test]
+    fn ieditcontroller_iid_matches_sdk() {
+        let sdk: Vec<u8> = vst3::Steinberg::Vst::IEditController_iid
+            .iter()
+            .map(|b| *b as u8)
+            .collect();
+        assert_eq!(super::IEDIT_CONTROLLER_IID.as_slice(), sdk.as_slice());
     }
 }

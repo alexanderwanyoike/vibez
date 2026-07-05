@@ -8,7 +8,7 @@ use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
-use vibez_plugin_host::{PluginId, PluginInfo};
+use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
 use crate::state::{
@@ -396,6 +396,7 @@ pub enum Message {
 
     // Cursor tracking
     CursorMoved(f32, f32),
+    WindowResized(f32, f32),
     MouseReleased,
 
     // File menu
@@ -479,7 +480,7 @@ pub enum Message {
 
     // Plugin scanning
     ScanPlugins,
-    ScanPluginsComplete(Vec<PluginInfo>),
+    ScanPluginsComplete(vibez_plugin_host::ScanReport),
     AddPluginScanPath,
     PluginScanPathSelected(Option<PathBuf>),
     RemovePluginScanPath(usize),
