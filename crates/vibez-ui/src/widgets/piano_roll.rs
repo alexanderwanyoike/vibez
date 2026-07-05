@@ -44,6 +44,10 @@ pub struct PianoRollWidget {
     pub snap_grid: SnapGrid,
     pub scroll_y: f32,
     pub edit_mode: PianoRollEditMode,
+    /// Per-pitch key-lane labels (drum rack pad names). When present
+    /// these replace the default C-note octave labels so drum tracks
+    /// show sample names on their keys, like Ableton's drum racks.
+    pub key_labels: std::collections::HashMap<u8, String>,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -85,6 +89,7 @@ impl PianoRollWidget {
             snap_grid,
             scroll_y,
             edit_mode,
+            key_labels: std::collections::HashMap::new(),
         }
     }
 
@@ -98,6 +103,7 @@ impl PianoRollWidget {
             snap_grid: SnapGrid::Eighth,
             scroll_y: default_scroll_y(200.0),
             edit_mode: PianoRollEditMode::default(),
+            key_labels: std::collections::HashMap::new(),
         }
     }
 
@@ -165,7 +171,7 @@ fn clamp_scroll_y(scroll_y: f32, canvas_height: f32) -> f32 {
 }
 
 /// Returns a pitch name like "C4", "D#3".
-fn pitch_name(pitch: u8) -> String {
+pub(crate) fn pitch_name(pitch: u8) -> String {
     const NAMES: [&str; 12] = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
@@ -422,7 +428,15 @@ impl canvas::Program<Message> for PianoRollWidget {
                 continue;
             }
 
-            if pitch % 12 == 0 {
+            if let Some(name) = self.key_labels.get(&pitch) {
+                frame.fill_text(canvas::Text {
+                    content: format!("{} {}", pitch_name(pitch), name),
+                    position: iced::Point::new(black_key_width + 3.0, y + 2.0),
+                    color: KEY_LABEL_COLOR,
+                    size: iced::Pixels(9.0),
+                    ..Default::default()
+                });
+            } else if self.key_labels.is_empty() && pitch.is_multiple_of(12) {
                 let label = pitch_name(pitch);
                 frame.fill_text(canvas::Text {
                     content: label,

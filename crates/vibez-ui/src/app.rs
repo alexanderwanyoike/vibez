@@ -2213,6 +2213,29 @@ impl App {
                     self.state.tracks.len()
                 );
             }
+            Message::DeleteKeyPressed => {
+                // Never delete anything while a text field is being
+                // edited; backspace belongs to the text there.
+                if self.state.editing_track_name.is_some() || self.state.editing_clip_name.is_some()
+                {
+                    return Task::none();
+                }
+                // Priority 1: selected notes in the open piano roll.
+                if let Some((track_id, clip_id)) = self.state.selected_note_clip {
+                    let has_selection = self
+                        .state
+                        .find_track(track_id)
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
+                        .is_some_and(|c| !c.selected_notes.is_empty());
+                    if has_selection {
+                        return self.update(Message::RemoveSelectedNotes(track_id, clip_id));
+                    }
+                }
+                // Priority 2: selected arrangement clips.
+                if !self.state.selected_clips.is_empty() {
+                    return self.update(Message::DeleteSelectedClip);
+                }
+            }
             Message::SelectTrack(track_id) => {
                 self.state.selected_track = Some(track_id);
             }
@@ -8812,9 +8835,10 @@ impl App {
                 // Use container + mouse_area so press events reach us and
                 // drag-drop works. iced Button would capture ButtonPressed
                 // and hide it from mouse_area.
+                let pad_note = crate::widgets::piano_roll::pitch_name(36 + pad_index as u8);
                 let pad_body = container(
                     column![
-                        text(format!("{:02}", pad_index + 1))
+                        text(format!("{:02}  {pad_note}", pad_index + 1))
                             .size(9)
                             .color(if active { th::ACCENT } else { th::TEXT_DIM }),
                         text(label)
@@ -9251,7 +9275,7 @@ impl App {
             if let Some(track) = self.state.find_track(track_id) {
                 if let Some(clip) = track.note_clips.iter().find(|c| c.id == cd.5) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
-                    PianoRollWidget::from_clip(
+                    let mut widget = PianoRollWidget::from_clip(
                         track_id,
                         clip,
                         clip_relative_playhead,
@@ -9260,7 +9284,9 @@ impl App {
                         self.state.snap_grid,
                         self.state.piano_roll_scroll_y,
                         self.state.piano_roll_edit_mode,
-                    )
+                    );
+                    widget.key_labels = drum_pad_key_labels(track);
+                    widget
                 } else {
                     PianoRollWidget::empty(track_id, playhead_beats, track_color)
                 }
@@ -9849,6 +9875,22 @@ impl App {
     }
 }
 
+/// Key-lane labels for drum rack tracks: pad sample names keyed by
+/// the pad's MIDI pitch (pads start at note 36, chromatic upward).
+/// Empty for non-drum tracks, which keeps the default octave labels.
+fn drum_pad_key_labels(track: &UiTrack) -> std::collections::HashMap<u8, String> {
+    const BASE_PAD_NOTE: u8 = 36;
+    let mut labels = std::collections::HashMap::new();
+    if track.instrument_kind == Some(InstrumentKind::DrumRack) {
+        for (i, pad) in track.drum_rack_pads.iter().enumerate() {
+            let pitch = BASE_PAD_NOTE + i as u8;
+            let name = pad.name.clone().unwrap_or_else(|| format!("Pad {}", i + 1));
+            labels.insert(pitch, name);
+        }
+    }
+    labels
+}
+
 /// Default clip loop region end: the note content's span rounded up
 /// to whole bars (4/4), capped at the clip duration. This is the
 /// Ableton behavior: loop the PATTERN, not the whole clip, so a
@@ -9997,6 +10039,18 @@ fn global_key_handler(
     // Escape: cancel editing
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
         return Some(Message::CancelEditing);
+    }
+
+    // Delete/Backspace: context-resolved in update() (selected notes
+    // first, then selected clips) and ignored while renaming.
+    if !modifiers.control()
+        && matches!(
+            key,
+            iced::keyboard::Key::Named(Named::Delete)
+                | iced::keyboard::Key::Named(Named::Backspace)
+        )
+    {
+        return Some(Message::DeleteKeyPressed);
     }
 
     // B: toggle piano roll draw mode (no modifiers)
