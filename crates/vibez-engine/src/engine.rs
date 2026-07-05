@@ -44,6 +44,10 @@ pub struct AudioEngine {
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
+    /// Set when process_multitrack split the block at the arrangement
+    /// loop boundary; suppresses the post-advance discontinuity flush
+    /// for that block (segment-2 notes are legitimately sounding).
+    split_wrap_handled: bool,
 }
 
 /// Dedicated single-voice preview channel used by the sample browser.
@@ -72,6 +76,7 @@ impl AudioEngine {
             sample_rate: 44100,
             cmd_rx,
             event_tx,
+            split_wrap_handled: false,
         };
 
         (engine, cmd_tx, event_rx)
@@ -118,14 +123,21 @@ impl AudioEngine {
         let pos_before = self.transport.position();
         let new_pos = self.transport.advance(frames as u64);
 
-        // Discontinuous jump (arrangement-loop wrap or auto-stop):
-        // kill sounding notes, otherwise they hang forever because
-        // the note schedulers only reason about adjacent positions.
-        if was_playing && new_pos != pos_before.saturating_add(frames as u64) {
+        // Discontinuous jump NOT already handled by the loop-boundary
+        // split (auto-stop at project end, loop region moved behind
+        // the playhead): kill sounding notes, otherwise they hang
+        // forever because the note schedulers only reason about
+        // adjacent positions. When the split ran, notes started
+        // after the wrap are legitimately sounding and must survive.
+        if was_playing
+            && !self.split_wrap_handled
+            && new_pos != pos_before.saturating_add(frames as u64)
+        {
             for track in &mut self.tracks {
                 track.flush_notes();
             }
         }
+        self.split_wrap_handled = false;
 
         // Position event.
         let _ = self.event_tx.push(EngineEvent::PlaybackPosition(new_pos));
@@ -160,12 +172,55 @@ impl AudioEngine {
     // ------------------------------------------------------------------
 
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
+    ///
+    /// When the arrangement loop boundary falls inside this block the
+    /// work is split into two segments around it. Without the split,
+    /// the block renders linearly past the loop end and the next
+    /// block starts after the loop start, so note-ons in the skipped
+    /// window (e.g. a note right at the loop start) never fire.
     fn process_multitrack(&mut self, output: &mut [f32], frames: usize, channels: usize) {
         if !self.transport.is_playing() {
             return;
         }
 
         let pos = self.transport.position();
+        if let Some((loop_start, loop_end)) = self.transport.active_loop_region() {
+            if pos < loop_end && pos + frames as u64 > loop_end {
+                let first = (loop_end - pos) as usize;
+                let rest = frames - first;
+                self.render_multitrack_segment(
+                    &mut output[..first * channels],
+                    pos,
+                    first,
+                    channels,
+                );
+                // Kill anything sounding across the boundary, then
+                // continue sample-accurately from the loop start.
+                for track in &mut self.tracks {
+                    track.flush_notes();
+                }
+                if rest > 0 {
+                    self.render_multitrack_segment(
+                        &mut output[first * channels..],
+                        loop_start,
+                        rest,
+                        channels,
+                    );
+                }
+                self.split_wrap_handled = true;
+                return;
+            }
+        }
+        self.render_multitrack_segment(output, pos, frames, channels);
+    }
+
+    fn render_multitrack_segment(
+        &mut self,
+        output: &mut [f32],
+        pos: u64,
+        frames: usize,
+        channels: usize,
+    ) {
         let has_solo = any_solo(&self.tracks);
 
         for track_idx in 0..self.tracks.len() {
@@ -1933,6 +1988,115 @@ mod stuck_note_tests {
             "note-on should have fired"
         );
         (engine, cmd_tx, events, tid)
+    }
+
+    /// Reproduce the dogfood report: 8-beat clip, 1-beat note at the
+    /// start, clip loop on, arrangement loop over the same 2 bars.
+    /// Every note-on must be closed by a note-off before the next
+    /// note-on of the same pitch (otherwise the voice piles up /
+    /// drones).
+    fn assert_no_hanging_notes(events: &[(bool, u8)]) {
+        let mut sounding = false;
+        for (i, &(is_on, pitch)) in events.iter().enumerate() {
+            assert_eq!(pitch, 60);
+            if is_on {
+                assert!(!sounding, "note-on #{i} while already sounding: {events:?}");
+                sounding = true;
+            } else {
+                sounding = false;
+            }
+        }
+    }
+
+    fn run_scenario(
+        clip_loop: (bool, f64, f64),
+        arr_loop: Option<(u64, u64)>,
+        note_dur: f64,
+        blocks: usize,
+    ) -> Vec<(bool, u8)> {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        cmd_tx
+            .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::SetPluginInstrument {
+                track_id: tid,
+                instrument: Box::new(SpyInstrument {
+                    events: Arc::clone(&events),
+                }),
+            })
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddNoteClip {
+                track_id: tid,
+                clip_id: cid,
+                position_beats: 0.0,
+                duration_beats: 8.0,
+                loop_enabled: clip_loop.0,
+                loop_start_beats: clip_loop.1,
+                loop_end_beats: clip_loop.2,
+            })
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AddNote {
+                track_id: tid,
+                clip_id: cid,
+                note: MidiNote {
+                    pitch: 60,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: note_dur,
+                },
+            })
+            .unwrap();
+        if let Some((start, end)) = arr_loop {
+            cmd_tx
+                .push(EngineCommand::SetArrangementLoopRegion { start, end })
+                .unwrap();
+            cmd_tx
+                .push(EngineCommand::SetArrangementLoop(true))
+                .unwrap();
+        }
+        cmd_tx.push(EngineCommand::Play).unwrap();
+        let mut buf = vec![0.0f32; 512 * 2];
+        for _ in 0..blocks {
+            engine.process(&mut buf, 2);
+        }
+        let out = events.lock().unwrap().clone();
+        out
+    }
+
+    #[test]
+    fn dogfood_clip_loop_one_bar_in_two_bar_clip() {
+        // Clip loop repeats the first bar inside the 2-bar clip.
+        // 120 BPM default: samples_per_beat = 44100 * 60/120 = 22050.
+        // 8 beats = 176400 samples. Arrangement loop the same 2 bars.
+        let events = run_scenario((true, 0.0, 4.0), Some((0, 176_400)), 1.0, 1500);
+        assert!(
+            events.iter().filter(|e| e.0).count() >= 4,
+            "expected several note-ons: {events:?}"
+        );
+        assert_no_hanging_notes(&events);
+    }
+
+    #[test]
+    fn dogfood_full_clip_loop_with_arrangement_loop() {
+        let events = run_scenario((true, 0.0, 8.0), Some((0, 176_400)), 1.0, 1500);
+        assert!(
+            events.iter().filter(|e| e.0).count() >= 2,
+            "expected repeated note-ons: {events:?}"
+        );
+        assert_no_hanging_notes(&events);
+    }
+
+    #[test]
+    fn dogfood_note_spanning_clip_loop_boundary() {
+        // Note as long as the loop region: off lands exactly on the wrap.
+        let events = run_scenario((true, 0.0, 4.0), Some((0, 176_400)), 4.0, 1500);
+        assert_no_hanging_notes(&events);
     }
 
     #[test]

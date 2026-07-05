@@ -3214,22 +3214,17 @@ impl App {
                 let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let was_full_clip_loop = clip.loop_enabled
-                            && clip.loop_start_beats == 0.0
-                            && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
                         clip.duration_beats = new_duration_beats;
 
-                        // Keep the loop region inside the clip. A
-                        // full-clip loop follows the new length; a
-                        // partial loop is clamped when shrinking.
-                        if clip.loop_enabled {
-                            if was_full_clip_loop {
-                                clip.loop_end_beats = new_duration_beats;
-                            } else if clip.loop_end_beats > new_duration_beats {
-                                clip.loop_end_beats = new_duration_beats;
-                                if clip.loop_start_beats >= clip.loop_end_beats {
-                                    clip.loop_start_beats = 0.0;
-                                }
+                        // Keep the loop region inside the clip when
+                        // shrinking. Extending leaves the region
+                        // untouched so the looped pattern repeats to
+                        // fill the new length (the whole point of
+                        // stretching a looped clip).
+                        if clip.loop_enabled && clip.loop_end_beats > new_duration_beats {
+                            clip.loop_end_beats = new_duration_beats;
+                            if clip.loop_start_beats >= clip.loop_end_beats {
+                                clip.loop_start_beats = 0.0;
                             }
                         }
 
