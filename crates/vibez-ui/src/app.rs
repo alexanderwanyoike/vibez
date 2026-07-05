@@ -810,6 +810,22 @@ impl App {
 
     fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
         self.clear_project_runtime();
+
+        // Seed the global id counter past every persisted id BEFORE
+        // anything new is created: loaded ids come from a previous
+        // session's counter, and a collision makes two objects
+        // answer to the same id (double selection, engine commands
+        // hitting both).
+        let max_loaded_id = loaded
+            .project
+            .tracks
+            .iter()
+            .flat_map(|t| std::iter::once(t.id.raw()).chain(t.effects.iter().map(|e| e.id.raw())))
+            .chain(loaded.project.clips.iter().map(|c| c.id.raw()))
+            .chain(loaded.project.note_clips.iter().map(|c| c.id.raw()))
+            .max()
+            .unwrap_or(0);
+        vibez_core::id::ensure_ids_above(max_loaded_id);
         // Third-party plugin devices load asynchronously after the
         // built-in rebuild; collected here, spawned at the end.
         let mut plugin_effect_requests: Vec<(
@@ -2709,6 +2725,7 @@ impl App {
             }
             Message::SelectNoteClip(track_id, clip_id) => {
                 self.state.selected_note_clip = Some((track_id, clip_id));
+                self.state.selected_track = Some(track_id);
             }
             Message::AddNote {
                 track_id,
