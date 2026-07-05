@@ -8958,14 +8958,12 @@ impl App {
                                 PluginCategory::Instrument => "inst",
                                 PluginCategory::Both => "fx+inst",
                             };
-                            let display: String = if plugin.name.chars().count() > 20 {
-                                format!("{}...", plugin.name.chars().take(18).collect::<String>())
-                            } else {
-                                plugin.name.clone()
-                            };
                             let plugin_id = plugin.id.clone();
+                            // Full name, wrapping inside the fixed
+                            // cell width: truncated names made the
+                            // LSP suite indistinguishable.
                             let cell = column![
-                                text(display).size(11).color(th::TEXT),
+                                text(plugin.name.clone()).size(11).color(th::TEXT),
                                 text(format!("{format_badge} {cat_label}"))
                                     .size(9)
                                     .color(th::TEXT_DIM),
