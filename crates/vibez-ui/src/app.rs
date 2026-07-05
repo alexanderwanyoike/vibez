@@ -2632,17 +2632,20 @@ impl App {
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        // Default the loop region to the full clip
-                        // whenever the stored region is unusable:
-                        // never set, inverted, or stale from before a
-                        // resize (an end past the clip's duration
-                        // never wraps, an end before it loops the
-                        // wrong slice). Bug #3 in the dogfood log.
+                        // Default the loop region whenever the stored
+                        // one is unusable: never set, inverted, or
+                        // stale from before a resize. Ableton
+                        // semantics: the loop region covers the
+                        // CONTENT (rounded up to whole bars), so a
+                        // 1-bar pattern inside a longer clip repeats
+                        // bar by bar instead of playing once followed
+                        // by silence. Bug #3 in the dogfood log.
                         let invalid = clip.loop_end_beats <= clip.loop_start_beats
                             || clip.loop_end_beats > clip.duration_beats;
                         if clip.loop_enabled && invalid {
                             clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats = clip.duration_beats;
+                            clip.loop_end_beats =
+                                default_loop_end(&clip.notes, clip.duration_beats);
                         }
                         cmd_data = Some((
                             clip.loop_enabled,
@@ -3231,15 +3234,11 @@ impl App {
                         // Auto-enable loop when extending past note content
                         // Only if the clip actually has notes — empty clips don't loop
                         if !clip.notes.is_empty() && !clip.loop_enabled {
-                            let content_end = clip
-                                .notes
-                                .iter()
-                                .map(|n| n.start_beat + n.duration_beats)
-                                .fold(0.0_f64, f64::max);
-                            if content_end > 0.0 && new_duration_beats > content_end {
+                            let loop_end = default_loop_end(&clip.notes, new_duration_beats);
+                            if loop_end > 0.0 && new_duration_beats > loop_end {
                                 clip.loop_enabled = true;
                                 clip.loop_start_beats = 0.0;
-                                clip.loop_end_beats = content_end;
+                                clip.loop_end_beats = loop_end;
                             }
                         }
 
@@ -9831,6 +9830,23 @@ impl App {
             }),
         ])
     }
+}
+
+/// Default clip loop region end: the note content's span rounded up
+/// to whole bars (4/4), capped at the clip duration. This is the
+/// Ableton behavior: loop the PATTERN, not the whole clip, so a
+/// 1-bar pattern in a longer clip repeats bar by bar.
+fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
+    const BEATS_PER_BAR: f64 = 4.0;
+    let content_end = notes
+        .iter()
+        .map(|n| n.start_beat + n.duration_beats)
+        .fold(0.0_f64, f64::max);
+    if content_end <= 0.0 {
+        return duration_beats;
+    }
+    let bars = (content_end / BEATS_PER_BAR).ceil().max(1.0);
+    (bars * BEATS_PER_BAR).min(duration_beats)
 }
 
 /// Persistent identity for a plugin device, built from scan info.

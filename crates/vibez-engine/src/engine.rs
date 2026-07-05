@@ -633,6 +633,7 @@ impl AudioEngine {
                         if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                             clip.duration_beats = duration_beats;
                         }
+                        track.flush_notes();
                     }
                 }
                 EngineCommand::AddNoteClip {
@@ -659,6 +660,10 @@ impl AudioEngine {
                 EngineCommand::RemoveNoteClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.note_clips.retain(|c| c.id != clip_id);
+                        // Sounding notes get their note-offs from the
+                        // clip's schedule; without the clip they hang
+                        // forever.
+                        track.flush_notes();
                     }
                 }
                 EngineCommand::MoveNoteClip {
@@ -694,6 +699,7 @@ impl AudioEngine {
                                 clip.notes.remove(note_index);
                             }
                         }
+                        track.flush_notes();
                     }
                 }
                 EngineCommand::EditNote {
@@ -708,6 +714,7 @@ impl AudioEngine {
                                 clip.notes[note_index] = note;
                             }
                         }
+                        track.flush_notes();
                     }
                 }
                 EngineCommand::SetInstrumentParam {
@@ -801,6 +808,7 @@ impl AudioEngine {
                             clip.loop_start_beats = loop_start_beats;
                             clip.loop_end_beats = loop_end_beats;
                         }
+                        track.flush_notes();
                     }
                 }
 
@@ -2097,6 +2105,26 @@ mod stuck_note_tests {
         // Note as long as the loop region: off lands exactly on the wrap.
         let events = run_scenario((true, 0.0, 4.0), Some((0, 176_400)), 4.0, 1500);
         assert_no_hanging_notes(&events);
+    }
+
+    #[test]
+    fn removing_clip_kills_sounding_notes() {
+        let (mut engine, mut cmd_tx, events, tid) = engine_with_held_note();
+        // Clip id is unknown here; removing ALL note clips on the
+        // track exercises the same path.
+        let cid = {
+            // recover clip id from engine state
+            engine.tracks()[0].note_clips[0].id
+        };
+        cmd_tx
+            .push(EngineCommand::RemoveNoteClip(tid, cid))
+            .unwrap();
+        let mut buf = vec![0.0f32; 512 * 2];
+        engine.process(&mut buf, 2);
+        assert!(
+            events.lock().unwrap().contains(&(false, 60)),
+            "deleting the clip must kill its sounding notes"
+        );
     }
 
     #[test]
