@@ -220,58 +220,41 @@ impl canvas::Program<Message> for EffectKnobWidget {
         let radius = (w.min(h) / 2.0 - 3.0).max(6.0);
         let engaged = state.dragging || cursor.is_over(bounds);
 
-        // Knob body: darker than the card so it reads as a physical
-        // control (the old body used the card's own color and was
-        // invisible). Subtle ring border, brighter while engaged.
-        let body = canvas::Path::circle(center, radius);
-        frame.fill(
-            &body,
-            Color {
-                r: 0.09,
-                g: 0.09,
-                b: 0.09,
-                a: 1.0,
-            },
-        );
-        let ring = canvas::Path::circle(center, radius);
-        frame.stroke(
-            &ring,
-            canvas::Stroke::default()
-                .with_color(if engaged {
-                    self.arc_color
-                } else {
-                    theme::BORDER
-                })
-                .with_width(1.0),
-        );
-
-        let arc_radius = radius - 1.5;
-        let segments = 48;
+        // Geometry: the value arc rides outside the body with clear
+        // air between every element; overlapping strokes at nearly
+        // identical radii were the source of the shimmer artifacts.
+        let arc_radius = radius - 1.25;
+        let body_radius = radius - 4.5;
         let norm = self.normalized();
+        let value_angle = ARC_START + norm * (ARC_END - ARC_START);
 
-        // Track arc: visible neutral grey along the full sweep.
-        let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END, segments);
+        // Track arc first, then the knob body on top. Round caps keep
+        // the arc ends crisp.
+        let round = canvas::Stroke {
+            line_cap: canvas::LineCap::Round,
+            ..canvas::Stroke::default()
+        };
+        let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END);
         frame.stroke(
             &bg_arc,
-            canvas::Stroke::default()
+            round
+                .clone()
                 .with_color(Color {
-                    r: 0.24,
-                    g: 0.24,
-                    b: 0.24,
+                    r: 0.22,
+                    g: 0.22,
+                    b: 0.22,
                     a: 1.0,
                 })
                 .with_width(2.5),
         );
 
-        // Value arc in the track color, slightly brighter when engaged.
-        let value_angle = ARC_START + norm * (ARC_END - ARC_START);
         if norm > 0.005 {
-            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
+            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle);
             let arc_color = if engaged {
                 Color {
-                    r: (self.arc_color.r * 1.25).min(1.0),
-                    g: (self.arc_color.g * 1.25).min(1.0),
-                    b: (self.arc_color.b * 1.25).min(1.0),
+                    r: (self.arc_color.r * 1.2).min(1.0),
+                    g: (self.arc_color.g * 1.2).min(1.0),
+                    b: (self.arc_color.b * 1.2).min(1.0),
                     a: 1.0,
                 }
             } else {
@@ -279,15 +262,35 @@ impl canvas::Program<Message> for EffectKnobWidget {
             };
             frame.stroke(
                 &value_arc,
-                canvas::Stroke::default()
-                    .with_color(arc_color)
-                    .with_width(2.5),
+                round.clone().with_color(arc_color).with_width(2.5),
             );
         }
 
-        // Pointer line, the Ableton-style position indicator.
-        let pointer_inner = radius * 0.30;
-        let pointer_outer = radius - 3.5;
+        // Knob body: filled disc, subtly lighter while engaged.
+        let body = canvas::Path::circle(center, body_radius);
+        frame.fill(
+            &body,
+            if engaged {
+                Color {
+                    r: 0.16,
+                    g: 0.16,
+                    b: 0.16,
+                    a: 1.0,
+                }
+            } else {
+                Color {
+                    r: 0.12,
+                    g: 0.12,
+                    b: 0.12,
+                    a: 1.0,
+                }
+            },
+        );
+
+        // Pointer: from inside the body to its edge, rounded, never
+        // touching the arc.
+        let pointer_inner = body_radius * 0.35;
+        let pointer_outer = body_radius - 1.0;
         let pointer = canvas::Path::line(
             iced::Point::new(
                 center.x + pointer_inner * value_angle.cos(),
@@ -300,7 +303,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
         );
         frame.stroke(
             &pointer,
-            canvas::Stroke::default()
+            round
                 .with_color(if engaged {
                     theme::TEXT
                 } else {
@@ -431,26 +434,16 @@ impl canvas::Program<Message> for EffectKnobWidget {
     }
 }
 
-fn build_arc(
-    center: iced::Point,
-    radius: f32,
-    start: f32,
-    end: f32,
-    segments: usize,
-) -> canvas::Path {
+fn build_arc(center: iced::Point, radius: f32, start: f32, end: f32) -> canvas::Path {
+    // Native arc geometry: true curves stay antialiased at any size,
+    // unlike the segment polylines that caused visible stair-step
+    // artifacting on small knobs.
     canvas::Path::new(|builder| {
-        let step = (end - start) / segments as f32;
-        for i in 0..=segments {
-            let angle = start + step * i as f32;
-            let point = iced::Point::new(
-                center.x + radius * angle.cos(),
-                center.y + radius * angle.sin(),
-            );
-            if i == 0 {
-                builder.move_to(point);
-            } else {
-                builder.line_to(point);
-            }
-        }
+        builder.arc(canvas::path::Arc {
+            center,
+            radius,
+            start_angle: iced::Radians(start),
+            end_angle: iced::Radians(end),
+        });
     })
 }

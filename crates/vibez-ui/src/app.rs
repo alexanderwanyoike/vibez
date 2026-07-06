@@ -140,6 +140,7 @@ struct App {
 pub fn run() -> iced::Result {
     iced::application("vibez", App::update, App::view)
         .theme(App::theme)
+        .antialiasing(true)
         .subscription(App::subscription)
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
