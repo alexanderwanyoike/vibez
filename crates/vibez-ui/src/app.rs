@@ -8339,9 +8339,19 @@ impl App {
                 .into()
         };
 
+        // Ableton-style panel heights: the Devices tab is a FIXED
+        // strip that device cards are designed to fit exactly (the
+        // arrangement flexes instead); the Clip tab keeps flexible
+        // height for the piano roll. Window-fraction heights clipped
+        // cards or demanded ugly vertical scrollbars.
+        let panel_height = if self.state.detail_panel_tab == DetailPanelTab::Devices {
+            Length::Fixed(th::DEVICE_BODY_H + 96.0)
+        } else {
+            Length::FillPortion(2)
+        };
         container(detail_content)
             .width(Length::Fill)
-            .height(Length::FillPortion(2))
+            .height(panel_height)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::BG_DARK.into()),
                 border: iced::Border {
@@ -8418,19 +8428,15 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        let thin = || {
-            scrollable::Scrollbar::new()
-                .width(5)
-                .scroller_width(5)
-                .spacing(2)
-        };
-        // Both axes: on short windows the rack height exceeds the
-        // panel viewport and vertical scroll keeps every control
-        // reachable instead of amputated.
-        let scrollable_devices = scrollable(devices_row).direction(scrollable::Direction::Both {
-            horizontal: thin(),
-            vertical: thin(),
-        });
+        // Horizontal only: the panel is now a fixed-height strip the
+        // cards fit exactly, Ableton-style.
+        let scrollable_devices =
+            scrollable(devices_row).direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(5)
+                    .scroller_width(5)
+                    .spacing(2),
+            ));
 
         let content = column![header, scrollable_devices]
             .spacing(6)
