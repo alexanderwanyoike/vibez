@@ -8418,13 +8418,19 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        let scrollable_devices =
-            scrollable(devices_row).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new()
-                    .width(5)
-                    .scroller_width(5)
-                    .spacing(4),
-            ));
+        let thin = || {
+            scrollable::Scrollbar::new()
+                .width(5)
+                .scroller_width(5)
+                .spacing(2)
+        };
+        // Both axes: on short windows the rack height exceeds the
+        // panel viewport and vertical scroll keeps every control
+        // reachable instead of amputated.
+        let scrollable_devices = scrollable(devices_row).direction(scrollable::Direction::Both {
+            horizontal: thin(),
+            vertical: thin(),
+        });
 
         let content = column![header, scrollable_devices]
             .spacing(6)
