@@ -238,7 +238,6 @@ pub enum Message {
     },
 
     // Clip operations
-    DuplicateNoteClip(TrackId, ClipId),
     DoubleNoteClip(TrackId, ClipId),
     CropNoteClip(TrackId, ClipId),
 
@@ -251,18 +250,6 @@ pub enum Message {
         clip_id: ClipId,
         new_duration_beats: f64,
     },
-    SplitAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_position: u64,
-    },
-    SplitNoteClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_beat: f64,
-    },
-    SplitSelectedAtPlayhead,
-    JoinSelectedClips,
 
     // Detail panel tabs
     SwitchDetailTab(DetailPanelTab),
@@ -276,20 +263,6 @@ pub enum Message {
         target: ContextMenuTarget,
     },
     DismissContextMenu,
-    DeleteClipsInRegion {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-    SplitClipsAtRegion {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-
-    // Clip creation from region
-    CreateClipFromSelection,
-    CreateNoteClipFromSelection(TrackId),
 
     // Track reordering
 
@@ -656,5 +629,64 @@ impl Message {
     }
     pub fn set_time_selection_active(a: bool) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTimeSelectionActive(a))
+    }
+    pub fn duplicate_note_clip(t: TrackId, c: ClipId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::DuplicateNoteClip(t, c))
+    }
+    pub fn split_audio_clip(t: TrackId, c: ClipId, split_position: u64) -> Self {
+        Self::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::SplitAudioClip {
+                track_id: t,
+                clip_id: c,
+                split_position,
+            },
+        )
+    }
+    pub fn split_note_clip(t: TrackId, c: ClipId, split_beat: f64) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SplitNoteClip {
+            track_id: t,
+            clip_id: c,
+            split_beat,
+        })
+    }
+    pub fn split_selected_at_playhead() -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SplitSelectedAtPlayhead)
+    }
+    pub fn join_selected_clips() -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::JoinSelectedClips)
+    }
+    pub fn delete_clips_in_region(
+        start_beats: f64,
+        end_beats: f64,
+        track_id: Option<TrackId>,
+    ) -> Self {
+        Self::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::DeleteClipsInRegion {
+                start_beats,
+                end_beats,
+                track_id,
+            },
+        )
+    }
+    pub fn split_clips_at_region(
+        start_beats: f64,
+        end_beats: f64,
+        track_id: Option<TrackId>,
+    ) -> Self {
+        Self::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::SplitClipsAtRegion {
+                start_beats,
+                end_beats,
+                track_id,
+            },
+        )
+    }
+    pub fn create_clip_from_selection() -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::CreateClipFromSelection)
+    }
+    pub fn create_note_clip_from_selection(t: TrackId) -> Self {
+        Self::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::CreateNoteClipFromSelection(t),
+        )
     }
 }

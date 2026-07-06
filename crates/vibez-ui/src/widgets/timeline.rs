@@ -1868,13 +1868,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         "e" => {
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::SplitSelectedAtPlayhead),
+                                Some(Message::split_selected_at_playhead()),
                             );
                         }
                         "j" if !self.selected_clips.is_empty() => {
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::JoinSelectedClips),
+                                Some(Message::join_selected_clips()),
                             );
                         }
                         "t" | "T" => {
