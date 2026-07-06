@@ -16,6 +16,16 @@ use crate::state::{
     SampleBrowserEntry, SettingsTab, SnapGrid, Workspace,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrumPadParam {
+    Gain,
+    Pan,
+    Start,
+    End,
+    CoarseTune,
+    FineTune,
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedClipData {
     pub info: ClipInfo,
@@ -207,6 +217,22 @@ pub enum Message {
     DrumRackPadDecodeError(TrackId, usize, String),
     ClearDrumRackPad(TrackId, usize),
     SelectDrumRackPad(TrackId, usize),
+    SetDrumPadParam {
+        track_id: TrackId,
+        pad_index: usize,
+        param: DrumPadParam,
+        value: f32,
+    },
+    SetDrumPadOneShot {
+        track_id: TrackId,
+        pad_index: usize,
+        one_shot: bool,
+    },
+    SetDrumPadChokeGroup {
+        track_id: TrackId,
+        pad_index: usize,
+        choke_group: Option<u8>,
+    },
 
     // Zoom / scroll
     ZoomIn,

@@ -2165,6 +2165,53 @@ mod stuck_note_tests {
     }
 
     #[test]
+    fn instrument_params_change_the_sound() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid = TrackId::new();
+        cmd_tx
+            .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::SetTrackInstrument(
+                tid,
+                vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            ))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AuditionNote {
+                track_id: tid,
+                pitch: 60,
+                velocity: 100,
+                on: true,
+            })
+            .unwrap();
+        let mut open_buf = vec![0.0f32; 2048 * 2];
+        engine.process(&mut open_buf, 2);
+        engine.process(&mut open_buf, 2);
+
+        // Slam the filter shut (param 5 = cutoff in Hz) and compare.
+        cmd_tx
+            .push(EngineCommand::SetInstrumentParam {
+                track_id: tid,
+                param_index: 5,
+                value: 60.0,
+            })
+            .unwrap();
+        let mut closed_buf = vec![0.0f32; 2048 * 2];
+        engine.process(&mut closed_buf, 2);
+        engine.process(&mut closed_buf, 2);
+
+        let rms = |b: &[f32]| (b.iter().map(|s| s * s).sum::<f32>() / b.len() as f32).sqrt();
+        let open_rms = rms(&open_buf);
+        let closed_rms = rms(&closed_buf);
+        assert!(open_rms > 0.0);
+        assert!(
+            closed_rms < open_rms * 0.7,
+            "60 Hz cutoff must audibly darken/quiet a C4 saw: open={open_rms} closed={closed_rms}"
+        );
+    }
+
+    #[test]
     fn audition_sounds_while_transport_stopped() {
         let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
         let tid = TrackId::new();

@@ -28,8 +28,8 @@ use vibez_project::Project;
 
 use crate::icons;
 use crate::message::{
-    BrowserImportTarget, LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message,
-    ProjectLoadResult, SampleLibraryScanResult,
+    BrowserImportTarget, DrumPadParam, LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData,
+    Message, ProjectLoadResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
@@ -1956,6 +1956,9 @@ impl App {
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
                 | Message::ClearDrumRackPad(..)
+                | Message::SetDrumPadParam { .. }
+                | Message::SetDrumPadOneShot { .. }
+                | Message::SetDrumPadChokeGroup { .. }
                 | Message::BrowserSampleDecoded(..)
                 | Message::ToggleClipLoop(..)
                 | Message::SetClipLoopRegion { .. }
@@ -2645,6 +2648,67 @@ impl App {
                     track.selected_drum_pad = pad_index.min(max_index);
                 }
                 self.state.selected_track = Some(track_id);
+            }
+            Message::SetDrumPadParam {
+                track_id,
+                pad_index,
+                param,
+                value,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        match param {
+                            DrumPadParam::Gain => pad.gain = value.clamp(0.0, 2.0),
+                            DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
+                            DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
+                            DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
+                            DrumPadParam::CoarseTune => {
+                                pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
+                            }
+                            DrumPadParam::FineTune => pad.fine_tune = value.clamp(-100.0, 100.0),
+                        }
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
+            }
+            Message::SetDrumPadOneShot {
+                track_id,
+                pad_index,
+                one_shot,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        pad.one_shot = one_shot;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
+            }
+            Message::SetDrumPadChokeGroup {
+                track_id,
+                pad_index,
+                choke_group,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        pad.choke_group = choke_group;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
             }
 
             // -- Clip looping --
@@ -8581,7 +8645,7 @@ impl App {
                         devices_row = devices_row.push(card);
                     }
                     _ => {
-                        let synth_card = self.view_synth_device(track_id, track_color);
+                        let synth_card = self.view_synth_device(track_id, track, track_color);
                         devices_row = devices_row.push(synth_card);
                     }
                 }
@@ -8597,9 +8661,13 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        let scrollable_devices = scrollable(devices_row).direction(
-            scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
-        );
+        let scrollable_devices =
+            scrollable(devices_row).direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(5)
+                    .scroller_width(5)
+                    .spacing(4),
+            ));
 
         let content = column![header, scrollable_devices]
             .spacing(6)
@@ -8629,6 +8697,57 @@ impl App {
                 background: Some(th::BG_SURFACE.into()),
                 ..Default::default()
             })
+    }
+
+    /// Standard device title row: colored dot, name, optional remove.
+    fn device_title_row(
+        name: &str,
+        track_color: Color,
+        remove: Option<Message>,
+    ) -> iced::widget::Row<'_, Message> {
+        let dot = text("\u{25CF}").size(8).color(track_color);
+        let name = text(name.to_string()).size(11).color(th::TEXT);
+        let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
+        if let Some(msg) = remove {
+            let remove_btn: Element<'_, Message> =
+                Self::device_icon_btn(icons::X, th::TEXT_DIM, th::DANGER, msg).into();
+            r = r.push(horizontal_space().width(Length::Fixed(12.0)));
+            r = r.push(remove_btn);
+        }
+        r
+    }
+
+    /// Labeled section inside a device body, Ableton-style: a tiny
+    /// uppercase header above the section's controls.
+    fn device_section<'a>(
+        label: &'static str,
+        content: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        column![text(label).size(8).color(th::TEXT_MUTED), content]
+            .spacing(6)
+            .align_x(iced::Alignment::Start)
+            .into()
+    }
+
+    /// Thin vertical rule separating device sections.
+    fn device_divider() -> Element<'static, Message> {
+        container(text(""))
+            .width(Length::Fixed(1.0))
+            .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::DIVIDER.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Standard device body: fixed rack height so every card in the
+    /// chain lines up like a hardware rack, consistent padding.
+    fn device_body(content: Element<'_, Message>) -> Element<'_, Message> {
+        container(content)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
     }
 
     /// Wrap card content in the standard device card container.
@@ -8738,23 +8857,124 @@ impl App {
     }
 
     /// Synth device card for instrument tracks.
-    fn view_synth_device(&self, _track_id: TrackId, track_color: Color) -> Element<'_, Message> {
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Synth").size(11).color(th::TEXT);
+    fn view_synth_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Synth",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
-        let title =
-            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
+        let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
+        let value_of = |i: usize| {
+            track
+                .instrument_params
+                .get(i)
+                .copied()
+                .unwrap_or(descriptors[i].default)
+        };
+        let knob = |i: usize, label: &str| {
+            param_column(
+                EffectKnobWidget::for_instrument(
+                    track_id,
+                    i,
+                    value_of(i),
+                    descriptors[i].min,
+                    descriptors[i].max,
+                    descriptors[i].default,
+                    track_color,
+                ),
+                label.to_string(),
+                format_value(value_of(i), descriptors[i].unit),
+            )
+        };
 
-        let param_names = ["Attack", "Decay", "Sustain", "Release"];
-        let mut params_col = column![].spacing(3);
-        for pn in &param_names {
-            let label = text(*pn).size(9).color(th::TEXT_DIM);
-            let value = text("0.50").size(8).color(th::TEXT_MUTED);
-            params_col = params_col.push(column![label, value].spacing(1));
-        }
-        let body = container(params_col).padding([6, 6]).width(Length::Fill);
+        // OSC section: 2x2 waveform selector grid.
+        let wave_value = value_of(0).round() as usize;
+        let wave_btn = |i: usize, label: &'static str| {
+            let active = wave_value == i;
+            button(
+                text(label)
+                    .size(9)
+                    .width(Length::Fixed(30.0))
+                    .align_x(iced::Alignment::Center)
+                    .color(if active { th::BG_DARK } else { th::TEXT_DIM }),
+            )
+            .on_press(Message::SetInstrumentParam(track_id, 0, i as f32))
+            .padding([3, 4])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(if active { th::ACCENT } else { th::BG_DARK }.into()),
+                text_color: if active { th::BG_DARK } else { th::TEXT_DIM },
+                border: iced::Border {
+                    color: if active { th::ACCENT } else { th::BORDER },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            })
+        };
+        let scope: Element<'a, Message> = canvas(crate::widgets::mini_waveform::OscScope {
+            waveform_index: wave_value,
+            color: track_color,
+        })
+        .width(Length::Fixed(66.0))
+        .height(Length::Fixed(38.0))
+        .into();
+        let osc = column![
+            scope,
+            row![wave_btn(0, "Sin"), wave_btn(1, "Saw")].spacing(3),
+            row![wave_btn(2, "Sqr"), wave_btn(3, "Tri")].spacing(3),
+        ]
+        .spacing(3)
+        .align_x(iced::Alignment::Center);
 
-        Self::device_card(column![title, body].width(Length::Fixed(120.0)))
+        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
+            attack: value_of(1),
+            decay: value_of(2),
+            sustain: value_of(3),
+            release: value_of(4),
+            color: track_color,
+        })
+        .width(Length::Fixed(240.0))
+        .height(Length::Fixed(34.0))
+        .into();
+        let envelope = column![
+            adsr,
+            row![
+                knob(1, "Attack"),
+                knob(2, "Decay"),
+                knob(3, "Sustain"),
+                knob(4, "Release")
+            ]
+            .spacing(6)
+        ]
+        .spacing(5)
+        .align_x(iced::Alignment::Center);
+
+        let body = row![
+            Self::device_section("OSC", osc.into()),
+            Self::device_divider(),
+            Self::device_section("ENVELOPE", envelope.into()),
+            Self::device_divider(),
+            Self::device_section(
+                "FILTER",
+                row![knob(5, "Cutoff"), knob(6, "Res")].spacing(6).into()
+            ),
+            Self::device_divider(),
+            Self::device_section("OUT", knob(7, "Volume")),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
+
+        // OSC 66 + envelope 240 + filter 118 + out 56 + chrome.
+        Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(570.0)),
+        )
     }
 
     /// Sampler device card.
@@ -8764,17 +8984,51 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Sampler").size(11).color(th::TEXT);
+        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Sampler",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
-        let title =
-            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
-
-        let sample_label = match &track.sample_name {
-            Some(name) => text(name.as_str()).size(10).color(th::TEXT),
-            None => text("No Sample").size(10).color(th::TEXT_MUTED),
+        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
+        let value_of = |i: usize| {
+            track
+                .instrument_params
+                .get(i)
+                .copied()
+                .unwrap_or(descriptors[i].default)
+        };
+        let knob = |i: usize, label: &str| {
+            param_column(
+                EffectKnobWidget::for_instrument(
+                    track_id,
+                    i,
+                    value_of(i),
+                    descriptors[i].min,
+                    descriptors[i].max,
+                    descriptors[i].default,
+                    track_color,
+                ),
+                label.to_string(),
+                format_value(value_of(i), descriptors[i].unit),
+            )
         };
 
+        // Long file names must not blow the section open; the
+        // waveform display defines the section width.
+        let sample_label = match &track.sample_name {
+            Some(name) => {
+                let display = if name.chars().count() > 24 {
+                    let head: String = name.chars().take(21).collect();
+                    format!("{head}...")
+                } else {
+                    name.clone()
+                };
+                text(display).size(10).color(th::TEXT)
+            }
+            None => text("No Sample").size(10).color(th::TEXT_MUTED),
+        };
         let load_btn = button(text("Load").size(9).color(th::TEXT))
             .on_press(Message::LoadSamplerSample(track_id))
             .padding([2, 8])
@@ -8794,24 +9048,68 @@ impl App {
                     ..Default::default()
                 }
             });
+        let waveform: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
+            audio: track.sample_audio.clone(),
+            color: track_color,
+            region: None,
+        })
+        .width(Length::Fixed(190.0))
+        .height(Length::Fixed(56.0))
+        .into();
+        let sample = column![
+            waveform,
+            row![sample_label, load_btn]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(5)
+        .width(Length::Fixed(190.0))
+        .align_x(iced::Alignment::Start);
 
-        let sample_row = row![sample_label, load_btn]
+        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
+            attack: value_of(1),
+            decay: value_of(2),
+            sustain: value_of(3),
+            release: value_of(4),
+            color: track_color,
+        })
+        .width(Length::Fixed(240.0))
+        .height(Length::Fixed(34.0))
+        .into();
+        let envelope = column![
+            adsr,
+            row![
+                knob(1, "Attack"),
+                knob(2, "Decay"),
+                knob(3, "Sustain"),
+                knob(4, "Release")
+            ]
             .spacing(6)
-            .align_y(iced::Alignment::Center);
+        ]
+        .spacing(5)
+        .align_x(iced::Alignment::Center);
 
-        let param_names = ["Attack", "Decay", "Sustain", "Release", "Volume"];
-        let mut params_col = column![].spacing(2);
-        for pn in &param_names {
-            let label = text(*pn).size(9).color(th::TEXT_DIM);
-            let value = text("\u{2014}").size(8).color(th::TEXT_MUTED);
-            params_col = params_col.push(column![label, value].spacing(1));
-        }
+        let body = row![
+            Self::device_section("SAMPLE", sample.into()),
+            Self::device_divider(),
+            Self::device_section("TUNE", knob(0, "Root")),
+            Self::device_divider(),
+            Self::device_section("ENVELOPE", envelope.into()),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
 
-        let body = container(column![sample_row, params_col].spacing(6))
-            .padding([6, 6])
-            .width(Length::Fill);
-
-        Self::device_card(column![title, body].width(Length::Fixed(140.0)))
+        // Width = sample 190 + tune 56 + envelope 240 + dividers,
+        // spacing, padding. Fixed so the Fill title strip and card
+        // background actually render (Fill inside a shrink column
+        // collapses in iced).
+        let card = Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(560.0)),
+        );
+        // The whole card accepts browser drops, like drum pads.
+        mouse_area(card)
+            .on_release(Message::DropSampleOnSampler { track_id })
+            .into()
     }
 
     fn view_drum_rack_device<'a>(
@@ -8820,25 +9118,15 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Drum Rack").size(11).color(th::TEXT);
+        use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
         let selected_pad = track
             .selected_drum_pad
             .min(track.drum_rack_pads.len().saturating_sub(1));
-
-        let remove: Element<'a, Message> = Self::device_icon_btn(
-            icons::X,
-            th::TEXT_DIM,
-            th::DANGER,
-            Message::RemoveTrackInstrument(track_id),
-        )
-        .into();
-
-        let title = Self::device_title_bar(
-            row![dot, name, horizontal_space(), remove]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-        );
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Drum Rack",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
         let mut grid = column![].spacing(4);
         for row_index in 0..4 {
@@ -8851,8 +9139,8 @@ impl App {
                     .name
                     .as_deref()
                     .map(|name| {
-                        if name.len() > 10 {
-                            format!("{}...", &name[..10])
+                        if name.len() > 7 {
+                            format!("{}..", &name[..7])
                         } else {
                             name.to_string()
                         }
@@ -8874,8 +9162,8 @@ impl App {
                     .spacing(2)
                     .align_x(iced::Alignment::Center),
                 )
-                .padding([8, 6])
-                .width(Length::Fixed(60.0))
+                .padding([3, 4])
+                .width(Length::Fixed(52.0))
                 .style(move |_theme: &Theme| container::Style {
                     background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
                     text_color: Some(if active { th::ACCENT } else { th::TEXT }),
@@ -8908,6 +9196,7 @@ impl App {
             .as_ref()
             .map(MediaSourceRef::display_name)
             .unwrap_or_else(|| "Use the browser or Load".to_string());
+        let selected_pad_state = &track.drum_rack_pads[selected_pad];
 
         let load_btn = button(text("Load").size(9).color(th::TEXT))
             .on_press(Message::LoadDrumRackPadSample(track_id, selected_pad))
@@ -8958,11 +9247,190 @@ impl App {
         ]
         .spacing(4);
 
-        let body = container(column![grid, footer].spacing(8))
-            .padding([6, 6])
-            .width(Length::Fill);
+        let drum_params = [
+            (
+                "Gain",
+                format!("{:.2}", selected_pad_state.gain),
+                selected_pad_state.gain,
+                0.0,
+                2.0,
+                1.0,
+                DrumPadParam::Gain,
+            ),
+            (
+                "Pan",
+                format!("{:.2}", selected_pad_state.pan),
+                selected_pad_state.pan,
+                -1.0,
+                1.0,
+                0.0,
+                DrumPadParam::Pan,
+            ),
+            (
+                "Start",
+                format!("{:.0}%", selected_pad_state.start * 100.0),
+                selected_pad_state.start,
+                0.0,
+                1.0,
+                0.0,
+                DrumPadParam::Start,
+            ),
+            (
+                "End",
+                format!("{:.0}%", selected_pad_state.end * 100.0),
+                selected_pad_state.end,
+                0.0,
+                1.0,
+                1.0,
+                DrumPadParam::End,
+            ),
+            (
+                "Coarse",
+                format!("{}st", selected_pad_state.coarse_tune),
+                selected_pad_state.coarse_tune as f32,
+                -24.0,
+                24.0,
+                0.0,
+                DrumPadParam::CoarseTune,
+            ),
+            (
+                "Fine",
+                format!("{:.0}ct", selected_pad_state.fine_tune),
+                selected_pad_state.fine_tune,
+                -100.0,
+                100.0,
+                0.0,
+                DrumPadParam::FineTune,
+            ),
+        ];
 
-        Self::device_card(column![title, body].width(Length::Fixed(300.0)))
+        let mut knob_row = row![].spacing(6);
+        for (label_text, value_text, value, min, max, default, param) in drum_params.iter() {
+            let knob = EffectKnobWidget::for_drum_pad(
+                track_id,
+                selected_pad,
+                *param,
+                *value,
+                *min,
+                *max,
+                *default,
+                track_color,
+            );
+            knob_row = knob_row.push(param_column(
+                knob,
+                label_text.to_string(),
+                value_text.clone(),
+            ));
+        }
+
+        let one_shot_active = selected_pad_state.one_shot;
+        let one_shot_btn = button(text("One-shot").size(9).color(if one_shot_active {
+            th::ACCENT
+        } else {
+            th::TEXT_DIM
+        }))
+        .on_press(Message::SetDrumPadOneShot {
+            track_id,
+            pad_index: selected_pad,
+            one_shot: !one_shot_active,
+        })
+        .padding([2, 6])
+        .style(move |_theme: &Theme, _status| button::Style {
+            background: Some(
+                if one_shot_active {
+                    th::ACCENT_DIM
+                } else {
+                    th::BG_DARK
+                }
+                .into(),
+            ),
+            text_color: if one_shot_active {
+                th::ACCENT
+            } else {
+                th::TEXT_DIM
+            },
+            border: iced::Border {
+                color: if one_shot_active {
+                    th::ACCENT_DIM
+                } else {
+                    th::BORDER
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let mut choke_row = row![text("Choke").size(9).color(th::TEXT_DIM)]
+            .spacing(2)
+            .align_y(iced::Alignment::Center);
+        for (group, label) in [
+            (None, "Off"),
+            (Some(1), "1"),
+            (Some(2), "2"),
+            (Some(3), "3"),
+            (Some(4), "4"),
+        ] {
+            let active = selected_pad_state.choke_group == group;
+            let btn =
+                button(
+                    text(label)
+                        .size(9)
+                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                )
+                .on_press(Message::SetDrumPadChokeGroup {
+                    track_id,
+                    pad_index: selected_pad,
+                    choke_group: group,
+                })
+                .padding([2, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
+                    text_color: if active { th::ACCENT } else { th::TEXT_DIM },
+                    border: iced::Border {
+                        color: if active { th::ACCENT_DIM } else { th::BORDER },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+            choke_row = choke_row.push(btn);
+        }
+
+        let pad_wave: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
+            audio: track.drum_rack_pads[selected_pad].audio.clone(),
+            color: track_color,
+            region: Some((selected_pad_state.start, selected_pad_state.end)),
+        })
+        .width(Length::Fixed(190.0))
+        .height(Length::Fixed(40.0))
+        .into();
+        let editor = column![
+            row![footer, pad_wave]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
+            knob_row,
+            row![one_shot_btn, choke_row]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(6);
+
+        // Pads and the selected pad's editor sit side by side in
+        // labeled sections; the panel scrolls horizontally so the
+        // card grows sideways, never past the rack height.
+        let body = row![
+            Self::device_section("PADS", grid.into()),
+            Self::device_divider(),
+            Self::device_section("PAD", editor.into()),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
+
+        // Pads 220 + editor (six knob columns) + chrome.
+        Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(650.0)),
+        )
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.
