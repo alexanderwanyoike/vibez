@@ -8914,26 +8914,48 @@ impl App {
                 ..Default::default()
             })
         };
+        let scope: Element<'a, Message> = canvas(crate::widgets::mini_waveform::OscScope {
+            waveform_index: wave_value,
+            color: track_color,
+        })
+        .width(Length::Fixed(66.0))
+        .height(Length::Fixed(38.0))
+        .into();
         let osc = column![
+            scope,
             row![wave_btn(0, "Sin"), wave_btn(1, "Saw")].spacing(3),
             row![wave_btn(2, "Sqr"), wave_btn(3, "Tri")].spacing(3),
         ]
-        .spacing(3);
+        .spacing(3)
+        .align_x(iced::Alignment::Center);
+
+        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
+            attack: value_of(1),
+            decay: value_of(2),
+            sustain: value_of(3),
+            release: value_of(4),
+            color: track_color,
+        })
+        .width(Length::Fixed(240.0))
+        .height(Length::Fixed(34.0))
+        .into();
+        let envelope = column![
+            adsr,
+            row![
+                knob(1, "Attack"),
+                knob(2, "Decay"),
+                knob(3, "Sustain"),
+                knob(4, "Release")
+            ]
+            .spacing(6)
+        ]
+        .spacing(5)
+        .align_x(iced::Alignment::Center);
 
         let body = row![
             Self::device_section("OSC", osc.into()),
             Self::device_divider(),
-            Self::device_section(
-                "ENVELOPE",
-                row![
-                    knob(1, "Attack"),
-                    knob(2, "Decay"),
-                    knob(3, "Sustain"),
-                    knob(4, "Release")
-                ]
-                .spacing(6)
-                .into()
-            ),
+            Self::device_section("ENVELOPE", envelope.into()),
             Self::device_divider(),
             Self::device_section(
                 "FILTER",
@@ -9009,24 +9031,52 @@ impl App {
                     ..Default::default()
                 }
             });
-        let sample = column![sample_label, load_btn, knob(0, "Root")]
-            .spacing(4)
-            .align_x(iced::Alignment::Center);
+        let waveform: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
+            audio: track.sample_audio.clone(),
+            color: track_color,
+            region: None,
+        })
+        .width(Length::Fixed(190.0))
+        .height(Length::Fixed(56.0))
+        .into();
+        let sample = column![
+            waveform,
+            row![sample_label, load_btn]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(5)
+        .align_x(iced::Alignment::Start);
+
+        let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
+            attack: value_of(1),
+            decay: value_of(2),
+            sustain: value_of(3),
+            release: value_of(4),
+            color: track_color,
+        })
+        .width(Length::Fixed(240.0))
+        .height(Length::Fixed(34.0))
+        .into();
+        let envelope = column![
+            adsr,
+            row![
+                knob(1, "Attack"),
+                knob(2, "Decay"),
+                knob(3, "Sustain"),
+                knob(4, "Release")
+            ]
+            .spacing(6)
+        ]
+        .spacing(5)
+        .align_x(iced::Alignment::Center);
 
         let body = row![
             Self::device_section("SAMPLE", sample.into()),
             Self::device_divider(),
-            Self::device_section(
-                "ENVELOPE",
-                row![
-                    knob(1, "Attack"),
-                    knob(2, "Decay"),
-                    knob(3, "Sustain"),
-                    knob(4, "Release")
-                ]
-                .spacing(6)
-                .into()
-            ),
+            Self::device_section("TUNE", knob(0, "Root")),
+            Self::device_divider(),
+            Self::device_section("ENVELOPE", envelope.into()),
         ]
         .spacing(10)
         .align_y(iced::Alignment::Start);
@@ -9319,8 +9369,18 @@ impl App {
             choke_row = choke_row.push(btn);
         }
 
+        let pad_wave: Element<'a, Message> = canvas(crate::widgets::mini_waveform::MiniWaveform {
+            audio: track.drum_rack_pads[selected_pad].audio.clone(),
+            color: track_color,
+            region: Some((selected_pad_state.start, selected_pad_state.end)),
+        })
+        .width(Length::Fixed(190.0))
+        .height(Length::Fixed(40.0))
+        .into();
         let editor = column![
-            footer,
+            row![footer, pad_wave]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
             knob_row,
             row![one_shot_btn, choke_row]
                 .spacing(8)

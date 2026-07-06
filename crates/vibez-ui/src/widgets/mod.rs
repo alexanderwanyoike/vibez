@@ -3,6 +3,7 @@ pub mod effect_knob;
 pub mod effect_slot;
 pub mod fader;
 pub mod knob;
+pub mod mini_waveform;
 pub mod mixer_strip;
 pub mod piano_roll;
 pub mod timeline;
