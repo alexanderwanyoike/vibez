@@ -9203,8 +9203,22 @@ impl App {
         // Pads and the selected pad's editor sit side by side in
         // labeled sections; the panel scrolls horizontally so the
         // card grows sideways, never past the rack height.
+        // Ableton-style pad bank: the grid lives in its own fixed
+        // vertical viewport with a slim scrollbar; the card height
+        // never depends on the pad count.
+        let pads_view: Element<'a, Message> = scrollable(grid)
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new()
+                    .width(4)
+                    .scroller_width(4)
+                    .spacing(2),
+            ))
+            .height(Length::Fixed(132.0))
+            .width(Length::Fixed(232.0))
+            .into();
+
         let body = row![
-            Self::device_section("PADS", grid.into()),
+            Self::device_section("PADS", pads_view),
             Self::device_divider(),
             Self::device_section("PAD", editor.into()),
         ]
