@@ -34,6 +34,12 @@ struct OpenPluginWindow {
     gui_handle: PluginGuiHandle,
     #[allow(dead_code)]
     title: String,
+    /// Last size forwarded to the plugin, to filter duplicate
+    /// ConfigureNotify events.
+    size: (u16, u16),
+    /// Whether the plugin GUI resizes; locked windows carry min==max
+    /// WM hints that must move with plugin-initiated resizes.
+    can_resize: bool,
 }
 
 /// Synchronous plugin window manager that runs on the UI thread.
@@ -201,6 +207,48 @@ impl PluginWindowManager {
         handle.show();
         let _ = self.conn.flush();
 
+        // The pre-attach size query lies for some plugins (VST3 has
+        // no view yet at that point; some CLAP GUIs only know their
+        // size after create/attach), which shipped 800x600 windows
+        // with clipped or floating GUIs. Re-query now and make the
+        // window match reality.
+        let (mut width, mut height) = (width, height);
+        if let Some((w, h)) = handle.get_size() {
+            if (w, h) != (width, height) && w > 0 && h > 0 {
+                eprintln!(
+                    "vibez: open_window — post-attach size correction {width}x{height} -> {w}x{h}"
+                );
+                width = w;
+                height = h;
+                let _ = self.conn.configure_window(
+                    window_id,
+                    &xproto::ConfigureWindowAux::new()
+                        .width(width)
+                        .height(height),
+                );
+            }
+        }
+
+        // Resize policy (dogfood bug #9): plugins that cannot resize
+        // get a hard-locked window (min == max size hints) so the WM
+        // never exposes dead framebuffer space; resizable plugins get
+        // their resizes forwarded from ConfigureNotify in poll_events
+        // and their own requests applied from the pending queues.
+        let can_resize = handle.can_resize();
+        if !can_resize {
+            let hints = x11rb::properties::WmSizeHints {
+                min_size: Some((width as i32, height as i32)),
+                max_size: Some((width as i32, height as i32)),
+                ..Default::default()
+            };
+            let _ = hints.set_normal_hints(&self.conn, window_id);
+        }
+        eprintln!(
+            "vibez: open_window — plugin can_resize={can_resize}, window {}locked",
+            if can_resize { "un" } else { "" }
+        );
+        let _ = self.conn.flush();
+
         // Mark as open
         match &mut handle {
             PluginGuiHandle::Clap(h) => h.open = true,
@@ -213,6 +261,8 @@ impl PluginWindowManager {
                 x11_window_id: window_id,
                 gui_handle: handle,
                 title,
+                size: (width as u16, height as u16),
+                can_resize,
             },
         );
 
@@ -262,10 +312,70 @@ impl PluginWindowManager {
             window.gui_handle.service_runloop();
         }
 
+        // Plugin-initiated resize requests: CLAP request_resize
+        // callbacks land in a queue keyed by plugin pointer; VST3
+        // resizeView requests sit on each view's frame.
+        let clap_requests = vibez_plugin_host::clap_host::host_impl::take_pending_gui_resizes();
+        let mut apply: Vec<(u32, u16, u16, bool)> = Vec::new();
+        for window in self.windows.values_mut() {
+            let request = window.gui_handle.take_pending_resize().or_else(|| {
+                window.gui_handle.clap_plugin_ptr().and_then(|ptr| {
+                    clap_requests
+                        .iter()
+                        .find(|(p, _, _)| *p == ptr)
+                        .map(|&(_, w, h)| (w, h))
+                })
+            });
+            if let Some((w, h)) = request {
+                let new_size = (w as u16, h as u16);
+                if new_size != window.size && w > 0 && h > 0 {
+                    window.size = new_size;
+                    apply.push((
+                        window.x11_window_id,
+                        new_size.0,
+                        new_size.1,
+                        window.can_resize,
+                    ));
+                }
+            }
+        }
+        for (win_id, w, h, can_resize) in apply {
+            if !can_resize {
+                // Move the lock with the window or the WM refuses
+                // the plugin's own resize.
+                let hints = x11rb::properties::WmSizeHints {
+                    min_size: Some((w as i32, h as i32)),
+                    max_size: Some((w as i32, h as i32)),
+                    ..Default::default()
+                };
+                let _ = hints.set_normal_hints(&self.conn, win_id);
+            }
+            let _ = self.conn.configure_window(
+                win_id,
+                &xproto::ConfigureWindowAux::new()
+                    .width(w as u32)
+                    .height(h as u32),
+            );
+        }
+
         let mut events = Vec::new();
         loop {
             match self.conn.poll_for_event() {
                 Ok(Some(event)) => {
+                    if let x11rb::protocol::Event::ConfigureNotify(cfg) = &event {
+                        if let Some(win) = self
+                            .windows
+                            .values_mut()
+                            .find(|w| w.x11_window_id == cfg.window)
+                        {
+                            let new_size = (cfg.width, cfg.height);
+                            if new_size != win.size && new_size.0 > 0 && new_size.1 > 0 {
+                                win.size = new_size;
+                                win.gui_handle
+                                    .set_size(new_size.0 as u32, new_size.1 as u32);
+                            }
+                        }
+                    }
                     if let x11rb::protocol::Event::ClientMessage(cm) = event {
                         if cm.format == 32 && cm.data.as_data32()[0] == self.wm_delete_window {
                             let key = self

@@ -361,11 +361,33 @@ static CLAP_HOST_GUI_IMPL: clap_host_gui = clap_host_gui {
 
 unsafe extern "C" fn host_gui_resize_hints_changed(_host: *const clap_host) {}
 
+/// GUI resize requests from plugins, keyed by plugin pointer. The
+/// plugin window manager drains this every tick and resizes the
+/// actual X11 window; returning true without acting (the previous
+/// behavior) made plugins render at a size the window never had.
+static PENDING_GUI_RESIZES: Mutex<Vec<(usize, u32, u32)>> = Mutex::new(Vec::new());
+
+/// Drain pending plugin-initiated GUI resizes: (plugin_ptr, w, h).
+pub fn take_pending_gui_resizes() -> Vec<(usize, u32, u32)> {
+    PENDING_GUI_RESIZES
+        .lock()
+        .map(|mut v| std::mem::take(&mut *v))
+        .unwrap_or_default()
+}
+
 unsafe extern "C" fn host_gui_request_resize(
-    _host: *const clap_host,
-    _width: u32,
-    _height: u32,
+    host: *const clap_host,
+    width: u32,
+    height: u32,
 ) -> bool {
+    if host.is_null() || (*host).host_data.is_null() {
+        return false;
+    }
+    let data = &*((*host).host_data as *const ClapHostUserData);
+    if let Ok(mut pending) = PENDING_GUI_RESIZES.lock() {
+        pending.retain(|(p, _, _)| *p != data.plugin_ptr as usize);
+        pending.push((data.plugin_ptr as usize, width, height));
+    }
     true
 }
 
