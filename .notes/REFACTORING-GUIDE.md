@@ -119,7 +119,7 @@ Still to do:
   for smoke tests after every step (plugin teardown ordering is
   segfault territory, see apply_snapshot's comment).
 
-Final count this session: app.rs ~7,700 lines (from 11,305),
+Final count this session: app.rs ~9,100 lines (from 11,305),
 60 UI unit tests (from zero), six domain modules (transport,
 devices, arrangement, piano_roll, browser, project) plus the
 shared EngineHandle seam in domains/mod.rs.
