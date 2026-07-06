@@ -8848,10 +8848,10 @@ impl App {
             wave_row = wave_row.push(btn);
         }
 
-        // Remaining params get real knobs, four per row.
-        let mut param_rows = column![].spacing(6);
-        let mut current_row = row![].spacing(8);
-        let mut count = 0;
+        // Remaining params get real knobs in ONE row: the devices
+        // panel scrolls horizontally, so width is free and height is
+        // the scarce resource (stacked rows clip their labels).
+        let mut knob_row = row![].spacing(8);
         for (i, descriptor) in descriptors.iter().enumerate().skip(1) {
             let value = track
                 .instrument_params
@@ -8881,22 +8881,14 @@ impl App {
                 .spacing(1)
                 .width(Length::Fixed(52.0))
                 .align_x(iced::Alignment::Center);
-            current_row = current_row.push(param_col);
-            count += 1;
-            if count % 4 == 0 {
-                param_rows = param_rows.push(current_row);
-                current_row = row![].spacing(8);
-            }
-        }
-        if count % 4 != 0 {
-            param_rows = param_rows.push(current_row);
+            knob_row = knob_row.push(param_col);
         }
 
-        let body = container(column![wave_row, param_rows].spacing(6))
+        let body = container(column![wave_row, knob_row].spacing(6))
             .padding([6, 7])
             .width(Length::Fill);
 
-        Self::device_card(column![title, body].width(Length::Fixed(260.0)))
+        Self::device_card(column![title, body].width(Length::Fixed(440.0)))
     }
 
     /// Sampler device card.
@@ -8943,9 +8935,9 @@ impl App {
             .align_y(iced::Alignment::Center);
 
         let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
-        let mut param_rows = column![].spacing(6);
-        let mut current_row = row![].spacing(8);
-        let mut count = 0;
+        // One knob row: the devices panel scrolls horizontally and
+        // stacked rows clip their labels vertically.
+        let mut knob_row = row![].spacing(8);
         for (i, descriptor) in descriptors.iter().enumerate() {
             let value = track
                 .instrument_params
@@ -8975,22 +8967,14 @@ impl App {
                 .spacing(1)
                 .width(Length::Fixed(52.0))
                 .align_x(iced::Alignment::Center);
-            current_row = current_row.push(param_col);
-            count += 1;
-            if count % 4 == 0 {
-                param_rows = param_rows.push(current_row);
-                current_row = row![].spacing(8);
-            }
-        }
-        if count % 4 != 0 {
-            param_rows = param_rows.push(current_row);
+            knob_row = knob_row.push(param_col);
         }
 
-        let body = container(column![sample_row, param_rows].spacing(6))
+        let body = container(column![sample_row, knob_row].spacing(6))
             .padding([6, 7])
             .width(Length::Fill);
 
-        Self::device_card(column![title, body].width(Length::Fixed(260.0)))
+        Self::device_card(column![title, body].width(Length::Fixed(400.0)))
     }
 
     fn view_drum_rack_device<'a>(
@@ -9310,11 +9294,17 @@ impl App {
         ]
         .spacing(6);
 
-        let body = container(column![grid, footer, editor].spacing(8))
-            .padding([6, 6])
-            .width(Length::Fill);
+        // Editor sits BESIDE the pad grid: the grid already spends
+        // the panel's height budget, anything below it clips.
+        let body = container(
+            row![column![grid, footer].spacing(6), editor]
+                .spacing(12)
+                .align_y(iced::Alignment::Start),
+        )
+        .padding([6, 6])
+        .width(Length::Fill);
 
-        Self::device_card(column![title, body].width(Length::Fixed(300.0)))
+        Self::device_card(column![title, body].width(Length::Fixed(500.0)))
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.
