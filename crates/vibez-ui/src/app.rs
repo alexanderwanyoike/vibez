@@ -1639,6 +1639,51 @@ impl App {
         })
     }
 
+    /// Ableton-style global tempo follow. Warped audio clips keep
+    /// their BAR position (sample positions rescale by the tempo
+    /// ratio) and their audio re-stretches to the new tempo through
+    /// the idempotent re-warp path. Unwarped audio clips keep
+    /// absolute time, exactly like unwarped clips in Ableton. MIDI
+    /// clips are beat-positioned and follow inherently.
+    fn follow_tempo_change(&mut self, old_bpm: f64, new_bpm: f64) -> Task<Message> {
+        let position_ratio = old_bpm / new_bpm;
+        let mut warped: Vec<(TrackId, ClipId)> = Vec::new();
+        let mut moves: Vec<(TrackId, ClipId, u64)> = Vec::new();
+
+        for track in &mut self.state.tracks {
+            for clip in &mut track.clips {
+                if !clip.warped {
+                    continue;
+                }
+                let new_position = (clip.position as f64 * position_ratio).round() as u64;
+                if new_position != clip.position {
+                    clip.position = new_position;
+                    moves.push((track.id, clip.id, new_position));
+                }
+                warped.push((track.id, clip.id));
+            }
+        }
+        for (track_id, clip_id, new_position) in moves {
+            self.send_command(EngineCommand::MoveClip {
+                track_id,
+                clip_id,
+                new_position,
+            });
+        }
+        if warped.is_empty() {
+            return Task::none();
+        }
+        self.state.status_text = format!(
+            "Tempo {old_bpm:.0} -> {new_bpm:.0}: re-warping {} clip(s)",
+            warped.len()
+        );
+        let tasks: Vec<Task<Message>> = warped
+            .into_iter()
+            .map(|(track_id, clip_id)| self.dispatch_warp_clip_to_project(track_id, clip_id))
+            .collect();
+        Task::batch(tasks)
+    }
+
     fn dispatch_warp_clip_to_project(
         &mut self,
         track_id: TrackId,
@@ -2051,6 +2096,7 @@ impl App {
             Message::BpmSubmit => {
                 if let Ok(bpm) = self.state.bpm_text.parse::<f64>() {
                     let bpm = bpm.clamp(20.0, 999.0);
+                    let old_bpm = self.state.bpm;
                     self.state.bpm = bpm;
                     self.state.bpm_text = format!("{bpm:.0}");
                     self.send_command(EngineCommand::SetBpm(bpm));
@@ -2059,6 +2105,11 @@ impl App {
                         let start = self.state.beats_to_samples(self.state.loop_start_beats);
                         let end = self.state.beats_to_samples(self.state.loop_end_beats);
                         self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+                    }
+                    // Ableton-style tempo follow: warped clips restretch
+                    // and keep their musical position on the new grid.
+                    if (bpm - old_bpm).abs() > f64::EPSILON {
+                        return self.follow_tempo_change(old_bpm, bpm);
                     }
                 } else {
                     let bpm = self.state.bpm;
