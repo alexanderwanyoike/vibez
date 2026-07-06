@@ -827,10 +827,9 @@ mod tests {
     use vibez_core::id::TrackId;
 
     fn make_state_with(tracks: Vec<UiTrack>) -> AppState {
-        AppState {
-            tracks,
-            ..Default::default()
-        }
+        let mut state = AppState::default();
+        state.arrangement.tracks = tracks;
+        state
     }
 
     fn make_two_tracks() -> Vec<UiTrack> {
@@ -843,68 +842,68 @@ mod tests {
     #[test]
     fn move_track_up() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.tracks[0].id;
-        let id1 = state.tracks[1].id;
+        let id0 = state.arrangement.tracks[0].id;
+        let id1 = state.arrangement.tracks[1].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id1) {
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id1) {
             if idx > 0 {
-                state.tracks.swap(idx, idx - 1);
+                state.arrangement.tracks.swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id1);
-        assert_eq!(state.tracks[1].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id1);
+        assert_eq!(state.arrangement.tracks[1].id, id0);
     }
 
     #[test]
     fn move_track_down() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.tracks[0].id;
-        let id1 = state.tracks[1].id;
+        let id0 = state.arrangement.tracks[0].id;
+        let id1 = state.arrangement.tracks[1].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.tracks.len() {
-                state.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.arrangement.tracks.len() {
+                state.arrangement.tracks.swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id1);
-        assert_eq!(state.tracks[1].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id1);
+        assert_eq!(state.arrangement.tracks[1].id, id0);
     }
 
     #[test]
     fn move_first_track_up_noop() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.tracks[0].id;
+        let id0 = state.arrangement.tracks[0].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
             if idx > 0 {
-                state.tracks.swap(idx, idx - 1);
+                state.arrangement.tracks.swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id0);
     }
 
     #[test]
     fn move_last_track_down_noop() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.tracks[0].id;
+        let id0 = state.arrangement.tracks[0].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.tracks.len() {
-                state.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.arrangement.tracks.len() {
+                state.arrangement.tracks.swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id0);
     }
 
     #[test]
     fn rename_track() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.tracks[0].id;
+        let id = state.arrangement.tracks[0].id;
 
         if let Some(track) = state.find_track_mut(id) {
             track.name = "My Custom Track".into();
         }
-        assert_eq!(state.tracks[0].name, "My Custom Track");
+        assert_eq!(state.arrangement.tracks[0].name, "My Custom Track");
     }
 
     #[test]
@@ -935,7 +934,10 @@ mod tests {
                 c.name = "Intro Pattern".into();
             }
         }
-        assert_eq!(state.tracks[0].note_clips[0].name, "Intro Pattern");
+        assert_eq!(
+            state.arrangement.tracks[0].note_clips[0].name,
+            "Intro Pattern"
+        );
     }
 
     #[test]
@@ -964,7 +966,7 @@ mod tests {
     #[test]
     fn rename_empty_rejected() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.tracks[0].id;
+        let id = state.arrangement.tracks[0].id;
 
         // Simulate the FinishEditing guard: empty name doesn't rename
         let new_name = "";
@@ -973,6 +975,6 @@ mod tests {
                 track.name = new_name.to_string();
             }
         }
-        assert_eq!(state.tracks[0].name, "Track 1");
+        assert_eq!(state.arrangement.tracks[0].name, "Track 1");
     }
 }

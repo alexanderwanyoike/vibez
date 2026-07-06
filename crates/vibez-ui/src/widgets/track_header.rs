@@ -49,7 +49,7 @@ pub fn view_track_header<'a>(
         let msg = if selected {
             Message::StartEditingTrackName(track.id)
         } else {
-            Message::SelectTrack(track.id)
+            Message::select_track(track.id)
         };
         button(text(&track.name).size(13).color(name_color))
             .on_press(msg)
@@ -75,7 +75,7 @@ pub fn view_track_header<'a>(
     };
 
     let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::TEXT_DIM))
-        .on_press(Message::RemoveTrack(track.id))
+        .on_press(Message::remove_track(track.id))
         .padding([2, 4])
         .style(|_theme: &Theme, status| {
             let bg = match status {
@@ -105,7 +105,7 @@ pub fn view_track_header<'a>(
         let label = text("M").size(11);
         if track.mute {
             button(label.color(th::BG_DARK))
-                .on_press(Message::SetTrackMute(track.id))
+                .on_press(Message::set_track_mute(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::MUTE_ACTIVE.into()),
@@ -118,7 +118,7 @@ pub fn view_track_header<'a>(
                 })
         } else {
             button(label.color(th::TEXT_DIM))
-                .on_press(Message::SetTrackMute(track.id))
+                .on_press(Message::set_track_mute(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -137,7 +137,7 @@ pub fn view_track_header<'a>(
         let label = text("S").size(11);
         if track.solo {
             button(label.color(th::BG_DARK))
-                .on_press(Message::SetTrackSolo(track.id))
+                .on_press(Message::set_track_solo(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::SOLO_ACTIVE.into()),
@@ -150,7 +150,7 @@ pub fn view_track_header<'a>(
                 })
         } else {
             button(label.color(th::TEXT_DIM))
-                .on_press(Message::SetTrackSolo(track.id))
+                .on_press(Message::set_track_solo(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -218,6 +218,6 @@ pub fn view_track_header<'a>(
     // (name, M/S, add, delete, fader) capture their own clicks first,
     // so this only fires on otherwise-dead header space.
     mouse_area(card)
-        .on_press(Message::SelectTrack(track.id))
+        .on_press(Message::select_track(track.id))
         .into()
 }

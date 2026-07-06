@@ -8,6 +8,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
+use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
@@ -1682,6 +1683,26 @@ impl App {
         })
     }
 
+    /// Route cross-domain effects requested by the arrangement domain.
+    fn apply_arrangement_action(&mut self, action: crate::domains::arrangement::ArrangementAction) {
+        if let Some(track_id) = action.close_track_guis {
+            if let Some(ref mut mgr) = self.plugin_window_manager {
+                mgr.close_track_effects(track_id);
+            }
+            self.plugin_gui_raw_ptrs.retain(|k, _| match k {
+                PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
+                PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
+            });
+            self.plugin_state_ptrs.retain(|k, _| match k {
+                PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
+                PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
+            });
+        }
+        if let Some(status) = action.status {
+            self.state.status_text = status;
+        }
+    }
+
     /// Route cross-domain effects requested by the devices domain.
     fn apply_devices_action(&mut self, action: crate::domains::devices::DevicesAction) {
         if let Some(key) = action.close_gui {
@@ -2023,7 +2044,7 @@ impl App {
                     | Message::Transport(TransportMsg::EnginePosition(_))
                     | Message::EngineMetering { .. }
                     | Message::Transport(TransportMsg::EngineStopped)
-                    | Message::EngineTrackMeter { .. }
+                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
                     | Message::ShowContextMenu { .. }
                     | Message::DismissContextMenu
                     | Message::DeleteClipsInRegion { .. }
@@ -2066,15 +2087,10 @@ impl App {
         let should_mark_dirty = matches!(
             &message,
             Message::Transport(TransportMsg::BpmSubmit)
-                | Message::AddTrack
-                | Message::RemoveTrack(_)
+                | Message::Arrangement(ArrangementMsg::AddTrack)
                 | Message::ClipAudioDecoded(..)
                 | Message::RemoveClip(..)
-                | Message::SetTrackGain(..)
-                | Message::SetTrackPan(..)
-                | Message::SetTrackMute(_)
-                | Message::SetTrackSolo(_)
-                | Message::AddInstrumentTrack
+                | Message::Arrangement(ArrangementMsg::AddInstrumentTrack)
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
                 | Message::BrowserSampleDecoded(..)
@@ -2109,13 +2125,9 @@ impl App {
                 | Message::SplitClipsAtRegion { .. }
                 | Message::CreateClipFromSelection
                 | Message::CreateNoteClipFromSelection(_)
-                | Message::MoveTrackUp(_)
-                | Message::MoveTrackDown(_)
-                | Message::MoveSelectedTrackUp
-                | Message::MoveSelectedTrackDown
-                | Message::RenameTrack(..)
-                | Message::RenameClip(..)
-                | Message::AddMidiTrack
+                | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
+                | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
+                | Message::Arrangement(ArrangementMsg::AddMidiTrack)
                 | Message::HalveNoteClip(..)
                 | Message::QuantizeNoteClip { .. }
                 | Message::AudioQuantizeReady { .. }
@@ -2124,7 +2136,8 @@ impl App {
                 | Message::ClipWarpReady { .. }
                 | Message::ClearClipWarp { .. }
                 | Message::ClipAutoWarpReady { .. }
-        ) || matches!(&message, Message::Devices(m) if m.marks_dirty());
+        ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
+            || matches!(&message, Message::Arrangement(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot();
             self.mark_project_dirty();
@@ -2167,6 +2180,13 @@ impl App {
                     )
                 };
                 self.apply_devices_action(action);
+            }
+            Message::Arrangement(msg) => {
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.arrangement.update(msg, &mut engine)
+                };
+                self.apply_arrangement_action(action);
             }
 
             // -- Workspace --
@@ -2256,69 +2276,6 @@ impl App {
             }
 
             // -- Multi-track messages --
-            Message::AddTrack => {
-                let track_num = self.next_unique_track_number("Track");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.arrangement.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("Track {track_num}");
-
-                self.send_command(EngineCommand::AddTrack(id, name.clone()));
-                self.state
-                    .arrangement
-                    .tracks
-                    .push(UiTrack::new(id, name, color_index));
-                self.state.arrangement.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
-            }
-            Message::RemoveTrack(track_id) => {
-                // Capture identity before mutating so we can report exactly
-                // which track was removed. Helps diagnose the "deleted the
-                // wrong track" reports.
-                let removed_name = self
-                    .state
-                    .find_track(track_id)
-                    .map(|t| t.name.clone())
-                    .unwrap_or_else(|| format!("{track_id}"));
-
-                // Close all plugin GUI windows for this track
-                if let Some(ref mut mgr) = self.plugin_window_manager {
-                    mgr.close_track_effects(track_id);
-                }
-                self.plugin_gui_raw_ptrs.retain(|k, _| match k {
-                    PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
-                    PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
-                });
-                self.plugin_state_ptrs.retain(|k, _| match k {
-                    PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
-                    PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
-                });
-
-                self.send_command(EngineCommand::RemoveTrack(track_id));
-                self.state.arrangement.tracks.retain(|t| t.id != track_id);
-                if self.state.arrangement.selected_track == Some(track_id) {
-                    self.state.arrangement.selected_track =
-                        self.state.arrangement.tracks.first().map(|t| t.id);
-                }
-                // Clear note clip selection if track removed
-                if let Some((tid, _)) = self.state.arrangement.selected_note_clip {
-                    if tid == track_id {
-                        self.state.arrangement.selected_note_clip = None;
-                    }
-                }
-                // Clear arrangement selections for removed track
-                self.state.arrangement.selected_clips.retain(|sel| {
-                    let sel_track = match sel {
-                        ArrangementSelection::AudioClip { track_id: t, .. } => *t,
-                        ArrangementSelection::NoteClip { track_id: t, .. } => *t,
-                    };
-                    sel_track != track_id
-                });
-                self.state.status_text = format!(
-                    "Removed {removed_name}. {} track(s) remain.",
-                    self.state.arrangement.tracks.len()
-                );
-            }
             Message::DeleteKeyPressed => {
                 // Never delete anything while a text field is being
                 // edited; backspace belongs to the text there.
@@ -2341,9 +2298,6 @@ impl App {
                 if !self.state.arrangement.selected_clips.is_empty() {
                     return self.update(Message::DeleteSelectedClip);
                 }
-            }
-            Message::SelectTrack(track_id) => {
-                self.state.arrangement.selected_track = Some(track_id);
             }
             Message::AddClipToTrack(track_id) => {
                 // Guard: only audio tracks can have audio clips
@@ -2450,63 +2404,10 @@ impl App {
                     .selected_clips
                     .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
             }
-            Message::SetTrackGain(track_id, gain) => {
-                let gain = gain.clamp(0.0, 2.0);
-                self.send_command(EngineCommand::SetTrackGain(track_id, gain));
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.gain = gain;
-                }
-            }
-            Message::SetTrackPan(track_id, pan) => {
-                let pan = pan.clamp(0.0, 1.0);
-                self.send_command(EngineCommand::SetTrackPan(track_id, pan));
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.pan = pan;
-                }
-            }
-            Message::SetTrackMute(track_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.mute = !track.mute;
-                    let mute = track.mute;
-                    self.send_command(EngineCommand::SetTrackMute(track_id, mute));
-                }
-            }
-            Message::SetTrackSolo(track_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.solo = !track.solo;
-                    let solo = track.solo;
-                    self.send_command(EngineCommand::SetTrackSolo(track_id, solo));
-                }
-            }
-            Message::EngineTrackMeter {
-                track_id,
-                peak_l,
-                peak_r,
-            } => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.peak_l = peak_l.max(track.peak_l * 0.85);
-                    track.peak_r = peak_r.max(track.peak_r * 0.85);
-                }
-            }
 
             // -- Effects --
 
             // -- Instrument tracks --
-            Message::AddInstrumentTrack => {
-                let track_num = self.next_unique_track_number("MIDI");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.arrangement.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("MIDI {track_num}");
-                let kind = TrackKind::Midi;
-
-                self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
-                let mut track = UiTrack::new_instrument(id, name, kind, color_index);
-                track.has_instrument = false;
-                self.state.arrangement.tracks.push(track);
-                self.state.arrangement.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
-            }
 
             // -- Sampler --
             Message::LoadSamplerSample(track_id) => {
@@ -4201,48 +4102,6 @@ impl App {
             }
 
             // -- Track reordering --
-            Message::MoveTrackUp(track_id) => {
-                if let Some(idx) = self
-                    .state
-                    .arrangement
-                    .tracks
-                    .iter()
-                    .position(|t| t.id == track_id)
-                {
-                    if idx > 0 {
-                        self.state.arrangement.tracks.swap(idx, idx - 1);
-                        let order: Vec<TrackId> =
-                            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
-                        self.send_command(EngineCommand::ReorderTracks(order));
-                    }
-                }
-            }
-            Message::MoveTrackDown(track_id) => {
-                if let Some(idx) = self
-                    .state
-                    .arrangement
-                    .tracks
-                    .iter()
-                    .position(|t| t.id == track_id)
-                {
-                    if idx + 1 < self.state.arrangement.tracks.len() {
-                        self.state.arrangement.tracks.swap(idx, idx + 1);
-                        let order: Vec<TrackId> =
-                            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
-                        self.send_command(EngineCommand::ReorderTracks(order));
-                    }
-                }
-            }
-            Message::MoveSelectedTrackUp => {
-                if let Some(tid) = self.state.arrangement.selected_track {
-                    return self.update(Message::MoveTrackUp(tid));
-                }
-            }
-            Message::MoveSelectedTrackDown => {
-                if let Some(tid) = self.state.arrangement.selected_track {
-                    return self.update(Message::MoveTrackDown(tid));
-                }
-            }
 
             // -- Renaming --
             Message::StartEditingTrackName(track_id) => {
@@ -4279,12 +4138,12 @@ impl App {
                 let new_name = self.state.edit_name_text.clone();
                 if let Some(track_id) = self.state.editing_track_name.take() {
                     if !new_name.is_empty() {
-                        return self.update(Message::RenameTrack(track_id, new_name));
+                        return self.update(Message::rename_track(track_id, new_name));
                     }
                 }
                 if let Some((track_id, clip_id)) = self.state.editing_clip_name.take() {
                     if !new_name.is_empty() {
-                        return self.update(Message::RenameClip(track_id, clip_id, new_name));
+                        return self.update(Message::rename_clip(track_id, clip_id, new_name));
                     }
                 }
             }
@@ -4294,38 +4153,8 @@ impl App {
                 self.state.edit_name_text.clear();
                 self.state.devices.context_menu = None;
             }
-            Message::RenameTrack(track_id, new_name) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.name = new_name;
-                }
-            }
-            Message::RenameClip(track_id, clip_id, new_name) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(c) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        c.name = new_name.clone();
-                    }
-                    if let Some(c) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        c.name = new_name;
-                    }
-                }
-            }
 
             // -- MIDI track (no auto-synth) --
-            Message::AddMidiTrack => {
-                let track_num = self.next_unique_track_number("MIDI");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.arrangement.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("MIDI {track_num}");
-                let kind = TrackKind::Midi;
-
-                self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
-                let mut track = UiTrack::new_instrument(id, name, kind, color_index);
-                track.has_instrument = false;
-                self.state.arrangement.tracks.push(track);
-                self.state.arrangement.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
-            }
 
             // -- Instrument attach/detach --
 
@@ -6972,12 +6801,12 @@ impl App {
                 menu_btn(
                     icons::AUDIO_WAVEFORM,
                     "Add Audio Track".into(),
-                    Message::AddTrack,
+                    Message::Arrangement(ArrangementMsg::AddTrack),
                 ),
                 menu_btn(
                     icons::MUSIC,
                     "Add MIDI Track".into(),
-                    Message::AddInstrumentTrack,
+                    Message::Arrangement(ArrangementMsg::AddInstrumentTrack),
                 ),
             ]
             .spacing(0)
@@ -10483,14 +10312,18 @@ fn global_key_handler(
         return None;
     }
     match key {
-        iced::keyboard::Key::Named(Named::ArrowUp) => Some(Message::MoveSelectedTrackUp),
-        iced::keyboard::Key::Named(Named::ArrowDown) => Some(Message::MoveSelectedTrackDown),
+        iced::keyboard::Key::Named(Named::ArrowUp) => {
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
+        }
+        iced::keyboard::Key::Named(Named::ArrowDown) => {
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
+        }
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
             "t" | "T" => {
                 if modifiers.shift() {
-                    Some(Message::AddInstrumentTrack)
+                    Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
                 } else {
-                    Some(Message::AddTrack)
+                    Some(Message::Arrangement(ArrangementMsg::AddTrack))
                 }
             }
             "m" => Some(Message::CreateClipFromSelection),

@@ -6,6 +6,7 @@
 //! app.rs shrinks to a router. TypeScript mental model: these are
 //! Redux slices; `EngineHandle` is an injected service interface.
 
+pub mod arrangement;
 pub mod devices;
 pub mod transport;
 

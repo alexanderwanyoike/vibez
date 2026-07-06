@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
+use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
@@ -1516,7 +1517,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         });
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SelectTrack(track_id)),
+                            Some(Message::select_track(track_id)),
                         );
                     }
                 }
@@ -1864,10 +1865,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             if modifiers.shift() {
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::AddInstrumentTrack),
+                                    Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack)),
                                 );
                             } else {
-                                return (canvas::event::Status::Captured, Some(Message::AddTrack));
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::Arrangement(ArrangementMsg::AddTrack)),
+                                );
                             }
                         }
                         _ => {}

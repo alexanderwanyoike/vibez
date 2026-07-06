@@ -153,6 +153,8 @@ pub enum Message {
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
     Devices(crate::domains::devices::DevicesMsg),
+    /// Arrangement domain (tracks, selection; clips arriving next).
+    Arrangement(crate::domains::arrangement::ArrangementMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
@@ -165,9 +167,6 @@ pub enum Message {
     },
 
     // Multi-track
-    AddTrack,
-    RemoveTrack(TrackId),
-    SelectTrack(TrackId),
     AddClipToTrack(TrackId),
     ClipFileSelected(TrackId, Option<PathBuf>),
     ClipAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String, MediaSourceRef),
@@ -175,22 +174,12 @@ pub enum Message {
     RemoveClip(TrackId, ClipId),
 
     // Track controls
-    SetTrackGain(TrackId, f32),
-    SetTrackPan(TrackId, f32),
-    SetTrackMute(TrackId),
-    SetTrackSolo(TrackId),
 
     // Per-track metering
-    EngineTrackMeter {
-        track_id: TrackId,
-        peak_l: f32,
-        peak_r: f32,
-    },
 
     // Effects
 
     // Instrument tracks
-    AddInstrumentTrack,
 
     // Sampler
     LoadSamplerSample(TrackId),
@@ -346,14 +335,8 @@ pub enum Message {
     CreateNoteClipFromSelection(TrackId),
 
     // Track reordering
-    MoveTrackUp(TrackId),
-    MoveTrackDown(TrackId),
-    MoveSelectedTrackUp,
-    MoveSelectedTrackDown,
 
     // Renaming
-    RenameTrack(TrackId, String),
-    RenameClip(TrackId, ClipId, String),
     StartEditingTrackName(TrackId),
     StartEditingClipName(TrackId, ClipId),
     EditNameText(String),
@@ -361,7 +344,6 @@ pub enum Message {
     CancelEditing,
 
     // MIDI track (no auto-synth)
-    AddMidiTrack,
 
     // Instrument attach/detach
 
@@ -658,5 +640,48 @@ impl Message {
     }
     pub fn device_menu_search(q: String) -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::MenuSearch(q))
+    }
+}
+
+impl Message {
+    pub fn select_track(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SelectTrack(t))
+    }
+    pub fn remove_track(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RemoveTrack(t))
+    }
+    pub fn rename_track(t: TrackId, n: String) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RenameTrack(
+            t, n,
+        ))
+    }
+    pub fn rename_clip(t: TrackId, c: ClipId, n: String) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RenameClip(
+            t, c, n,
+        ))
+    }
+    pub fn move_track_up(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::MoveTrackUp(t))
+    }
+    pub fn move_track_down(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::MoveTrackDown(
+            t,
+        ))
+    }
+    pub fn set_track_gain(t: TrackId, g: f32) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackGain(
+            t, g,
+        ))
+    }
+    pub fn set_track_pan(t: TrackId, p: f32) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackPan(
+            t, p,
+        ))
+    }
+    pub fn set_track_mute(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackMute(t))
+    }
+    pub fn set_track_solo(t: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackSolo(t))
     }
 }
