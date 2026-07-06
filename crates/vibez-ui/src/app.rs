@@ -8894,14 +8894,18 @@ impl App {
                 let pad_index = row_index * 4 + col_index;
                 let pad = &track.drum_rack_pads[pad_index];
                 let active = selected_pad == pad_index;
+                // Hard-truncated single line: wrapping names change
+                // the tile height and blow the card's height budget
+                // (clipped knobs, dogfood screenshot 2026-07-06).
                 let label = pad
                     .name
                     .as_deref()
                     .map(|name| {
-                        if name.len() > 7 {
-                            format!("{}..", &name[..7])
+                        let short: String = name.chars().take(6).collect();
+                        if name.chars().count() > 6 {
+                            format!("{short}..")
                         } else {
-                            name.to_string()
+                            short
                         }
                     })
                     .unwrap_or_else(|| format!("Pad {}", pad_index + 1));
@@ -8915,7 +8919,7 @@ impl App {
                             .size(9)
                             .color(if active { th::ACCENT } else { th::TEXT_DIM }),
                         text(label)
-                            .size(10)
+                            .size(8)
                             .color(if active { th::ACCENT } else { th::TEXT })
                     ]
                     .spacing(2)
@@ -8923,6 +8927,7 @@ impl App {
                 )
                 .padding([3, 4])
                 .width(Length::Fixed(52.0))
+                .height(Length::Fixed(30.0))
                 .style(move |_theme: &Theme| container::Style {
                     background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
                     text_color: Some(if active { th::ACCENT } else { th::TEXT }),
@@ -8998,8 +9003,12 @@ impl App {
             });
 
         let footer = column![
-            text(selected_name).size(10).color(th::TEXT),
-            text(source_hint).size(9).color(th::TEXT_DIM),
+            text(truncate_end(&selected_name, 22))
+                .size(10)
+                .color(th::TEXT),
+            text(truncate_end(&source_hint, 26))
+                .size(9)
+                .color(th::TEXT_DIM),
             row![load_btn, clear_btn]
                 .spacing(6)
                 .align_y(iced::Alignment::Center)
@@ -10176,6 +10185,16 @@ impl App {
                 _ => None,
             }),
         ])
+    }
+}
+
+/// One-line ellipsis truncation for fixed-budget card text.
+fn truncate_end(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_string()
+    } else {
+        let head: String = text.chars().take(max_chars.saturating_sub(2)).collect();
+        format!("{head}..")
     }
 }
 
