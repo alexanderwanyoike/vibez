@@ -158,6 +158,8 @@ pub enum Message {
     // BPM
     BpmChanged(String),
     BpmSubmit,
+    /// Increment/decrement project BPM by a whole beat-per-minute.
+    NudgeBpm(f64),
 
     // Workspace
     SwitchWorkspace(Workspace),

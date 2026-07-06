@@ -32,8 +32,18 @@ const WSOLA_SEARCH: isize = 256;
 
 // Ratio router.
 const RATIO_PASSTHROUGH_EPS: f64 = 0.005;
-const RATIO_MIN: f64 = 0.5;
-const RATIO_MAX: f64 = 2.0;
+/// Stretch ratios this close to unity use plain resampling instead of
+/// a phase vocoder: the resulting pitch shift is under one semitone
+/// (inaudible on drums, barely audible on melodic material) and the
+/// time domain stays bit-exact, so transients cannot smear. This is
+/// the classic tempo-match case (e.g. a 135 BPM loop into a 138 BPM
+/// project) that produced audible artifacts under WSOLA.
+const RESAMPLE_BAND_MIN: f64 = 0.94;
+const RESAMPLE_BAND_MAX: f64 = 1.06;
+/// Signalsmith Stretch stays musical over a far wider range than the
+/// old hand-rolled WSOLA did.
+const RATIO_MIN: f64 = 0.25;
+const RATIO_MAX: f64 = 4.0;
 
 /// Stretch `audio` to the given target frame count using linear-interp
 /// resampling (pitch-shifting). Sample rate is preserved.
@@ -76,27 +86,48 @@ pub fn pitch_preserving_stretch(audio: &DecodedAudio, target_frames: usize) -> D
         return resize_clone(audio, target_frames);
     }
 
+    // Near-unity ratios: plain resample beats any stretcher.
+    if (RESAMPLE_BAND_MIN..=RESAMPLE_BAND_MAX).contains(&ratio) {
+        return stretch_to(audio, target_frames);
+    }
+
     if !(RATIO_MIN..=RATIO_MAX).contains(&ratio) || src_frames < WSOLA_FRAME * 2 {
         return stretch_to(audio, target_frames);
     }
 
-    if audio.channels.len() == 2 {
-        let (left, right) =
-            wsola_stretch_stereo(&audio.channels[0], &audio.channels[1], target_frames);
-        DecodedAudio {
-            channels: vec![left, right],
-            sample_rate: audio.sample_rate,
+    signalsmith_stretch(audio, target_frames)
+}
+
+/// Offline whole-buffer stretch through Signalsmith Stretch (the
+/// library behind serious commercial time-stretching). Interleaves,
+/// runs `exact` (which handles latency pre-roll and flush), and
+/// deinterleaves. Falls back to resampling if the engine declines.
+fn signalsmith_stretch(audio: &DecodedAudio, target_frames: usize) -> DecodedAudio {
+    let ch = audio.channels.len().max(1);
+    let src_frames = audio.num_frames();
+
+    let mut input = vec![0.0f32; src_frames * ch];
+    for (c, channel) in audio.channels.iter().enumerate() {
+        for (f, s) in channel.iter().enumerate() {
+            input[f * ch + c] = *s;
         }
-    } else {
-        let channels = audio
-            .channels
-            .iter()
-            .map(|ch| pitch_preserving_stretch_mono(ch, target_frames))
-            .collect();
-        DecodedAudio {
-            channels,
-            sample_rate: audio.sample_rate,
+    }
+    let mut output = vec![0.0f32; target_frames * ch];
+
+    let mut stretch = signalsmith_stretch::Stretch::preset_default(ch as u32, audio.sample_rate);
+    if !stretch.exact(&input, &mut output) {
+        return stretch_to(audio, target_frames);
+    }
+
+    let mut channels = vec![Vec::with_capacity(target_frames); ch];
+    for f in 0..target_frames {
+        for (c, channel) in channels.iter_mut().enumerate() {
+            channel.push(output[f * ch + c]);
         }
+    }
+    DecodedAudio {
+        channels,
+        sample_rate: audio.sample_rate,
     }
 }
 
@@ -608,5 +639,69 @@ mod tests {
         let input = sine(440.0, 44_100, 2_048);
         let out = pitch_preserving_stretch_mono(&input, 8_192);
         assert_eq!(out.len(), 8_192);
+    }
+}
+
+#[cfg(test)]
+mod stretch_quality_tests {
+    use super::*;
+
+    fn sine(freq: f32, seconds: f32, sample_rate: u32) -> DecodedAudio {
+        let n = (seconds * sample_rate as f32) as usize;
+        let ch: Vec<f32> = (0..n)
+            .map(|i| (i as f32 / sample_rate as f32 * freq * std::f32::consts::TAU).sin())
+            .collect();
+        DecodedAudio {
+            channels: vec![ch.clone(), ch],
+            sample_rate,
+        }
+    }
+
+    fn zero_crossings(buf: &[f32]) -> usize {
+        buf.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count()
+    }
+
+    #[test]
+    fn near_unity_ratio_uses_exact_length_resample() {
+        // 2.2% stretch (the 135->138 BPM dogfood case) must resample:
+        // output length exact and content dense (no silent tail).
+        let audio = sine(440.0, 1.0, 44_100);
+        let target = (44_100.0 * 1.022) as usize;
+        let out = pitch_preserving_stretch(&audio, target);
+        assert_eq!(out.num_frames(), target);
+        let tail = &out.channels[0][target - 4410..];
+        assert!(
+            tail.iter().any(|s| s.abs() > 0.1),
+            "tail must contain signal"
+        );
+    }
+
+    #[test]
+    fn signalsmith_preserves_pitch_under_big_stretch() {
+        // 1.5x longer at the same pitch: zero-crossing rate stays at
+        // the source frequency instead of dropping by a third.
+        let audio = sine(440.0, 1.0, 44_100);
+        let target = 66_150;
+        let out = pitch_preserving_stretch(&audio, target);
+        assert_eq!(out.num_frames(), target);
+
+        // Ignore edges; measure the middle second.
+        let mid = &out.channels[0][11_025..55_125];
+        let crossings = zero_crossings(mid);
+        let expected = 440.0; // crossings per second == frequency
+        let measured = crossings as f32 / 1.0;
+        assert!(
+            (measured - expected).abs() / expected < 0.05,
+            "pitch drifted: measured {measured} Hz vs {expected} Hz"
+        );
+        // And it must not be silent.
+        assert!(mid.iter().any(|s| s.abs() > 0.3));
+    }
+
+    #[test]
+    fn extreme_ratio_falls_back_to_resample() {
+        let audio = sine(440.0, 0.5, 44_100);
+        let out = pitch_preserving_stretch(&audio, 44_100 * 5);
+        assert_eq!(out.num_frames(), 44_100 * 5);
     }
 }

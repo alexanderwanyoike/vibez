@@ -1654,6 +1654,72 @@ impl App {
         })
     }
 
+    /// Apply a new project tempo: clamps, updates the engine and the
+    /// beat-mapped loop region, and runs Ableton-style tempo follow
+    /// for warped clips. Shared by the BPM field and nudge buttons.
+    fn set_project_bpm(&mut self, bpm: f64) -> Task<Message> {
+        let bpm = bpm.clamp(20.0, 999.0);
+        let old_bpm = self.state.bpm;
+        self.state.bpm = bpm;
+        self.state.bpm_text = format!("{bpm:.0}");
+        self.send_command(EngineCommand::SetBpm(bpm));
+        // Re-send loop region since the beat-to-sample mapping changed.
+        if self.state.loop_enabled {
+            let start = self.state.beats_to_samples(self.state.loop_start_beats);
+            let end = self.state.beats_to_samples(self.state.loop_end_beats);
+            self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+        }
+        if (bpm - old_bpm).abs() > f64::EPSILON {
+            return self.follow_tempo_change(old_bpm, bpm);
+        }
+        Task::none()
+    }
+
+    /// Ableton-style global tempo follow. Warped audio clips keep
+    /// their BAR position (sample positions rescale by the tempo
+    /// ratio) and their audio re-stretches to the new tempo through
+    /// the idempotent re-warp path. Unwarped audio clips keep
+    /// absolute time, exactly like unwarped clips in Ableton. MIDI
+    /// clips are beat-positioned and follow inherently.
+    fn follow_tempo_change(&mut self, old_bpm: f64, new_bpm: f64) -> Task<Message> {
+        let position_ratio = old_bpm / new_bpm;
+        let mut warped: Vec<(TrackId, ClipId)> = Vec::new();
+        let mut moves: Vec<(TrackId, ClipId, u64)> = Vec::new();
+
+        for track in &mut self.state.tracks {
+            for clip in &mut track.clips {
+                if !clip.warped {
+                    continue;
+                }
+                let new_position = (clip.position as f64 * position_ratio).round() as u64;
+                if new_position != clip.position {
+                    clip.position = new_position;
+                    moves.push((track.id, clip.id, new_position));
+                }
+                warped.push((track.id, clip.id));
+            }
+        }
+        for (track_id, clip_id, new_position) in moves {
+            self.send_command(EngineCommand::MoveClip {
+                track_id,
+                clip_id,
+                new_position,
+            });
+        }
+        if warped.is_empty() {
+            return Task::none();
+        }
+        self.state.status_text = format!(
+            "Tempo {old_bpm:.0} -> {new_bpm:.0}: re-warping {} clip(s)",
+            warped.len()
+        );
+        let tasks: Vec<Task<Message>> = warped
+            .into_iter()
+            .map(|(track_id, clip_id)| self.dispatch_warp_clip_to_project(track_id, clip_id))
+            .collect();
+        Task::batch(tasks)
+    }
+
     fn dispatch_warp_clip_to_project(
         &mut self,
         track_id: TrackId,
@@ -1797,7 +1863,8 @@ impl App {
                     }
                 }
                 self.state.status_text = format!(
-                    "Detected {:.1} BPM (confidence {:.2}, below warp threshold)",
+                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
+                     Use the clip's Warp button to apply it manually.",
                     bpm, confidence
                 );
                 self.state.project_dirty = true;
@@ -2059,25 +2126,19 @@ impl App {
                 self.state.time_selection_active = false;
                 self.state.time_selection_track = None;
             }
+            Message::NudgeBpm(delta) => {
+                let bpm = self.state.bpm + delta;
+                return self.set_project_bpm(bpm);
+            }
             Message::BpmChanged(val) => {
                 self.state.bpm_text = val;
             }
             Message::BpmSubmit => {
                 if let Ok(bpm) = self.state.bpm_text.parse::<f64>() {
-                    let bpm = bpm.clamp(20.0, 999.0);
-                    self.state.bpm = bpm;
-                    self.state.bpm_text = format!("{bpm:.0}");
-                    self.send_command(EngineCommand::SetBpm(bpm));
-                    // Re-send loop region since beat→sample mapping changed
-                    if self.state.loop_enabled {
-                        let start = self.state.beats_to_samples(self.state.loop_start_beats);
-                        let end = self.state.beats_to_samples(self.state.loop_end_beats);
-                        self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-                    }
-                } else {
-                    let bpm = self.state.bpm;
-                    self.state.bpm_text = format!("{bpm:.0}");
+                    return self.set_project_bpm(bpm);
                 }
+                let bpm = self.state.bpm;
+                self.state.bpm_text = format!("{bpm:.0}");
             }
 
             // -- Workspace --
@@ -10158,6 +10219,21 @@ impl App {
                     );
                 }
             }
+        } else if let Some(detected) = clip.original_bpm {
+            // Auto-warp declined (low confidence) or was never run:
+            // the clip knows its tempo and it disagrees with the
+            // project. Say so loudly instead of a status-bar whisper;
+            // the Warp button on this same row is the one-click fix.
+            if (detected - self.state.bpm).abs() > 0.5 {
+                row_widgets = row_widgets.push(
+                    text(format!(
+                        "OUT OF TEMPO: clip {detected:.1} BPM vs project {:.0}",
+                        self.state.bpm
+                    ))
+                    .size(10)
+                    .color(th::METER_YELLOW),
+                );
+            }
         }
 
         row_widgets.into()
@@ -10304,6 +10380,34 @@ impl App {
             .width(Length::Fixed(55.0))
             .size(14);
 
+        let bpm_nudge = |icon: char, delta: f64| {
+            button(icons::icon(icon).size(8).color(th::TEXT_DIM))
+                .on_press(Message::NudgeBpm(delta))
+                .padding([0, 4])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::BG_HOVER.into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::TEXT_DIM,
+                        border: iced::Border {
+                            radius: 2.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })
+        };
+        let bpm_spinner = column![
+            bpm_nudge(icons::CHEVRON_UP, 1.0),
+            bpm_nudge(icons::CHEVRON_DOWN, -1.0),
+        ]
+        .spacing(1);
+
         let bpm_label = text("BPM").size(12).color(th::TEXT_DIM);
 
         // Master VU meter
@@ -10325,7 +10429,9 @@ impl App {
             horizontal_space(),
             volume_icon,
             master_meter_canvas,
-            bpm_input,
+            row![bpm_input, bpm_spinner]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
             bpm_label,
         ]
         .spacing(12)
