@@ -184,7 +184,10 @@ impl App {
         };
 
         let state = AppState {
-            sample_rate,
+            transport: crate::state::TransportState {
+                sample_rate,
+                ..Default::default()
+            },
             sample_browser_open: ui_settings.sample_browser_open,
             sample_browser_roots: ui_settings.sample_library_roots,
             auto_warp_on_import: ui_settings.auto_warp_on_import,
@@ -229,7 +232,7 @@ impl App {
         };
 
         // Inform the engine of the actual sample rate
-        app.send_command(EngineCommand::SetBpm(app.state.bpm));
+        app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
 
         let startup_task = if app.state.sample_browser_roots.is_empty() {
             Task::none()
@@ -255,8 +258,8 @@ impl App {
     }
 
     fn clear_project_runtime(&mut self) {
-        self.state.playing = false;
-        self.state.position_samples = 0;
+        self.state.transport.playing = false;
+        self.state.transport.position_samples = 0;
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));
 
@@ -278,9 +281,9 @@ impl App {
         self.state.next_track_number = 1;
         self.state.selected_note_clip = None;
         self.state.selected_clips.clear();
-        self.state.loop_enabled = false;
-        self.state.loop_start_beats = 0.0;
-        self.state.loop_end_beats = 4.0;
+        self.state.transport.loop_enabled = false;
+        self.state.transport.loop_start_beats = 0.0;
+        self.state.transport.loop_end_beats = 4.0;
         self.state.time_selection_active = false;
         self.state.selection_start_beats = 0.0;
         self.state.selection_end_beats = 0.0;
@@ -295,9 +298,9 @@ impl App {
 
     fn reset_to_new_project(&mut self) {
         self.clear_project_runtime();
-        self.state.bpm = vibez_core::constants::DEFAULT_BPM;
-        self.state.bpm_text = format!("{:.0}", self.state.bpm);
-        self.send_command(EngineCommand::SetBpm(self.state.bpm));
+        self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
+        self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
+        self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
         self.state.current_project_path = None;
         self.state.project_dirty = false;
         self.undo_history.clear();
@@ -805,8 +808,8 @@ impl App {
                 .and_then(|path| path.file_stem())
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Untitled".to_string()),
-            bpm: self.state.bpm,
-            sample_rate: self.state.sample_rate,
+            bpm: self.state.transport.bpm,
+            sample_rate: self.state.transport.sample_rate,
             tracks,
             clips,
             note_clips,
@@ -842,8 +845,8 @@ impl App {
         let mut plugin_instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)> =
             Vec::new();
         self.undo_history.clear();
-        self.state.bpm = loaded.project.bpm;
-        self.state.bpm_text = format!("{:.0}", loaded.project.bpm);
+        self.state.transport.bpm = loaded.project.bpm;
+        self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
 
         for track_info in &loaded.project.tracks {
@@ -937,7 +940,7 @@ impl App {
                 }
                 let fx = vibez_dsp::factory::create_effect_with_params(
                     effect_info.effect_type,
-                    self.state.sample_rate as f32,
+                    self.state.transport.sample_rate as f32,
                     &effect_info.params,
                 );
                 let descriptors = fx.param_descriptors();
@@ -1116,7 +1119,7 @@ impl App {
 
         let effect_tx = self.plugin_effect_tx.clone();
         let instrument_tx = self.plugin_instrument_tx.clone();
-        let sample_rate = self.state.sample_rate as f64;
+        let sample_rate = self.state.transport.sample_rate as f64;
 
         std::thread::spawn(move || {
             use base64::Engine;
@@ -1242,8 +1245,8 @@ impl App {
         let assets = self.collect_bounce_assets();
         let project = self.project_from_state();
         let wav_path = self.next_bounce_path();
-        let sample_rate = self.state.sample_rate;
-        let bpm = self.state.bpm;
+        let sample_rate = self.state.transport.sample_rate;
+        let bpm = self.state.transport.bpm;
 
         let request = vibez_engine::render::BounceRequest {
             tracks: project.tracks,
@@ -1333,11 +1336,11 @@ impl App {
     fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
         crate::state::ProjectSnapshot {
             tracks: self.state.tracks.clone(),
-            bpm: self.state.bpm,
-            bpm_text: self.state.bpm_text.clone(),
-            loop_enabled: self.state.loop_enabled,
-            loop_start_beats: self.state.loop_start_beats,
-            loop_end_beats: self.state.loop_end_beats,
+            bpm: self.state.transport.bpm,
+            bpm_text: self.state.transport.bpm_text.clone(),
+            loop_enabled: self.state.transport.loop_enabled,
+            loop_start_beats: self.state.transport.loop_start_beats,
+            loop_end_beats: self.state.transport.loop_end_beats,
             selected_track: self.state.selected_track,
             selected_clips: self.state.selected_clips.clone(),
             selected_note_clip: self.state.selected_note_clip,
@@ -1369,21 +1372,21 @@ impl App {
         }
 
         self.state.tracks = snapshot.tracks;
-        self.state.bpm = snapshot.bpm;
-        self.state.bpm_text = snapshot.bpm_text;
-        self.state.loop_enabled = snapshot.loop_enabled;
-        self.state.loop_start_beats = snapshot.loop_start_beats;
-        self.state.loop_end_beats = snapshot.loop_end_beats;
+        self.state.transport.bpm = snapshot.bpm;
+        self.state.transport.bpm_text = snapshot.bpm_text;
+        self.state.transport.loop_enabled = snapshot.loop_enabled;
+        self.state.transport.loop_start_beats = snapshot.loop_start_beats;
+        self.state.transport.loop_end_beats = snapshot.loop_end_beats;
         self.state.selected_track = snapshot.selected_track;
         self.state.selected_clips = snapshot.selected_clips;
         self.state.selected_note_clip = snapshot.selected_note_clip;
         self.state.next_track_number = snapshot.next_track_number;
 
-        self.send_command(EngineCommand::SetBpm(self.state.bpm));
-        self.send_command(EngineCommand::SetArrangementLoop(self.state.loop_enabled));
-        if self.state.loop_enabled {
-            let start = self.state.beats_to_samples(self.state.loop_start_beats);
-            let end = self.state.beats_to_samples(self.state.loop_end_beats);
+        self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
+        self.send_command(EngineCommand::SetArrangementLoop(self.state.transport.loop_enabled));
+        if self.state.transport.loop_enabled {
+            let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
+            let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
 
@@ -1539,15 +1542,15 @@ impl App {
             self.state.status_text = "Clip not found".to_string();
             return Task::none();
         };
-        if self.state.bpm <= 0.0 || self.state.sample_rate == 0 {
+        if self.state.transport.bpm <= 0.0 || self.state.transport.sample_rate == 0 {
             self.state.status_text = "Cannot quantize at zero BPM".to_string();
             return Task::none();
         }
 
         let input = QuantizeInput {
             audio: Arc::clone(&clip.audio),
-            bpm: self.state.bpm,
-            sample_rate: self.state.sample_rate,
+            bpm: self.state.transport.bpm,
+            sample_rate: self.state.transport.sample_rate,
             grid,
             clip_position: clip.position,
             clip_source_offset: clip.source_offset,
@@ -1620,7 +1623,7 @@ impl App {
                 clip_id: success.new_clip_id,
             });
 
-        let duration_seconds = success.new_duration as f64 / self.state.sample_rate as f64;
+        let duration_seconds = success.new_duration as f64 / self.state.transport.sample_rate as f64;
         self.state.status_text = format!(
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
@@ -1642,7 +1645,7 @@ impl App {
             .original_audio
             .clone()
             .unwrap_or_else(|| Arc::clone(&clip.audio));
-        let sample_rate = self.state.sample_rate;
+        let sample_rate = self.state.transport.sample_rate;
         self.state.status_text = format!("Detecting BPM for {}...", clip.name);
         Task::perform(detect_clip_bpm_async(audio, sample_rate), move |estimate| {
             Message::ClipBpmDetected {
@@ -1659,14 +1662,14 @@ impl App {
     /// for warped clips. Shared by the BPM field and nudge buttons.
     fn set_project_bpm(&mut self, bpm: f64) -> Task<Message> {
         let bpm = bpm.clamp(20.0, 999.0);
-        let old_bpm = self.state.bpm;
-        self.state.bpm = bpm;
-        self.state.bpm_text = format!("{bpm:.0}");
+        let old_bpm = self.state.transport.bpm;
+        self.state.transport.bpm = bpm;
+        self.state.transport.bpm_text = format!("{bpm:.0}");
         self.send_command(EngineCommand::SetBpm(bpm));
         // Re-send loop region since the beat-to-sample mapping changed.
-        if self.state.loop_enabled {
-            let start = self.state.beats_to_samples(self.state.loop_start_beats);
-            let end = self.state.beats_to_samples(self.state.loop_end_beats);
+        if self.state.transport.loop_enabled {
+            let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
+            let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
         if (bpm - old_bpm).abs() > f64::EPSILON {
@@ -1725,8 +1728,8 @@ impl App {
         track_id: TrackId,
         clip_id: ClipId,
     ) -> Task<Message> {
-        let project_bpm = self.state.bpm;
-        let sample_rate = self.state.sample_rate;
+        let project_bpm = self.state.transport.bpm;
+        let sample_rate = self.state.transport.sample_rate;
         if project_bpm <= 0.0 || sample_rate == 0 {
             self.state.status_text = "Cannot warp at zero BPM".to_string();
             return Task::none();
@@ -1822,13 +1825,13 @@ impl App {
         clip_id: ClipId,
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     ) -> Task<Message> {
-        if !self.state.auto_warp_on_import || self.state.bpm <= 0.0 || self.state.sample_rate == 0 {
+        if !self.state.auto_warp_on_import || self.state.transport.bpm <= 0.0 || self.state.transport.sample_rate == 0 {
             return Task::none();
         }
         let input = AutoWarpInput {
             audio,
-            sample_rate: self.state.sample_rate,
-            project_bpm: self.state.bpm,
+            sample_rate: self.state.transport.sample_rate,
+            project_bpm: self.state.transport.bpm,
             confidence_threshold: self.state.warp_confidence_threshold,
         };
         Task::perform(auto_warp_clip_async(input), move |outcome| {
@@ -2099,17 +2102,17 @@ impl App {
 
         match message {
             Message::Play => {
-                self.state.playing = true;
+                self.state.transport.playing = true;
                 self.send_command(EngineCommand::Play);
             }
             Message::Stop => {
-                self.state.playing = false;
-                self.state.position_samples = 0;
+                self.state.transport.playing = false;
+                self.state.transport.position_samples = 0;
                 self.send_command(EngineCommand::Stop);
                 self.send_command(EngineCommand::Seek(0));
             }
             Message::TogglePlayback => {
-                if self.state.playing {
+                if self.state.transport.playing {
                     return self.update(Message::Stop);
                 } else {
                     return self.update(Message::Play);
@@ -2119,7 +2122,7 @@ impl App {
                 let total = self.state.total_duration_samples();
                 if total > 0 {
                     let sample_pos = (normalized * total as f64) as u64;
-                    self.state.position_samples = sample_pos;
+                    self.state.transport.position_samples = sample_pos;
                     self.send_command(EngineCommand::Seek(sample_pos));
                 }
                 // Simple click clears the time selection
@@ -2127,18 +2130,18 @@ impl App {
                 self.state.time_selection_track = None;
             }
             Message::NudgeBpm(delta) => {
-                let bpm = self.state.bpm + delta;
+                let bpm = self.state.transport.bpm + delta;
                 return self.set_project_bpm(bpm);
             }
             Message::BpmChanged(val) => {
-                self.state.bpm_text = val;
+                self.state.transport.bpm_text = val;
             }
             Message::BpmSubmit => {
-                if let Ok(bpm) = self.state.bpm_text.parse::<f64>() {
+                if let Ok(bpm) = self.state.transport.bpm_text.parse::<f64>() {
                     return self.set_project_bpm(bpm);
                 }
-                let bpm = self.state.bpm;
-                self.state.bpm_text = format!("{bpm:.0}");
+                let bpm = self.state.transport.bpm;
+                self.state.transport.bpm_text = format!("{bpm:.0}");
             }
 
             // -- Workspace --
@@ -2223,14 +2226,14 @@ impl App {
                 }
             }
             Message::EnginePosition(pos) => {
-                self.state.position_samples = pos;
+                self.state.transport.position_samples = pos;
             }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
                 self.state.peak_r = peak_r;
             }
             Message::EngineStopped => {
-                self.state.playing = false;
+                self.state.transport.playing = false;
             }
 
             // -- Multi-track messages --
@@ -2478,7 +2481,7 @@ impl App {
             Message::AddEffect(track_id, effect_type) => {
                 let effect_id = vibez_core::id::EffectId::new();
                 let fx =
-                    vibez_dsp::factory::create_effect(effect_type, self.state.sample_rate as f32);
+                    vibez_dsp::factory::create_effect(effect_type, self.state.transport.sample_rate as f32);
                 let descriptors = fx.param_descriptors();
                 let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
 
@@ -3356,7 +3359,7 @@ impl App {
                 new_duration,
             } => {
                 // Update UI state — auto-enable loop when extending past source length
-                let spb = 60.0 * self.state.sample_rate as f64 / self.state.bpm;
+                let spb = 60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm;
                 let mut sync_data = None;
                 let mut clip_end_beat = None;
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -4038,7 +4041,7 @@ impl App {
                             let _ = self.update(Message::SplitAudioClip {
                                 track_id,
                                 clip_id,
-                                split_position: self.state.position_samples,
+                                split_position: self.state.transport.position_samples,
                             });
                         }
                         ArrangementSelection::NoteClip { track_id, clip_id } => {
@@ -4082,18 +4085,18 @@ impl App {
 
             // -- Arrangement loop --
             Message::ToggleArrangementLoop => {
-                self.state.loop_enabled = !self.state.loop_enabled;
-                self.send_command(EngineCommand::SetArrangementLoop(self.state.loop_enabled));
-                if self.state.loop_enabled {
+                self.state.transport.loop_enabled = !self.state.transport.loop_enabled;
+                self.send_command(EngineCommand::SetArrangementLoop(self.state.transport.loop_enabled));
+                if self.state.transport.loop_enabled {
                     // Copy selection to loop region when enabling loop with active selection
                     if self.state.time_selection_active
                         && self.state.selection_end_beats > self.state.selection_start_beats
                     {
-                        self.state.loop_start_beats = self.state.selection_start_beats;
-                        self.state.loop_end_beats = self.state.selection_end_beats;
+                        self.state.transport.loop_start_beats = self.state.selection_start_beats;
+                        self.state.transport.loop_end_beats = self.state.selection_end_beats;
                     }
-                    let start = self.state.beats_to_samples(self.state.loop_start_beats);
-                    let end = self.state.beats_to_samples(self.state.loop_end_beats);
+                    let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
+                    let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
                     self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
                 }
             }
@@ -4101,8 +4104,8 @@ impl App {
                 start_beats,
                 end_beats,
             } => {
-                self.state.loop_start_beats = start_beats;
-                self.state.loop_end_beats = end_beats;
+                self.state.transport.loop_start_beats = start_beats;
+                self.state.transport.loop_end_beats = end_beats;
                 let start = self.state.beats_to_samples(start_beats);
                 let end = self.state.beats_to_samples(end_beats);
                 self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
@@ -4124,13 +4127,13 @@ impl App {
             }
             Message::SetSelectionAsLoop => {
                 self.state.context_menu = None;
-                self.state.loop_start_beats = self.state.selection_start_beats;
-                self.state.loop_end_beats = self.state.selection_end_beats;
-                let start = self.state.beats_to_samples(self.state.loop_start_beats);
-                let end = self.state.beats_to_samples(self.state.loop_end_beats);
+                self.state.transport.loop_start_beats = self.state.selection_start_beats;
+                self.state.transport.loop_end_beats = self.state.selection_end_beats;
+                let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
+                let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
                 self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-                if !self.state.loop_enabled {
-                    self.state.loop_enabled = true;
+                if !self.state.transport.loop_enabled {
+                    self.state.transport.loop_enabled = true;
                     self.send_command(EngineCommand::SetArrangementLoop(true));
                 }
             }
@@ -4198,8 +4201,8 @@ impl App {
                 track_id: target_track,
             } => {
                 self.state.context_menu = None;
-                let spb = if self.state.bpm > 0.0 {
-                    self.state.sample_rate as f64 * 60.0 / self.state.bpm
+                let spb = if self.state.transport.bpm > 0.0 {
+                    self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm
                 } else {
                     0.0
                 };
@@ -4252,8 +4255,8 @@ impl App {
                 track_id: target_track,
             } => {
                 self.state.context_menu = None;
-                let spb = if self.state.bpm > 0.0 {
-                    self.state.sample_rate as f64 * 60.0 / self.state.bpm
+                let spb = if self.state.transport.bpm > 0.0 {
+                    self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm
                 } else {
                     0.0
                 };
@@ -4509,7 +4512,7 @@ impl App {
 
             // -- Instrument attach/detach --
             Message::SetTrackInstrument(track_id, instrument_kind) => {
-                let sample_rate = self.state.sample_rate as f32;
+                let sample_rate = self.state.transport.sample_rate as f32;
                 let instrument_params = default_instrument_params(instrument_kind, sample_rate);
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.has_instrument = true;
@@ -4686,7 +4689,7 @@ impl App {
                     .map(|(tid, cid)| self.dispatch_warp_clip_to_project(tid, cid))
                     .collect();
                 self.state.status_text =
-                    format!("Re-warping {count} clip(s) to {:.0} BPM", self.state.bpm);
+                    format!("Re-warping {count} clip(s) to {:.0} BPM", self.state.transport.bpm);
                 return Task::batch(tasks);
             }
             Message::AddSampleLibraryRoot => {
@@ -5103,7 +5106,7 @@ impl App {
                             if let Err(e) = stream.play() {
                                 eprintln!("vibez: failed to restart audio stream: {e}");
                             }
-                            self.state.sample_rate = sr;
+                            self.state.transport.sample_rate = sr;
                             self.state.status_text =
                                 format!("Audio restarted — buffer {size}, {sr} Hz");
                         }
@@ -5203,7 +5206,7 @@ impl App {
                     .find(|p| p.id == plugin_id)
                     .cloned()
                 {
-                    let sample_rate = self.state.sample_rate as f64;
+                    let sample_rate = self.state.transport.sample_rate as f64;
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
@@ -5321,7 +5324,7 @@ impl App {
             } => {
                 self.state.context_menu = None;
                 let (range, insert_pos, name) = if is_note_clip {
-                    let spb = self.state.sample_rate as f64 * 60.0 / self.state.bpm;
+                    let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
                     let track_opt = self.state.find_track(track_id);
                     let nc = track_opt.and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
                     match nc {
@@ -5521,8 +5524,8 @@ impl App {
                 }
                 let assets = self.collect_bounce_assets();
                 let project = self.project_from_state();
-                let sample_rate = self.state.sample_rate;
-                let bpm = self.state.bpm;
+                let sample_rate = self.state.transport.sample_rate;
+                let bpm = self.state.transport.bpm;
                 let request = vibez_engine::render::BounceRequest {
                     tracks: project.tracks,
                     audio_clips: project.clips,
@@ -6254,17 +6257,17 @@ impl App {
                         drop(cell.take());
                     }
                     EngineEvent::PlaybackPosition(pos) => {
-                        self.state.position_samples = pos;
+                        self.state.transport.position_samples = pos;
                     }
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
                     }
                     EngineEvent::PlaybackStopped => {
-                        self.state.playing = false;
+                        self.state.transport.playing = false;
                     }
                     EngineEvent::PlaybackStarted => {
-                        self.state.playing = true;
+                        self.state.transport.playing = true;
                     }
                     EngineEvent::TrackMeter {
                         track_id,
@@ -6607,7 +6610,7 @@ impl App {
         }
 
         let sr_label = text("Sample Rate").size(14).color(th::TEXT);
-        let sr_value = text(format!("{} Hz", self.state.sample_rate))
+        let sr_value = text(format!("{} Hz", self.state.transport.sample_rate))
             .size(13)
             .color(th::TEXT_DIM);
 
@@ -7118,7 +7121,7 @@ impl App {
                         },
                     ));
                 } else {
-                    let split_sample = self.state.position_samples;
+                    let split_sample = self.state.transport.position_samples;
                     col = col.push(menu_btn(
                         icons::SCISSORS,
                         "Split at Playhead".into(),
@@ -8274,8 +8277,8 @@ impl App {
         }
 
         let playhead_beats = self.state.position_beats();
-        let sample_rate = self.state.sample_rate;
-        let bpm = self.state.bpm;
+        let sample_rate = self.state.transport.sample_rate;
+        let bpm = self.state.transport.bpm;
         let zoom_level = self.state.zoom_level;
         let scroll_offset = self.state.scroll_offset_beats;
         let total_beats = self.state.total_beats();
@@ -8287,9 +8290,9 @@ impl App {
             zoom_level,
             scroll_offset_beats: scroll_offset,
             total_beats,
-            loop_enabled: self.state.loop_enabled,
-            loop_start_beats: self.state.loop_start_beats,
-            loop_end_beats: self.state.loop_end_beats,
+            loop_enabled: self.state.transport.loop_enabled,
+            loop_start_beats: self.state.transport.loop_start_beats,
+            loop_end_beats: self.state.transport.loop_end_beats,
             time_selection_active: self.state.time_selection_active,
             selection_start_beats: self.state.selection_start_beats,
             selection_end_beats: self.state.selection_end_beats,
@@ -8324,9 +8327,9 @@ impl App {
             zoom_level,
             playhead_beats,
             bpm,
-            loop_enabled: self.state.loop_enabled,
-            loop_start_beats: self.state.loop_start_beats,
-            loop_end_beats: self.state.loop_end_beats,
+            loop_enabled: self.state.transport.loop_enabled,
+            loop_start_beats: self.state.transport.loop_start_beats,
+            loop_end_beats: self.state.transport.loop_end_beats,
             tracks: self
                 .state
                 .tracks
@@ -8415,9 +8418,9 @@ impl App {
                 track_ids.clone(),
                 track_kinds.clone(),
                 selected_clips,
-                self.state.loop_enabled,
-                self.state.loop_start_beats,
-                self.state.loop_end_beats,
+                self.state.transport.loop_enabled,
+                self.state.transport.loop_start_beats,
+                self.state.transport.loop_end_beats,
                 self.state.time_selection_active,
                 self.state.selection_start_beats,
                 self.state.selection_end_beats,
@@ -10080,7 +10083,7 @@ impl App {
         clip: &UiClip,
         track_color: Color,
     ) -> Element<'_, Message> {
-        let playhead_samples = self.state.position_samples;
+        let playhead_samples = self.state.transport.position_samples;
         let playhead_normalized = if clip.duration > 0
             && playhead_samples >= clip.position
             && playhead_samples < clip.position + clip.duration
@@ -10094,7 +10097,7 @@ impl App {
             audio: Arc::clone(&clip.audio),
             duration_samples: clip.duration,
             source_offset: clip.source_offset,
-            sample_rate: self.state.sample_rate,
+            sample_rate: self.state.transport.sample_rate,
             track_color,
             playhead_normalized,
             loop_enabled: clip.loop_enabled,
@@ -10111,7 +10114,7 @@ impl App {
         let clip_info = text(format!(
             "{}: {:.1}s",
             clip.name,
-            clip.duration as f64 / self.state.sample_rate as f64
+            clip.duration as f64 / self.state.transport.sample_rate as f64
         ))
         .size(10)
         .color(th::TEXT_MUTED);
@@ -10190,7 +10193,7 @@ impl App {
             .style(button_style);
 
         let warp_btn = button(
-            text(format!("Warp → {:.0} BPM", self.state.bpm))
+            text(format!("Warp → {:.0} BPM", self.state.transport.bpm))
                 .size(11)
                 .color(th::TEXT),
         )
@@ -10210,7 +10213,7 @@ impl App {
             row_widgets = row_widgets.push(clear_btn);
 
             if let Some(warped_to) = clip.warped_to_bpm {
-                let stale = (warped_to - self.state.bpm).abs() > 0.01;
+                let stale = (warped_to - self.state.transport.bpm).abs() > 0.01;
                 if stale {
                     row_widgets = row_widgets.push(
                         text(format!("(was {:.0})", warped_to))
@@ -10224,11 +10227,11 @@ impl App {
             // the clip knows its tempo and it disagrees with the
             // project. Say so loudly instead of a status-bar whisper;
             // the Warp button on this same row is the one-click fix.
-            if (detected - self.state.bpm).abs() > 0.5 {
+            if (detected - self.state.transport.bpm).abs() > 0.5 {
                 row_widgets = row_widgets.push(
                     text(format!(
                         "OUT OF TEMPO: clip {detected:.1} BPM vs project {:.0}",
-                        self.state.bpm
+                        self.state.transport.bpm
                     ))
                     .size(10)
                     .color(th::METER_YELLOW),
@@ -10301,7 +10304,7 @@ impl App {
             });
 
         // Play/Pause button
-        let play_pause_btn = if self.state.playing {
+        let play_pause_btn = if self.state.transport.playing {
             button(icons::icon(icons::PAUSE).size(16).color(th::ACCENT))
                 .on_press(Message::Stop)
                 .padding([8, 14])
@@ -10332,7 +10335,7 @@ impl App {
         };
 
         // Loop toggle button
-        let loop_btn = if self.state.loop_enabled {
+        let loop_btn = if self.state.transport.loop_enabled {
             button(icons::icon(icons::REPEAT).size(16).color(th::ACCENT))
                 .on_press(Message::ToggleArrangementLoop)
                 .padding([8, 12])
@@ -10374,7 +10377,7 @@ impl App {
         .color(th::TEXT);
 
         // BPM
-        let bpm_input = text_input("BPM", &self.state.bpm_text)
+        let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
             .on_input(Message::BpmChanged)
             .on_submit(Message::BpmSubmit)
             .width(Length::Fixed(55.0))
