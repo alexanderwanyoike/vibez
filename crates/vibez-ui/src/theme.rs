@@ -334,3 +334,7 @@ pub fn vibez_theme() -> Theme {
         },
     )
 }
+
+/// Uniform device-card body height across the device chain: the
+/// panel scrolls horizontally, so cards share one rack height.
+pub const DEVICE_BODY_H: f32 = 168.0;

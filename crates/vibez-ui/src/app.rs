@@ -8695,6 +8695,57 @@ impl App {
             })
     }
 
+    /// Standard device title row: colored dot, name, optional remove.
+    fn device_title_row(
+        name: &str,
+        track_color: Color,
+        remove: Option<Message>,
+    ) -> iced::widget::Row<'_, Message> {
+        let dot = text("\u{25CF}").size(8).color(track_color);
+        let name = text(name.to_string()).size(11).color(th::TEXT);
+        let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
+        if let Some(msg) = remove {
+            let remove_btn: Element<'_, Message> =
+                Self::device_icon_btn(icons::X, th::TEXT_DIM, th::DANGER, msg).into();
+            r = r.push(horizontal_space().width(Length::Fixed(12.0)));
+            r = r.push(remove_btn);
+        }
+        r
+    }
+
+    /// Labeled section inside a device body, Ableton-style: a tiny
+    /// uppercase header above the section's controls.
+    fn device_section<'a>(
+        label: &'static str,
+        content: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        column![text(label).size(8).color(th::TEXT_MUTED), content]
+            .spacing(6)
+            .align_x(iced::Alignment::Start)
+            .into()
+    }
+
+    /// Thin vertical rule separating device sections.
+    fn device_divider() -> Element<'static, Message> {
+        container(text(""))
+            .width(Length::Fixed(1.0))
+            .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::DIVIDER.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Standard device body: fixed rack height so every card in the
+    /// chain lines up like a hardware rack, consistent padding.
+    fn device_body(content: Element<'_, Message>) -> Element<'_, Message> {
+        container(content)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
+    }
+
     /// Wrap card content in the standard device card container.
     fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
         container(content)
@@ -8808,87 +8859,93 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::EffectKnobWidget;
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Synth").size(11).color(th::TEXT);
-
-        let title =
-            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
+        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Synth",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
         let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
-
-        // Param 0 is the waveform: a selector reads better than a knob.
-        let wave_value = track
-            .instrument_params
-            .first()
-            .copied()
-            .unwrap_or(descriptors[0].default)
-            .round() as usize;
-        let mut wave_row = row![].spacing(2);
-        for (i, label) in ["Sin", "Saw", "Sqr", "Tri"].iter().enumerate() {
-            let active = wave_value == i;
-            let btn =
-                button(
-                    text(*label)
-                        .size(9)
-                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
-                )
-                .on_press(Message::SetInstrumentParam(track_id, 0, i as f32))
-                .padding([2, 6])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
-                    text_color: if active { th::ACCENT } else { th::TEXT_DIM },
-                    border: iced::Border {
-                        color: if active { th::ACCENT_DIM } else { th::BORDER },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                });
-            wave_row = wave_row.push(btn);
-        }
-
-        // Remaining params get real knobs in ONE row: the devices
-        // panel scrolls horizontally, so width is free and height is
-        // the scarce resource (stacked rows clip their labels).
-        let mut knob_row = row![].spacing(8);
-        for (i, descriptor) in descriptors.iter().enumerate().skip(1) {
-            let value = track
+        let value_of = |i: usize| {
+            track
                 .instrument_params
                 .get(i)
                 .copied()
-                .unwrap_or(descriptor.default);
-            let knob = EffectKnobWidget::for_instrument(
-                track_id,
-                i,
-                value,
-                descriptor.min,
-                descriptor.max,
-                descriptor.default,
-                track_color,
-            );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .into();
-            let label = text(short_param_name(descriptor.name))
-                .size(9)
-                .color(th::TEXT_DIM);
-            let value_label = text(format!("{value:.2}{}", descriptor.unit))
-                .size(8)
-                .color(th::TEXT_MUTED);
-            let param_col = column![knob_canvas, label, value_label]
-                .spacing(1)
-                .width(Length::Fixed(52.0))
-                .align_x(iced::Alignment::Center);
-            knob_row = knob_row.push(param_col);
-        }
+                .unwrap_or(descriptors[i].default)
+        };
+        let knob = |i: usize, label: &str| {
+            param_column(
+                EffectKnobWidget::for_instrument(
+                    track_id,
+                    i,
+                    value_of(i),
+                    descriptors[i].min,
+                    descriptors[i].max,
+                    descriptors[i].default,
+                    track_color,
+                ),
+                label.to_string(),
+                format_value(value_of(i), descriptors[i].unit),
+            )
+        };
 
-        let body = container(column![wave_row, knob_row].spacing(6))
-            .padding([6, 7])
-            .width(Length::Fill);
+        // OSC section: 2x2 waveform selector grid.
+        let wave_value = value_of(0).round() as usize;
+        let wave_btn = |i: usize, label: &'static str| {
+            let active = wave_value == i;
+            button(
+                text(label)
+                    .size(9)
+                    .width(Length::Fixed(30.0))
+                    .align_x(iced::Alignment::Center)
+                    .color(if active { th::BG_DARK } else { th::TEXT_DIM }),
+            )
+            .on_press(Message::SetInstrumentParam(track_id, 0, i as f32))
+            .padding([3, 4])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(if active { th::ACCENT } else { th::BG_DARK }.into()),
+                text_color: if active { th::BG_DARK } else { th::TEXT_DIM },
+                border: iced::Border {
+                    color: if active { th::ACCENT } else { th::BORDER },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            })
+        };
+        let osc = column![
+            row![wave_btn(0, "Sin"), wave_btn(1, "Saw")].spacing(3),
+            row![wave_btn(2, "Sqr"), wave_btn(3, "Tri")].spacing(3),
+        ]
+        .spacing(3);
 
-        Self::device_card(column![title, body].width(Length::Fixed(440.0)))
+        let body = row![
+            Self::device_section("OSC", osc.into()),
+            Self::device_divider(),
+            Self::device_section(
+                "ENVELOPE",
+                row![
+                    knob(1, "Attack"),
+                    knob(2, "Decay"),
+                    knob(3, "Sustain"),
+                    knob(4, "Release")
+                ]
+                .spacing(6)
+                .into()
+            ),
+            Self::device_divider(),
+            Self::device_section(
+                "FILTER",
+                row![knob(5, "Cutoff"), knob(6, "Res")].spacing(6).into()
+            ),
+            Self::device_divider(),
+            Self::device_section("OUT", knob(7, "Volume")),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
+
+        Self::device_card(column![title, Self::device_body(body.into())])
     }
 
     /// Sampler device card.
@@ -8898,18 +8955,41 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::EffectKnobWidget;
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Sampler").size(11).color(th::TEXT);
+        use crate::widgets::effect_knob::{format_value, param_column, EffectKnobWidget};
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Sampler",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
-        let title =
-            Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
+        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
+        let value_of = |i: usize| {
+            track
+                .instrument_params
+                .get(i)
+                .copied()
+                .unwrap_or(descriptors[i].default)
+        };
+        let knob = |i: usize, label: &str| {
+            param_column(
+                EffectKnobWidget::for_instrument(
+                    track_id,
+                    i,
+                    value_of(i),
+                    descriptors[i].min,
+                    descriptors[i].max,
+                    descriptors[i].default,
+                    track_color,
+                ),
+                label.to_string(),
+                format_value(value_of(i), descriptors[i].unit),
+            )
+        };
 
         let sample_label = match &track.sample_name {
             Some(name) => text(name.as_str()).size(10).color(th::TEXT),
             None => text("No Sample").size(10).color(th::TEXT_MUTED),
         };
-
         let load_btn = button(text("Load").size(9).color(th::TEXT))
             .on_press(Message::LoadSamplerSample(track_id))
             .padding([2, 8])
@@ -8929,52 +9009,29 @@ impl App {
                     ..Default::default()
                 }
             });
+        let sample = column![sample_label, load_btn, knob(0, "Root")]
+            .spacing(4)
+            .align_x(iced::Alignment::Center);
 
-        let sample_row = row![sample_label, load_btn]
-            .spacing(6)
-            .align_y(iced::Alignment::Center);
+        let body = row![
+            Self::device_section("SAMPLE", sample.into()),
+            Self::device_divider(),
+            Self::device_section(
+                "ENVELOPE",
+                row![
+                    knob(1, "Attack"),
+                    knob(2, "Decay"),
+                    knob(3, "Sustain"),
+                    knob(4, "Release")
+                ]
+                .spacing(6)
+                .into()
+            ),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
 
-        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
-        // One knob row: the devices panel scrolls horizontally and
-        // stacked rows clip their labels vertically.
-        let mut knob_row = row![].spacing(8);
-        for (i, descriptor) in descriptors.iter().enumerate() {
-            let value = track
-                .instrument_params
-                .get(i)
-                .copied()
-                .unwrap_or(descriptor.default);
-            let knob = EffectKnobWidget::for_instrument(
-                track_id,
-                i,
-                value,
-                descriptor.min,
-                descriptor.max,
-                descriptor.default,
-                track_color,
-            );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .into();
-            let label = text(short_param_name(descriptor.name))
-                .size(9)
-                .color(th::TEXT_DIM);
-            let value_label = text(format!("{value:.2}{}", descriptor.unit))
-                .size(8)
-                .color(th::TEXT_MUTED);
-            let param_col = column![knob_canvas, label, value_label]
-                .spacing(1)
-                .width(Length::Fixed(52.0))
-                .align_x(iced::Alignment::Center);
-            knob_row = knob_row.push(param_col);
-        }
-
-        let body = container(column![sample_row, knob_row].spacing(6))
-            .padding([6, 7])
-            .width(Length::Fill);
-
-        Self::device_card(column![title, body].width(Length::Fixed(400.0)))
+        Self::device_card(column![title, Self::device_body(body.into())])
     }
 
     fn view_drum_rack_device<'a>(
@@ -8983,26 +9040,15 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        use crate::widgets::effect_knob::EffectKnobWidget;
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text("Drum Rack").size(11).color(th::TEXT);
+        use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
         let selected_pad = track
             .selected_drum_pad
             .min(track.drum_rack_pads.len().saturating_sub(1));
-
-        let remove: Element<'a, Message> = Self::device_icon_btn(
-            icons::X,
-            th::TEXT_DIM,
-            th::DANGER,
-            Message::RemoveTrackInstrument(track_id),
-        )
-        .into();
-
-        let title = Self::device_title_bar(
-            row![dot, name, horizontal_space(), remove]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-        );
+        let title = Self::device_title_bar(Self::device_title_row(
+            "Drum Rack",
+            track_color,
+            Some(Message::RemoveTrackInstrument(track_id)),
+        ));
 
         let mut grid = column![].spacing(4);
         for row_index in 0..4 {
@@ -9015,8 +9061,8 @@ impl App {
                     .name
                     .as_deref()
                     .map(|name| {
-                        if name.len() > 10 {
-                            format!("{}...", &name[..10])
+                        if name.len() > 7 {
+                            format!("{}..", &name[..7])
                         } else {
                             name.to_string()
                         }
@@ -9038,8 +9084,8 @@ impl App {
                     .spacing(2)
                     .align_x(iced::Alignment::Center),
                 )
-                .padding([8, 6])
-                .width(Length::Fixed(60.0))
+                .padding([3, 4])
+                .width(Length::Fixed(52.0))
                 .style(move |_theme: &Theme| container::Style {
                     background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
                     text_color: Some(if active { th::ACCENT } else { th::TEXT }),
@@ -9180,11 +9226,8 @@ impl App {
             ),
         ];
 
-        let mut param_rows = column![].spacing(6);
-        let mut current_row = row![].spacing(8);
-        for (i, (label_text, value_text, value, min, max, default, param)) in
-            drum_params.iter().enumerate()
-        {
+        let mut knob_row = row![].spacing(6);
+        for (label_text, value_text, value, min, max, default, param) in drum_params.iter() {
             let knob = EffectKnobWidget::for_drum_pad(
                 track_id,
                 selected_pad,
@@ -9195,21 +9238,11 @@ impl App {
                 *default,
                 track_color,
             );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .into();
-            let label = text(*label_text).size(9).color(th::TEXT_DIM);
-            let value_label = text(value_text.clone()).size(8).color(th::TEXT_MUTED);
-            let param_col = column![knob_canvas, label, value_label]
-                .spacing(1)
-                .width(Length::Fixed(52.0))
-                .align_x(iced::Alignment::Center);
-            current_row = current_row.push(param_col);
-            if (i + 1) % 3 == 0 {
-                param_rows = param_rows.push(current_row);
-                current_row = row![].spacing(8);
-            }
+            knob_row = knob_row.push(param_column(
+                knob,
+                label_text.to_string(),
+                value_text.clone(),
+            ));
         }
 
         let one_shot_active = selected_pad_state.one_shot;
@@ -9287,24 +9320,26 @@ impl App {
         }
 
         let editor = column![
-            param_rows,
+            footer,
+            knob_row,
             row![one_shot_btn, choke_row]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)
         ]
         .spacing(6);
 
-        // Editor sits BESIDE the pad grid: the grid already spends
-        // the panel's height budget, anything below it clips.
-        let body = container(
-            row![column![grid, footer].spacing(6), editor]
-                .spacing(12)
-                .align_y(iced::Alignment::Start),
-        )
-        .padding([6, 6])
-        .width(Length::Fill);
+        // Pads and the selected pad's editor sit side by side in
+        // labeled sections; the panel scrolls horizontally so the
+        // card grows sideways, never past the rack height.
+        let body = row![
+            Self::device_section("PADS", grid.into()),
+            Self::device_divider(),
+            Self::device_section("PAD", editor.into()),
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Start);
 
-        Self::device_card(column![title, body].width(Length::Fixed(500.0)))
+        Self::device_card(column![title, Self::device_body(body.into())])
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.
@@ -10238,17 +10273,6 @@ impl App {
                 _ => None,
             }),
         ])
-    }
-}
-
-/// Compact display name for a device parameter: multi-word
-/// descriptor names wrap illegibly under a 32px knob.
-fn short_param_name(name: &str) -> &str {
-    match name {
-        "Filter Cutoff" => "Cutoff",
-        "Filter Res" => "Res",
-        "Root Note" => "Root",
-        other => other,
     }
 }
 

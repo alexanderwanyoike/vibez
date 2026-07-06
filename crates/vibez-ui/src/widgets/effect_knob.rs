@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use iced::keyboard;
 use iced::mouse;
-use iced::widget::canvas;
-use iced::{Color, Rectangle, Renderer, Theme};
+use iced::widget::{canvas, column, text};
+use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
 use crate::message::{DrumPadParam, Message};
 use crate::theme;
@@ -151,6 +151,48 @@ impl EffectKnobWidget {
     }
 }
 
+/// Standard width of a knob+label+value column in device cards.
+pub const PARAM_COLUMN_WIDTH: f32 = 56.0;
+/// Standard knob canvas size in device cards.
+pub const KNOB_SIZE: f32 = 36.0;
+
+/// The one true knob column: knob, name, value. Every device card
+/// (effects and instruments) uses this so density, typography, and
+/// spacing stay consistent across the whole device chain.
+pub fn param_column<'a>(
+    knob: EffectKnobWidget,
+    label: String,
+    value_text: String,
+) -> Element<'a, Message> {
+    let knob_canvas: Element<'a, Message> = canvas(knob)
+        .width(Length::Fixed(KNOB_SIZE))
+        .height(Length::Fixed(KNOB_SIZE))
+        .into();
+    column![
+        knob_canvas,
+        text(label).size(9).color(theme::TEXT_DIM),
+        text(value_text).size(9).color(theme::TEXT),
+    ]
+    .spacing(2)
+    .width(Length::Fixed(PARAM_COLUMN_WIDTH))
+    .align_x(iced::Alignment::Center)
+    .into()
+}
+
+/// Musical value formatting shared by every device card: note names
+/// for pitch params, kHz above 1000 Hz, ms below one second.
+pub fn format_value(value: f32, unit: &str) -> String {
+    match unit {
+        "note" => crate::widgets::piano_roll::pitch_name(value.round().clamp(0.0, 127.0) as u8),
+        "Hz" if value >= 1000.0 => format!("{:.1} kHz", value / 1000.0),
+        "Hz" => format!("{value:.0} Hz"),
+        "s" if value < 1.0 => format!("{:.0} ms", value * 1000.0),
+        "s" => format!("{value:.2} s"),
+        "" => format!("{value:.2}"),
+        other => format!("{value:.1} {other}"),
+    }
+}
+
 /// State for mouse interaction.
 #[derive(Debug, Default)]
 pub struct EffectKnobState {
@@ -165,50 +207,87 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
         let center = iced::Point::new(w / 2.0, h / 2.0);
-        let radius = (w.min(h) / 2.0 - 3.0).max(4.0);
+        let radius = (w.min(h) / 2.0 - 3.0).max(6.0);
+        let engaged = state.dragging || cursor.is_over(bounds);
 
-        // Background circle
-        let bg_circle = canvas::Path::circle(center, radius);
-        frame.fill(&bg_circle, theme::KNOB_BG);
+        // Knob body: darker than the card so it reads as a physical
+        // control (the old body used the card's own color and was
+        // invisible). Subtle ring border, brighter while engaged.
+        let body = canvas::Path::circle(center, radius);
+        frame.fill(
+            &body,
+            Color {
+                r: 0.09,
+                g: 0.09,
+                b: 0.09,
+                a: 1.0,
+            },
+        );
+        let ring = canvas::Path::circle(center, radius);
+        frame.stroke(
+            &ring,
+            canvas::Stroke::default()
+                .with_color(if engaged {
+                    self.arc_color
+                } else {
+                    theme::BORDER
+                })
+                .with_width(1.0),
+        );
 
-        let arc_radius = radius - 2.0;
-        let segments = 40;
+        let arc_radius = radius - 1.5;
+        let segments = 48;
         let norm = self.normalized();
 
-        // Background arc (full 270-degree range)
+        // Track arc: visible neutral grey along the full sweep.
         let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END, segments);
         frame.stroke(
             &bg_arc,
             canvas::Stroke::default()
-                .with_color(theme::FADER_TRACK)
-                .with_width(3.0),
+                .with_color(Color {
+                    r: 0.24,
+                    g: 0.24,
+                    b: 0.24,
+                    a: 1.0,
+                })
+                .with_width(2.5),
         );
 
-        // Value arc (filled portion) using track color
+        // Value arc in the track color, slightly brighter when engaged.
         let value_angle = ARC_START + norm * (ARC_END - ARC_START);
         if norm > 0.005 {
             let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
+            let arc_color = if engaged {
+                Color {
+                    r: (self.arc_color.r * 1.25).min(1.0),
+                    g: (self.arc_color.g * 1.25).min(1.0),
+                    b: (self.arc_color.b * 1.25).min(1.0),
+                    a: 1.0,
+                }
+            } else {
+                self.arc_color
+            };
             frame.stroke(
                 &value_arc,
                 canvas::Stroke::default()
-                    .with_color(self.arc_color)
-                    .with_width(3.0),
+                    .with_color(arc_color)
+                    .with_width(2.5),
             );
         }
 
-        // Pointer line from center toward current value angle
-        let pointer_inner = radius * 0.25;
-        let pointer_outer = radius - 3.0;
+        // Pointer line, the Ableton-style position indicator.
+        let pointer_inner = radius * 0.30;
+        let pointer_outer = radius - 3.5;
         let pointer = canvas::Path::line(
             iced::Point::new(
                 center.x + pointer_inner * value_angle.cos(),
@@ -222,7 +301,11 @@ impl canvas::Program<Message> for EffectKnobWidget {
         frame.stroke(
             &pointer,
             canvas::Stroke::default()
-                .with_color(theme::TEXT)
+                .with_color(if engaged {
+                    theme::TEXT
+                } else {
+                    theme::TEXT_DIM
+                })
                 .with_width(2.0),
         );
 

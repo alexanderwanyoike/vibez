@@ -1,15 +1,13 @@
-use iced::widget::{button, canvas, column, container, row, text, Space};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Color, Element, Length, Theme};
 
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::effect_knob::EffectKnobWidget;
+use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
 use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
-
-const CARD_WIDTH: f32 = 220.0;
 
 /// Render an Ableton-style device card for the detail panel.
 pub fn view_effect_slot<'a>(
@@ -169,10 +167,9 @@ pub fn view_effect_slot<'a>(
         } else {
             track_color
         };
-        let mut param_rows = column![].spacing(6);
-        let mut current_row = row![].spacing(8);
-        let mut count = 0;
-
+        // One knob row in the shared column format: the devices
+        // panel scrolls horizontally and stacked rows clip.
+        let mut knob_row = row![].spacing(6);
         for (i, descriptor) in effect.descriptors.iter().enumerate() {
             let value = effect.params.get(i).copied().unwrap_or(descriptor.default);
             let knob = EffectKnobWidget::new(
@@ -185,42 +182,25 @@ pub fn view_effect_slot<'a>(
                 descriptor.default,
                 knob_color,
             );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .into();
-
-            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
-            let value_text = format_param_value(value, descriptor.unit);
-            let value_label = text(value_text).size(8).color(th::TEXT_MUTED);
-
-            let param_col = column![knob_canvas, label, value_label]
-                .spacing(1)
-                .align_x(iced::Alignment::Center);
-
-            current_row = current_row.push(param_col);
-            count += 1;
-
-            if count % 4 == 0 {
-                param_rows = param_rows.push(current_row);
-                current_row = row![].spacing(8);
-            }
+            knob_row = knob_row.push(param_column(
+                knob,
+                descriptor.name.to_string(),
+                crate::widgets::effect_knob::format_value(value, descriptor.unit),
+            ));
         }
 
-        if count % 4 != 0 {
-            param_rows = param_rows.push(current_row);
-        }
-
-        container(param_rows)
-            .padding([6, 7])
-            .width(Length::Fill)
+        container(knob_row)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
             .into()
     } else {
-        Space::new(Length::Fill, Length::Fixed(2.0)).into()
+        container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
     };
 
     // ── Card ─────────────────────────────────────────────────
-    let card = column![title_bar, body].width(Length::Fixed(CARD_WIDTH));
+    let card = column![title_bar, body];
 
     container(card)
         .style(|_theme: &Theme| container::Style {
@@ -261,14 +241,4 @@ fn action_btn(
                 ..Default::default()
             }
         })
-}
-
-fn format_param_value(value: f32, unit: &str) -> String {
-    if unit.is_empty() {
-        format!("{value:.2}")
-    } else if unit == "Hz" && value >= 1000.0 {
-        format!("{:.1}k{unit}", value / 1000.0)
-    } else {
-        format!("{value:.1}{unit}")
-    }
 }
