@@ -495,6 +495,17 @@ impl Default for TransportState {
     }
 }
 
+/// Arrangement domain state: the track list (the shared model other
+/// domains receive explicitly), selection, and track numbering.
+#[derive(Debug, Default)]
+pub struct ArrangementState {
+    pub tracks: Vec<UiTrack>,
+    pub selected_track: Option<TrackId>,
+    pub next_track_number: u32,
+    pub selected_clips: HashSet<ArrangementSelection>,
+    pub selected_note_clip: Option<(TrackId, ClipId)>,
+}
+
 pub struct AppState {
     // Transport domain slice (playback, tempo, arrangement loop).
     pub transport: TransportState,
@@ -515,16 +526,8 @@ pub struct AppState {
     pub snap_grid: SnapGrid,
     pub piano_roll_scroll_y: f32,
 
-    // Multi-track
-    pub tracks: Vec<UiTrack>,
-    pub selected_track: Option<TrackId>,
-    pub next_track_number: u32,
-
-    // Detail panel: which note clip is selected for piano roll editing
-    pub selected_note_clip: Option<(TrackId, ClipId)>,
-
-    // Arrangement clip selection (multi-select)
-    pub selected_clips: HashSet<ArrangementSelection>,
+    // Arrangement domain slice (tracks, selection, numbering).
+    pub arrangement: ArrangementState,
 
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
@@ -624,11 +627,10 @@ impl Default for AppState {
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::Eighth,
             piano_roll_scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
-            tracks: Vec::new(),
-            selected_track: None,
-            next_track_number: 1,
-            selected_note_clip: None,
-            selected_clips: HashSet::new(),
+            arrangement: ArrangementState {
+                next_track_number: 1,
+                ..ArrangementState::default()
+            },
             detail_panel_tab: DetailPanelTab::Clip,
             time_selection_active: false,
             selection_start_beats: 0.0,
@@ -762,7 +764,7 @@ impl AppState {
     /// Check if a clip is in the multi-selection set.
     #[allow(dead_code)]
     pub fn is_clip_selected(&self, clip_id: ClipId) -> bool {
-        self.selected_clips.iter().any(|sel| match sel {
+        self.arrangement.selected_clips.iter().any(|sel| match sel {
             ArrangementSelection::AudioClip { clip_id: cid, .. } => *cid == clip_id,
             ArrangementSelection::NoteClip { clip_id: cid, .. } => *cid == clip_id,
         })
@@ -771,24 +773,25 @@ impl AppState {
     /// Returns the single selected clip if exactly one is selected.
     #[allow(dead_code)]
     pub fn single_selected_clip(&self) -> Option<ArrangementSelection> {
-        if self.selected_clips.len() == 1 {
-            self.selected_clips.iter().next().copied()
+        if self.arrangement.selected_clips.len() == 1 {
+            self.arrangement.selected_clips.iter().next().copied()
         } else {
             None
         }
     }
 
     pub fn find_track(&self, id: TrackId) -> Option<&UiTrack> {
-        self.tracks.iter().find(|t| t.id == id)
+        self.arrangement.tracks.iter().find(|t| t.id == id)
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
-        self.tracks.iter_mut().find(|t| t.id == id)
+        self.arrangement.tracks.iter_mut().find(|t| t.id == id)
     }
 
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
         let audio_max = self
+            .arrangement
             .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
@@ -803,7 +806,8 @@ impl AppState {
             0.0
         };
         let note_max = if spb > 0.0 {
-            self.tracks
+            self.arrangement
+                .tracks
                 .iter()
                 .flat_map(|t| t.note_clips.iter())
                 .map(|c| ((c.position_beats + c.duration_beats) * spb) as u64)

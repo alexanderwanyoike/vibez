@@ -264,12 +264,13 @@ impl App {
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));
 
-        let existing_track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
+        let existing_track_ids: Vec<TrackId> =
+            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
 
-        self.state.tracks.clear();
+        self.state.arrangement.tracks.clear();
         // The engine drops all plugin instances with their tracks;
         // their GUI windows and stale raw pointers must go with them
         // (pumping a closed plugin's run-loop timers segfaults).
@@ -278,10 +279,10 @@ impl App {
         }
         self.plugin_gui_raw_ptrs.clear();
         self.plugin_state_ptrs.clear();
-        self.state.selected_track = None;
-        self.state.next_track_number = 1;
-        self.state.selected_note_clip = None;
-        self.state.selected_clips.clear();
+        self.state.arrangement.selected_track = None;
+        self.state.arrangement.next_track_number = 1;
+        self.state.arrangement.selected_note_clip = None;
+        self.state.arrangement.selected_clips.clear();
         self.state.transport.loop_enabled = false;
         self.state.transport.loop_start_beats = 0.0;
         self.state.transport.loop_end_beats = 4.0;
@@ -332,6 +333,7 @@ impl App {
     fn selected_browser_device_target(&self) -> Option<BrowserImportTarget> {
         let track = self
             .state
+            .arrangement
             .selected_track
             .and_then(|track_id| self.state.find_track(track_id))?;
         match track.instrument_kind {
@@ -412,13 +414,13 @@ impl App {
     /// deletes, or undo chains.
     fn next_unique_track_number(&mut self, prefix: &str) -> u32 {
         loop {
-            let candidate = self.state.next_track_number;
+            let candidate = self.state.arrangement.next_track_number;
             let name = format!("{prefix} {candidate}");
-            let clash = self.state.tracks.iter().any(|t| t.name == name);
+            let clash = self.state.arrangement.tracks.iter().any(|t| t.name == name);
             if !clash {
                 return candidate;
             }
-            self.state.next_track_number += 1;
+            self.state.arrangement.next_track_number += 1;
         }
     }
 
@@ -434,14 +436,17 @@ impl App {
         }
 
         let track_num = self.next_unique_track_number("Audio");
-        self.state.next_track_number = track_num + 1;
+        self.state.arrangement.next_track_number = track_num + 1;
         let id = TrackId::new();
         let color_index = ((track_num - 1) % 8) as u8;
         let name = format!("Audio {track_num}");
 
         self.send_command(EngineCommand::AddTrack(id, name.clone()));
-        self.state.tracks.push(UiTrack::new(id, name, color_index));
-        self.state.selected_track = Some(id);
+        self.state
+            .arrangement
+            .tracks
+            .push(UiTrack::new(id, name, color_index));
+        self.state.arrangement.selected_track = Some(id);
         id
     }
 
@@ -498,7 +503,7 @@ impl App {
             });
         }
 
-        self.state.selected_track = Some(track_id);
+        self.state.arrangement.selected_track = Some(track_id);
         self.state.status_text = format!("Added clip: {name}");
         self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
     }
@@ -591,7 +596,7 @@ impl App {
                 original_audio: None,
             });
         }
-        self.state.selected_track = Some(track_id);
+        self.state.arrangement.selected_track = Some(track_id);
         self.state.status_text = format!("Dropped '{name}' on {track_name}");
         self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
     }
@@ -747,6 +752,7 @@ impl App {
     fn project_from_state(&self) -> Project {
         let tracks = self
             .state
+            .arrangement
             .tracks
             .iter()
             .map(|track| self.track_info_from_ui(track))
@@ -754,6 +760,7 @@ impl App {
 
         let clips = self
             .state
+            .arrangement
             .tracks
             .iter()
             .flat_map(|track| {
@@ -781,6 +788,7 @@ impl App {
 
         let note_clips = self
             .state
+            .arrangement
             .tracks
             .iter()
             .flat_map(|track| {
@@ -976,11 +984,12 @@ impl App {
                 });
             }
 
-            self.state.next_track_number = self
+            self.state.arrangement.next_track_number = self
                 .state
+                .arrangement
                 .next_track_number
-                .max(self.state.tracks.len() as u32 + 1);
-            self.state.tracks.push(track);
+                .max(self.state.arrangement.tracks.len() as u32 + 1);
+            self.state.arrangement.tracks.push(track);
         }
 
         for loaded_clip in loaded.clips {
@@ -1082,7 +1091,8 @@ impl App {
             });
         }
 
-        self.state.selected_track = self.state.tracks.first().map(|track| track.id);
+        self.state.arrangement.selected_track =
+            self.state.arrangement.tracks.first().map(|track| track.id);
         self.state.current_project_path = Some(loaded.path.clone());
         self.state.project_dirty = false;
         self.state.status_text = if loaded.warnings.is_empty() {
@@ -1187,7 +1197,7 @@ impl App {
         let mut clips = std::collections::HashMap::new();
         let mut samplers = std::collections::HashMap::new();
         let mut pads = std::collections::HashMap::new();
-        for track in &self.state.tracks {
+        for track in &self.state.arrangement.tracks {
             for clip in &track.clips {
                 clips.insert(clip.id, Arc::clone(&clip.audio));
             }
@@ -1271,13 +1281,14 @@ impl App {
 
     fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
         let track_num = self.next_unique_track_number("Bounce");
-        self.state.next_track_number = track_num + 1;
+        self.state.arrangement.next_track_number = track_num + 1;
         let color_index = (track_num.wrapping_sub(1) % 8) as u8;
         let track_id = TrackId::new();
         let track_name = format!("Bounce {track_num}");
 
         self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
         self.state
+            .arrangement
             .tracks
             .push(UiTrack::new(track_id, track_name, color_index));
 
@@ -1314,9 +1325,10 @@ impl App {
             });
         }
 
-        self.state.selected_track = Some(track_id);
-        self.state.selected_clips.clear();
+        self.state.arrangement.selected_track = Some(track_id);
+        self.state.arrangement.selected_clips.clear();
         self.state
+            .arrangement
             .selected_clips
             .insert(ArrangementSelection::AudioClip { track_id, clip_id });
         self.mark_project_dirty();
@@ -1336,16 +1348,16 @@ impl App {
 
     fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
         crate::state::ProjectSnapshot {
-            tracks: self.state.tracks.clone(),
+            tracks: self.state.arrangement.tracks.clone(),
             bpm: self.state.transport.bpm,
             bpm_text: self.state.transport.bpm_text.clone(),
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
-            selected_track: self.state.selected_track,
-            selected_clips: self.state.selected_clips.clone(),
-            selected_note_clip: self.state.selected_note_clip,
-            next_track_number: self.state.next_track_number,
+            selected_track: self.state.arrangement.selected_track,
+            selected_clips: self.state.arrangement.selected_clips.clone(),
+            selected_note_clip: self.state.arrangement.selected_note_clip,
+            next_track_number: self.state.arrangement.next_track_number,
         }
     }
 
@@ -1367,21 +1379,22 @@ impl App {
         self.plugin_state_ptrs.clear();
 
         // Tear down the engine side.
-        let existing_track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
+        let existing_track_ids: Vec<TrackId> =
+            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
 
-        self.state.tracks = snapshot.tracks;
+        self.state.arrangement.tracks = snapshot.tracks;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;
         self.state.transport.loop_enabled = snapshot.loop_enabled;
         self.state.transport.loop_start_beats = snapshot.loop_start_beats;
         self.state.transport.loop_end_beats = snapshot.loop_end_beats;
-        self.state.selected_track = snapshot.selected_track;
-        self.state.selected_clips = snapshot.selected_clips;
-        self.state.selected_note_clip = snapshot.selected_note_clip;
-        self.state.next_track_number = snapshot.next_track_number;
+        self.state.arrangement.selected_track = snapshot.selected_track;
+        self.state.arrangement.selected_clips = snapshot.selected_clips;
+        self.state.arrangement.selected_note_clip = snapshot.selected_note_clip;
+        self.state.arrangement.next_track_number = snapshot.next_track_number;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
         self.send_command(EngineCommand::SetArrangementLoop(
@@ -1397,7 +1410,7 @@ impl App {
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
 
-        let tracks = self.state.tracks.clone();
+        let tracks = self.state.arrangement.tracks.clone();
         for track in &tracks {
             self.replay_track_to_engine(track);
         }
@@ -1586,13 +1599,16 @@ impl App {
         if let Some(track) = self.state.find_track_mut(track_id) {
             track.clips.retain(|c| c.id != old_clip_id);
         }
-        self.state.selected_clips.retain(|sel| match sel {
-            ArrangementSelection::AudioClip {
-                clip_id: cid,
-                track_id: tid,
-            } => !(*tid == track_id && *cid == old_clip_id),
-            _ => true,
-        });
+        self.state
+            .arrangement
+            .selected_clips
+            .retain(|sel| match sel {
+                ArrangementSelection::AudioClip {
+                    clip_id: cid,
+                    track_id: tid,
+                } => !(*tid == track_id && *cid == old_clip_id),
+                _ => true,
+            });
 
         self.send_command(EngineCommand::AddClip {
             track_id,
@@ -1624,6 +1640,7 @@ impl App {
             });
         }
         self.state
+            .arrangement
             .selected_clips
             .insert(ArrangementSelection::AudioClip {
                 track_id,
@@ -1675,7 +1692,7 @@ impl App {
             self.plugin_state_ptrs.remove(&key);
         }
         if let Some(track_id) = action.select_track {
-            self.state.selected_track = Some(track_id);
+            self.state.arrangement.selected_track = Some(track_id);
         }
         if let Some(status) = action.status {
             self.state.status_text = status;
@@ -1712,7 +1729,7 @@ impl App {
         let mut warped: Vec<(TrackId, ClipId)> = Vec::new();
         let mut moves: Vec<(TrackId, ClipId, u64)> = Vec::new();
 
-        for track in &mut self.state.tracks {
+        for track in &mut self.state.arrangement.tracks {
             for clip in &mut track.clips {
                 if !clip.warped {
                     continue;
@@ -2142,9 +2159,12 @@ impl App {
                 let sample_rate = self.state.transport.sample_rate;
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state
-                        .devices
-                        .update(msg, &mut engine, &mut self.state.tracks, sample_rate)
+                    self.state.devices.update(
+                        msg,
+                        &mut engine,
+                        &mut self.state.arrangement.tracks,
+                        sample_rate,
+                    )
                 };
                 self.apply_devices_action(action);
             }
@@ -2239,14 +2259,17 @@ impl App {
             Message::AddTrack => {
                 let track_num = self.next_unique_track_number("Track");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number = track_num + 1;
+                self.state.arrangement.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("Track {track_num}");
 
                 self.send_command(EngineCommand::AddTrack(id, name.clone()));
-                self.state.tracks.push(UiTrack::new(id, name, color_index));
-                self.state.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.tracks.len());
+                self.state
+                    .arrangement
+                    .tracks
+                    .push(UiTrack::new(id, name, color_index));
+                self.state.arrangement.selected_track = Some(id);
+                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
             }
             Message::RemoveTrack(track_id) => {
                 // Capture identity before mutating so we can report exactly
@@ -2272,18 +2295,19 @@ impl App {
                 });
 
                 self.send_command(EngineCommand::RemoveTrack(track_id));
-                self.state.tracks.retain(|t| t.id != track_id);
-                if self.state.selected_track == Some(track_id) {
-                    self.state.selected_track = self.state.tracks.first().map(|t| t.id);
+                self.state.arrangement.tracks.retain(|t| t.id != track_id);
+                if self.state.arrangement.selected_track == Some(track_id) {
+                    self.state.arrangement.selected_track =
+                        self.state.arrangement.tracks.first().map(|t| t.id);
                 }
                 // Clear note clip selection if track removed
-                if let Some((tid, _)) = self.state.selected_note_clip {
+                if let Some((tid, _)) = self.state.arrangement.selected_note_clip {
                     if tid == track_id {
-                        self.state.selected_note_clip = None;
+                        self.state.arrangement.selected_note_clip = None;
                     }
                 }
                 // Clear arrangement selections for removed track
-                self.state.selected_clips.retain(|sel| {
+                self.state.arrangement.selected_clips.retain(|sel| {
                     let sel_track = match sel {
                         ArrangementSelection::AudioClip { track_id: t, .. } => *t,
                         ArrangementSelection::NoteClip { track_id: t, .. } => *t,
@@ -2292,7 +2316,7 @@ impl App {
                 });
                 self.state.status_text = format!(
                     "Removed {removed_name}. {} track(s) remain.",
-                    self.state.tracks.len()
+                    self.state.arrangement.tracks.len()
                 );
             }
             Message::DeleteKeyPressed => {
@@ -2303,7 +2327,7 @@ impl App {
                     return Task::none();
                 }
                 // Priority 1: selected notes in the open piano roll.
-                if let Some((track_id, clip_id)) = self.state.selected_note_clip {
+                if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
                     let has_selection = self
                         .state
                         .find_track(track_id)
@@ -2314,12 +2338,12 @@ impl App {
                     }
                 }
                 // Priority 2: selected arrangement clips.
-                if !self.state.selected_clips.is_empty() {
+                if !self.state.arrangement.selected_clips.is_empty() {
                     return self.update(Message::DeleteSelectedClip);
                 }
             }
             Message::SelectTrack(track_id) => {
-                self.state.selected_track = Some(track_id);
+                self.state.arrangement.selected_track = Some(track_id);
             }
             Message::AddClipToTrack(track_id) => {
                 // Guard: only audio tracks can have audio clips
@@ -2422,6 +2446,7 @@ impl App {
                 }
                 // Clear from multi-selection if this clip was selected
                 self.state
+                    .arrangement
                     .selected_clips
                     .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
             }
@@ -2470,7 +2495,7 @@ impl App {
             Message::AddInstrumentTrack => {
                 let track_num = self.next_unique_track_number("MIDI");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number = track_num + 1;
+                self.state.arrangement.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("MIDI {track_num}");
                 let kind = TrackKind::Midi;
@@ -2478,9 +2503,9 @@ impl App {
                 self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
                 let mut track = UiTrack::new_instrument(id, name, kind, color_index);
                 track.has_instrument = false;
-                self.state.tracks.push(track);
-                self.state.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.tracks.len());
+                self.state.arrangement.tracks.push(track);
+                self.state.arrangement.selected_track = Some(id);
+                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
             }
 
             // -- Sampler --
@@ -2521,7 +2546,7 @@ impl App {
                 self.apply_sampler_sample_loaded(track_id, audio, name, source);
             }
             Message::SamplerDecodeError(track_id, err) => {
-                self.state.selected_track = Some(track_id);
+                self.state.arrangement.selected_track = Some(track_id);
                 self.state.status_text = format!("Sample load error: {err}");
             }
             Message::LoadDrumRackPadSample(track_id, pad_index) => {
@@ -2562,7 +2587,7 @@ impl App {
                 self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
             }
             Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
-                self.state.selected_track = Some(track_id);
+                self.state.arrangement.selected_track = Some(track_id);
                 self.state.status_text = format!("Drum pad load error: {err}");
             }
 
@@ -2699,12 +2724,12 @@ impl App {
                     loop_end_beats: duration_beats,
                 });
                 // Auto-select the new note clip for piano roll editing
-                self.state.selected_note_clip = Some((track_id, clip_id));
+                self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
                 self.state.status_text = "Added note clip".to_string();
             }
             Message::SelectNoteClip(track_id, clip_id) => {
-                self.state.selected_note_clip = Some((track_id, clip_id));
-                self.state.selected_track = Some(track_id);
+                self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
+                self.state.arrangement.selected_track = Some(track_id);
             }
             Message::AddNote {
                 track_id,
@@ -2945,7 +2970,7 @@ impl App {
                             note: *note,
                         });
                     }
-                    self.state.selected_note_clip = Some((track_id, new_clip_id));
+                    self.state.arrangement.selected_note_clip = Some((track_id, new_clip_id));
                     self.state.status_text = "Duplicated clip".to_string();
                 }
             }
@@ -3069,25 +3094,25 @@ impl App {
             } => {
                 if shift_held {
                     // Toggle in/out of selection set
-                    if !self.state.selected_clips.remove(&selection) {
-                        self.state.selected_clips.insert(selection);
+                    if !self.state.arrangement.selected_clips.remove(&selection) {
+                        self.state.arrangement.selected_clips.insert(selection);
                     }
                 } else {
                     // Replace selection
-                    self.state.selected_clips.clear();
-                    self.state.selected_clips.insert(selection);
+                    self.state.arrangement.selected_clips.clear();
+                    self.state.arrangement.selected_clips.insert(selection);
                 }
                 self.state.detail_panel_tab = DetailPanelTab::Clip;
                 // Also update track selection and note clip selection for detail panel
                 match selection {
                     ArrangementSelection::AudioClip { track_id, .. } => {
-                        self.state.selected_track = Some(track_id);
+                        self.state.arrangement.selected_track = Some(track_id);
                         // Clear note clip selection when an audio clip is selected
-                        self.state.selected_note_clip = None;
+                        self.state.arrangement.selected_note_clip = None;
                     }
                     ArrangementSelection::NoteClip { track_id, clip_id } => {
-                        self.state.selected_track = Some(track_id);
-                        self.state.selected_note_clip = Some((track_id, clip_id));
+                        self.state.arrangement.selected_track = Some(track_id);
+                        self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
                     }
                 }
             }
@@ -3305,20 +3330,20 @@ impl App {
                             track.note_clips.push(clip);
                         }
                         // Update selection
-                        self.state
-                            .selected_clips
-                            .remove(&ArrangementSelection::NoteClip {
+                        self.state.arrangement.selected_clips.remove(
+                            &ArrangementSelection::NoteClip {
                                 track_id: source_track,
                                 clip_id,
-                            });
-                        self.state
-                            .selected_clips
-                            .insert(ArrangementSelection::NoteClip {
+                            },
+                        );
+                        self.state.arrangement.selected_clips.insert(
+                            ArrangementSelection::NoteClip {
                                 track_id: target_track,
                                 clip_id,
-                            });
-                        self.state.selected_track = Some(target_track);
-                        self.state.selected_note_clip = Some((target_track, clip_id));
+                            },
+                        );
+                        self.state.arrangement.selected_track = Some(target_track);
+                        self.state.arrangement.selected_note_clip = Some((target_track, clip_id));
                     }
                 } else {
                     // Move audio clip between audio tracks
@@ -3348,19 +3373,19 @@ impl App {
                             track.clips.push(clip);
                         }
                         // Update selection
-                        self.state
-                            .selected_clips
-                            .remove(&ArrangementSelection::AudioClip {
+                        self.state.arrangement.selected_clips.remove(
+                            &ArrangementSelection::AudioClip {
                                 track_id: source_track,
                                 clip_id,
-                            });
-                        self.state
-                            .selected_clips
-                            .insert(ArrangementSelection::AudioClip {
+                            },
+                        );
+                        self.state.arrangement.selected_clips.insert(
+                            ArrangementSelection::AudioClip {
                                 track_id: target_track,
                                 clip_id,
-                            });
-                        self.state.selected_track = Some(target_track);
+                            },
+                        );
+                        self.state.arrangement.selected_track = Some(target_track);
                     }
                 }
             }
@@ -3478,9 +3503,11 @@ impl App {
 
                     // Update selection: remove original, add left half
                     self.state
+                        .arrangement
                         .selected_clips
                         .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
                     self.state
+                        .arrangement
                         .selected_clips
                         .insert(ArrangementSelection::AudioClip {
                             track_id,
@@ -3612,21 +3639,23 @@ impl App {
 
                     // Update selection: remove original, add left half
                     self.state
+                        .arrangement
                         .selected_clips
                         .remove(&ArrangementSelection::NoteClip { track_id, clip_id });
                     self.state
+                        .arrangement
                         .selected_clips
                         .insert(ArrangementSelection::NoteClip {
                             track_id,
                             clip_id: left_id,
                         });
-                    self.state.selected_note_clip = Some((track_id, left_id));
+                    self.state.arrangement.selected_note_clip = Some((track_id, left_id));
                     self.state.status_text = "Split note clip".to_string();
                 }
             }
 
             Message::DeleteSelectedClip => {
-                let selections: Vec<_> = self.state.selected_clips.drain().collect();
+                let selections: Vec<_> = self.state.arrangement.selected_clips.drain().collect();
                 if !selections.is_empty() {
                     for selection in &selections {
                         match selection {
@@ -3645,10 +3674,11 @@ impl App {
                                 }
                                 if self
                                     .state
+                                    .arrangement
                                     .selected_note_clip
                                     .is_some_and(|(tid, cid)| tid == *track_id && cid == *clip_id)
                                 {
-                                    self.state.selected_note_clip = None;
+                                    self.state.arrangement.selected_note_clip = None;
                                 }
                             }
                         }
@@ -3663,7 +3693,13 @@ impl App {
             }
 
             Message::DuplicateSelectedClip => {
-                let selections: Vec<_> = self.state.selected_clips.iter().copied().collect();
+                let selections: Vec<_> = self
+                    .state
+                    .arrangement
+                    .selected_clips
+                    .iter()
+                    .copied()
+                    .collect();
                 if !selections.is_empty() {
                     let mut new_selections = HashSet::new();
                     for selection in &selections {
@@ -3785,7 +3821,7 @@ impl App {
                         }
                     }
                     // Select the new copies
-                    self.state.selected_clips = new_selections;
+                    self.state.arrangement.selected_clips = new_selections;
                     let count = selections.len();
                     self.state.status_text = if count == 1 {
                         "Duplicated clip".to_string()
@@ -3809,7 +3845,13 @@ impl App {
                     });
                 }
 
-                let clips: Vec<_> = self.state.selected_clips.iter().copied().collect();
+                let clips: Vec<_> = self
+                    .state
+                    .arrangement
+                    .selected_clips
+                    .iter()
+                    .copied()
+                    .collect();
                 for selection in clips {
                     match selection {
                         ArrangementSelection::AudioClip { track_id, clip_id } => {
@@ -3832,7 +3874,13 @@ impl App {
 
             // -- Join selected clips (Ctrl+J) --
             Message::JoinSelectedClips => {
-                let clips: Vec<_> = self.state.selected_clips.iter().copied().collect();
+                let clips: Vec<_> = self
+                    .state
+                    .arrangement
+                    .selected_clips
+                    .iter()
+                    .copied()
+                    .collect();
                 if clips.len() < 2 {
                     return Task::none();
                 }
@@ -3870,7 +3918,7 @@ impl App {
                 self.state.time_selection_active = true;
                 self.state.time_selection_track = track_id;
                 if let Some(tid) = track_id {
-                    self.state.selected_track = Some(tid);
+                    self.state.arrangement.selected_track = Some(tid);
                 }
             }
             Message::SetSelectionAsLoop => {
@@ -3932,11 +3980,11 @@ impl App {
                             clip_id: *clip_id,
                         }
                     };
-                    if !self.state.selected_clips.contains(&selection) {
-                        self.state.selected_clips.clear();
-                        self.state.selected_clips.insert(selection);
+                    if !self.state.arrangement.selected_clips.contains(&selection) {
+                        self.state.arrangement.selected_clips.clear();
+                        self.state.arrangement.selected_clips.insert(selection);
                     }
-                    self.state.selected_track = Some(*track_id);
+                    self.state.arrangement.selected_track = Some(*track_id);
                 }
                 self.state.context_menu = Some(crate::state::ContextMenu {
                     x: menu_x,
@@ -3961,7 +4009,7 @@ impl App {
                 // Collect clip IDs to remove
                 let mut audio_removals: Vec<(TrackId, ClipId)> = Vec::new();
                 let mut note_removals: Vec<(TrackId, ClipId)> = Vec::new();
-                for track in &self.state.tracks {
+                for track in &self.state.arrangement.tracks {
                     if let Some(tid) = target_track {
                         if track.id != tid {
                             continue;
@@ -3995,8 +4043,8 @@ impl App {
                         track.note_clips.retain(|c| c.id != *cid);
                     }
                 }
-                self.state.selected_clips.clear();
-                self.state.selected_note_clip = None;
+                self.state.arrangement.selected_clips.clear();
+                self.state.arrangement.selected_note_clip = None;
                 self.state.time_selection_active = false;
                 let count = audio_removals.len() + note_removals.len();
                 self.state.status_text = format!("Deleted {count} clips in region");
@@ -4025,6 +4073,7 @@ impl App {
                     // on a single lane.
                     let audio_hits: Vec<(TrackId, ClipId)> = if spb > 0.0 {
                         self.state
+                            .arrangement
                             .tracks
                             .iter()
                             .filter(|t| target_track.is_none_or(|tid| t.id == tid))
@@ -4046,6 +4095,7 @@ impl App {
 
                     let note_hits: Vec<(TrackId, ClipId)> = self
                         .state
+                        .arrangement
                         .tracks
                         .iter()
                         .filter(|t| target_track.is_none_or(|tid| t.id == tid))
@@ -4087,7 +4137,7 @@ impl App {
 
             // -- Clip creation from region --
             Message::CreateClipFromSelection => {
-                if let Some(tid) = self.state.selected_track {
+                if let Some(tid) = self.state.arrangement.selected_track {
                     if let Some(track) = self.state.find_track(tid) {
                         if track.kind.is_midi() {
                             return self.update(Message::CreateNoteClipFromSelection(tid));
@@ -4141,9 +4191,10 @@ impl App {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                 });
-                self.state.selected_note_clip = Some((track_id, clip_id));
-                self.state.selected_clips.clear();
+                self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
+                self.state.arrangement.selected_clips.clear();
                 self.state
+                    .arrangement
                     .selected_clips
                     .insert(ArrangementSelection::NoteClip { track_id, clip_id });
                 self.state.status_text = "Created note clip from selection".to_string();
@@ -4151,30 +4202,44 @@ impl App {
 
             // -- Track reordering --
             Message::MoveTrackUp(track_id) => {
-                if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
+                if let Some(idx) = self
+                    .state
+                    .arrangement
+                    .tracks
+                    .iter()
+                    .position(|t| t.id == track_id)
+                {
                     if idx > 0 {
-                        self.state.tracks.swap(idx, idx - 1);
-                        let order: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
+                        self.state.arrangement.tracks.swap(idx, idx - 1);
+                        let order: Vec<TrackId> =
+                            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
                         self.send_command(EngineCommand::ReorderTracks(order));
                     }
                 }
             }
             Message::MoveTrackDown(track_id) => {
-                if let Some(idx) = self.state.tracks.iter().position(|t| t.id == track_id) {
-                    if idx + 1 < self.state.tracks.len() {
-                        self.state.tracks.swap(idx, idx + 1);
-                        let order: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
+                if let Some(idx) = self
+                    .state
+                    .arrangement
+                    .tracks
+                    .iter()
+                    .position(|t| t.id == track_id)
+                {
+                    if idx + 1 < self.state.arrangement.tracks.len() {
+                        self.state.arrangement.tracks.swap(idx, idx + 1);
+                        let order: Vec<TrackId> =
+                            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
                         self.send_command(EngineCommand::ReorderTracks(order));
                     }
                 }
             }
             Message::MoveSelectedTrackUp => {
-                if let Some(tid) = self.state.selected_track {
+                if let Some(tid) = self.state.arrangement.selected_track {
                     return self.update(Message::MoveTrackUp(tid));
                 }
             }
             Message::MoveSelectedTrackDown => {
-                if let Some(tid) = self.state.selected_track {
+                if let Some(tid) = self.state.arrangement.selected_track {
                     return self.update(Message::MoveTrackDown(tid));
                 }
             }
@@ -4249,7 +4314,7 @@ impl App {
             Message::AddMidiTrack => {
                 let track_num = self.next_unique_track_number("MIDI");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.state.next_track_number = track_num + 1;
+                self.state.arrangement.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("MIDI {track_num}");
                 let kind = TrackKind::Midi;
@@ -4257,9 +4322,9 @@ impl App {
                 self.send_command(EngineCommand::AddMidiTrack(id, name.clone()));
                 let mut track = UiTrack::new_instrument(id, name, kind, color_index);
                 track.has_instrument = false;
-                self.state.tracks.push(track);
-                self.state.selected_track = Some(id);
-                self.state.status_text = format!("{} tracks", self.state.tracks.len());
+                self.state.arrangement.tracks.push(track);
+                self.state.arrangement.selected_track = Some(id);
+                self.state.status_text = format!("{} tracks", self.state.arrangement.tracks.len());
             }
 
             // -- Instrument attach/detach --
@@ -4343,6 +4408,7 @@ impl App {
                 // Collect targets first so we don't hold a borrow across dispatch.
                 let targets: Vec<(TrackId, ClipId)> = self
                     .state
+                    .arrangement
                     .tracks
                     .iter()
                     .flat_map(|track| {
@@ -4606,7 +4672,7 @@ impl App {
             Message::ImportSelectedBrowserSampleToArrangement => {
                 if let Some(entry) = self.selected_sample_browser_entry().cloned() {
                     let target = BrowserImportTarget::ArrangementClip(
-                        self.state.selected_track.filter(|track_id| {
+                        self.state.arrangement.selected_track.filter(|track_id| {
                             self.state
                                 .find_track(*track_id)
                                 .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
@@ -5380,7 +5446,8 @@ impl App {
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
-                let target = BrowserImportTarget::ArrangementClip(self.state.selected_track);
+                let target =
+                    BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
                 self.state.status_text = format!("Importing {}...", entry.name);
                 return Task::perform(
                     fetch_dropbox_sample_async(client, cache, entry),
@@ -5531,8 +5598,9 @@ impl App {
             });
         }
 
-        self.state.selected_clips.clear();
+        self.state.arrangement.selected_clips.clear();
         self.state
+            .arrangement
             .selected_clips
             .insert(ArrangementSelection::AudioClip {
                 track_id,
@@ -5625,14 +5693,15 @@ impl App {
             });
         }
 
-        self.state.selected_clips.clear();
+        self.state.arrangement.selected_clips.clear();
         self.state
+            .arrangement
             .selected_clips
             .insert(ArrangementSelection::NoteClip {
                 track_id,
                 clip_id: new_id,
             });
-        self.state.selected_note_clip = Some((track_id, new_id));
+        self.state.arrangement.selected_note_clip = Some((track_id, new_id));
         self.state.status_text = "Joined note clips".to_string();
     }
 
@@ -5891,7 +5960,7 @@ impl App {
         if events.is_empty() {
             return;
         }
-        let Some(track_id) = self.state.selected_track else {
+        let Some(track_id) = self.state.arrangement.selected_track else {
             return;
         };
         let has_instrument = self
@@ -6855,7 +6924,7 @@ impl App {
                 let mut col = column![].spacing(0).width(Length::Fixed(200.0));
 
                 // "Create Note Clip" if track is an instrument track
-                let effective_track = track_id.or(self.state.selected_track);
+                let effective_track = track_id.or(self.state.arrangement.selected_track);
                 if let Some(tid) = effective_track {
                     if let Some(track) = self.state.find_track(tid) {
                         if track.kind.is_midi() {
@@ -7929,7 +7998,7 @@ impl App {
     // ── Arrangement view ──
 
     fn view_arrangement(&self) -> Element<'_, Message> {
-        if self.state.tracks.is_empty() {
+        if self.state.arrangement.tracks.is_empty() {
             let prompt = text("Right-click or Ctrl+T to add a track")
                 .size(16)
                 .color(th::TEXT_DIM);
@@ -8009,6 +8078,7 @@ impl App {
             loop_end_beats: self.state.transport.loop_end_beats,
             tracks: self
                 .state
+                .arrangement
                 .tracks
                 .iter()
                 .map(|t| {
@@ -8043,20 +8113,27 @@ impl App {
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
         // Collect track IDs and kinds for cross-track drag
-        let track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
-        let track_kinds: Vec<bool> = self.state.tracks.iter().map(|t| t.kind.is_midi()).collect();
-        let total_track_count = self.state.tracks.len();
+        let track_ids: Vec<TrackId> = self.state.arrangement.tracks.iter().map(|t| t.id).collect();
+        let track_kinds: Vec<bool> = self
+            .state
+            .arrangement
+            .tracks
+            .iter()
+            .map(|t| t.kind.is_midi())
+            .collect();
+        let total_track_count = self.state.arrangement.tracks.len();
 
         // Track rows: header widgets + clip canvas
         let mut track_rows = column![].spacing(0);
 
-        for (track_index, track) in self.state.tracks.iter().enumerate() {
-            let selected = self.state.selected_track == Some(track.id);
+        for (track_index, track) in self.state.arrangement.tracks.iter().enumerate() {
+            let selected = self.state.arrangement.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
 
             // Collect selected clip IDs for this track
             let selected_clips: HashSet<ClipId> = self
                 .state
+                .arrangement
                 .selected_clips
                 .iter()
                 .filter_map(|sel| match sel {
@@ -8144,7 +8221,7 @@ impl App {
     // ── Mixer view ──
 
     fn view_mixer(&self) -> Element<'_, Message> {
-        if self.state.tracks.is_empty() {
+        if self.state.arrangement.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
                 .color(th::TEXT_DIM);
@@ -8164,7 +8241,7 @@ impl App {
         // ── Channel strips + pinned master ──
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
-        for track in &self.state.tracks {
+        for track in &self.state.arrangement.tracks {
             let strip = view_mixer_strip(track);
             strips = strips.push(strip);
         }
@@ -8231,6 +8308,7 @@ impl App {
     fn view_detail_panel(&self) -> Element<'_, Message> {
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
+            .arrangement
             .selected_track
             .and_then(|id| self.state.find_track(id))
         {
@@ -8296,10 +8374,11 @@ impl App {
                     let is_midi = track.kind.is_midi();
                     // Check for note clip selection on this MIDI track
                     let has_note_clip = is_midi
-                        && (self.state.selected_clips.iter().any(|s| {
+                        && (self.state.arrangement.selected_clips.iter().any(|s| {
                             matches!(s, ArrangementSelection::NoteClip { track_id: tid, .. } if *tid == track_id)
                         }) || self
                             .state
+                            .arrangement
                             .selected_note_clip
                             .is_some_and(|(tid, _)| tid == track_id));
 
@@ -8307,13 +8386,18 @@ impl App {
                         self.view_piano_roll_panel(track_id, track_color)
                     } else {
                         // Find a single selected audio clip on this track
-                        let audio_sel = self.state.selected_clips.iter().find_map(|s| match s {
-                            ArrangementSelection::AudioClip {
-                                track_id: tid,
-                                clip_id: cid,
-                            } if *tid == track_id => Some(*cid),
-                            _ => None,
-                        });
+                        let audio_sel =
+                            self.state
+                                .arrangement
+                                .selected_clips
+                                .iter()
+                                .find_map(|s| match s {
+                                    ArrangementSelection::AudioClip {
+                                        track_id: tid,
+                                        clip_id: cid,
+                                    } if *tid == track_id => Some(*cid),
+                                    _ => None,
+                                });
                         if let Some(sel_cid) = audio_sel {
                             if let Some(clip) = track.clips.iter().find(|c| c.id == sel_cid) {
                                 self.view_audio_clip_panel(track_id, clip, track_color)
@@ -9543,9 +9627,10 @@ impl App {
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
         let clip_data: Option<(String, f64, f64, bool, TrackId, ClipId)> =
-            if let Some((tid, cid)) = self.state.selected_note_clip {
+            if let Some((tid, cid)) = self.state.arrangement.selected_note_clip {
                 if tid == track_id {
                     self.state
+                        .arrangement
                         .tracks
                         .iter()
                         .find(|t| t.id == track_id)
