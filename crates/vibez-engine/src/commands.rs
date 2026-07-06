@@ -234,6 +234,15 @@ pub enum EngineCommand {
         position: Option<usize>,
     },
     /// Set a pre-loaded external plugin instrument on a track.
+    /// Audition a single note on a track's instrument (piano-roll
+    /// key press / drum pad click). Works while the transport is
+    /// stopped thanks to idle instrument rendering.
+    AuditionNote {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+    },
     SetPluginInstrument {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,

@@ -1827,27 +1827,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Delete for selected clip(s) --
-            //
-            // Intentionally does NOT capture Backspace. iced 0.13's canvas
-            // receives keyboard events even when a text input is focused, so
-            // binding Backspace here caused BPM edits to delete clips.
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
-                ..
-            }) => {
-                if !self.selected_clips.is_empty() {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::DeleteSelectedClip),
-                    );
-                } else if self.selected {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::RemoveTrack(self.track_id)),
-                    );
-                }
-            }
+            // Delete/Backspace are handled centrally by the global
+            // DeleteKeyPressed shortcut (context-aware: selected notes
+            // first, then clips). The old canvas binding here raced
+            // the piano roll's and won, deleting the clip while a
+            // note was selected; it could even delete the whole track.
 
             // -- Keyboard shortcuts (Ctrl+D/E/J/T) --
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {

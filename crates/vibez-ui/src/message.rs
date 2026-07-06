@@ -396,6 +396,14 @@ pub enum Message {
 
     // Cursor tracking
     CursorMoved(f32, f32),
+    DeleteKeyPressed,
+    /// Preview a pitch on a track's instrument (piano-roll key press
+    /// or drum pad click). `on: false` releases it.
+    AuditionNote {
+        track_id: TrackId,
+        pitch: u8,
+        on: bool,
+    },
     WindowResized(f32, f32),
     MouseReleased,
 

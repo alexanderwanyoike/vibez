@@ -116,6 +116,23 @@ impl EngineTrack {
         }
     }
 
+    /// Render the instrument with no clip events (transport stopped):
+    /// lets auditioned/held notes sound and plugin event queues drain.
+    /// Returns true when the buffer has signal.
+    pub fn render_instrument_idle(&mut self, frames: usize, channels: usize) -> bool {
+        if self.instrument.is_none() {
+            return false;
+        }
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
+        }
+        let instrument = self.instrument.as_mut().unwrap();
+        instrument.render(&mut self.mix_buffer[..buf_size], channels);
+        self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0)
+    }
+
     /// Send note-offs for every sounding note. Call whenever the
     /// playhead moves discontinuously; the offs reach the instrument
     /// immediately (built-ins) or on its next render (plugins).

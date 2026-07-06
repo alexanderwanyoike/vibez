@@ -165,7 +165,7 @@ fn clamp_scroll_y(scroll_y: f32, canvas_height: f32) -> f32 {
 }
 
 /// Returns a pitch name like "C4", "D#3".
-fn pitch_name(pitch: u8) -> String {
+pub(crate) fn pitch_name(pitch: u8) -> String {
     const NAMES: [&str; 12] = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
@@ -214,6 +214,8 @@ pub struct PianoRollState {
     last_cursor: Option<Point>,
     shift_held: bool,
     last_click: Option<(Instant, Point)>,
+    /// Pitch currently held down via a key-lane click (audition).
+    audition_pitch: Option<u8>,
 }
 
 // ── Grid row colors ──
@@ -279,13 +281,25 @@ impl canvas::Program<Message> for PianoRollWidget {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        // Key-lane feedback: the auditioned (pressed) pitch, and the
+        // pitch under the cursor while hovering the keys.
+        let pressed_pitch = state.audition_pitch;
+        let hovered_pitch = cursor.position_in(bounds).and_then(|pos| {
+            if pos.x < KEY_WIDTH && pos.y > RULER_HEIGHT && state.audition_pitch.is_none() {
+                let pitch = self.y_to_pitch(pos.y);
+                (LOW_NOTE..HIGH_NOTE).contains(&pitch).then_some(pitch)
+            } else {
+                None
+            }
+        });
         let w = bounds.width;
         let h = bounds.height;
         let grid_width = w - KEY_WIDTH;
@@ -349,10 +363,20 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
 
             if !is_black_key(pitch) {
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    Color {
+                        a: 0.75,
+                        ..WHITE_KEY_COLOR
+                    }
+                } else {
+                    WHITE_KEY_COLOR
+                };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
                     iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
-                    WHITE_KEY_COLOR,
+                    fill,
                 );
 
                 // Key border
@@ -393,10 +417,22 @@ impl canvas::Program<Message> for PianoRollWidget {
                 );
 
                 // Black key itself
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    Color {
+                        r: 0.35,
+                        g: 0.35,
+                        b: 0.35,
+                        a: 1.0,
+                    }
+                } else {
+                    BLACK_KEY_COLOR
+                };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
                     iced::Size::new(black_key_width, KEY_HEIGHT),
-                    BLACK_KEY_COLOR,
+                    fill,
                 );
 
                 // Key border
@@ -422,7 +458,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 continue;
             }
 
-            if pitch % 12 == 0 {
+            if pitch.is_multiple_of(12) {
                 let label = pitch_name(pitch);
                 frame.fill_text(canvas::Text {
                     content: label,
@@ -885,8 +921,21 @@ impl canvas::Program<Message> for PianoRollWidget {
                         return (canvas::event::Status::Ignored, None);
                     }
 
-                    // Only handle clicks in the grid area
+                    // Key lane: press auditions the pitch on this
+                    // track's instrument (released on mouse-up).
                     if pos.x < KEY_WIDTH {
+                        let pitch = self.y_to_pitch(pos.y);
+                        if (LOW_NOTE..HIGH_NOTE).contains(&pitch) {
+                            state.audition_pitch = Some(pitch);
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::AuditionNote {
+                                    track_id: self.track_id,
+                                    pitch,
+                                    on: true,
+                                }),
+                            );
+                        }
                         return (canvas::event::Status::Ignored, None);
                     }
 
@@ -1203,6 +1252,18 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
 
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                // Release an auditioned key first: it never coexists
+                // with a note drag.
+                if let Some(pitch) = state.audition_pitch.take() {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::AuditionNote {
+                            track_id: self.track_id,
+                            pitch,
+                            on: false,
+                        }),
+                    );
+                }
                 if let Some(drag) = state.drag.take() {
                     // On release of a multi-note drag, move all non-anchor notes
                     if let DragAction::MoveNote {
@@ -1279,26 +1340,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                 state.shift_held = false;
             }
 
-            // ── Keyboard: Delete → remove selected notes ──
-            //
-            // Backspace is intentionally not bound because iced 0.13 canvas
-            // receives keyboard events even when a text input is focused.
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
-                ..
-            }) => {
-                if let Some(ref clip_data) = self.clip {
-                    if !clip_data.selected_notes.is_empty() {
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::RemoveSelectedNotes(
-                                self.track_id,
-                                clip_data.clip_id,
-                            )),
-                        );
-                    }
-                }
-            }
+            // Delete/Backspace are handled centrally by the global
+            // DeleteKeyPressed shortcut (context-aware, respects text
+            // input focus). Canvases must NOT bind them: every canvas
+            // receives keyboard events, so two canvases binding the
+            // same key race each other (the timeline used to win and
+            // delete the clip while the piano roll wanted the note).
 
             // ── Keyboard: Arrow keys → nudge selected notes ──
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {

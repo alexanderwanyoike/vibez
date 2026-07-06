@@ -2213,6 +2213,41 @@ impl App {
                     self.state.tracks.len()
                 );
             }
+            Message::AuditionNote {
+                track_id,
+                pitch,
+                on,
+            } => {
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on,
+                });
+            }
+            Message::DeleteKeyPressed => {
+                // Never delete anything while a text field is being
+                // edited; backspace belongs to the text there.
+                if self.state.editing_track_name.is_some() || self.state.editing_clip_name.is_some()
+                {
+                    return Task::none();
+                }
+                // Priority 1: selected notes in the open piano roll.
+                if let Some((track_id, clip_id)) = self.state.selected_note_clip {
+                    let has_selection = self
+                        .state
+                        .find_track(track_id)
+                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
+                        .is_some_and(|c| !c.selected_notes.is_empty());
+                    if has_selection {
+                        return self.update(Message::RemoveSelectedNotes(track_id, clip_id));
+                    }
+                }
+                // Priority 2: selected arrangement clips.
+                if !self.state.selected_clips.is_empty() {
+                    return self.update(Message::DeleteSelectedClip);
+                }
+            }
             Message::SelectTrack(track_id) => {
                 self.state.selected_track = Some(track_id);
             }
@@ -2591,6 +2626,20 @@ impl App {
                 self.state.status_text = format!("Cleared pad {}", pad_index + 1);
             }
             Message::SelectDrumRackPad(track_id, pad_index) => {
+                // Audition the pad like Ableton: hear it on click.
+                let pitch = 36 + pad_index.min(127) as u8;
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on: true,
+                });
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on: false,
+                });
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     let max_index = track.drum_rack_pads.len().saturating_sub(1);
                     track.selected_drum_pad = pad_index.min(max_index);
@@ -8812,9 +8861,10 @@ impl App {
                 // Use container + mouse_area so press events reach us and
                 // drag-drop works. iced Button would capture ButtonPressed
                 // and hide it from mouse_area.
+                let pad_note = crate::widgets::piano_roll::pitch_name(36 + pad_index as u8);
                 let pad_body = container(
                     column![
-                        text(format!("{:02}", pad_index + 1))
+                        text(format!("{:02}  {pad_note}", pad_index + 1))
                             .size(9)
                             .color(if active { th::ACCENT } else { th::TEXT_DIM }),
                         text(label)
@@ -9997,6 +10047,18 @@ fn global_key_handler(
     // Escape: cancel editing
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
         return Some(Message::CancelEditing);
+    }
+
+    // Delete/Backspace: context-resolved in update() (selected notes
+    // first, then selected clips) and ignored while renaming.
+    if !modifiers.control()
+        && matches!(
+            key,
+            iced::keyboard::Key::Named(Named::Delete)
+                | iced::keyboard::Key::Named(Named::Backspace)
+        )
+    {
+        return Some(Message::DeleteKeyPressed);
     }
 
     // B: toggle piano roll draw mode (no modifiers)
