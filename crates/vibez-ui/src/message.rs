@@ -12,8 +12,7 @@ use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, DetailPanelTab, SampleBrowserEntry, SettingsTab,
-    SnapGrid, Workspace,
+    ContextMenuTarget, DetailPanelTab, SampleBrowserEntry, SettingsTab, SnapGrid, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,7 +170,6 @@ pub enum Message {
     ClipFileSelected(TrackId, Option<PathBuf>),
     ClipAudioDecoded(TrackId, ClipId, Arc<DecodedAudio>, String, MediaSourceRef),
     ClipDecodeError(TrackId, String),
-    RemoveClip(TrackId, ClipId),
 
     // Track controls
 
@@ -202,13 +200,6 @@ pub enum Message {
     SetSnapGrid(SnapGrid),
 
     // Clip looping
-    ToggleClipLoop(TrackId, ClipId),
-    SetClipLoopRegion {
-        track_id: TrackId,
-        clip_id: ClipId,
-        loop_start: u64,
-        loop_end: u64,
-    },
     ToggleNoteClipLoop(TrackId, ClipId),
     SetNoteClipLoopRegion {
         track_id: TrackId,
@@ -255,35 +246,10 @@ pub enum Message {
     PianoRollScrollY(f32),
 
     // Arrangement clip interaction
-    SelectArrangementClip {
-        selection: ArrangementSelection,
-        shift_held: bool,
-    },
-    MoveAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position: u64,
-    },
-    MoveNoteClipPosition {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position_beats: f64,
-    },
-    ResizeAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_duration: u64,
-    },
     ResizeNoteClipDuration {
         track_id: TrackId,
         clip_id: ClipId,
         new_duration_beats: f64,
-    },
-    MoveClipToTrack {
-        source_track: TrackId,
-        target_track: TrackId,
-        clip_id: ClipId,
-        is_note_clip: bool,
     },
     SplitAudioClip {
         track_id: TrackId,
@@ -295,8 +261,6 @@ pub enum Message {
         clip_id: ClipId,
         split_beat: f64,
     },
-    DeleteSelectedClip,
-    DuplicateSelectedClip,
     SplitSelectedAtPlayhead,
     JoinSelectedClips,
 
@@ -306,13 +270,6 @@ pub enum Message {
     // Arrangement loop
 
     // Time selection + context menu
-    SetTimeSelection {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-    SetSelectionAsLoop,
-    SetTimeSelectionActive(bool),
     ShowContextMenu {
         x: f32,
         y: f32,
@@ -683,5 +640,21 @@ impl Message {
     }
     pub fn set_track_solo(t: TrackId) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackSolo(t))
+    }
+}
+
+impl Message {
+    pub fn remove_clip(t: TrackId, c: ClipId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RemoveClip(
+            t, c,
+        ))
+    }
+    pub fn toggle_clip_loop(t: TrackId, c: ClipId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::ToggleClipLoop(
+            t, c,
+        ))
+    }
+    pub fn set_time_selection_active(a: bool) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTimeSelectionActive(a))
     }
 }

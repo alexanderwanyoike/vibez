@@ -509,6 +509,9 @@ pub struct ArrangementState {
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
     pub time_selection_track: Option<TrackId>,
+    /// An arrangement drag (move/resize) is active; drives edge
+    /// auto-scroll on ticks.
+    pub drag_resize_active: bool,
 }
 
 pub struct AppState {
@@ -537,7 +540,6 @@ pub struct AppState {
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
 
-
     // Context menu
     pub context_menu: Option<ContextMenu>,
 
@@ -548,9 +550,6 @@ pub struct AppState {
     // Last known window size, for clamping popup menus on-screen
     pub window_width: f32,
     pub window_height: f32,
-
-    // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
-    pub drag_resize_active: bool,
 
     // Inline renaming
     pub editing_track_name: Option<TrackId>,
@@ -634,7 +633,6 @@ impl Default for AppState {
             cursor_y: 0.0,
             window_width: 1400.0,
             window_height: 900.0,
-            drag_resize_active: false,
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),

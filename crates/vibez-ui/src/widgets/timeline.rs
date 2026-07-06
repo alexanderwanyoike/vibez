@@ -486,11 +486,13 @@ impl canvas::Program<Message> for RulerWidget {
                                     if end > start {
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::SetTimeSelection {
-                                                start_beats: start,
-                                                end_beats: end,
-                                                track_id: None,
-                                            }),
+                                            Some(Message::Arrangement(
+                                                ArrangementMsg::SetTimeSelection {
+                                                    start_beats: start,
+                                                    end_beats: end,
+                                                    track_id: None,
+                                                },
+                                            )),
                                         );
                                     }
                                 }
@@ -502,11 +504,13 @@ impl canvas::Program<Message> for RulerWidget {
                                 if end > start {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::SetTimeSelection {
-                                            start_beats: start,
-                                            end_beats: end,
-                                            track_id: None,
-                                        }),
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::SetTimeSelection {
+                                                start_beats: start,
+                                                end_beats: end,
+                                                track_id: None,
+                                            },
+                                        )),
                                     );
                                 }
                             }
@@ -529,7 +533,7 @@ impl canvas::Program<Message> for RulerWidget {
                         }
                         RulerDragAction::RegionSelect { .. } => {
                             // Completed region select
-                            Some(Message::SetTimeSelectionActive(true))
+                            Some(Message::set_time_selection_active(true))
                         }
                     };
                     state.drag = None;
@@ -1498,10 +1502,12 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SelectArrangementClip {
-                                selection,
-                                shift_held: state.shift_held,
-                            }),
+                            Some(Message::Arrangement(
+                                ArrangementMsg::SelectArrangementClip {
+                                    selection,
+                                    shift_held: state.shift_held,
+                                },
+                            )),
                         );
                     }
 
@@ -1620,11 +1626,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     if end > start {
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::SetTimeSelection {
-                                                start_beats: start,
-                                                end_beats: end,
-                                                track_id: Some(track_id),
-                                            }),
+                                            Some(Message::Arrangement(
+                                                ArrangementMsg::SetTimeSelection {
+                                                    start_beats: start,
+                                                    end_beats: end,
+                                                    track_id: Some(track_id),
+                                                },
+                                            )),
                                         );
                                     }
                                 }
@@ -1638,11 +1646,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 if end > start {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::SetTimeSelection {
-                                            start_beats: start,
-                                            end_beats: end,
-                                            track_id: Some(track_id),
-                                        }),
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::SetTimeSelection {
+                                                start_beats: start,
+                                                end_beats: end,
+                                                track_id: Some(track_id),
+                                            },
+                                        )),
                                     );
                                 }
                                 return (canvas::event::Status::Captured, None);
@@ -1683,12 +1693,14 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         if *is_note_clip == target_is_instrument {
                                             return (
                                                 canvas::event::Status::Captured,
-                                                Some(Message::MoveClipToTrack {
-                                                    source_track: track_id,
-                                                    target_track,
-                                                    clip_id: *clip_id,
-                                                    is_note_clip: *is_note_clip,
-                                                }),
+                                                Some(Message::Arrangement(
+                                                    ArrangementMsg::MoveClipToTrack {
+                                                        source_track: track_id,
+                                                        target_track,
+                                                        clip_id: *clip_id,
+                                                        is_note_clip: *is_note_clip,
+                                                    },
+                                                )),
                                             );
                                         }
                                     }
@@ -1697,22 +1709,24 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 if *is_note_clip {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::MoveNoteClipPosition {
-                                            track_id,
-                                            clip_id: *clip_id,
-                                            new_position_beats: snapped,
-                                        }),
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::MoveNoteClipPosition {
+                                                track_id,
+                                                clip_id: *clip_id,
+                                                new_position_beats: snapped,
+                                            },
+                                        )),
                                     );
                                 } else {
                                     let spb = self.spb();
                                     let new_sample_pos = (snapped * spb) as u64;
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::MoveAudioClip {
+                                        Some(Message::Arrangement(ArrangementMsg::MoveAudioClip {
                                             track_id,
                                             clip_id: *clip_id,
                                             new_position: new_sample_pos,
-                                        }),
+                                        })),
                                     );
                                 }
                             }
@@ -1740,11 +1754,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     let new_dur_samples = (snapped * spb) as u64;
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::ResizeAudioClip {
-                                            track_id,
-                                            clip_id: *clip_id,
-                                            new_duration: new_dur_samples.max(1),
-                                        }),
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::ResizeAudioClip {
+                                                track_id,
+                                                clip_id: *clip_id,
+                                                new_duration: new_dur_samples.max(1),
+                                            },
+                                        )),
                                     );
                                 }
                             }
@@ -1788,7 +1804,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             }
                         }
                         ClipDragAction::RegionSelect { .. } => {
-                            Some(Message::SetTimeSelectionActive(true))
+                            Some(Message::set_time_selection_active(true))
                         }
                         _ => None,
                     };
@@ -1846,7 +1862,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         "d" if !self.selected_clips.is_empty() => {
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::DuplicateSelectedClip),
+                                Some(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)),
                             );
                         }
                         "e" => {
