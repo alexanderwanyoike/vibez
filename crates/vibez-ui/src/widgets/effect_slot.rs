@@ -18,6 +18,7 @@ pub fn view_effect_slot<'a>(
     let is_bypassed = effect.bypass;
     let has_params = !effect.descriptors.is_empty();
     let has_gui = effect.has_plugin_gui;
+    let is_plugin = effect.plugin_name.is_some();
 
     let dot_color = if is_bypassed {
         th::TEXT_MUTED
@@ -58,7 +59,10 @@ pub fn view_effect_slot<'a>(
 
     // Fixed-size controls on the right
     // Edit button (open plugin GUI) — only for effects with a native GUI
-    let edit_btn: Option<iced::widget::Button<'_, Message>> = if has_gui {
+    let make_edit = || -> Option<iced::widget::Button<'a, Message>> {
+        if !has_gui {
+            return None;
+        }
         let gui_key = PluginGuiKey::Effect {
             track_id,
             effect_id: effect.id,
@@ -84,8 +88,6 @@ pub fn view_effect_slot<'a>(
                     }
                 }),
         )
-    } else {
-        None
     };
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
@@ -94,44 +96,50 @@ pub fn view_effect_slot<'a>(
     } else {
         th::SUCCESS
     };
-    let bypass_btn = button(text(bypass_label).size(9).color(bypass_color))
-        .on_press(Message::ToggleEffectBypass(track_id, effect.id))
-        .padding([2, 5])
-        .style(move |_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(th::BG_HOVER.into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: bypass_color,
-                border: iced::Border {
-                    color: if is_bypassed {
-                        th::BORDER
-                    } else {
-                        th::darken(th::SUCCESS, 0.5)
+    let make_bypass = move || {
+        button(text(bypass_label).size(9).color(bypass_color))
+            .on_press(Message::ToggleEffectBypass(track_id, effect.id))
+            .padding([2, 5])
+            .style(move |_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: bypass_color,
+                    border: iced::Border {
+                        color: if is_bypassed {
+                            th::BORDER
+                        } else {
+                            th::darken(th::SUCCESS, 0.5)
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
                     },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+                    ..Default::default()
+                }
+            })
+    };
 
-    let move_up: Element<'a, Message> = action_btn(
-        icons::CHEVRON_UP,
-        th::TEXT_DIM,
-        th::TEXT,
-        Message::MoveEffectUp(track_id, effect.id),
-    )
-    .into();
-    let move_down: Element<'a, Message> = action_btn(
-        icons::CHEVRON_DOWN,
-        th::TEXT_DIM,
-        th::TEXT,
-        Message::MoveEffectDown(track_id, effect.id),
-    )
-    .into();
+    let make_move_up = || -> Element<'a, Message> {
+        action_btn(
+            icons::CHEVRON_UP,
+            th::TEXT_DIM,
+            th::TEXT,
+            Message::MoveEffectUp(track_id, effect.id),
+        )
+        .into()
+    };
+    let make_move_down = || -> Element<'a, Message> {
+        action_btn(
+            icons::CHEVRON_DOWN,
+            th::TEXT_DIM,
+            th::TEXT,
+            Message::MoveEffectDown(track_id, effect.id),
+        )
+        .into()
+    };
     let remove: Element<'a, Message> = action_btn(
         icons::X,
         th::TEXT_DIM,
@@ -143,14 +151,20 @@ pub fn view_effect_slot<'a>(
     let mut title_row = row![dot, name_section]
         .spacing(3)
         .align_y(iced::Alignment::Center);
-    if let Some(eb) = edit_btn {
-        title_row = title_row.push(eb);
+    if is_plugin {
+        // Plugins: name gets the title to itself; Edit/On/reorder
+        // live in the body where they have room.
+        title_row = title_row.push(remove);
+    } else {
+        if let Some(eb) = make_edit() {
+            title_row = title_row.push(eb);
+        }
+        title_row = title_row
+            .push(make_bypass())
+            .push(make_move_up())
+            .push(make_move_down())
+            .push(remove);
     }
-    title_row = title_row
-        .push(bypass_btn)
-        .push(move_up)
-        .push(move_down)
-        .push(remove);
 
     let title_bar = container(title_row)
         .padding([4, 6])
@@ -193,6 +207,42 @@ pub fn view_effect_slot<'a>(
             .padding([8, 10])
             .height(Length::Fixed(th::DEVICE_BODY_H))
             .into()
+    } else if is_plugin {
+        // External plugin face: format badge, prominent Edit, then
+        // bypass and chain-reorder controls.
+        let format_label = effect
+            .plugin_ref
+            .as_ref()
+            .map(|d| d.format.to_uppercase())
+            .unwrap_or_else(|| "PLUGIN".to_string());
+        let badge = container(text(format_label).size(8).color(th::ACCENT))
+            .padding([2, 8])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_DARK.into()),
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            });
+
+        let mut face = column![badge].spacing(10).align_x(iced::Alignment::Center);
+        if let Some(eb) = make_edit() {
+            face = face.push(eb.padding([5, 22]));
+        }
+        face = face.push(
+            row![make_bypass(), make_move_up(), make_move_down()]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        );
+
+        container(face)
+            .width(Length::Fill)
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
     } else {
         container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
             .height(Length::Fixed(th::DEVICE_BODY_H))
@@ -207,7 +257,11 @@ pub fn view_effect_slot<'a>(
     } else {
         0
     };
-    let card_w = (knob_count as f32 * 62.0 + 24.0).max(150.0);
+    let card_w = if is_plugin {
+        190.0
+    } else {
+        (knob_count as f32 * 62.0 + 24.0).max(150.0)
+    };
     let card = column![title_bar, body].width(Length::Fixed(card_w));
 
     container(card)
