@@ -495,6 +495,17 @@ impl Default for TransportState {
     }
 }
 
+/// Arrangement domain state: the track list (the shared model other
+/// domains receive explicitly), selection, and track numbering.
+#[derive(Debug, Default)]
+pub struct ArrangementState {
+    pub tracks: Vec<UiTrack>,
+    pub selected_track: Option<TrackId>,
+    pub next_track_number: u32,
+    pub selected_clips: HashSet<ArrangementSelection>,
+    pub selected_note_clip: Option<(TrackId, ClipId)>,
+}
+
 pub struct AppState {
     // Transport domain slice (playback, tempo, arrangement loop).
     pub transport: TransportState,
@@ -515,16 +526,8 @@ pub struct AppState {
     pub snap_grid: SnapGrid,
     pub piano_roll_scroll_y: f32,
 
-    // Multi-track
-    pub tracks: Vec<UiTrack>,
-    pub selected_track: Option<TrackId>,
-    pub next_track_number: u32,
-
-    // Detail panel: which note clip is selected for piano roll editing
-    pub selected_note_clip: Option<(TrackId, ClipId)>,
-
-    // Arrangement clip selection (multi-select)
-    pub selected_clips: HashSet<ArrangementSelection>,
+    // Arrangement domain slice (tracks, selection, numbering).
+    pub arrangement: ArrangementState,
 
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
@@ -624,11 +627,10 @@ impl Default for AppState {
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::Eighth,
             piano_roll_scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
-            tracks: Vec::new(),
-            selected_track: None,
-            next_track_number: 1,
-            selected_note_clip: None,
-            selected_clips: HashSet::new(),
+            arrangement: ArrangementState {
+                next_track_number: 1,
+                ..ArrangementState::default()
+            },
             detail_panel_tab: DetailPanelTab::Clip,
             time_selection_active: false,
             selection_start_beats: 0.0,
@@ -762,7 +764,7 @@ impl AppState {
     /// Check if a clip is in the multi-selection set.
     #[allow(dead_code)]
     pub fn is_clip_selected(&self, clip_id: ClipId) -> bool {
-        self.selected_clips.iter().any(|sel| match sel {
+        self.arrangement.selected_clips.iter().any(|sel| match sel {
             ArrangementSelection::AudioClip { clip_id: cid, .. } => *cid == clip_id,
             ArrangementSelection::NoteClip { clip_id: cid, .. } => *cid == clip_id,
         })
@@ -771,24 +773,25 @@ impl AppState {
     /// Returns the single selected clip if exactly one is selected.
     #[allow(dead_code)]
     pub fn single_selected_clip(&self) -> Option<ArrangementSelection> {
-        if self.selected_clips.len() == 1 {
-            self.selected_clips.iter().next().copied()
+        if self.arrangement.selected_clips.len() == 1 {
+            self.arrangement.selected_clips.iter().next().copied()
         } else {
             None
         }
     }
 
     pub fn find_track(&self, id: TrackId) -> Option<&UiTrack> {
-        self.tracks.iter().find(|t| t.id == id)
+        self.arrangement.tracks.iter().find(|t| t.id == id)
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
-        self.tracks.iter_mut().find(|t| t.id == id)
+        self.arrangement.tracks.iter_mut().find(|t| t.id == id)
     }
 
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
         let audio_max = self
+            .arrangement
             .tracks
             .iter()
             .flat_map(|t| t.clips.iter())
@@ -803,7 +806,8 @@ impl AppState {
             0.0
         };
         let note_max = if spb > 0.0 {
-            self.tracks
+            self.arrangement
+                .tracks
                 .iter()
                 .flat_map(|t| t.note_clips.iter())
                 .map(|c| ((c.position_beats + c.duration_beats) * spb) as u64)
@@ -823,10 +827,9 @@ mod tests {
     use vibez_core::id::TrackId;
 
     fn make_state_with(tracks: Vec<UiTrack>) -> AppState {
-        AppState {
-            tracks,
-            ..Default::default()
-        }
+        let mut state = AppState::default();
+        state.arrangement.tracks = tracks;
+        state
     }
 
     fn make_two_tracks() -> Vec<UiTrack> {
@@ -839,68 +842,68 @@ mod tests {
     #[test]
     fn move_track_up() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.tracks[0].id;
-        let id1 = state.tracks[1].id;
+        let id0 = state.arrangement.tracks[0].id;
+        let id1 = state.arrangement.tracks[1].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id1) {
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id1) {
             if idx > 0 {
-                state.tracks.swap(idx, idx - 1);
+                state.arrangement.tracks.swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id1);
-        assert_eq!(state.tracks[1].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id1);
+        assert_eq!(state.arrangement.tracks[1].id, id0);
     }
 
     #[test]
     fn move_track_down() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.tracks[0].id;
-        let id1 = state.tracks[1].id;
+        let id0 = state.arrangement.tracks[0].id;
+        let id1 = state.arrangement.tracks[1].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.tracks.len() {
-                state.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.arrangement.tracks.len() {
+                state.arrangement.tracks.swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id1);
-        assert_eq!(state.tracks[1].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id1);
+        assert_eq!(state.arrangement.tracks[1].id, id0);
     }
 
     #[test]
     fn move_first_track_up_noop() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.tracks[0].id;
+        let id0 = state.arrangement.tracks[0].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
             if idx > 0 {
-                state.tracks.swap(idx, idx - 1);
+                state.arrangement.tracks.swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id0);
     }
 
     #[test]
     fn move_last_track_down_noop() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.tracks[0].id;
+        let id0 = state.arrangement.tracks[0].id;
 
-        if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.tracks.len() {
-                state.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.arrangement.tracks.len() {
+                state.arrangement.tracks.swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.tracks[0].id, id0);
+        assert_eq!(state.arrangement.tracks[0].id, id0);
     }
 
     #[test]
     fn rename_track() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.tracks[0].id;
+        let id = state.arrangement.tracks[0].id;
 
         if let Some(track) = state.find_track_mut(id) {
             track.name = "My Custom Track".into();
         }
-        assert_eq!(state.tracks[0].name, "My Custom Track");
+        assert_eq!(state.arrangement.tracks[0].name, "My Custom Track");
     }
 
     #[test]
@@ -931,7 +934,10 @@ mod tests {
                 c.name = "Intro Pattern".into();
             }
         }
-        assert_eq!(state.tracks[0].note_clips[0].name, "Intro Pattern");
+        assert_eq!(
+            state.arrangement.tracks[0].note_clips[0].name,
+            "Intro Pattern"
+        );
     }
 
     #[test]
@@ -960,7 +966,7 @@ mod tests {
     #[test]
     fn rename_empty_rejected() {
         let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.tracks[0].id;
+        let id = state.arrangement.tracks[0].id;
 
         // Simulate the FinishEditing guard: empty name doesn't rename
         let new_name = "";
@@ -969,6 +975,6 @@ mod tests {
                 track.name = new_name.to_string();
             }
         }
-        assert_eq!(state.tracks[0].name, "Track 1");
+        assert_eq!(state.arrangement.tracks[0].name, "Track 1");
     }
 }

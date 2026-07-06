@@ -190,7 +190,7 @@ impl canvas::Program<Message> for KnobWidget {
                             state.last_click = None;
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::SetTrackPan(self.track_id, 0.5)),
+                                Some(Message::set_track_pan(self.track_id, 0.5)),
                             );
                         }
                     }
@@ -230,7 +230,7 @@ impl canvas::Program<Message> for KnobWidget {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SetTrackPan(self.track_id, new_pan)),
+                            Some(Message::set_track_pan(self.track_id, new_pan)),
                         );
                     }
                 }
@@ -254,7 +254,7 @@ impl canvas::Program<Message> for KnobWidget {
 
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::SetTrackPan(self.track_id, new_pan)),
+                        Some(Message::set_track_pan(self.track_id, new_pan)),
                     );
                 }
             }

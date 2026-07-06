@@ -68,7 +68,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
         let label = text("M").size(11);
         if track.mute {
             button(label.color(th::BG_DARK))
-                .on_press(Message::SetTrackMute(track.id))
+                .on_press(Message::set_track_mute(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::MUTE_ACTIVE.into()),
@@ -81,7 +81,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
                 })
         } else {
             button(label.color(th::TEXT_DIM))
-                .on_press(Message::SetTrackMute(track.id))
+                .on_press(Message::set_track_mute(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -101,7 +101,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
         let label = text("S").size(11);
         if track.solo {
             button(label.color(th::BG_DARK))
-                .on_press(Message::SetTrackSolo(track.id))
+                .on_press(Message::set_track_solo(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::SOLO_ACTIVE.into()),
@@ -114,7 +114,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
                 })
         } else {
             button(label.color(th::TEXT_DIM))
-                .on_press(Message::SetTrackSolo(track.id))
+                .on_press(Message::set_track_solo(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),

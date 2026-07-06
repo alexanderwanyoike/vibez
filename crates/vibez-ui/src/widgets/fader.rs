@@ -145,7 +145,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SetTrackGain(self.track_id, new_gain)),
+                            Some(Message::set_track_gain(self.track_id, new_gain)),
                         );
                     }
                 }
@@ -296,7 +296,7 @@ impl canvas::Program<Message> for FaderWidget {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SetTrackGain(self.track_id, new_gain)),
+                            Some(Message::set_track_gain(self.track_id, new_gain)),
                         );
                     }
                 }
