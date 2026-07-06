@@ -180,6 +180,10 @@ impl AudioEngine {
     /// window (e.g. a note right at the loop start) never fire.
     fn process_multitrack(&mut self, output: &mut [f32], frames: usize, channels: usize) {
         if !self.transport.is_playing() {
+            // Stopped transport still renders instruments so
+            // auditioned notes (piano-roll keys, drum pads) and
+            // plugin-queued events are audible, like any DAW.
+            self.render_idle_instruments(output, frames, channels);
             return;
         }
 
@@ -861,6 +865,22 @@ impl AudioEngine {
                         }
                     }
                 }
+                EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity,
+                    on,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        if let Some(instrument) = track.instrument.as_mut() {
+                            if on {
+                                instrument.note_on(pitch, velocity);
+                            } else {
+                                instrument.note_off(pitch);
+                            }
+                        }
+                    }
+                }
                 EngineCommand::SetPluginInstrument {
                     track_id,
                     instrument,
@@ -876,6 +896,43 @@ impl AudioEngine {
     }
 
     /// Recalculate transport audio length from all track clips.
+    /// Render instruments with no clip scheduling (transport stopped)
+    /// so auditioned notes sound. Effects and gain/pan still apply.
+    fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
+        let has_solo = any_solo(&self.tracks);
+        for track in &mut self.tracks {
+            if track.instrument.is_none() || track.mute || (has_solo && !track.solo) {
+                continue;
+            }
+            if !track.render_instrument_idle(frames, channels) {
+                continue;
+            }
+            track.process_effects(frames, channels);
+            let gain = track.gain;
+            let (pan_l, pan_r) = equal_power_pan(track.pan);
+            let buf_size = frames * channels;
+            for frame in 0..frames {
+                for ch in 0..channels {
+                    let idx = frame * channels + ch;
+                    if idx >= buf_size {
+                        break;
+                    }
+                    let sample = track.mix_buffer[idx] * gain;
+                    let panned = if channels == 2 {
+                        if ch == 0 {
+                            sample * pan_l
+                        } else {
+                            sample * pan_r
+                        }
+                    } else {
+                        sample
+                    };
+                    output[idx] += panned;
+                }
+            }
+        }
+    }
+
     /// Hand a removed device back to the UI thread for teardown. If
     /// the event ring is full (should never happen for these rare
     /// events) the device is leaked rather than destroyed here:
@@ -2105,6 +2162,53 @@ mod stuck_note_tests {
         // Note as long as the loop region: off lands exactly on the wrap.
         let events = run_scenario((true, 0.0, 4.0), Some((0, 176_400)), 4.0, 1500);
         assert_no_hanging_notes(&events);
+    }
+
+    #[test]
+    fn audition_sounds_while_transport_stopped() {
+        let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+        let tid = TrackId::new();
+        cmd_tx
+            .push(EngineCommand::AddMidiTrack(tid, "midi".into()))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::SetTrackInstrument(
+                tid,
+                vibez_core::midi::InstrumentKind::SubtractiveSynth,
+            ))
+            .unwrap();
+        cmd_tx
+            .push(EngineCommand::AuditionNote {
+                track_id: tid,
+                pitch: 60,
+                velocity: 100,
+                on: true,
+            })
+            .unwrap();
+        // Transport NEVER started: idle rendering must still sound.
+        let mut buf = vec![0.0f32; 512 * 2];
+        engine.process(&mut buf, 2);
+        engine.process(&mut buf, 2);
+        assert!(
+            buf.iter().any(|&s| s.abs() > 1e-6),
+            "auditioned note must be audible while stopped"
+        );
+        cmd_tx
+            .push(EngineCommand::AuditionNote {
+                track_id: tid,
+                pitch: 60,
+                velocity: 100,
+                on: false,
+            })
+            .unwrap();
+        // Long tail drain: after release the synth decays to silence.
+        for _ in 0..200 {
+            engine.process(&mut buf, 2);
+        }
+        assert!(
+            buf.iter().all(|&s| s.abs() < 1e-4),
+            "note must decay after audition release"
+        );
     }
 
     #[test]

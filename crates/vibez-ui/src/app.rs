@@ -2213,6 +2213,18 @@ impl App {
                     self.state.tracks.len()
                 );
             }
+            Message::AuditionNote {
+                track_id,
+                pitch,
+                on,
+            } => {
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on,
+                });
+            }
             Message::DeleteKeyPressed => {
                 // Never delete anything while a text field is being
                 // edited; backspace belongs to the text there.
@@ -2614,6 +2626,20 @@ impl App {
                 self.state.status_text = format!("Cleared pad {}", pad_index + 1);
             }
             Message::SelectDrumRackPad(track_id, pad_index) => {
+                // Audition the pad like Ableton: hear it on click.
+                let pitch = 36 + pad_index.min(127) as u8;
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on: true,
+                });
+                self.send_command(EngineCommand::AuditionNote {
+                    track_id,
+                    pitch,
+                    velocity: 100,
+                    on: false,
+                });
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     let max_index = track.drum_rack_pads.len().saturating_sub(1);
                     track.selected_drum_pad = pad_index.min(max_index);
@@ -9275,7 +9301,7 @@ impl App {
             if let Some(track) = self.state.find_track(track_id) {
                 if let Some(clip) = track.note_clips.iter().find(|c| c.id == cd.5) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
-                    let mut widget = PianoRollWidget::from_clip(
+                    PianoRollWidget::from_clip(
                         track_id,
                         clip,
                         clip_relative_playhead,
@@ -9284,9 +9310,7 @@ impl App {
                         self.state.snap_grid,
                         self.state.piano_roll_scroll_y,
                         self.state.piano_roll_edit_mode,
-                    );
-                    widget.key_labels = drum_pad_key_labels(track);
-                    widget
+                    )
                 } else {
                     PianoRollWidget::empty(track_id, playhead_beats, track_color)
                 }
@@ -9873,28 +9897,6 @@ impl App {
             }),
         ])
     }
-}
-
-/// Key-lane labels for drum rack tracks: pad sample names keyed by
-/// the pad's MIDI pitch (pads start at note 36, chromatic upward).
-/// Empty for non-drum tracks, which keeps the default octave labels.
-fn drum_pad_key_labels(track: &UiTrack) -> std::collections::HashMap<u8, String> {
-    const BASE_PAD_NOTE: u8 = 36;
-    let mut labels = std::collections::HashMap::new();
-    if track.instrument_kind == Some(InstrumentKind::DrumRack) {
-        for (i, pad) in track.drum_rack_pads.iter().enumerate() {
-            // Only pads with samples get a name; empty pads keep a
-            // plain key so the lane stays readable.
-            let Some(name) = pad.name.as_deref() else {
-                continue;
-            };
-            let pitch = BASE_PAD_NOTE + i as u8;
-            // Strip the file extension; it is noise at 9px.
-            let clean = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
-            labels.insert(pitch, clean.to_string());
-        }
-    }
-    labels
 }
 
 /// Default clip loop region end: the note content's span rounded up
