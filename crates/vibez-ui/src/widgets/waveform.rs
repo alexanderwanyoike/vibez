@@ -6,6 +6,7 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use vibez_core::audio_buffer::DecodedAudio;
 
+use crate::domains::transport::TransportMsg;
 use crate::theme;
 
 pub struct WaveformWidget {
@@ -171,7 +172,9 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
                 let normalized = (pos.x / bounds.width) as f64;
                 return (
                     canvas::event::Status::Captured,
-                    Some(crate::message::Message::Seek(normalized.clamp(0.0, 1.0))),
+                    Some(crate::message::Message::Transport(TransportMsg::Seek(
+                        normalized.clamp(0.0, 1.0),
+                    ))),
                 );
             }
         }

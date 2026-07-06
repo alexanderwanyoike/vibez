@@ -8,6 +8,7 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
+use crate::domains::transport::TransportMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
@@ -1383,10 +1384,16 @@ impl App {
         self.state.next_track_number = snapshot.next_track_number;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
-        self.send_command(EngineCommand::SetArrangementLoop(self.state.transport.loop_enabled));
+        self.send_command(EngineCommand::SetArrangementLoop(
+            self.state.transport.loop_enabled,
+        ));
         if self.state.transport.loop_enabled {
-            let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
-            let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
+            let start = self
+                .state
+                .beats_to_samples(self.state.transport.loop_start_beats);
+            let end = self
+                .state
+                .beats_to_samples(self.state.transport.loop_end_beats);
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
 
@@ -1623,7 +1630,8 @@ impl App {
                 clip_id: success.new_clip_id,
             });
 
-        let duration_seconds = success.new_duration as f64 / self.state.transport.sample_rate as f64;
+        let duration_seconds =
+            success.new_duration as f64 / self.state.transport.sample_rate as f64;
         self.state.status_text = format!(
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
@@ -1657,25 +1665,23 @@ impl App {
         })
     }
 
-    /// Apply a new project tempo: clamps, updates the engine and the
-    /// beat-mapped loop region, and runs Ableton-style tempo follow
-    /// for warped clips. Shared by the BPM field and nudge buttons.
-    fn set_project_bpm(&mut self, bpm: f64) -> Task<Message> {
-        let bpm = bpm.clamp(20.0, 999.0);
-        let old_bpm = self.state.transport.bpm;
-        self.state.transport.bpm = bpm;
-        self.state.transport.bpm_text = format!("{bpm:.0}");
-        self.send_command(EngineCommand::SetBpm(bpm));
-        // Re-send loop region since the beat-to-sample mapping changed.
-        if self.state.transport.loop_enabled {
-            let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
-            let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
-            self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
+    /// Route a cross-domain effect requested by the transport domain.
+    fn apply_transport_action(
+        &mut self,
+        action: crate::domains::transport::TransportAction,
+    ) -> Task<Message> {
+        use crate::domains::transport::TransportAction;
+        match action {
+            TransportAction::None => Task::none(),
+            TransportAction::ClearTimeSelection => {
+                self.state.time_selection_active = false;
+                self.state.time_selection_track = None;
+                Task::none()
+            }
+            TransportAction::TempoChanged { old_bpm, new_bpm } => {
+                self.follow_tempo_change(old_bpm, new_bpm)
+            }
         }
-        if (bpm - old_bpm).abs() > f64::EPSILON {
-            return self.follow_tempo_change(old_bpm, bpm);
-        }
-        Task::none()
     }
 
     /// Ableton-style global tempo follow. Warped audio clips keep
@@ -1825,7 +1831,10 @@ impl App {
         clip_id: ClipId,
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     ) -> Task<Message> {
-        if !self.state.auto_warp_on_import || self.state.transport.bpm <= 0.0 || self.state.transport.sample_rate == 0 {
+        if !self.state.auto_warp_on_import
+            || self.state.transport.bpm <= 0.0
+            || self.state.transport.sample_rate == 0
+        {
             return Task::none();
         }
         let input = AutoWarpInput {
@@ -1977,9 +1986,9 @@ impl App {
             let keep_menu = matches!(
                 message,
                 Message::Tick
-                    | Message::EnginePosition(_)
+                    | Message::Transport(TransportMsg::EnginePosition(_))
                     | Message::EngineMetering { .. }
-                    | Message::EngineStopped
+                    | Message::Transport(TransportMsg::EngineStopped)
                     | Message::EngineTrackMeter { .. }
                     | Message::ShowContextMenu { .. }
                     | Message::DismissContextMenu
@@ -2022,7 +2031,7 @@ impl App {
 
         let should_mark_dirty = matches!(
             &message,
-            Message::BpmSubmit
+            Message::Transport(TransportMsg::BpmSubmit)
                 | Message::AddTrack
                 | Message::RemoveTrack(_)
                 | Message::ClipAudioDecoded(..)
@@ -2071,8 +2080,8 @@ impl App {
                 | Message::DuplicateSelectedClip
                 | Message::SplitSelectedAtPlayhead
                 | Message::JoinSelectedClips
-                | Message::ToggleArrangementLoop
-                | Message::SetArrangementLoopRegion { .. }
+                | Message::Transport(TransportMsg::ToggleArrangementLoop)
+                | Message::Transport(TransportMsg::SetArrangementLoopRegion { .. })
                 | Message::DeleteClipsInRegion { .. }
                 | Message::SplitClipsAtRegion { .. }
                 | Message::CreateClipFromSelection
@@ -2101,47 +2110,26 @@ impl App {
         }
 
         match message {
-            Message::Play => {
-                self.state.transport.playing = true;
-                self.send_command(EngineCommand::Play);
-            }
-            Message::Stop => {
-                self.state.transport.playing = false;
-                self.state.transport.position_samples = 0;
-                self.send_command(EngineCommand::Stop);
-                self.send_command(EngineCommand::Seek(0));
-            }
-            Message::TogglePlayback => {
-                if self.state.transport.playing {
-                    return self.update(Message::Stop);
-                } else {
-                    return self.update(Message::Play);
-                }
-            }
-            Message::Seek(normalized) => {
-                let total = self.state.total_duration_samples();
-                if total > 0 {
-                    let sample_pos = (normalized * total as f64) as u64;
-                    self.state.transport.position_samples = sample_pos;
-                    self.send_command(EngineCommand::Seek(sample_pos));
-                }
-                // Simple click clears the time selection
-                self.state.time_selection_active = false;
-                self.state.time_selection_track = None;
-            }
-            Message::NudgeBpm(delta) => {
-                let bpm = self.state.transport.bpm + delta;
-                return self.set_project_bpm(bpm);
-            }
-            Message::BpmChanged(val) => {
-                self.state.transport.bpm_text = val;
-            }
-            Message::BpmSubmit => {
-                if let Ok(bpm) = self.state.transport.bpm_text.parse::<f64>() {
-                    return self.set_project_bpm(bpm);
-                }
-                let bpm = self.state.transport.bpm;
-                self.state.transport.bpm_text = format!("{bpm:.0}");
+            // The transport domain owns its logic entirely; app.rs
+            // only computes the cross-domain context, routes the
+            // message, and applies the returned action.
+            Message::Transport(msg) => {
+                let ctx = crate::domains::transport::TransportCtx {
+                    total_duration_samples: self.state.total_duration_samples(),
+                    time_selection: if self.state.time_selection_active {
+                        Some((
+                            self.state.selection_start_beats,
+                            self.state.selection_end_beats,
+                        ))
+                    } else {
+                        None
+                    },
+                };
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.transport.update(msg, &mut engine, ctx)
+                };
+                return self.apply_transport_action(action);
             }
 
             // -- Workspace --
@@ -2225,15 +2213,9 @@ impl App {
                     }
                 }
             }
-            Message::EnginePosition(pos) => {
-                self.state.transport.position_samples = pos;
-            }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
                 self.state.peak_r = peak_r;
-            }
-            Message::EngineStopped => {
-                self.state.transport.playing = false;
             }
 
             // -- Multi-track messages --
@@ -2480,8 +2462,10 @@ impl App {
             // -- Effects --
             Message::AddEffect(track_id, effect_type) => {
                 let effect_id = vibez_core::id::EffectId::new();
-                let fx =
-                    vibez_dsp::factory::create_effect(effect_type, self.state.transport.sample_rate as f32);
+                let fx = vibez_dsp::factory::create_effect(
+                    effect_type,
+                    self.state.transport.sample_rate as f32,
+                );
                 let descriptors = fx.param_descriptors();
                 let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
 
@@ -4084,33 +4068,6 @@ impl App {
             }
 
             // -- Arrangement loop --
-            Message::ToggleArrangementLoop => {
-                self.state.transport.loop_enabled = !self.state.transport.loop_enabled;
-                self.send_command(EngineCommand::SetArrangementLoop(self.state.transport.loop_enabled));
-                if self.state.transport.loop_enabled {
-                    // Copy selection to loop region when enabling loop with active selection
-                    if self.state.time_selection_active
-                        && self.state.selection_end_beats > self.state.selection_start_beats
-                    {
-                        self.state.transport.loop_start_beats = self.state.selection_start_beats;
-                        self.state.transport.loop_end_beats = self.state.selection_end_beats;
-                    }
-                    let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
-                    let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
-                    self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-                }
-            }
-            Message::SetArrangementLoopRegion {
-                start_beats,
-                end_beats,
-            } => {
-                self.state.transport.loop_start_beats = start_beats;
-                self.state.transport.loop_end_beats = end_beats;
-                let start = self.state.beats_to_samples(start_beats);
-                let end = self.state.beats_to_samples(end_beats);
-                self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-            }
-
             // -- Time selection + context menu --
             Message::SetTimeSelection {
                 start_beats,
@@ -4129,8 +4086,12 @@ impl App {
                 self.state.context_menu = None;
                 self.state.transport.loop_start_beats = self.state.selection_start_beats;
                 self.state.transport.loop_end_beats = self.state.selection_end_beats;
-                let start = self.state.beats_to_samples(self.state.transport.loop_start_beats);
-                let end = self.state.beats_to_samples(self.state.transport.loop_end_beats);
+                let start = self
+                    .state
+                    .beats_to_samples(self.state.transport.loop_start_beats);
+                let end = self
+                    .state
+                    .beats_to_samples(self.state.transport.loop_end_beats);
                 self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
                 if !self.state.transport.loop_enabled {
                     self.state.transport.loop_enabled = true;
@@ -4688,8 +4649,10 @@ impl App {
                     .into_iter()
                     .map(|(tid, cid)| self.dispatch_warp_clip_to_project(tid, cid))
                     .collect();
-                self.state.status_text =
-                    format!("Re-warping {count} clip(s) to {:.0} BPM", self.state.transport.bpm);
+                self.state.status_text = format!(
+                    "Re-warping {count} clip(s) to {:.0} BPM",
+                    self.state.transport.bpm
+                );
                 return Task::batch(tasks);
             }
             Message::AddSampleLibraryRoot => {
@@ -5324,7 +5287,8 @@ impl App {
             } => {
                 self.state.context_menu = None;
                 let (range, insert_pos, name) = if is_note_clip {
-                    let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+                    let spb =
+                        self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
                     let track_opt = self.state.find_track(track_id);
                     let nc = track_opt.and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
                     match nc {
@@ -10290,7 +10254,7 @@ impl App {
     fn view_transport(&self) -> Element<'_, Message> {
         // Skip back button
         let skip_back_btn = button(icons::icon(icons::SKIP_BACK).size(16).color(th::TEXT))
-            .on_press(Message::Stop)
+            .on_press(Message::Transport(TransportMsg::Stop))
             .padding([8, 12])
             .style(|_theme: &Theme, _status| button::Style {
                 background: Some(th::BG_ELEVATED.into()),
@@ -10306,7 +10270,7 @@ impl App {
         // Play/Pause button
         let play_pause_btn = if self.state.transport.playing {
             button(icons::icon(icons::PAUSE).size(16).color(th::ACCENT))
-                .on_press(Message::Stop)
+                .on_press(Message::Transport(TransportMsg::Stop))
                 .padding([8, 14])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -10320,7 +10284,7 @@ impl App {
                 })
         } else {
             button(icons::icon(icons::PLAY).size(16).color(th::SUCCESS))
-                .on_press(Message::Play)
+                .on_press(Message::Transport(TransportMsg::Play))
                 .padding([8, 14])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -10337,7 +10301,7 @@ impl App {
         // Loop toggle button
         let loop_btn = if self.state.transport.loop_enabled {
             button(icons::icon(icons::REPEAT).size(16).color(th::ACCENT))
-                .on_press(Message::ToggleArrangementLoop)
+                .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
                 .padding([8, 12])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -10351,7 +10315,7 @@ impl App {
                 })
         } else {
             button(icons::icon(icons::REPEAT).size(16).color(th::TEXT_DIM))
-                .on_press(Message::ToggleArrangementLoop)
+                .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
                 .padding([8, 12])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: Some(th::BG_ELEVATED.into()),
@@ -10378,14 +10342,14 @@ impl App {
 
         // BPM
         let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
-            .on_input(Message::BpmChanged)
-            .on_submit(Message::BpmSubmit)
+            .on_input(|t| Message::Transport(TransportMsg::BpmChanged(t)))
+            .on_submit(Message::Transport(TransportMsg::BpmSubmit))
             .width(Length::Fixed(55.0))
             .size(14);
 
         let bpm_nudge = |icon: char, delta: f64| {
             button(icons::icon(icon).size(8).color(th::TEXT_DIM))
-                .on_press(Message::NudgeBpm(delta))
+                .on_press(Message::Transport(TransportMsg::NudgeBpm(delta)))
                 .padding([0, 4])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
@@ -10634,7 +10598,7 @@ fn global_key_handler(
 
     // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
-        return Some(Message::TogglePlayback);
+        return Some(Message::Transport(TransportMsg::TogglePlayback));
     }
 
     // Escape: cancel editing
@@ -10679,7 +10643,7 @@ fn global_key_handler(
             "m" => Some(Message::CreateClipFromSelection),
             "e" => Some(Message::SplitSelectedAtPlayhead),
             "j" => Some(Message::JoinSelectedClips),
-            "l" => Some(Message::ToggleArrangementLoop),
+            "l" => Some(Message::Transport(TransportMsg::ToggleArrangementLoop)),
             "0" => Some(Message::ZoomToFit),
             "z" | "Z" => {
                 if modifiers.shift() {
