@@ -464,15 +464,40 @@ pub struct DeviceContextMenu {
     pub search: String,
 }
 
-pub struct AppState {
-    // Transport
+/// Transport domain state: playback position, tempo, and the
+/// arrangement loop. First extracted domain slice of the
+/// architecture refactor: owns everything the transport bar and the
+/// beat/sample math need, and nothing else.
+#[derive(Debug)]
+pub struct TransportState {
     pub playing: bool,
     pub position_samples: u64,
     pub sample_rate: u32,
-
-    // BPM
     pub bpm: f64,
     pub bpm_text: String,
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+}
+
+impl Default for TransportState {
+    fn default() -> Self {
+        Self {
+            playing: false,
+            position_samples: 0,
+            sample_rate: 44_100,
+            bpm: 120.0,
+            bpm_text: "120".to_string(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 4.0,
+        }
+    }
+}
+
+pub struct AppState {
+    // Transport domain slice (playback, tempo, arrangement loop).
+    pub transport: TransportState,
 
     // Metering (master)
     pub peak_l: f32,
@@ -505,10 +530,6 @@ pub struct AppState {
     pub detail_panel_tab: DetailPanelTab,
 
     // Arrangement loop
-    pub loop_enabled: bool,
-    pub loop_start_beats: f64,
-    pub loop_end_beats: f64,
-
     // Time selection (visible brackets on arrangement — independent from loop)
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -590,11 +611,11 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            playing: false,
-            position_samples: 0,
-            sample_rate: 44_100,
-            bpm: DEFAULT_BPM,
-            bpm_text: format!("{DEFAULT_BPM:.0}"),
+            transport: TransportState {
+                bpm: DEFAULT_BPM,
+                bpm_text: format!("{DEFAULT_BPM:.0}"),
+                ..TransportState::default()
+            },
             peak_l: 0.0,
             peak_r: 0.0,
             status_text: "Ready — Add a track to get started".to_string(),
@@ -609,9 +630,6 @@ impl Default for AppState {
             selected_note_clip: None,
             selected_clips: HashSet::new(),
             detail_panel_tab: DetailPanelTab::Clip,
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
@@ -662,17 +680,17 @@ pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
 
 impl AppState {
     pub fn position_seconds(&self) -> f64 {
-        self.position_samples as f64 / self.sample_rate as f64
+        self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
 
     pub fn position_beats(&self) -> f64 {
-        self.position_seconds() * self.bpm / 60.0
+        self.position_seconds() * self.transport.bpm / 60.0
     }
 
     pub fn duration_seconds(&self) -> f64 {
         let samples = self.total_duration_samples();
         if samples > 0 {
-            samples as f64 / self.sample_rate as f64
+            samples as f64 / self.transport.sample_rate as f64
         } else {
             0.0
         }
@@ -721,8 +739,8 @@ impl AppState {
     /// Total duration in beats across all tracks, with generous padding.
     pub fn total_beats(&self) -> f64 {
         let dur = self.duration_seconds();
-        if dur > 0.0 && self.bpm > 0.0 {
-            let content_beats = dur * self.bpm / 60.0;
+        if dur > 0.0 && self.transport.bpm > 0.0 {
+            let content_beats = dur * self.transport.bpm / 60.0;
             // Pad by 32 beats or 25% of content, whichever is larger
             let padding = (content_beats * 0.25).max(32.0);
             (content_beats + padding).max(64.0)
@@ -734,8 +752,8 @@ impl AppState {
 
     /// Convert a beat value to a sample position.
     pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        if self.bpm > 0.0 {
-            (beats * self.sample_rate as f64 * 60.0 / self.bpm) as u64
+        if self.transport.bpm > 0.0 {
+            (beats * self.transport.sample_rate as f64 * 60.0 / self.transport.bpm) as u64
         } else {
             0
         }
@@ -779,8 +797,8 @@ impl AppState {
             .unwrap_or(0);
 
         // Include note clips: convert beat positions to samples
-        let spb = if self.bpm > 0.0 {
-            self.sample_rate as f64 * 60.0 / self.bpm
+        let spb = if self.transport.bpm > 0.0 {
+            self.transport.sample_rate as f64 * 60.0 / self.transport.bpm
         } else {
             0.0
         };

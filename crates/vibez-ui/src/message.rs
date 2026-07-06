@@ -149,29 +149,18 @@ pub struct ProjectLoadResult {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Transport
-    Play,
-    Stop,
-    TogglePlayback,
-    Seek(f64),
-
-    // BPM
-    BpmChanged(String),
-    BpmSubmit,
-    /// Increment/decrement project BPM by a whole beat-per-minute.
-    NudgeBpm(f64),
+    /// Transport domain (playback, tempo, arrangement loop).
+    Transport(crate::domains::transport::TransportMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
 
     // Engine events
     Tick,
-    EnginePosition(u64),
     EngineMetering {
         peak_l: f32,
         peak_r: f32,
     },
-    EngineStopped,
 
     // Multi-track
     AddTrack,
@@ -349,11 +338,6 @@ pub enum Message {
     SwitchDetailTab(DetailPanelTab),
 
     // Arrangement loop
-    ToggleArrangementLoop,
-    SetArrangementLoopRegion {
-        start_beats: f64,
-        end_beats: f64,
-    },
 
     // Time selection + context menu
     SetTimeSelection {

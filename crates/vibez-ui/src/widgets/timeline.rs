@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
+use crate::domains::transport::TransportMsg;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
 use crate::theme;
@@ -520,7 +521,7 @@ impl canvas::Program<Message> for RulerWidget {
                             // Short click → seek + clear selection
                             if self.total_beats > 0.0 {
                                 let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
-                                Some(Message::Seek(normalized))
+                                Some(Message::Transport(TransportMsg::Seek(normalized)))
                             } else {
                                 None
                             }
@@ -1780,7 +1781,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             // Short click → seek + clear selection
                             if self.total_beats > 0.0 {
                                 let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
-                                Some(Message::Seek(normalized))
+                                Some(Message::Transport(TransportMsg::Seek(normalized)))
                             } else {
                                 None
                             }
