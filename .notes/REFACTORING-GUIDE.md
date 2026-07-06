@@ -73,15 +73,30 @@ Cross-domain rules:
 
 ## Remaining tranches
 
-- 3b arrangement clips: audio clip add/move/resize/split/join/
-  duplicate/delete, time selection, ToggleClipLoop/SetClipLoopRegion,
-  warp orchestration messages (WarpClipToProject, ClipWarpReady,
-  ClearClipWarp, quantize, nominal BPM). Task-returning handlers can
-  stay in app.rs calling domain fns for the state math if Tasks prove
-  awkward (see devices' async note).
-- 4 piano roll: note clip CRUD, note editing/selection/nudge,
-  loop-region messages, HalveNoteClip/DoubleNoteClip/CropNoteClip.
+Progress 2026-07-07 (stacked PR chain, merge bottom-up):
+- 3b-1 clips selection/move/resize/loop: DONE (PR #22).
+- 3b-2 clips split/join/region ops + join helpers: DONE (PR #23,
+  stacked on #22). ArrangementCtx gained playhead_samples/
+  playhead_beats; ArrangementAction gained close_context_menu.
+- 4 piano roll: DONE (PR #24, stacked on #23). New PianoRollState
+  slice (scroll_y, edit_mode); PianoRollMsg with 19 variants;
+  quantize_note_clip + default_loop_end moved into the domain.
+  Widget construction sites were wrapped in place with a
+  paren/brace-matching script (Message::X{..} ->
+  Message::PianoRoll(PianoRollMsg::X{..})) instead of constructor
+  helpers; both approaches work, matching beats regex.
+
+Still to do:
+- 3b-3 clip async/warp orchestration: AddClipToTrack,
+  ClipFileSelected/Decoded, warp messages (WarpClipToProject,
+  ClipWarpReady, ClearClipWarp, RewarpAllClips, ClipAutoWarpReady,
+  DetectClipBpm, ClipBpmDetected, SetClipNominalBpm, quantize
+  audio), bounce. These spawn iced Tasks; keep the Task::perform
+  in app.rs and move the state math into domain fns the arm calls.
 - 5 browser: sample browser, preview, Dropbox, drag-drop dispatch.
+  Same async caveat: rfd dialogs and decode stay as Tasks in
+  app.rs; library/selection/drag state moves to a BrowserState
+  slice.
 - 6 project: save/load/undo/export/snapshots (also fix: snapshots
   drop plugin devices; see dogfood #22 note).
 - 7 services: plugin load pipeline (poll_plugin_loads + bg loaders),
