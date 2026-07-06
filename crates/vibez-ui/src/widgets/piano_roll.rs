@@ -281,13 +281,25 @@ impl canvas::Program<Message> for PianoRollWidget {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        // Key-lane feedback: the auditioned (pressed) pitch, and the
+        // pitch under the cursor while hovering the keys.
+        let pressed_pitch = state.audition_pitch;
+        let hovered_pitch = cursor.position_in(bounds).and_then(|pos| {
+            if pos.x < KEY_WIDTH && pos.y > RULER_HEIGHT && state.audition_pitch.is_none() {
+                let pitch = self.y_to_pitch(pos.y);
+                (LOW_NOTE..HIGH_NOTE).contains(&pitch).then_some(pitch)
+            } else {
+                None
+            }
+        });
         let w = bounds.width;
         let h = bounds.height;
         let grid_width = w - KEY_WIDTH;
@@ -351,10 +363,20 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
 
             if !is_black_key(pitch) {
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    Color {
+                        a: 0.75,
+                        ..WHITE_KEY_COLOR
+                    }
+                } else {
+                    WHITE_KEY_COLOR
+                };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
                     iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
-                    WHITE_KEY_COLOR,
+                    fill,
                 );
 
                 // Key border
@@ -395,10 +417,22 @@ impl canvas::Program<Message> for PianoRollWidget {
                 );
 
                 // Black key itself
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    Color {
+                        r: 0.35,
+                        g: 0.35,
+                        b: 0.35,
+                        a: 1.0,
+                    }
+                } else {
+                    BLACK_KEY_COLOR
+                };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
                     iced::Size::new(black_key_width, KEY_HEIGHT),
-                    BLACK_KEY_COLOR,
+                    fill,
                 );
 
                 // Key border
