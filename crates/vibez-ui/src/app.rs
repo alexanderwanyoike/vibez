@@ -8661,9 +8661,13 @@ impl App {
             devices_row = devices_row.push(slot);
         }
 
-        let scrollable_devices = scrollable(devices_row).direction(
-            scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
-        );
+        let scrollable_devices =
+            scrollable(devices_row).direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(5)
+                    .scroller_width(5)
+                    .spacing(4),
+            ));
 
         let content = column![header, scrollable_devices]
             .spacing(6)
@@ -8967,7 +8971,10 @@ impl App {
         .spacing(10)
         .align_y(iced::Alignment::Start);
 
-        Self::device_card(column![title, Self::device_body(body.into())])
+        // OSC 66 + envelope 240 + filter 118 + out 56 + chrome.
+        Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(570.0)),
+        )
     }
 
     /// Sampler device card.
@@ -9008,8 +9015,18 @@ impl App {
             )
         };
 
+        // Long file names must not blow the section open; the
+        // waveform display defines the section width.
         let sample_label = match &track.sample_name {
-            Some(name) => text(name.as_str()).size(10).color(th::TEXT),
+            Some(name) => {
+                let display = if name.chars().count() > 24 {
+                    let head: String = name.chars().take(21).collect();
+                    format!("{head}...")
+                } else {
+                    name.clone()
+                };
+                text(display).size(10).color(th::TEXT)
+            }
             None => text("No Sample").size(10).color(th::TEXT_MUTED),
         };
         let load_btn = button(text("Load").size(9).color(th::TEXT))
@@ -9046,6 +9063,7 @@ impl App {
                 .align_y(iced::Alignment::Center)
         ]
         .spacing(5)
+        .width(Length::Fixed(190.0))
         .align_x(iced::Alignment::Start);
 
         let adsr: Element<'a, Message> = canvas(crate::widgets::mini_waveform::AdsrScope {
@@ -9081,7 +9099,17 @@ impl App {
         .spacing(10)
         .align_y(iced::Alignment::Start);
 
-        Self::device_card(column![title, Self::device_body(body.into())])
+        // Width = sample 190 + tune 56 + envelope 240 + dividers,
+        // spacing, padding. Fixed so the Fill title strip and card
+        // background actually render (Fill inside a shrink column
+        // collapses in iced).
+        let card = Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(560.0)),
+        );
+        // The whole card accepts browser drops, like drum pads.
+        mouse_area(card)
+            .on_release(Message::DropSampleOnSampler { track_id })
+            .into()
     }
 
     fn view_drum_rack_device<'a>(
@@ -9399,7 +9427,10 @@ impl App {
         .spacing(10)
         .align_y(iced::Alignment::Start);
 
-        Self::device_card(column![title, Self::device_body(body.into())])
+        // Pads 220 + editor (six knob columns) + chrome.
+        Self::device_card(
+            column![title, Self::device_body(body.into())].width(Length::Fixed(650.0)),
+        )
     }
 
     /// Placeholder card for MIDI tracks with no instrument attached.

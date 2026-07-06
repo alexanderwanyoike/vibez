@@ -200,7 +200,15 @@ pub fn view_effect_slot<'a>(
     };
 
     // ── Card ─────────────────────────────────────────────────
-    let card = column![title_bar, body];
+    // Fixed width computed from the knob count: a Fill title strip
+    // inside a shrink column collapses the card chrome in iced.
+    let knob_count = if has_params && !has_gui {
+        effect.descriptors.len()
+    } else {
+        0
+    };
+    let card_w = (knob_count as f32 * 62.0 + 24.0).max(150.0);
+    let card = column![title_bar, body].width(Length::Fixed(card_w));
 
     container(card)
         .style(|_theme: &Theme| container::Style {
