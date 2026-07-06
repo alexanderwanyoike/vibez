@@ -294,11 +294,7 @@ impl Instrument for Sampler {
         }
 
         // Find free voice or steal oldest
-        let voice_idx = self
-            .voices
-            .iter()
-            .position(|v| !v.active)
-            .unwrap_or(0);
+        let voice_idx = self.voices.iter().position(|v| !v.active).unwrap_or(0);
 
         let voice = &mut self.voices[voice_idx];
         voice.active = true;
@@ -371,8 +367,8 @@ impl Instrument for Sampler {
                     if loop_enabled {
                         // Wrap back to start
                         let loop_len = (end_f - start_f) as f64;
-                        voice.position = start_f as f64
-                            + (voice.position - start_f as f64) % loop_len;
+                        voice.position =
+                            start_f as f64 + (voice.position - start_f as f64) % loop_len;
                     } else {
                         // Sample finished
                         voice.active = false;
@@ -422,7 +418,9 @@ mod tests {
 
     fn make_sine_sample(frames: usize, freq: f64, sample_rate: u32) -> Arc<DecodedAudio> {
         let data: Vec<f32> = (0..frames)
-            .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate as f64).sin() as f32)
+            .map(|i| {
+                (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate as f64).sin() as f32
+            })
             .collect();
         Arc::new(DecodedAudio {
             channels: vec![data.clone(), data],
@@ -451,7 +449,10 @@ mod tests {
         let mut buf = vec![0.0_f32; 512];
         sampler.render(&mut buf, 2);
         let energy: f32 = buf.iter().map(|s| s * s).sum();
-        assert!(energy > 0.01, "Sampler should produce sound, energy={energy}");
+        assert!(
+            energy > 0.01,
+            "Sampler should produce sound, energy={energy}"
+        );
     }
 
     #[test]
@@ -466,7 +467,10 @@ mod tests {
 
         // After rendering some frames, check the voice speed
         assert!(
-            sampler.voices.iter().any(|v| v.active && (v.speed - 2.0).abs() < 1e-6),
+            sampler
+                .voices
+                .iter()
+                .any(|v| v.active && (v.speed - 2.0).abs() < 1e-6),
             "Octave up should have speed 2.0"
         );
     }
@@ -481,7 +485,10 @@ mod tests {
         sampler.note_on(60, 100);
 
         assert!(
-            sampler.voices.iter().any(|v| v.active && (v.speed - 1.0).abs() < 1e-6),
+            sampler
+                .voices
+                .iter()
+                .any(|v| v.active && (v.speed - 1.0).abs() < 1e-6),
             "Root note should have speed 1.0"
         );
     }
@@ -498,13 +505,19 @@ mod tests {
 
         // Voice should still be active (one-shot ignores note_off)
         let active_count = sampler.voices.iter().filter(|v| v.active).count();
-        assert_eq!(active_count, 1, "One-shot should keep voice active after note_off");
+        assert_eq!(
+            active_count, 1,
+            "One-shot should keep voice active after note_off"
+        );
 
         // Render some frames — should still produce sound
         let mut buf = vec![0.0_f32; 256];
         sampler.render(&mut buf, 2);
         let energy: f32 = buf.iter().map(|s| s * s).sum();
-        assert!(energy > 0.01, "One-shot should still produce sound after note_off");
+        assert!(
+            energy > 0.01,
+            "One-shot should still produce sound after note_off"
+        );
     }
 
     #[test]
@@ -552,7 +565,10 @@ mod tests {
 
         // Should still produce sound
         let energy: f32 = buf[500..].iter().map(|s| s * s).sum();
-        assert!(energy > 0.001, "Looped sample should produce sound past end");
+        assert!(
+            energy > 0.001,
+            "Looped sample should produce sound past end"
+        );
     }
 
     #[test]

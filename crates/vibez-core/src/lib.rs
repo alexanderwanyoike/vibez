@@ -3,5 +3,6 @@ pub mod constants;
 pub mod effect;
 pub mod id;
 pub mod midi;
+pub mod onset;
 pub mod time;
 pub mod track;

@@ -11,6 +11,7 @@ cpal = { workspace = true }
 symphonia = { workspace = true }
 rubato = { workspace = true }
 audio_thread_priority = { workspace = true }
+midir = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

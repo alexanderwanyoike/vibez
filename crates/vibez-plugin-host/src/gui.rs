@@ -31,11 +31,52 @@ pub enum PluginGuiHandle {
 unsafe impl Send for PluginGuiHandle {}
 
 impl PluginGuiHandle {
+    /// Pump per-view host services (VST3 Linux IRunLoop). No-op for
+    /// CLAP, whose timer/fd extensions are pumped by the CLAP host.
+    pub fn service_runloop(&self) {
+        if let PluginGuiHandle::Vst3(h) = self {
+            h.service_runloop();
+        }
+    }
+
+    /// CLAP plugin pointer for matching plugin-initiated resize
+    /// requests; None for VST3.
+    pub fn clap_plugin_ptr(&self) -> Option<usize> {
+        match self {
+            PluginGuiHandle::Clap(h) => Some(h.plugin_ptr as usize),
+            PluginGuiHandle::Vst3(_) => None,
+        }
+    }
+
+    /// Plugin-initiated resize request (VST3 IPlugFrame::resizeView).
+    pub fn take_pending_resize(&self) -> Option<(u32, u32)> {
+        match self {
+            PluginGuiHandle::Clap(_) => None,
+            PluginGuiHandle::Vst3(h) => h.frame.as_ref().and_then(|f| f.take_pending_resize()),
+        }
+    }
+
     /// Whether the plugin actually supports a GUI.
     pub fn has_gui(&self) -> bool {
         match self {
             PluginGuiHandle::Clap(h) => !h.gui_ext.is_null(),
             PluginGuiHandle::Vst3(h) => !h.edit_controller.is_null(),
+        }
+    }
+
+    /// Whether the plugin GUI supports live resizing by the host.
+    pub fn can_resize(&self) -> bool {
+        match self {
+            PluginGuiHandle::Clap(h) => h.can_resize(),
+            PluginGuiHandle::Vst3(h) => h.can_resize(),
+        }
+    }
+
+    /// Forward a host-window resize to the plugin GUI.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        match self {
+            PluginGuiHandle::Clap(h) => h.set_size(width, height),
+            PluginGuiHandle::Vst3(h) => h.set_size(width, height),
         }
     }
 
@@ -106,6 +147,30 @@ pub struct ClapGuiHandle {
 unsafe impl Send for ClapGuiHandle {}
 
 impl ClapGuiHandle {
+    /// CLAP `clap_plugin_gui::can_resize`.
+    pub fn can_resize(&self) -> bool {
+        if self.gui_ext.is_null() {
+            return false;
+        }
+        let gui = unsafe { &*self.gui_ext };
+        match gui.can_resize {
+            Some(f) => unsafe { f(self.plugin_ptr) },
+            None => false,
+        }
+    }
+
+    /// CLAP `clap_plugin_gui::set_size`.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        if self.gui_ext.is_null() {
+            return false;
+        }
+        let gui = unsafe { &*self.gui_ext };
+        match gui.set_size {
+            Some(f) => unsafe { f(self.plugin_ptr, width, height) },
+            None => false,
+        }
+    }
+
     /// Create a new CLAP GUI handle from a raw `*const c_void` pointer.
     /// This is the safe-to-call-from-anywhere entry point that avoids
     /// exposing `clap_plugin` types to crates that don't depend on `clap-sys`.
@@ -171,9 +236,7 @@ impl ClapGuiHandle {
             return false;
         }
         let gui = unsafe { &*self.gui_ext };
-        unsafe {
-            (gui.create.unwrap())(self.plugin_ptr, CLAP_WINDOW_API_X11.as_ptr(), false)
-        }
+        unsafe { (gui.create.unwrap())(self.plugin_ptr, CLAP_WINDOW_API_X11.as_ptr(), false) }
     }
 
     fn attach_to_x11(&self, window_id: u32) -> bool {
@@ -227,9 +290,8 @@ impl ClapGuiHandle {
 // ── VST3 GUI Handle ──
 
 /// VST3 IEditController IID: {DCD7BBE3-7742-448D-A874-AACC979C759E}
-const IEDIT_CONTROLLER_IID: [u8; 16] = [
-    0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75,
-    0x9E,
+pub(crate) const IEDIT_CONTROLLER_IID: [u8; 16] = [
+    0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E,
 ];
 
 pub struct Vst3GuiHandle {
@@ -237,49 +299,85 @@ pub struct Vst3GuiHandle {
     edit_controller: *mut c_void,
     /// IPlugView COM pointer (created on open, destroyed on close).
     plug_view: *mut c_void,
+    /// Host IPlugFrame + Linux IRunLoop for this view. Alive from
+    /// setFrame until after removed(); the window manager services
+    /// its timers/fds every poll tick.
+    frame: Option<crate::vst3_host::runloop::HostPlugFrame>,
     pub open: bool,
 }
 
 unsafe impl Send for Vst3GuiHandle {}
 
 impl Vst3GuiHandle {
-    /// Extract an IEditController from a VST3 component via queryInterface.
+    /// Wrap the IEditController resolved at plugin load time
+    /// (`Vst3PluginInstance::controller_ptr`). Dual-component plugins
+    /// (JUCE) keep the controller as a separate object, so the GUI can
+    /// no longer be reached by querying the component; the instance
+    /// owns the resolution logic and hands the pointer here.
     ///
     /// # Safety
-    /// `component` must be a valid IComponent COM pointer.
-    pub unsafe fn new(component: *mut c_void) -> Option<Self> {
-        if component.is_null() {
-            eprintln!("vibez: Vst3GuiHandle::new — component is null");
+    /// `edit_controller` must be a valid IEditController COM pointer
+    /// (or null, which returns None). Takes its own reference.
+    pub unsafe fn new(edit_controller: *mut c_void) -> Option<Self> {
+        if edit_controller.is_null() {
+            eprintln!("vibez: Vst3GuiHandle::new — no edit controller (GUI unavailable)");
             return None;
         }
-        // FUnknown::queryInterface(iid, &mut obj) - vtable[0]
-        type QueryInterfaceFn = unsafe extern "system" fn(
-            *mut c_void,
-            *const u8,
-            *mut *mut c_void,
-        ) -> i32;
-        let vtbl = *(component as *const *const *const c_void);
-        let query_interface: QueryInterfaceFn = std::mem::transmute(*vtbl.add(0));
-
-        let mut edit_controller: *mut c_void = std::ptr::null_mut();
-        let hr = query_interface(
-            component,
-            IEDIT_CONTROLLER_IID.as_ptr(),
-            &mut edit_controller,
-        );
-        if hr != 0 || edit_controller.is_null() {
-            eprintln!(
-                "vibez: Vst3GuiHandle::new — queryInterface(IEditController) failed (hr={hr})"
-            );
-            return None;
-        }
-        eprintln!("vibez: Vst3GuiHandle::new — got IEditController OK");
-        // edit_controller now has its own refcount from queryInterface
+        // FUnknown::addRef - vtable[1]: hold our own reference; the
+        // plugin instance keeps its own and releases it independently.
+        type AddRefFn = unsafe extern "system" fn(*mut c_void) -> u32;
+        let vtbl = *(edit_controller as *const *const *const c_void);
+        let add_ref: AddRefFn = std::mem::transmute(*vtbl.add(1));
+        add_ref(edit_controller);
         Some(Self {
             edit_controller,
             plug_view: std::ptr::null_mut(),
+            frame: None,
             open: false,
         })
+    }
+
+    /// IPlugView::canResize - vtable [13]. kResultTrue (0) means yes.
+    pub fn can_resize(&self) -> bool {
+        if self.plug_view.is_null() {
+            return false;
+        }
+        type CanResizeFn = unsafe extern "system" fn(*mut c_void) -> i32;
+        let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
+        let can_resize: CanResizeFn = unsafe { std::mem::transmute(*vtbl.add(13)) };
+        unsafe { can_resize(self.plug_view) == 0 }
+    }
+
+    /// IPlugView::onSize - vtable [10]. Rect uses left/top/right/bottom.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        if self.plug_view.is_null() {
+            return false;
+        }
+        #[repr(C)]
+        struct ViewRect {
+            left: i32,
+            top: i32,
+            right: i32,
+            bottom: i32,
+        }
+        type OnSizeFn = unsafe extern "system" fn(*mut c_void, *mut ViewRect) -> i32;
+        let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
+        let on_size: OnSizeFn = unsafe { std::mem::transmute(*vtbl.add(10)) };
+        let mut rect = ViewRect {
+            left: 0,
+            top: 0,
+            right: width as i32,
+            bottom: height as i32,
+        };
+        unsafe { on_size(self.plug_view, &mut rect) == 0 }
+    }
+
+    /// Pump this view's run loop (timers + fd handlers). JUCE editors
+    /// paint and dispatch input exclusively from these callbacks.
+    pub fn service_runloop(&self) {
+        if let Some(frame) = &self.frame {
+            frame.service();
+        }
     }
 
     fn get_size(&self) -> Option<(u32, u32)> {
@@ -328,8 +426,7 @@ impl Vst3GuiHandle {
             return false;
         }
         // IPlugView::attached(parent, type) - vtable[4]
-        type AttachedFn =
-            unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8) -> i32;
+        type AttachedFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8) -> i32;
         let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
         let attached: AttachedFn = unsafe { std::mem::transmute(*vtbl.add(4)) };
         let platform_type = b"X11EmbedWindowID\0";
@@ -357,6 +454,9 @@ impl Vst3GuiHandle {
             unsafe { release(self.plug_view) };
             self.plug_view = std::ptr::null_mut();
         }
+        // Frame outlives removed(): plugins unregister their handlers
+        // in removed() and need the run loop alive to do it.
+        self.frame = None;
         self.open = false;
     }
 
@@ -376,8 +476,7 @@ impl Vst3GuiHandle {
         // IEditController::createView(name) -> IPlugView*
         // IEditController vtable: FUnknown[0-2] + IPluginBase[3-4] + IEditController[5-17]
         // createView is at index 17 in the vtable
-        type CreateViewFn =
-            unsafe extern "system" fn(*mut c_void, *const u8) -> *mut c_void;
+        type CreateViewFn = unsafe extern "system" fn(*mut c_void, *const u8) -> *mut c_void;
         let vtbl = unsafe { *(self.edit_controller as *const *const *const c_void) };
         let create_view: CreateViewFn = unsafe { std::mem::transmute(*vtbl.add(17)) };
         let editor_name = b"editor\0";
@@ -391,11 +490,9 @@ impl Vst3GuiHandle {
         self.plug_view = view;
 
         // Check if X11 is supported: IPlugView::isPlatformTypeSupported(type) - vtable[3]
-        type IsPlatformSupportedFn =
-            unsafe extern "system" fn(*mut c_void, *const u8) -> i32;
+        type IsPlatformSupportedFn = unsafe extern "system" fn(*mut c_void, *const u8) -> i32;
         let view_vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
-        let is_supported: IsPlatformSupportedFn =
-            unsafe { std::mem::transmute(*view_vtbl.add(3)) };
+        let is_supported: IsPlatformSupportedFn = unsafe { std::mem::transmute(*view_vtbl.add(3)) };
         let platform_type = b"X11EmbedWindowID\0";
         let hr = unsafe { is_supported(self.plug_view, platform_type.as_ptr()) };
         eprintln!("vibez: open_view — isPlatformTypeSupported(X11) = {hr}");
@@ -408,6 +505,19 @@ impl Vst3GuiHandle {
             self.plug_view = std::ptr::null_mut();
             return false;
         }
+
+        // Provide IPlugFrame/IRunLoop before attaching: JUCE queries
+        // the run loop during attached() and a null frame leaves the
+        // editor frozen (no repaints, no input).
+        let frame = crate::vst3_host::runloop::HostPlugFrame::new();
+        // IPlugView::setFrame(frame) - vtable[12]
+        type SetFrameFn = unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32;
+        let set_frame: SetFrameFn = unsafe { std::mem::transmute(*view_vtbl.add(12)) };
+        let hr = unsafe { set_frame(self.plug_view, frame.as_iplugframe()) };
+        if hr != 0 {
+            eprintln!("vibez: open_view — setFrame returned {hr} (continuing)");
+        }
+        self.frame = Some(frame);
 
         // Attach to X11 window
         eprintln!("vibez: open_view — attaching to X11 window {window_id}");
@@ -437,5 +547,19 @@ impl Drop for Vst3GuiHandle {
             unsafe { release(self.edit_controller) };
             self.edit_controller = std::ptr::null_mut();
         }
+    }
+}
+
+#[cfg(test)]
+mod iid_tests {
+    /// See vst3_host::instance::tests — hand-written IIDs must match
+    /// the SDK-generated constants or plugins reject queryInterface.
+    #[test]
+    fn ieditcontroller_iid_matches_sdk() {
+        let sdk: Vec<u8> = vst3::Steinberg::Vst::IEditController_iid
+            .iter()
+            .map(|b| *b as u8)
+            .collect();
+        assert_eq!(super::IEDIT_CONTROLLER_IID.as_slice(), sdk.as_slice());
     }
 }

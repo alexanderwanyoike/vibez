@@ -23,6 +23,15 @@ pub trait PluginInstance: Send {
         self.note_off(pitch);
     }
     fn reset(&mut self);
+    /// Capture the plugin's opaque state blob (project persistence).
+    /// Main-thread class in both CLAP and VST3. Default: unsupported.
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Restore a previously captured state blob. Default: unsupported.
+    fn load_state(&mut self, _data: &[u8]) -> bool {
+        false
+    }
     fn is_instrument(&self) -> bool;
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32);
     fn activate(&mut self) -> bool;

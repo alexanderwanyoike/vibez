@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -6,6 +7,8 @@ use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::track::{DrumPadState, MediaSourceRef};
+use vibez_dropbox::DropboxEntry;
 use vibez_plugin_host::PluginSettings;
 
 /// A clip as represented in the UI.
@@ -14,6 +17,7 @@ pub struct UiClip {
     pub id: ClipId,
     pub name: String,
     pub audio: Arc<DecodedAudio>,
+    pub source: Option<MediaSourceRef>,
     /// Position on the timeline in samples.
     pub position: u64,
     /// Offset into the source audio in samples.
@@ -24,6 +28,96 @@ pub struct UiClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// Nominal BPM of the underlying sample. `None` until detected or
+    /// entered manually.
+    pub original_bpm: Option<f64>,
+    /// Whether `audio` has been time-stretched to fit the project
+    /// tempo.
+    pub warped: bool,
+    /// Project BPM the current warped audio was stretched to. Used to
+    /// flag staleness in the timeline when the project tempo changes.
+    pub warped_to_bpm: Option<f64>,
+    /// Un-warped source audio, retained so the UI can re-warp to a new
+    /// project BPM or clear the warp without re-decoding. Populated on
+    /// import or on first warp. Not persisted: on reload the UI
+    /// re-decodes from the source and re-warps.
+    pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiDrumPad {
+    pub name: Option<String>,
+    pub source: Option<MediaSourceRef>,
+    /// Decoded audio kept on the UI side so offline bounce can re-seed a
+    /// drum rack without a round-trip through the audio thread.
+    pub audio: Option<Arc<DecodedAudio>>,
+    pub gain: f32,
+    pub pan: f32,
+    pub start: f32,
+    pub end: f32,
+    pub coarse_tune: i8,
+    pub fine_tune: f32,
+    pub one_shot: bool,
+    pub choke_group: Option<u8>,
+}
+
+impl Default for UiDrumPad {
+    fn default() -> Self {
+        Self {
+            name: None,
+            source: None,
+            audio: None,
+            gain: 1.0,
+            pan: 0.0,
+            start: 0.0,
+            end: 1.0,
+            coarse_tune: 0,
+            fine_tune: 0.0,
+            one_shot: true,
+            choke_group: None,
+        }
+    }
+}
+
+impl UiDrumPad {
+    pub fn to_state(&self) -> DrumPadState {
+        DrumPadState {
+            source: self.source.clone(),
+            gain: self.gain,
+            pan: self.pan,
+            start: self.start,
+            end: self.end,
+            coarse_tune: self.coarse_tune,
+            fine_tune: self.fine_tune,
+            one_shot: self.one_shot,
+            choke_group: self.choke_group,
+        }
+    }
+
+    pub fn from_state(state: &DrumPadState) -> Self {
+        Self {
+            name: state.source.as_ref().map(MediaSourceRef::display_name),
+            source: state.source.clone(),
+            audio: None,
+            gain: state.gain,
+            pan: state.pan,
+            start: state.start,
+            end: state.end,
+            coarse_tune: state.coarse_tune,
+            fine_tune: state.fine_tune,
+            one_shot: state.one_shot,
+            choke_group: state.choke_group,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SampleBrowserEntry {
+    pub source: MediaSourceRef,
+    pub name: String,
+    pub root_path: PathBuf,
+    pub relative_path: PathBuf,
+    pub search_text: String,
 }
 
 /// An effect instance as represented in the UI.
@@ -38,6 +132,8 @@ pub struct UiEffect {
     pub plugin_name: Option<String>,
     /// Whether this effect has a native plugin GUI available.
     pub has_plugin_gui: bool,
+    /// Persistent identity of the plugin backing this slot, if any.
+    pub plugin_ref: Option<vibez_core::effect::PluginDeviceInfo>,
 }
 
 /// A note clip (MIDI pattern) as represented in the UI.
@@ -74,8 +170,17 @@ pub struct UiTrack {
     pub has_instrument: bool,
     pub instrument_kind: Option<InstrumentKind>,
     pub sample_name: Option<String>,
+    pub sample_source: Option<MediaSourceRef>,
+    /// Decoded audio for the sampler, kept UI-side so offline bounce can
+    /// re-seed a fresh sampler instance.
+    pub sample_audio: Option<Arc<DecodedAudio>>,
+    pub instrument_params: Vec<f32>,
+    pub drum_rack_pads: Vec<UiDrumPad>,
+    pub selected_drum_pad: usize,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
+    /// Persistent identity of the plugin instrument, if any.
+    pub plugin_instrument_ref: Option<vibez_core::effect::PluginDeviceInfo>,
     /// Whether the plugin instrument has a native GUI.
     pub has_plugin_instrument_gui: bool,
 }
@@ -99,7 +204,13 @@ impl UiTrack {
             has_instrument: false,
             instrument_kind: None,
             sample_name: None,
+            sample_source: None,
+            sample_audio: None,
+            instrument_params: Vec::new(),
+            drum_rack_pads: default_drum_rack_pads(),
+            selected_drum_pad: 0,
             plugin_instrument_name: None,
+            plugin_instrument_ref: None,
             has_plugin_instrument_gui: false,
         }
     }
@@ -126,7 +237,13 @@ impl UiTrack {
             has_instrument,
             instrument_kind,
             sample_name: None,
+            sample_source: None,
+            sample_audio: None,
+            instrument_params: Vec::new(),
+            drum_rack_pads: default_drum_rack_pads(),
+            selected_drum_pad: 0,
             plugin_instrument_name: None,
+            plugin_instrument_ref: None,
             has_plugin_instrument_gui: false,
         }
     }
@@ -231,6 +348,104 @@ pub enum SettingsTab {
     #[default]
     Audio,
     Plugins,
+    Dropbox,
+    Warping,
+}
+
+/// A point-in-time snapshot of the editable project state, used to
+/// implement undo / redo. `UiTrack` clones share audio via `Arc` so
+/// each snapshot is cheap on memory despite the full tree.
+#[derive(Debug, Clone)]
+pub struct ProjectSnapshot {
+    pub tracks: Vec<UiTrack>,
+    pub bpm: f64,
+    pub bpm_text: String,
+    pub loop_enabled: bool,
+    pub loop_start_beats: f64,
+    pub loop_end_beats: f64,
+    pub selected_track: Option<TrackId>,
+    pub selected_clips: HashSet<ArrangementSelection>,
+    pub selected_note_clip: Option<(TrackId, ClipId)>,
+    pub next_track_number: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct UndoHistory {
+    pub undo: VecDeque<ProjectSnapshot>,
+    pub redo: VecDeque<ProjectSnapshot>,
+}
+
+impl UndoHistory {
+    pub const CAPACITY: usize = 100;
+
+    pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
+        self.undo.push_back(snapshot);
+        if self.undo.len() > Self::CAPACITY {
+            self.undo.pop_front();
+        }
+        self.redo.clear();
+    }
+
+    pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
+        self.undo.pop_back()
+    }
+
+    pub fn push_redo(&mut self, snapshot: ProjectSnapshot) {
+        self.redo.push_back(snapshot);
+        if self.redo.len() > Self::CAPACITY {
+            self.redo.pop_front();
+        }
+    }
+
+    pub fn pop_redo(&mut self) -> Option<ProjectSnapshot> {
+        self.redo.pop_back()
+    }
+
+    #[allow(dead_code)]
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    #[allow(dead_code)]
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SampleBrowserMode {
+    #[default]
+    Local,
+    Dropbox,
+}
+
+/// UI-side state for the Dropbox browser and Settings tab.
+#[derive(Debug, Default, Clone)]
+pub struct DropboxUiState {
+    pub connected: bool,
+    pub account_email: Option<String>,
+    /// App key entered in settings (may be empty until the user pastes one).
+    pub app_key_input: String,
+    /// Whether any source of app key is present (settings, env, build-time).
+    pub has_app_key: bool,
+    /// An OAuth flow is in progress; Connect button is disabled.
+    pub auth_in_progress: bool,
+    pub last_error: Option<String>,
+    /// Listing cache keyed by Dropbox folder path (`""` for root).
+    pub folders: HashMap<String, Vec<DropboxEntry>>,
+    /// Paths for which a list_folder call is currently in flight.
+    pub listing_in_progress: HashSet<String>,
+    /// Paths expanded in the tree UI.
+    pub expanded: HashSet<String>,
+    /// `path_lower` of the currently-selected Dropbox entry, if any.
+    pub selected_path: Option<String>,
+    /// A preview fetch / playback is in flight.
+    pub preview_in_progress: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +513,9 @@ pub struct AppState {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Track whose lane was dragged to create the current time selection,
+    /// if any. `None` means the selection is arrangement-wide (ruler drag).
+    pub time_selection_track: Option<TrackId>,
 
     // Context menu
     pub context_menu: Option<ContextMenu>,
@@ -306,6 +524,10 @@ pub struct AppState {
     pub cursor_x: f32,
     pub cursor_y: f32,
 
+    // Last known window size, for clamping popup menus on-screen
+    pub window_width: f32,
+    pub window_height: f32,
+
     // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
     pub drag_resize_active: bool,
 
@@ -313,6 +535,11 @@ pub struct AppState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+    /// In-progress manual BPM input text keyed by clip id. Only
+    /// populated while the user is actively editing the field in the
+    /// clip detail panel; `None` / missing means show the committed
+    /// `UiClip::original_bpm` value instead.
+    pub clip_bpm_edit: HashMap<ClipId, String>,
 
     // Piano roll edit mode
     pub piano_roll_edit_mode: PianoRollEditMode,
@@ -325,13 +552,40 @@ pub struct AppState {
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
+    pub current_project_path: Option<PathBuf>,
+    pub project_dirty: bool,
+    pub sample_browser_open: bool,
+    /// Automatically detect sample BPM and warp to project tempo on
+    /// import. Mirrored from `UiSettings::auto_warp_on_import`.
+    pub auto_warp_on_import: bool,
+    /// Minimum BPM-detect confidence required to auto-warp. Mirrored
+    /// from `UiSettings::warp_confidence_threshold`.
+    pub warp_confidence_threshold: f32,
+    pub sample_browser_search: String,
+    pub sample_browser_roots: Vec<PathBuf>,
+    pub sample_browser_entries: Vec<SampleBrowserEntry>,
+    pub sample_browser_root_filter: Option<PathBuf>,
+    pub sample_browser_selected_source: Option<MediaSourceRef>,
+    pub sample_browser_scan_in_progress: bool,
+    pub sample_browser_mode: SampleBrowserMode,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
     pub plugin_scan_in_progress: bool,
     pub plugin_scan_status: String,
-}
 
+    // Dropbox
+    pub dropbox: DropboxUiState,
+
+    // Drag-and-drop from sample browser
+    pub drag_source: Option<MediaSourceRef>,
+    pub drag_label: Option<String>,
+    /// Most recent track the cursor has been confirmed over while a drag
+    /// is in flight. Used as the drop target if the release happens on a
+    /// sub-pixel boundary between lanes.
+    pub drag_hover_track: Option<TrackId>,
+    pub drag_hover_beat: f64,
+}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -361,24 +615,49 @@ impl Default for AppState {
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
+            time_selection_track: None,
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,
+            window_width: 1400.0,
+            window_height: 900.0,
             drag_resize_active: false,
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            clip_bpm_edit: HashMap::new(),
             piano_roll_edit_mode: PianoRollEditMode::default(),
             device_context_menu: None,
             file_menu_open: false,
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
+            current_project_path: None,
+            project_dirty: false,
+            sample_browser_open: true,
+            auto_warp_on_import: false,
+            warp_confidence_threshold: 0.6,
+            sample_browser_search: String::new(),
+            sample_browser_roots: Vec::new(),
+            sample_browser_entries: Vec::new(),
+            sample_browser_root_filter: None,
+            sample_browser_selected_source: None,
+            sample_browser_scan_in_progress: false,
+            sample_browser_mode: SampleBrowserMode::default(),
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
+            dropbox: DropboxUiState::default(),
+            drag_source: None,
+            drag_label: None,
+            drag_hover_track: None,
+            drag_hover_beat: 0.0,
         }
     }
+}
+
+pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
+    (0..16).map(|_| UiDrumPad::default()).collect()
 }
 
 impl AppState {
@@ -571,11 +850,7 @@ mod tests {
 
     #[test]
     fn move_first_track_up_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id0 = state.tracks[0].id;
 
         if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
@@ -588,11 +863,7 @@ mod tests {
 
     #[test]
     fn move_last_track_down_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id0 = state.tracks[0].id;
 
         if let Some(idx) = state.tracks.iter().position(|t| t.id == id0) {
@@ -605,11 +876,7 @@ mod tests {
 
     #[test]
     fn rename_track() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id = state.tracks[0].id;
 
         if let Some(track) = state.find_track_mut(id) {
@@ -674,11 +941,7 @@ mod tests {
 
     #[test]
     fn rename_empty_rejected() {
-        let mut state = make_state_with(vec![UiTrack::new(
-            TrackId::new(),
-            "Track 1".into(),
-            0,
-        )]);
+        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
         let id = state.tracks[0].id;
 
         // Simulate the FinishEditing guard: empty name doesn't rename

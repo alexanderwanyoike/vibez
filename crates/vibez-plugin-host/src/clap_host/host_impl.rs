@@ -250,11 +250,9 @@ fn poll_timers() {
             // Get the plugin's timer extension
             let plugin_ref = unsafe { &*plugin_ptr };
             let ext_ptr = unsafe {
-                (plugin_ref.get_extension.unwrap())(
-                    plugin_ptr,
-                    CLAP_EXT_TIMER_SUPPORT.as_ptr(),
-                )
-            } as *const clap_sys::ext::timer_support::clap_plugin_timer_support;
+                (plugin_ref.get_extension.unwrap())(plugin_ptr, CLAP_EXT_TIMER_SUPPORT.as_ptr())
+            }
+                as *const clap_sys::ext::timer_support::clap_plugin_timer_support;
 
             if !ext_ptr.is_null() {
                 let ext = unsafe { &*ext_ptr };
@@ -306,7 +304,8 @@ fn poll_fds() {
                         plugin_ptr,
                         CLAP_EXT_POSIX_FD_SUPPORT.as_ptr(),
                     )
-                } as *const clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support;
+                }
+                    as *const clap_sys::ext::posix_fd_support::clap_plugin_posix_fd_support;
 
                 if !ext_ptr.is_null() {
                     let ext = unsafe { &*ext_ptr };
@@ -362,11 +361,33 @@ static CLAP_HOST_GUI_IMPL: clap_host_gui = clap_host_gui {
 
 unsafe extern "C" fn host_gui_resize_hints_changed(_host: *const clap_host) {}
 
+/// GUI resize requests from plugins, keyed by plugin pointer. The
+/// plugin window manager drains this every tick and resizes the
+/// actual X11 window; returning true without acting (the previous
+/// behavior) made plugins render at a size the window never had.
+static PENDING_GUI_RESIZES: Mutex<Vec<(usize, u32, u32)>> = Mutex::new(Vec::new());
+
+/// Drain pending plugin-initiated GUI resizes: (plugin_ptr, w, h).
+pub fn take_pending_gui_resizes() -> Vec<(usize, u32, u32)> {
+    PENDING_GUI_RESIZES
+        .lock()
+        .map(|mut v| std::mem::take(&mut *v))
+        .unwrap_or_default()
+}
+
 unsafe extern "C" fn host_gui_request_resize(
-    _host: *const clap_host,
-    _width: u32,
-    _height: u32,
+    host: *const clap_host,
+    width: u32,
+    height: u32,
 ) -> bool {
+    if host.is_null() || (*host).host_data.is_null() {
+        return false;
+    }
+    let data = &*((*host).host_data as *const ClapHostUserData);
+    if let Ok(mut pending) = PENDING_GUI_RESIZES.lock() {
+        pending.retain(|(p, _, _)| *p != data.plugin_ptr as usize);
+        pending.push((data.plugin_ptr as usize, width, height));
+    }
     true
 }
 
@@ -438,6 +459,21 @@ mod tests {
     // Counters incremented by fake plugin callbacks
     static TEST_TIMER_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
     static TEST_FD_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    // The host timer/fd registries are process-global, so tests in
+    // this module MUST run serialized and start from a clean slate;
+    // in parallel they race each other (flaked three separate times
+    // in CI-style full runs before this lock).
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn serialize_and_reset() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        CLAP_TIMERS.lock().unwrap().clear();
+        CLAP_FDS.lock().unwrap().clear();
+        TEST_TIMER_CALL_COUNT.store(0, Ordering::SeqCst);
+        TEST_FD_CALL_COUNT.store(0, Ordering::SeqCst);
+        guard
+    }
 
     static TEST_PLUGIN_TIMER_EXT: clap_sys::ext::timer_support::clap_plugin_timer_support =
         clap_sys::ext::timer_support::clap_plugin_timer_support {
@@ -515,6 +551,7 @@ mod tests {
 
     #[test]
     fn test_make_clap_host_fields() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
         assert_eq!(host.clap_version, CLAP_VERSION);
         assert!(host.get_extension.is_some());
@@ -532,15 +569,15 @@ mod tests {
 
     #[test]
     fn test_host_get_extension_returns_thread_check() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_THREAD_CHECK.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_THREAD_CHECK.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
     #[test]
     fn test_host_get_extension_returns_gui() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
         let ptr = unsafe { host_get_extension(&host, CLAP_EXT_GUI.as_ptr()) };
         assert!(!ptr.is_null());
@@ -548,24 +585,23 @@ mod tests {
 
     #[test]
     fn test_host_get_extension_returns_timer_support() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_TIMER_SUPPORT.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_TIMER_SUPPORT.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
     #[test]
     fn test_host_get_extension_returns_posix_fd_support() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
-        let ptr = unsafe {
-            host_get_extension(&host, CLAP_EXT_POSIX_FD_SUPPORT.as_ptr())
-        };
+        let ptr = unsafe { host_get_extension(&host, CLAP_EXT_POSIX_FD_SUPPORT.as_ptr()) };
         assert!(!ptr.is_null());
     }
 
     #[test]
     fn test_host_get_extension_returns_null_for_unknown() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
         let unknown = c"clap.unknown-extension";
         let ptr = unsafe { host_get_extension(&host, unknown.as_ptr()) };
@@ -574,6 +610,7 @@ mod tests {
 
     #[test]
     fn test_host_get_extension_returns_null_for_null_id() {
+        let _serial = serialize_and_reset();
         let host = make_clap_host();
         let ptr = unsafe { host_get_extension(&host, std::ptr::null()) };
         assert!(ptr.is_null());
@@ -583,6 +620,7 @@ mod tests {
 
     #[test]
     fn test_set_host_user_data() {
+        let _serial = serialize_and_reset();
         let plugin = make_test_plugin();
         let mut host = make_clap_host();
         assert!(host.host_data.is_null());
@@ -598,6 +636,7 @@ mod tests {
 
     #[test]
     fn test_timer_register_unregister() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let plugin = make_test_plugin();
@@ -630,6 +669,7 @@ mod tests {
 
     #[test]
     fn test_timer_register_assigns_unique_ids() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let plugin = make_test_plugin();
@@ -659,6 +699,7 @@ mod tests {
 
     #[test]
     fn test_unregister_nonexistent_timer() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let host = make_clap_host();
@@ -670,6 +711,7 @@ mod tests {
 
     #[test]
     fn test_timer_register_fails_without_host_data() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let host = make_clap_host(); // host_data is null
@@ -684,6 +726,7 @@ mod tests {
 
     #[test]
     fn test_fd_register_unregister() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let plugin = make_test_plugin();
@@ -712,6 +755,7 @@ mod tests {
 
     #[test]
     fn test_fd_modify() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let plugin = make_test_plugin();
@@ -719,9 +763,7 @@ mod tests {
 
         unsafe { host_register_fd(&host, 10, CLAP_POSIX_FD_READ) };
 
-        let ok = unsafe {
-            host_modify_fd(&host, 10, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE)
-        };
+        let ok = unsafe { host_modify_fd(&host, 10, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE) };
         assert!(ok);
 
         {
@@ -734,6 +776,7 @@ mod tests {
 
     #[test]
     fn test_fd_modify_nonexistent() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let host = make_clap_host();
@@ -745,6 +788,7 @@ mod tests {
 
     #[test]
     fn test_fd_register_fails_without_host_data() {
+        let _serial = serialize_and_reset();
         clear_registries();
 
         let host = make_clap_host(); // host_data is null
@@ -758,6 +802,7 @@ mod tests {
 
     #[test]
     fn test_poll_timers_fires_elapsed() {
+        let _serial = serialize_and_reset();
         clear_registries();
         TEST_TIMER_CALL_COUNT.store(0, Ordering::Relaxed);
 
@@ -784,6 +829,7 @@ mod tests {
 
     #[test]
     fn test_poll_timers_skips_not_elapsed() {
+        let _serial = serialize_and_reset();
         clear_registries();
         TEST_TIMER_CALL_COUNT.store(0, Ordering::Relaxed);
 
@@ -812,6 +858,7 @@ mod tests {
 
     #[test]
     fn test_poll_fds_fires_on_ready_pipe() {
+        let _serial = serialize_and_reset();
         clear_registries();
         TEST_FD_CALL_COUNT.store(0, Ordering::Relaxed);
 
@@ -855,6 +902,7 @@ mod tests {
 
     #[test]
     fn test_poll_fds_does_not_fire_empty_pipe() {
+        let _serial = serialize_and_reset();
         clear_registries();
         TEST_FD_CALL_COUNT.store(0, Ordering::Relaxed);
 
@@ -894,6 +942,7 @@ mod tests {
 
     #[test]
     fn test_is_on_clap_main_thread_default() {
+        let _serial = serialize_and_reset();
         // Before set_clap_main_thread is called (or if OnceLock not set for
         // this test), any thread should be considered the main thread.
         // Note: If another test already called set_clap_main_thread in this

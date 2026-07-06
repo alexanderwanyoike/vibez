@@ -6,6 +6,66 @@ use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 
+/// Canonical reference to media outside the project file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MediaSourceRef {
+    LocalFile {
+        path: PathBuf,
+    },
+    DropboxFile {
+        path_lower: String,
+        display_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+    },
+}
+
+impl MediaSourceRef {
+    pub fn display_name(&self) -> String {
+        match self {
+            MediaSourceRef::LocalFile { path } => path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string()),
+            MediaSourceRef::DropboxFile { display_path, .. } => PathBuf::from(display_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| display_path.clone()),
+        }
+    }
+}
+
+/// Persisted state for a future native drum rack.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DrumPadState {
+    pub source: Option<MediaSourceRef>,
+    pub gain: f32,
+    pub pan: f32,
+    pub start: f32,
+    pub end: f32,
+    pub coarse_tune: i8,
+    pub fine_tune: f32,
+    pub one_shot: bool,
+    pub choke_group: Option<u8>,
+}
+
+/// Persisted state for native instruments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InstrumentStateInfo {
+    SubtractiveSynth {
+        params: Vec<f32>,
+    },
+    Sampler {
+        params: Vec<f32>,
+        source: Option<MediaSourceRef>,
+    },
+    DrumRack {
+        pads: Vec<DrumPadState>,
+    },
+}
+
 /// Serializable track metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackInfo {
@@ -23,6 +83,11 @@ pub struct TrackInfo {
     pub color_index: u8,
     #[serde(default)]
     pub instrument: Option<InstrumentKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_instrument: Option<InstrumentStateInfo>,
+    /// Third-party plugin instrument on this track, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_instrument: Option<crate::effect::PluginDeviceInfo>,
 }
 
 impl TrackInfo {
@@ -38,6 +103,8 @@ impl TrackInfo {
             kind: TrackKind::default(),
             color_index: 0,
             instrument: None,
+            native_instrument: None,
+            plugin_instrument: None,
         }
     }
 }
@@ -54,20 +121,53 @@ pub struct ClipInfo {
     pub source_offset: u64,
     /// Duration in samples.
     pub duration: u64,
-    /// Path to the source audio file.
-    pub file_path: PathBuf,
+    /// Canonical external media source reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MediaSourceRef>,
+    /// Legacy local path kept for backward compatibility with older projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<PathBuf>,
     #[serde(default)]
     pub loop_enabled: bool,
     #[serde(default)]
     pub loop_start: u64,
     #[serde(default)]
     pub loop_end: u64,
+    /// Nominal BPM of the underlying sample, set either by BPM
+    /// detection or manually. Drives warp ratio calculations and is
+    /// independent of the project tempo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_bpm: Option<f64>,
+    /// Whether the clip's audio has been time-stretched to fit the
+    /// project tempo.
+    #[serde(default, skip_serializing_if = "skip_if_false")]
+    pub warped: bool,
+    /// Project BPM the current warped audio was stretched to. Used to
+    /// flag staleness when the project tempo changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warped_to_bpm: Option<f64>,
+}
+
+fn skip_if_false(b: &bool) -> bool {
+    !b
 }
 
 impl ClipInfo {
     /// The end position of this clip on the timeline (position + duration).
     pub fn end_position(&self) -> u64 {
         self.position.saturating_add(self.duration)
+    }
+
+    pub fn resolved_source(&self) -> Option<&MediaSourceRef> {
+        self.source.as_ref()
+    }
+
+    pub fn resolved_local_path(&self) -> Option<&PathBuf> {
+        if let Some(MediaSourceRef::LocalFile { path }) = self.source.as_ref() {
+            Some(path)
+        } else {
+            self.file_path.as_ref()
+        }
     }
 }
 
@@ -85,37 +185,36 @@ mod tests {
         assert!(!track.solo);
     }
 
-    #[test]
-    fn clip_end_position() {
-        let clip = ClipInfo {
+    fn test_clip(position: u64, duration: u64) -> ClipInfo {
+        ClipInfo {
             id: ClipId::new(),
             track_id: TrackId::new(),
             name: "test".into(),
-            position: 1000,
+            position,
             source_offset: 0,
-            duration: 500,
-            file_path: PathBuf::from("test.wav"),
+            duration,
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("test.wav"),
+            }),
+            file_path: Some(PathBuf::from("test.wav")),
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
-        };
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        }
+    }
+
+    #[test]
+    fn clip_end_position() {
+        let clip = test_clip(1000, 500);
         assert_eq!(clip.end_position(), 1500);
     }
 
     #[test]
     fn clip_end_position_saturates() {
-        let clip = ClipInfo {
-            id: ClipId::new(),
-            track_id: TrackId::new(),
-            name: "test".into(),
-            position: u64::MAX - 10,
-            source_offset: 0,
-            duration: 100,
-            file_path: PathBuf::from("test.wav"),
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        };
+        let clip = test_clip(u64::MAX - 10, 100);
         assert_eq!(clip.end_position(), u64::MAX);
     }
 
@@ -138,18 +237,16 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_clip() {
-        let clip = ClipInfo {
-            id: ClipId::new(),
-            track_id: TrackId::new(),
-            name: "vocal.wav".into(),
-            position: 44100,
-            source_offset: 1000,
-            duration: 88200,
-            file_path: PathBuf::from("/audio/vocal.wav"),
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        };
+        let mut clip = test_clip(44_100, 88_200);
+        clip.name = "vocal.wav".into();
+        clip.source_offset = 1_000;
+        clip.source = Some(MediaSourceRef::LocalFile {
+            path: PathBuf::from("/audio/vocal.wav"),
+        });
+        clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
+        clip.original_bpm = Some(174.0);
+        clip.warped = true;
+        clip.warped_to_bpm = Some(140.0);
         let json = serde_json::to_string(&clip).unwrap();
         let deserialized: ClipInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(clip.id, deserialized.id);
@@ -157,5 +254,25 @@ mod tests {
         assert_eq!(clip.source_offset, deserialized.source_offset);
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
+        assert_eq!(clip.source, deserialized.source);
+        assert_eq!(clip.original_bpm, deserialized.original_bpm);
+        assert_eq!(clip.warped, deserialized.warped);
+        assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
+    }
+
+    #[test]
+    fn clip_info_backward_compat_from_legacy_file_path() {
+        let json = r#"{
+            "id":0,
+            "track_id":0,
+            "name":"legacy.wav",
+            "position":0,
+            "source_offset":0,
+            "duration":100,
+            "file_path":"legacy.wav"
+        }"#;
+        let clip: ClipInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
+        assert!(clip.source.is_none());
     }
 }

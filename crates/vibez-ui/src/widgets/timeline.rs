@@ -22,6 +22,11 @@ pub struct TimelineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// True when this clip is warped but its `warped_to_bpm` no longer
+    /// matches the current project BPM. The canvas draws a diagonal
+    /// stripe overlay so the user can see at a glance that a re-warp
+    /// is needed.
+    pub warp_stale: bool,
 }
 
 /// Lightweight copy of a note clip for timeline rendering.
@@ -450,19 +455,14 @@ impl canvas::Program<Message> for RulerWidget {
                                     .clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(
-                                        overshoot as f64 * 2.0,
-                                    )),
+                                    Some(Message::ScrollArrangement(overshoot as f64 * 2.0)),
                                 );
                             }
                             if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
-                                let overshoot = ((edge_zone - local_x) / edge_zone)
-                                    .clamp(0.0, 3.0);
+                                let overshoot = ((edge_zone - local_x) / edge_zone).clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(
-                                        -(overshoot as f64 * 2.0),
-                                    )),
+                                    Some(Message::ScrollArrangement(-(overshoot as f64 * 2.0))),
                                 );
                             }
                         }
@@ -487,6 +487,7 @@ impl canvas::Program<Message> for RulerWidget {
                                             Some(Message::SetTimeSelection {
                                                 start_beats: start,
                                                 end_beats: end,
+                                                track_id: None,
                                             }),
                                         );
                                     }
@@ -502,6 +503,7 @@ impl canvas::Program<Message> for RulerWidget {
                                         Some(Message::SetTimeSelection {
                                             start_beats: start,
                                             end_beats: end,
+                                            track_id: None,
                                         }),
                                     );
                                 }
@@ -690,6 +692,16 @@ pub struct TrackClipCanvas {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Track the selection originated on. `None` means arrangement-wide
+    /// (selection was drawn on the ruler); `Some` means show it only on
+    /// that lane.
+    pub time_selection_track: Option<TrackId>,
+    /// True while a sample is being drag-dropped from the browser.
+    /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
+    pub sample_drop_active: bool,
+    /// The track name this canvas was constructed with. Drawn on the drop
+    /// indicator so the user can verify which lane will receive the drop.
+    pub track_name: String,
 }
 
 impl TrackClipCanvas {
@@ -716,6 +728,8 @@ impl TrackClipCanvas {
         time_selection_active: bool,
         selection_start_beats: f64,
         selection_end_beats: f64,
+        time_selection_track: Option<TrackId>,
+        sample_drop_active: bool,
     ) -> Self {
         let clips = track
             .clips
@@ -729,6 +743,10 @@ impl TrackClipCanvas {
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
+                warp_stale: c.warped
+                    && c.warped_to_bpm
+                        .map(|b| (b - bpm).abs() > 0.01)
+                        .unwrap_or(false),
             })
             .collect();
         let note_clips = track
@@ -773,6 +791,9 @@ impl TrackClipCanvas {
             time_selection_active,
             selection_start_beats,
             selection_end_beats,
+            time_selection_track,
+            sample_drop_active,
+            track_name: track.name.clone(),
         }
     }
 
@@ -852,15 +873,21 @@ impl canvas::Program<Message> for TrackClipCanvas {
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
         let ppb = self.pixels_per_beat();
 
+        // True when a sample drag is active and the cursor is hovering this
+        // lane. Used to paint a drop indicator.
+        let drop_hover = self.sample_drop_active && cursor.position_in(bounds).is_some();
+
         // Background
-        let bg_color = if self.selected {
+        let bg_color = if drop_hover {
+            theme::ACCENT_DIM
+        } else if self.selected {
             theme::TRACK_BG_SELECTED
         } else {
             theme::TRACK_BG
@@ -1064,6 +1091,48 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         ..Default::default()
                     });
                 }
+
+                // Diagonal stripe overlay when the clip's warp is
+                // stale relative to the current project tempo. Low
+                // opacity so the waveform and clip colour remain
+                // legible, but strong enough to catch the eye.
+                if clip.warp_stale && clip_w > 4.0 {
+                    let stripe_color = theme::with_alpha(theme::METER_YELLOW, 0.22);
+                    let stripe_spacing = 8.0f32;
+                    let stripe_stroke = 1.5f32;
+                    let mut offset = -clip_h;
+                    while offset < clip_w {
+                        let x0 = clip_x + offset;
+                        let x1 = clip_x + offset + clip_h;
+                        let a_x = x0.clamp(clip_x, clip_x + clip_w);
+                        let b_x = x1.clamp(clip_x, clip_x + clip_w);
+                        let a_t = if (x1 - x0).abs() > 0.1 {
+                            (a_x - x0) / (x1 - x0)
+                        } else {
+                            0.0
+                        };
+                        let b_t = if (x1 - x0).abs() > 0.1 {
+                            (b_x - x0) / (x1 - x0)
+                        } else {
+                            0.0
+                        };
+                        let a_y = clip_y + a_t * clip_h;
+                        let b_y = clip_y + b_t * clip_h;
+                        if (b_x - a_x).abs() > 0.5 {
+                            let line = canvas::Path::line(
+                                iced::Point::new(a_x, a_y),
+                                iced::Point::new(b_x, b_y),
+                            );
+                            frame.stroke(
+                                &line,
+                                canvas::Stroke::default()
+                                    .with_color(stripe_color)
+                                    .with_width(stripe_stroke),
+                            );
+                        }
+                        offset += stripe_spacing;
+                    }
+                }
             }
         }
 
@@ -1249,8 +1318,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
             }
         }
 
-        // Selection region tint (separate from loop)
-        if self.time_selection_active && self.selection_end_beats > self.selection_start_beats {
+        // Selection region tint. Only drawn on the lane the selection
+        // originated on; ruler-drawn selections (track_id = None) still
+        // show across every lane.
+        let show_selection_on_this_lane = self
+            .time_selection_track
+            .is_none_or(|tid| tid == self.track_id);
+        if show_selection_on_this_lane
+            && self.time_selection_active
+            && self.selection_end_beats > self.selection_start_beats
+        {
             let sel_x1 = self.beat_to_x(self.selection_start_beats);
             let sel_x2 = self.beat_to_x(self.selection_end_beats);
             let fill_x = sel_x1.max(0.0);
@@ -1287,6 +1364,46 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 .with_color(theme::DIVIDER)
                 .with_width(1.0),
         );
+
+        // Drop-target indicator: bold accent border + vertical bar at the
+        // cursor x + the track name overlaid so the user can verify which
+        // lane will receive the drop.
+        if drop_hover {
+            let outline = canvas::Path::rectangle(
+                iced::Point::new(1.0, 1.0),
+                iced::Size::new(w - 2.0, h - 2.0),
+            );
+            frame.stroke(
+                &outline,
+                canvas::Stroke::default()
+                    .with_color(theme::ACCENT)
+                    .with_width(2.0),
+            );
+            if let Some(local) = cursor.position_in(bounds) {
+                let beat = self.x_to_beat(local.x).max(0.0);
+                let snapped_x = self.beat_to_x(beat.round());
+                if snapped_x >= 0.0 && snapped_x <= w {
+                    let drop_line = canvas::Path::line(
+                        iced::Point::new(snapped_x, 0.0),
+                        iced::Point::new(snapped_x, h),
+                    );
+                    frame.stroke(
+                        &drop_line,
+                        canvas::Stroke::default()
+                            .with_color(theme::ACCENT)
+                            .with_width(2.0),
+                    );
+                }
+            }
+            // "Dropping to <track>" label inside the lane.
+            frame.fill_text(canvas::Text {
+                content: format!("Drop on: {}", self.track_name),
+                position: iced::Point::new(8.0, 8.0),
+                color: theme::ACCENT,
+                size: 14.0.into(),
+                ..Default::default()
+            });
+        }
 
         vec![frame.into_geometry()]
     }
@@ -1386,7 +1503,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         );
                     }
 
-                    // No clip hit — PendingSeek (may become RegionSelect on drag)
+                    // No clip hit. Start a PendingSeek (may become RegionSelect on drag).
+                    // Also surface the track as the selection target so subsequent
+                    // browser imports / dropdowns know which lane is "active".
                     if bounds.width > 0.0 {
                         let ppb = self.pixels_per_beat();
                         let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
@@ -1394,7 +1513,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             beat,
                             start_x: pos.x,
                         });
-                        return (canvas::event::Status::Captured, None);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::SelectTrack(track_id)),
+                        );
                     }
                 }
             }
@@ -1457,6 +1579,21 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                // If a sample drag from the browser is in flight and the
+                // cursor is over this lane, publish a hover update so the
+                // global drop handler can route a release here even if
+                // the release lands on a sub-pixel boundary outside
+                // `cursor.position_in(bounds)`.
+                if self.sample_drop_active {
+                    if let Some(local) = cursor.position_in(bounds) {
+                        let beat = self.x_to_beat(local.x).max(0.0).round();
+                        return (
+                            canvas::event::Status::Ignored,
+                            Some(Message::DragHoverTrack { track_id, beat }),
+                        );
+                    }
+                }
+
                 if let Some(ref drag) = state.drag {
                     if let Some(pos) = cursor.position() {
                         let local_x = pos.x - bounds.x;
@@ -1484,6 +1621,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                             Some(Message::SetTimeSelection {
                                                 start_beats: start,
                                                 end_beats: end,
+                                                track_id: Some(track_id),
                                             }),
                                         );
                                     }
@@ -1501,6 +1639,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         Some(Message::SetTimeSelection {
                                             start_beats: start,
                                             end_beats: end,
+                                            track_id: Some(track_id),
                                         }),
                                     );
                                 }
@@ -1612,8 +1751,29 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Release: end drag --
+            // -- Release: end drag or drop sample --
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                // Drag-and-drop from the sample browser wins over a local
+                // drag: if a sample is being dragged and the cursor is
+                // inside this lane on release, emit a drop message.
+                if self.sample_drop_active {
+                    if let Some(pos) = cursor.position_in(bounds) {
+                        // Snap the drop position to the nearest beat so it
+                        // matches the indicator drawn in `draw`.
+                        let beat = self.x_to_beat(pos.x).max(0.0).round();
+                        let spb = self.spb();
+                        let position_samples = if spb > 0.0 { (beat * spb) as u64 } else { 0 };
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::DropSampleOnArrangement {
+                                track_id,
+                                position_samples,
+                            }),
+                        );
+                    }
+                }
+
                 if let Some(ref drag) = state.drag {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
@@ -1667,27 +1827,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 }
             }
 
-            // -- Keyboard: Delete/Backspace for selected clip(s) --
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
-                ..
-            })
-            | canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
-                ..
-            }) => {
-                if !self.selected_clips.is_empty() {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::DeleteSelectedClip),
-                    );
-                } else if self.selected {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::RemoveTrack(self.track_id)),
-                    );
-                }
-            }
+            // Delete/Backspace are handled centrally by the global
+            // DeleteKeyPressed shortcut (context-aware: selected notes
+            // first, then clips). The old canvas binding here raced
+            // the piano roll's and won, deleting the clip while a
+            // note was selected; it could even delete the whole track.
 
             // -- Keyboard shortcuts (Ctrl+D/E/J/T) --
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -1722,10 +1866,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     Some(Message::AddInstrumentTrack),
                                 );
                             } else {
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::AddTrack),
-                                );
+                                return (canvas::event::Status::Captured, Some(Message::AddTrack));
                             }
                         }
                         _ => {}
@@ -1888,10 +2029,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
         // Playhead line
         let ph_x = (self.playhead_beats * ppb_mini) as f32;
         if ph_x >= 0.0 && ph_x <= w {
-            let playhead = canvas::Path::line(
-                iced::Point::new(ph_x, 0.0),
-                iced::Point::new(ph_x, h),
-            );
+            let playhead =
+                canvas::Path::line(iced::Point::new(ph_x, 0.0), iced::Point::new(ph_x, h));
             frame.stroke(
                 &playhead,
                 canvas::Stroke::default()
@@ -1901,10 +2040,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         // Bottom border
-        let border = canvas::Path::line(
-            iced::Point::new(0.0, h - 0.5),
-            iced::Point::new(w, h - 0.5),
-        );
+        let border =
+            canvas::Path::line(iced::Point::new(0.0, h - 0.5), iced::Point::new(w, h - 0.5));
         frame.stroke(
             &border,
             canvas::Stroke::default()
@@ -1930,9 +2067,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         let visible = self.visible_beats(bounds.width);
 
         match event {
-            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                iced::mouse::Button::Left,
-            )) => {
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let click_beat = pos.x as f64 / ppb_mini;
 
@@ -1990,9 +2125,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                     }
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                iced::mouse::Button::Left,
-            )) => {
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 if state.drag.is_some() {
                     state.drag = None;
                     return (canvas::event::Status::Captured, None);

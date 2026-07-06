@@ -315,6 +315,65 @@ pub fn resample_audio(
 }
 
 // ---------------------------------------------------------------------------
+// Writing
+// ---------------------------------------------------------------------------
+
+/// Write a [`DecodedAudio`] buffer to a 16-bit PCM WAV file.
+///
+/// Samples are clamped to `[-1.0, 1.0]` and scaled to `i16`. Parent directories
+/// are created as needed. A zero-frame buffer produces a valid empty WAV.
+pub fn write_wav_file(path: &Path, audio: &DecodedAudio) -> Result<(), FileIoError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    let num_channels = audio.num_channels().max(1) as u16;
+    let num_frames = audio.num_frames();
+    let sample_rate = audio.sample_rate;
+    let bits_per_sample: u16 = 16;
+    let byte_rate = sample_rate * num_channels as u32 * (bits_per_sample as u32 / 8);
+    let block_align = num_channels * bits_per_sample / 8;
+    let data_size = (num_frames * num_channels as usize * 2) as u32;
+    let file_size = 36 + data_size;
+
+    let mut buf = Vec::with_capacity(44 + data_size as usize);
+
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&file_size.to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes());
+    buf.extend_from_slice(&num_channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&bits_per_sample.to_le_bytes());
+
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_size.to_le_bytes());
+
+    let channel_slices: Vec<&[f32]> = (0..num_channels as usize)
+        .map(|ch| audio.channels.get(ch).map(Vec::as_slice).unwrap_or(&[]))
+        .collect();
+
+    for frame in 0..num_frames {
+        for ch_data in &channel_slices {
+            let sample = ch_data.get(frame).copied().unwrap_or(0.0);
+            let clamped = sample.clamp(-1.0, 1.0);
+            let as_i16 = (clamped * i16::MAX as f32).round() as i16;
+            buf.extend_from_slice(&as_i16.to_le_bytes());
+        }
+    }
+
+    std::fs::write(path, buf)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -657,5 +716,63 @@ mod tests {
         // Test Error trait.
         let err: &dyn std::error::Error = &FileIoError::EmptyAudio;
         assert!(err.to_string().contains("no decodable frames"));
+    }
+
+    #[test]
+    fn write_wav_roundtrip_stereo() {
+        let frames = 4_410;
+        let left: Vec<f32> = (0..frames)
+            .map(|i| {
+                let t = i as f32 / 44_100.0;
+                (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5
+            })
+            .collect();
+        let right: Vec<f32> = (0..frames)
+            .map(|i| {
+                let t = i as f32 / 44_100.0;
+                (2.0 * std::f32::consts::PI * 660.0 * t).sin() * 0.5
+            })
+            .collect();
+        let audio = DecodedAudio {
+            channels: vec![left, right],
+            sample_rate: 44_100,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roundtrip.wav");
+        write_wav_file(&path, &audio).unwrap();
+
+        let loaded = decode_audio_file(&path).unwrap();
+        assert_eq!(loaded.sample_rate, 44_100);
+        assert_eq!(loaded.num_channels(), 2);
+        assert_eq!(loaded.num_frames(), frames);
+
+        let peak_l = loaded.channels[0]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        let peak_r = loaded.channels[1]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        assert!(peak_l > 0.4 && peak_l <= 0.51, "peak_l {peak_l}");
+        assert!(peak_r > 0.4 && peak_r <= 0.51, "peak_r {peak_r}");
+    }
+
+    #[test]
+    fn write_wav_clamps_clipping_samples() {
+        let audio = DecodedAudio {
+            channels: vec![vec![2.0, -2.0, 0.5]],
+            sample_rate: 22_050,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clamp.wav");
+        write_wav_file(&path, &audio).unwrap();
+
+        let loaded = decode_audio_file(&path).unwrap();
+        let ch = &loaded.channels[0];
+        assert!((ch[0] - 1.0).abs() < 1e-3);
+        assert!((ch[1] - (-1.0)).abs() < 1e-3);
+        assert!((ch[2] - 0.5).abs() < 1e-3);
     }
 }

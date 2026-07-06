@@ -13,5 +13,6 @@ serde_json = { workspace = true }
 clap-sys = "0.5"
 vst3 = "0.3"
 libloading = "0.8"
+libc = "0.2"
 dirs = "5"
 log = "0.4"

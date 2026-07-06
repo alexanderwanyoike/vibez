@@ -5,9 +5,7 @@ use clap_sys::events::{
     clap_event_header, clap_event_note, clap_input_events, clap_output_events,
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
 };
-use clap_sys::ext::params::{
-    clap_plugin_params, CLAP_EXT_PARAMS,
-};
+use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
 use clap_sys::plugin::clap_plugin;
 use clap_sys::process::{clap_process, clap_process_status};
 
@@ -121,8 +119,7 @@ impl ClapPluginInstance {
         let entry_ref = unsafe { &*partial.entry_ptr };
 
         // entry.init() — lightweight, just returns true for clap-juce-extensions
-        let path_cstr =
-            CString::new(partial.path.as_str()).map_err(|e| format!("{e}"))?;
+        let path_cstr = CString::new(partial.path.as_str()).map_err(|e| format!("{e}"))?;
         let init_ok = unsafe { (entry_ref.init.unwrap())(path_cstr.as_ptr()) };
         if !init_ok {
             return Err("clap_entry.init() failed".into());
@@ -133,7 +130,8 @@ impl ClapPluginInstance {
             (entry_ref.get_factory.unwrap())(
                 clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID.as_ptr(),
             )
-        } as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
+        }
+            as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
 
         if factory_ptr.is_null() {
             return Err("No plugin factory".into());
@@ -224,9 +222,9 @@ impl ClapPluginInstance {
 fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f32>) {
     let plugin_ref = unsafe { &*plugin_ptr };
 
-    let ext_ptr = unsafe {
-        (plugin_ref.get_extension.unwrap())(plugin_ptr, CLAP_EXT_PARAMS.as_ptr())
-    } as *const clap_plugin_params;
+    let ext_ptr =
+        unsafe { (plugin_ref.get_extension.unwrap())(plugin_ptr, CLAP_EXT_PARAMS.as_ptr()) }
+            as *const clap_plugin_params;
 
     if ext_ptr.is_null() {
         return (Vec::new(), Vec::new());
@@ -256,14 +254,18 @@ fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f3
         }
 
         // Extract name from the fixed-size char array
-        let name_bytes: Vec<u8> = info.name.iter().take_while(|&&b| b != 0).map(|&b| b as u8).collect();
+        let name_bytes: Vec<u8> = info
+            .name
+            .iter()
+            .take_while(|&&b| b != 0)
+            .map(|&b| b as u8)
+            .collect();
         let name_string = String::from_utf8_lossy(&name_bytes).to_string();
         // Leak the string so we get &'static str (small, lives for session duration)
         let name_static: &'static str = Box::leak(name_string.into_boxed_str());
 
         let mut value = 0.0_f64;
-        let _ok =
-            unsafe { (params_ext.get_value.unwrap())(plugin_ptr, info.id, &mut value) };
+        let _ok = unsafe { (params_ext.get_value.unwrap())(plugin_ptr, info.id, &mut value) };
 
         descriptors.push(ParamDescriptor {
             name: name_static,
@@ -281,6 +283,14 @@ fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f3
 impl PluginInstance for ClapPluginInstance {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        unsafe { crate::state::clap_save_state(self.plugin_ptr) }
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        unsafe { crate::state::clap_load_state(self.plugin_ptr, data) }
     }
 
     fn param_count(&self) -> usize {
@@ -347,7 +357,8 @@ impl PluginInstance for ClapPluginInstance {
             events: &input_events_storage,
         };
         let input_events_clap = clap_input_events {
-            ctx: &input_events as *const ClapInputEvents as *const std::ffi::c_void as *mut std::ffi::c_void,
+            ctx: &input_events as *const ClapInputEvents as *const std::ffi::c_void
+                as *mut std::ffi::c_void,
             size: Some(input_events_size),
             get: Some(input_events_get),
         };
@@ -447,9 +458,8 @@ impl PluginInstance for ClapPluginInstance {
             return false;
         }
         let plugin_ref = unsafe { &*self.plugin_ptr };
-        let ok = unsafe {
-            (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 32, 4096)
-        };
+        let ok =
+            unsafe { (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 32, 4096) };
         if ok {
             unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
             self.active = true;
@@ -544,11 +554,7 @@ mod tests {
         let fake_plugin = dir.join("vibez_test_fake.clap");
         std::fs::write(&fake_plugin, b"not a real shared library").unwrap();
 
-        let result = ClapPluginInstance::load_partial(
-            &fake_plugin,
-            "com.test.plugin",
-            false,
-        );
+        let result = ClapPluginInstance::load_partial(&fake_plugin, "com.test.plugin", false);
         assert!(result.is_err());
 
         std::fs::remove_file(&fake_plugin).ok();

@@ -3,6 +3,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
@@ -47,6 +48,21 @@ pub enum EngineCommand {
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
+    /// Swap the audio buffer backing an existing clip in place. Used
+    /// by the warp / quantize pipelines to install a stretched buffer
+    /// without round-tripping through RemoveClip + AddClip (which
+    /// would break playback continuity and lose selection state).
+    /// The caller is responsible for scaling `duration`,
+    /// `source_offset`, and loop bounds by the stretch ratio.
+    ReplaceClipAudio {
+        track_id: TrackId,
+        clip_id: ClipId,
+        audio: Arc<DecodedAudio>,
+        duration: u64,
+        source_offset: u64,
+        loop_start: u64,
+        loop_end: u64,
+    },
     /// Move a clip to a new position on the timeline.
     MoveClip {
         track_id: TrackId,
@@ -146,6 +162,21 @@ pub enum EngineCommand {
         sample: Arc<DecodedAudio>,
         sample_name: String,
     },
+    LoadDrumRackPadSample {
+        track_id: TrackId,
+        pad_index: usize,
+        sample: Arc<DecodedAudio>,
+        sample_name: String,
+    },
+    ClearDrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
+    SetDrumRackPadState {
+        track_id: TrackId,
+        pad_index: usize,
+        state: DrumPadState,
+    },
 
     // -- Arrangement loop --
     SetArrangementLoop(bool),
@@ -170,6 +201,30 @@ pub enum EngineCommand {
         loop_end_beats: f64,
     },
 
+    // -- Preview (sample auditioning) --
+    /// Start previewing a decoded audio buffer on the hidden preview
+    /// channel. Bypasses transport, mute, and solo; one-shot; the
+    /// previous preview is cut if still playing.
+    StartPreview(Arc<DecodedAudio>),
+    /// Stop any in-progress preview.
+    StopPreview,
+
+    // -- External MIDI input --
+    /// Route a live note-on from an external MIDI source (hardware
+    /// keyboard, Push, virtual cable) to the instrument on the named
+    /// track. Routed outside the clip pipeline so it works regardless
+    /// of transport state.
+    ExternalNoteOn {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+    },
+    /// Route a live note-off from an external MIDI source.
+    ExternalNoteOff {
+        track_id: TrackId,
+        pitch: u8,
+    },
+
     // -- External plugins --
     /// Add a pre-loaded external plugin effect to a track.
     AddPluginEffect {
@@ -179,6 +234,15 @@ pub enum EngineCommand {
         position: Option<usize>,
     },
     /// Set a pre-loaded external plugin instrument on a track.
+    /// Audition a single note on a track's instrument (piano-roll
+    /// key press / drum pad click). Works while the transport is
+    /// stopped thanks to idle instrument rendering.
+    AuditionNote {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+    },
     SetPluginInstrument {
         track_id: TrackId,
         instrument: Box<dyn Instrument>,

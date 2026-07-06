@@ -1,3 +1,4 @@
+pub mod drum_rack;
 pub(crate) mod envelope;
 pub mod sampler;
 pub mod synth;
@@ -7,7 +8,9 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
+use vibez_core::track::DrumPadState;
 
+use drum_rack::DrumRack;
 use sampler::Sampler;
 use synth::SubtractiveSynth;
 
@@ -39,6 +42,21 @@ pub trait Instrument: Send {
     /// Load a sample into the instrument. No-op for non-sample instruments.
     fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {}
 
+    /// Load a sample into a drum-rack pad. No-op for non-drum-rack instruments.
+    fn load_drum_pad_sample(
+        &mut self,
+        _pad_index: usize,
+        _sample: Arc<DecodedAudio>,
+        _name: String,
+    ) {
+    }
+
+    /// Clear a drum-rack pad. No-op for non-drum-rack instruments.
+    fn clear_drum_pad(&mut self, _pad_index: usize) {}
+
+    /// Apply pad settings to a drum-rack pad. No-op for other instruments.
+    fn set_drum_pad_state(&mut self, _pad_index: usize, _state: DrumPadState) {}
+
     /// Sample name for UI display. None for non-sample instruments.
     fn sample_name(&self) -> Option<&str> {
         None
@@ -50,5 +68,6 @@ pub fn create_instrument(kind: InstrumentKind, sample_rate: f32) -> Box<dyn Inst
     match kind {
         InstrumentKind::SubtractiveSynth => Box::new(SubtractiveSynth::new(sample_rate)),
         InstrumentKind::Sampler => Box::new(Sampler::new(sample_rate)),
+        InstrumentKind::DrumRack => Box::new(DrumRack::new(sample_rate)),
     }
 }

@@ -5,4 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+signalsmith-stretch = "0.1.3"
 vibez-core = { workspace = true }

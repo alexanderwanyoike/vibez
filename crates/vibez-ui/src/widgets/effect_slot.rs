@@ -1,15 +1,13 @@
-use iced::widget::{button, canvas, column, container, row, text, Space};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Color, Element, Length, Theme};
 
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
-use crate::widgets::effect_knob::EffectKnobWidget;
+use crate::widgets::effect_knob::{param_column, EffectKnobWidget};
 use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
-
-const CARD_WIDTH: f32 = 220.0;
 
 /// Render an Ableton-style device card for the detail panel.
 pub fn view_effect_slot<'a>(
@@ -20,6 +18,7 @@ pub fn view_effect_slot<'a>(
     let is_bypassed = effect.bypass;
     let has_params = !effect.descriptors.is_empty();
     let has_gui = effect.has_plugin_gui;
+    let is_plugin = effect.plugin_name.is_some();
 
     let dot_color = if is_bypassed {
         th::TEXT_MUTED
@@ -60,7 +59,10 @@ pub fn view_effect_slot<'a>(
 
     // Fixed-size controls on the right
     // Edit button (open plugin GUI) — only for effects with a native GUI
-    let edit_btn: Option<iced::widget::Button<'_, Message>> = if has_gui {
+    let make_edit = || -> Option<iced::widget::Button<'a, Message>> {
+        if !has_gui {
+            return None;
+        }
         let gui_key = PluginGuiKey::Effect {
             track_id,
             effect_id: effect.id,
@@ -86,8 +88,6 @@ pub fn view_effect_slot<'a>(
                     }
                 }),
         )
-    } else {
-        None
     };
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
@@ -96,44 +96,50 @@ pub fn view_effect_slot<'a>(
     } else {
         th::SUCCESS
     };
-    let bypass_btn = button(text(bypass_label).size(9).color(bypass_color))
-        .on_press(Message::ToggleEffectBypass(track_id, effect.id))
-        .padding([2, 5])
-        .style(move |_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered => Some(th::BG_HOVER.into()),
-                _ => None,
-            };
-            button::Style {
-                background: bg,
-                text_color: bypass_color,
-                border: iced::Border {
-                    color: if is_bypassed {
-                        th::BORDER
-                    } else {
-                        th::darken(th::SUCCESS, 0.5)
+    let make_bypass = move || {
+        button(text(bypass_label).size(9).color(bypass_color))
+            .on_press(Message::ToggleEffectBypass(track_id, effect.id))
+            .padding([2, 5])
+            .style(move |_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: bypass_color,
+                    border: iced::Border {
+                        color: if is_bypassed {
+                            th::BORDER
+                        } else {
+                            th::darken(th::SUCCESS, 0.5)
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
                     },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+                    ..Default::default()
+                }
+            })
+    };
 
-    let move_up: Element<'a, Message> = action_btn(
-        icons::CHEVRON_UP,
-        th::TEXT_DIM,
-        th::TEXT,
-        Message::MoveEffectUp(track_id, effect.id),
-    )
-    .into();
-    let move_down: Element<'a, Message> = action_btn(
-        icons::CHEVRON_DOWN,
-        th::TEXT_DIM,
-        th::TEXT,
-        Message::MoveEffectDown(track_id, effect.id),
-    )
-    .into();
+    let make_move_up = || -> Element<'a, Message> {
+        action_btn(
+            icons::CHEVRON_UP,
+            th::TEXT_DIM,
+            th::TEXT,
+            Message::MoveEffectUp(track_id, effect.id),
+        )
+        .into()
+    };
+    let make_move_down = || -> Element<'a, Message> {
+        action_btn(
+            icons::CHEVRON_DOWN,
+            th::TEXT_DIM,
+            th::TEXT,
+            Message::MoveEffectDown(track_id, effect.id),
+        )
+        .into()
+    };
     let remove: Element<'a, Message> = action_btn(
         icons::X,
         th::TEXT_DIM,
@@ -145,22 +151,28 @@ pub fn view_effect_slot<'a>(
     let mut title_row = row![dot, name_section]
         .spacing(3)
         .align_y(iced::Alignment::Center);
-    if let Some(eb) = edit_btn {
-        title_row = title_row.push(eb);
+    if is_plugin {
+        // Plugins: name gets the title to itself; Edit/On/reorder
+        // live in the body where they have room.
+        title_row = title_row.push(remove);
+    } else {
+        if let Some(eb) = make_edit() {
+            title_row = title_row.push(eb);
+        }
+        title_row = title_row
+            .push(make_bypass())
+            .push(make_move_up())
+            .push(make_move_down())
+            .push(remove);
     }
-    title_row = title_row
-        .push(bypass_btn)
-        .push(move_up)
-        .push(move_down)
-        .push(remove);
 
     let title_bar = container(title_row)
-    .padding([4, 6])
-    .width(Length::Fill)
-    .style(|_theme: &Theme| container::Style {
-        background: Some(th::BG_SURFACE.into()),
-        ..Default::default()
-    });
+        .padding([4, 6])
+        .width(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::BG_SURFACE.into()),
+            ..Default::default()
+        });
 
     // ── Body ─────────────────────────────────────────────────
     let body: Element<'a, Message> = if has_params && !has_gui {
@@ -169,10 +181,9 @@ pub fn view_effect_slot<'a>(
         } else {
             track_color
         };
-        let mut param_rows = column![].spacing(6);
-        let mut current_row = row![].spacing(8);
-        let mut count = 0;
-
+        // One knob row in the shared column format: the devices
+        // panel scrolls horizontally and stacked rows clip.
+        let mut knob_row = row![].spacing(6);
         for (i, descriptor) in effect.descriptors.iter().enumerate() {
             let value = effect.params.get(i).copied().unwrap_or(descriptor.default);
             let knob = EffectKnobWidget::new(
@@ -185,42 +196,73 @@ pub fn view_effect_slot<'a>(
                 descriptor.default,
                 knob_color,
             );
-            let knob_canvas: Element<'a, Message> = canvas(knob)
-                .width(Length::Fixed(32.0))
-                .height(Length::Fixed(32.0))
-                .into();
-
-            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
-            let value_text = format_param_value(value, descriptor.unit);
-            let value_label = text(value_text).size(8).color(th::TEXT_MUTED);
-
-            let param_col = column![knob_canvas, label, value_label]
-                .spacing(1)
-                .align_x(iced::Alignment::Center);
-
-            current_row = current_row.push(param_col);
-            count += 1;
-
-            if count % 4 == 0 {
-                param_rows = param_rows.push(current_row);
-                current_row = row![].spacing(8);
-            }
+            knob_row = knob_row.push(param_column(
+                knob,
+                descriptor.name.to_string(),
+                crate::widgets::effect_knob::format_value(value, descriptor.unit),
+            ));
         }
 
-        if count % 4 != 0 {
-            param_rows = param_rows.push(current_row);
-        }
+        container(knob_row)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
+    } else if is_plugin {
+        // External plugin face: format badge, prominent Edit, then
+        // bypass and chain-reorder controls.
+        let format_label = effect
+            .plugin_ref
+            .as_ref()
+            .map(|d| d.format.to_uppercase())
+            .unwrap_or_else(|| "PLUGIN".to_string());
+        let badge = container(text(format_label).size(8).color(th::ACCENT))
+            .padding([2, 8])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_DARK.into()),
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            });
 
-        container(param_rows)
-            .padding([6, 7])
+        let mut face = column![badge].spacing(10).align_x(iced::Alignment::Center);
+        if let Some(eb) = make_edit() {
+            face = face.push(eb.padding([5, 22]));
+        }
+        face = face.push(
+            row![make_bypass(), make_move_up(), make_move_down()]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+        );
+
+        container(face)
             .width(Length::Fill)
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
             .into()
     } else {
-        Space::new(Length::Fill, Length::Fixed(2.0)).into()
+        container(Space::new(Length::Fixed(120.0), Length::Fixed(2.0)))
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
     };
 
     // ── Card ─────────────────────────────────────────────────
-    let card = column![title_bar, body].width(Length::Fixed(CARD_WIDTH));
+    // Fixed width computed from the knob count: a Fill title strip
+    // inside a shrink column collapses the card chrome in iced.
+    let knob_count = if has_params && !has_gui {
+        effect.descriptors.len()
+    } else {
+        0
+    };
+    let card_w = if is_plugin {
+        190.0
+    } else {
+        (knob_count as f32 * 62.0 + 24.0).max(150.0)
+    };
+    let card = column![title_bar, body].width(Length::Fixed(card_w));
 
     container(card)
         .style(|_theme: &Theme| container::Style {
@@ -261,14 +303,4 @@ fn action_btn(
                 ..Default::default()
             }
         })
-}
-
-fn format_param_value(value: f32, unit: &str) -> String {
-    if unit.is_empty() {
-        format!("{value:.2}")
-    } else if unit == "Hz" && value >= 1000.0 {
-        format!("{:.1}k{unit}", value / 1000.0)
-    } else {
-        format!("{value:.1}{unit}")
-    }
 }

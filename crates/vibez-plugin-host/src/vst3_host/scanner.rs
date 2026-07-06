@@ -12,6 +12,49 @@ pub fn scan_vst3(path: &Path) -> Result<Vec<PluginInfo>, String> {
     }
 }
 
+/// Run the platform-specific VST3 module entry export. The VST3 spec
+/// requires this before `GetPluginFactory` (Linux: `ModuleEntry(handle)`,
+/// Windows: `InitDll()`); DPF-based plugins such as Dragonfly Reverb
+/// segfault inside the factory if it is skipped. Takes the library by
+/// value because extracting the raw handle on unix consumes the wrapper.
+pub(crate) fn vst3_module_init(lib: libloading::Library) -> Result<libloading::Library, String> {
+    #[cfg(unix)]
+    {
+        use libloading::os::unix::Library as UnixLibrary;
+        let handle = UnixLibrary::from(lib).into_raw();
+        let lib = libloading::Library::from(unsafe { UnixLibrary::from_raw(handle) });
+        type ModuleEntryFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> bool;
+        if let Ok(entry) = unsafe { lib.get::<ModuleEntryFn>(b"ModuleEntry\0") } {
+            if !unsafe { entry(handle) } {
+                return Err("ModuleEntry returned false".into());
+            }
+        }
+        Ok(lib)
+    }
+    #[cfg(windows)]
+    {
+        type InitDllFn = unsafe extern "system" fn() -> bool;
+        if let Ok(entry) = unsafe { lib.get::<InitDllFn>(b"InitDll\0") } {
+            if !unsafe { entry() } {
+                return Err("InitDll returned false".into());
+            }
+        }
+        Ok(lib)
+    }
+}
+
+/// Counterpart to [`vst3_module_init`]; call before the library is dropped.
+pub(crate) fn vst3_module_exit(lib: &libloading::Library) {
+    #[cfg(unix)]
+    const NAME: &[u8] = b"ModuleExit\0";
+    #[cfg(windows)]
+    const NAME: &[u8] = b"ExitDll\0";
+    type ExitFn = unsafe extern "system" fn() -> bool;
+    if let Ok(exit) = unsafe { lib.get::<ExitFn>(NAME) } {
+        unsafe { exit() };
+    }
+}
+
 fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
     let module_path = find_vst3_module(path)?;
 
@@ -19,6 +62,7 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
         libloading::Library::new(&module_path)
             .map_err(|e| format!("Failed to load VST3 module: {e}"))?
     };
+    let lib = vst3_module_init(lib)?;
 
     // GetPluginFactory returns a raw COM pointer to IPluginFactory.
     // We call through the vtable directly since the vst3 crate's traits require smart pointers.
@@ -102,6 +146,7 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
 
     // Drop the library so the OS fully unloads it and resets all statics.
     // Leaking via mem::forget can poison plugins that use one-shot init guards.
+    vst3_module_exit(&lib);
     drop(lib);
 
     Ok(results)

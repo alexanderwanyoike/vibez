@@ -1,9 +1,16 @@
 use vibez_core::effect::EffectType;
 
+use crate::auto_pan::AutoPanEffect;
+use crate::bitcrush::BitcrushEffect;
+use crate::compressor::CompressorEffect;
 use crate::delay::DelayEffect;
+use crate::drive::DriveEffect;
 use crate::effect::AudioEffect;
+use crate::eq::EqEffect;
 use crate::filter::FilterEffect;
 use crate::gain::GainEffect;
+use crate::gate::GateEffect;
+use crate::phaser::PhaserEffect;
 use crate::reverb::ReverbEffect;
 
 /// Create an effect instance from its type.
@@ -13,6 +20,13 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Filter => Box::new(FilterEffect::new(sample_rate)),
         EffectType::Delay => Box::new(DelayEffect::new(sample_rate)),
         EffectType::Reverb => Box::new(ReverbEffect::new(sample_rate)),
+        EffectType::Drive => Box::new(DriveEffect::new()),
+        EffectType::Bitcrush => Box::new(BitcrushEffect::new()),
+        EffectType::Compressor => Box::new(CompressorEffect::new(sample_rate)),
+        EffectType::AutoPan => Box::new(AutoPanEffect::new(sample_rate)),
+        EffectType::Gate => Box::new(GateEffect::new(sample_rate)),
+        EffectType::Phaser => Box::new(PhaserEffect::new(sample_rate)),
+        EffectType::Eq => Box::new(EqEffect::new(sample_rate)),
     }
 }
 

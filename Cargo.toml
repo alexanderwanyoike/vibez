@@ -7,6 +7,7 @@ members = [
     "crates/vibez-instruments",
     "crates/vibez-plugin-host",
     "crates/vibez-project",
+    "crates/vibez-dropbox",
     "crates/vibez-ui",
 ]
 resolver = "2"
@@ -25,6 +26,7 @@ vibez-dsp = { path = "crates/vibez-dsp" }
 vibez-instruments = { path = "crates/vibez-instruments" }
 vibez-plugin-host = { path = "crates/vibez-plugin-host" }
 vibez-project = { path = "crates/vibez-project" }
+vibez-dropbox = { path = "crates/vibez-dropbox" }
 vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio
@@ -33,12 +35,14 @@ symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "aac", "
 rubato = "0.16"
 rtrb = "0.3"
 audio_thread_priority = "0.32"
+midir = "0.10"
 
 # GUI
 iced = { version = "0.13", features = ["canvas", "tokio"] }
 
 # Shared
 serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
 serde_json = "1"
 
 [package]
@@ -49,6 +53,7 @@ license.workspace = true
 
 [dependencies]
 vibez-ui = { workspace = true }
+vibez-plugin-host = { workspace = true }
 iced = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

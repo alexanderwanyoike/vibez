@@ -1,4 +1,6 @@
-use iced::widget::{button, canvas, column, container, horizontal_space, row, text, text_input};
+use iced::widget::{
+    button, canvas, column, container, horizontal_space, mouse_area, row, text, text_input,
+};
 use iced::{Element, Length, Theme};
 
 use crate::icons;
@@ -195,22 +197,27 @@ pub fn view_track_header<'a>(
 
     let header_with_bar = row![color_bar, header].height(Length::Fill);
 
-    container(header_with_bar)
-        .style(move |_theme: &Theme| container::Style {
-            background: Some(
-                if selected {
-                    th::TRACK_BG_SELECTED
-                } else {
-                    th::BG_SURFACE
-                }
-                .into(),
-            ),
-            border: iced::Border {
-                color: if selected { th::ACCENT_DIM } else { th::BORDER },
-                width: if selected { 1.0 } else { 0.0 },
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
+    let card = container(header_with_bar).style(move |_theme: &Theme| container::Style {
+        background: Some(
+            if selected {
+                th::TRACK_BG_SELECTED
+            } else {
+                th::BG_SURFACE
+            }
+            .into(),
+        ),
+        border: iced::Border {
+            color: if selected { th::ACCENT_DIM } else { th::BORDER },
+            width: if selected { 1.0 } else { 0.0 },
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    });
+
+    // The whole header column selects the track. Child widgets
+    // (name, M/S, add, delete, fader) capture their own clicks first,
+    // so this only fires on otherwise-dead header space.
+    mouse_area(card)
+        .on_press(Message::SelectTrack(track.id))
         .into()
 }

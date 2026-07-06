@@ -8,6 +8,21 @@ use vibez_core::time::TempoMap;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
+/// Map a raw timeline frame through the active arrangement loop.
+/// Anything at or past `loop_end` is wrapped to `loop_start +
+/// overshoot mod loop_len`, so mid-block wraps stay seamless.
+#[inline]
+fn apply_loop_wrap(global_frame: u64, loop_region: Option<(u64, u64)>) -> u64 {
+    match loop_region {
+        Some((start, end)) if end > start && global_frame >= end => {
+            let loop_len = end - start;
+            let overshoot = global_frame - end;
+            start + (overshoot % loop_len)
+        }
+        _ => global_frame,
+    }
+}
+
 /// A clip as it exists at runtime in the engine (on the audio thread).
 pub struct EngineClip {
     pub id: ClipId,
@@ -73,6 +88,13 @@ pub struct EngineTrack {
     timed_note_ons: Vec<(u32, u8, u8)>,
     /// Scratch storage for batch rendering: (frame_offset, pitch)
     timed_note_offs: Vec<(u32, u8)>,
+    /// Bitmask of MIDI pitches currently sounding on the instrument,
+    /// maintained by the note schedulers. Lets the engine kill
+    /// hanging notes when the playhead jumps discontinuously
+    /// (arrangement-loop wrap, seek, stop): the schedulers only see
+    /// adjacent sample positions, so a jump would otherwise strand
+    /// every sounding note in the "held down" state forever.
+    active_notes: u128,
 }
 
 impl EngineTrack {
@@ -90,7 +112,42 @@ impl EngineTrack {
             instrument: None,
             timed_note_ons: Vec::new(),
             timed_note_offs: Vec::new(),
+            active_notes: 0,
         }
+    }
+
+    /// Render the instrument with no clip events (transport stopped):
+    /// lets auditioned/held notes sound and plugin event queues drain.
+    /// Returns true when the buffer has signal.
+    pub fn render_instrument_idle(&mut self, frames: usize, channels: usize) -> bool {
+        if self.instrument.is_none() {
+            return false;
+        }
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
+        }
+        let instrument = self.instrument.as_mut().unwrap();
+        instrument.render(&mut self.mix_buffer[..buf_size], channels);
+        self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0)
+    }
+
+    /// Send note-offs for every sounding note. Call whenever the
+    /// playhead moves discontinuously; the offs reach the instrument
+    /// immediately (built-ins) or on its next render (plugins).
+    pub fn flush_notes(&mut self) {
+        if self.active_notes == 0 {
+            return;
+        }
+        if let Some(instrument) = self.instrument.as_mut() {
+            for pitch in 0..128u8 {
+                if self.active_notes & (1u128 << pitch) != 0 {
+                    instrument.note_off(pitch);
+                }
+            }
+        }
+        self.active_notes = 0;
     }
 
     /// Ensure the mix buffer has at least `size` elements.
@@ -102,39 +159,63 @@ impl EngineTrack {
 
     /// Render all active clips into the mix_buffer for the given position.
     /// Returns `true` if any audio was rendered.
-    pub fn render(&mut self, pos: u64, frames: usize, channels: usize) -> bool {
+    ///
+    /// `loop_region` is the active arrangement loop (if any). When
+    /// provided, any frame within this block whose global position
+    /// would land past `loop_end` is wrapped back to `loop_start +
+    /// overshoot` before clip content is looked up. Without this, a
+    /// block that straddles the loop boundary would play clip audio
+    /// past the loop end before the transport wraps on the next
+    /// block — which surfaces as a "double beat" when the clip
+    /// extends slightly past the looped region (common with warped
+    /// samples that aren't exactly one bar).
+    pub fn render(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) -> bool {
         let buf_size = frames * channels;
         self.ensure_buffer(buf_size);
 
-        // Zero the buffer
         for s in self.mix_buffer[..buf_size].iter_mut() {
             *s = 0.0;
         }
 
         let mut rendered_any = false;
 
+        // When the arrangement loop is crossed mid-block, `is_active`
+        // as computed against raw `pos..pos+frames` may not cover the
+        // clip that plays *after* the wrap. Fall back to iterating
+        // every clip on boundary-straddling blocks.
+        let block_crosses_loop = matches!(
+            loop_region,
+            Some((start, end)) if end > start
+                && pos < end
+                && pos.saturating_add(frames as u64) > end
+        );
+
         for clip in &self.clips {
-            if !clip.is_active(pos, frames as u64) {
+            if !block_crosses_loop && !clip.is_active(pos, frames as u64) {
                 continue;
             }
 
-            rendered_any = true;
             let audio_channels = clip.audio.num_channels();
+            let mut clip_rendered = false;
 
             for frame in 0..frames {
-                let global_frame = pos as usize + frame;
+                let raw_global = pos + frame as u64;
+                let global_frame = apply_loop_wrap(raw_global, loop_region);
 
-                // Skip frames before clip starts
-                if (global_frame as u64) < clip.position {
+                if global_frame < clip.position {
                     continue;
                 }
-                // Skip frames after clip ends
-                if (global_frame as u64) >= clip.end_position() {
+                if global_frame >= clip.end_position() {
                     continue;
                 }
 
-                // Calculate the sample index into the source audio
-                let clip_frame = global_frame - clip.position as usize;
+                let clip_frame = (global_frame - clip.position) as usize;
                 let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
                     let raw = clip.source_offset as usize + clip_frame;
                     let loop_len = (clip.loop_end - clip.loop_start) as usize;
@@ -157,6 +238,11 @@ impl EngineTrack {
                     };
                     self.mix_buffer[frame * channels + ch] += sample;
                 }
+                clip_rendered = true;
+            }
+
+            if clip_rendered {
+                rendered_any = true;
             }
         }
 
@@ -316,6 +402,21 @@ impl EngineTrack {
             instrument.note_on_at(pitch, vel, frame);
             rendered = true;
         }
+        // Update the sounding-note mask in event order: within one
+        // block an off followed by an on at a later frame must leave
+        // the note marked active.
+        for &(_, pitch) in &self.timed_note_offs {
+            self.active_notes &= !(1u128 << pitch);
+        }
+        for &(frame, pitch, _) in &self.timed_note_ons {
+            let killed_later = self
+                .timed_note_offs
+                .iter()
+                .any(|&(off_frame, off_pitch)| off_pitch == pitch && off_frame > frame);
+            if !killed_later {
+                self.active_notes |= 1u128 << pitch;
+            }
+        }
 
         instrument.render(&mut self.mix_buffer[..buf_size], channels);
 
@@ -431,9 +532,11 @@ impl EngineTrack {
             let instrument = self.instrument.as_mut().unwrap();
             for pitch in &note_offs {
                 instrument.note_off(*pitch);
+                self.active_notes &= !(1u128 << *pitch);
             }
             for (pitch, vel) in &note_ons {
                 instrument.note_on(*pitch, *vel);
+                self.active_notes |= 1u128 << *pitch;
                 rendered = true;
             }
 
@@ -534,7 +637,7 @@ mod tests {
             loop_end: 0,
         });
 
-        let rendered = track.render(0, 8, 2);
+        let rendered = track.render(0, 8, 2, None);
         assert!(rendered);
 
         // Check that samples were written
@@ -565,7 +668,7 @@ mod tests {
             loop_end: 0,
         });
 
-        let rendered = track.render(0, 4, 2);
+        let rendered = track.render(0, 4, 2, None);
         assert!(rendered);
 
         // First frame should come from source_offset 10
@@ -576,7 +679,7 @@ mod tests {
     #[test]
     fn no_clips_returns_false() {
         let mut track = EngineTrack::new(TrackId::new());
-        let rendered = track.render(0, 8, 2);
+        let rendered = track.render(0, 8, 2, None);
         assert!(!rendered);
     }
 
@@ -666,7 +769,7 @@ mod tests {
         });
 
         // Render frames 100..108 (in looped region, past source length)
-        let rendered = track.render(100, 8, 2);
+        let rendered = track.render(100, 8, 2, None);
         assert!(rendered);
 
         // Output should be source audio (0.5), not silence
@@ -703,7 +806,7 @@ mod tests {
         });
 
         // Render all 250 frames
-        let rendered = track.render(0, 250, 2);
+        let rendered = track.render(0, 250, 2, None);
         assert!(rendered);
 
         // frame 150 should wrap to source frame 50 (150 % 100 = 50)
@@ -746,7 +849,7 @@ mod tests {
             loop_end: 100,
         });
 
-        let rendered = track.render(0, 200, 2);
+        let rendered = track.render(0, 200, 2, None);
         assert!(rendered);
 
         // First frame maps to source frame 20
@@ -785,7 +888,7 @@ mod tests {
         });
 
         // Render frames 100..108 (past source, no loop)
-        let rendered = track.render(100, 8, 2);
+        let rendered = track.render(100, 8, 2, None);
         assert!(rendered); // clip is still "active" (duration=200)
 
         // Output should be silence since DecodedAudio returns 0.0 for out-of-bounds
@@ -794,6 +897,99 @@ mod tests {
                 track.mix_buffer[i].abs() < 1e-6,
                 "sample {i}: expected silence, got {}",
                 track.mix_buffer[i]
+            );
+        }
+    }
+
+    #[test]
+    fn arrangement_loop_wraps_mid_block_within_clip() {
+        // Simulate the reported "double beat" bug: a clip that extends
+        // past the arrangement loop end. Before the fix, the mixer
+        // rendered the clip's audio past loop_end in the block that
+        // straddled the boundary. With the loop-region wrap, frames
+        // past loop_end are re-mapped to the start of the loop so
+        // playback stays inside the bar.
+        let audio = Arc::new(DecodedAudio {
+            // Ramp from 0.0..1.0 so we can tell positions apart.
+            channels: vec![
+                (0..200).map(|i| i as f32 / 200.0).collect(),
+                (0..200).map(|i| i as f32 / 200.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio: Arc::clone(&audio),
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+
+        // Loop is [0, 100), clip extends to 200.
+        // Render a block that crosses loop_end (pos=90, 20 frames -> 90..110).
+        let rendered = track.render(90, 20, 2, Some((0, 100)));
+        assert!(rendered);
+
+        // Frames 0..10 (global 90..100) should read source[90..100].
+        for f in 0..10 {
+            let expected = (90 + f) as f32 / 200.0;
+            let got = track.mix_buffer[f * 2];
+            assert!(
+                (got - expected).abs() < 1e-6,
+                "pre-wrap frame {f}: expected {expected}, got {got}",
+            );
+        }
+        // Frames 10..20 (global 100..110) should have wrapped to source[0..10],
+        // NOT source[100..110]. This is the regression the fix prevents.
+        for f in 10..20 {
+            let expected = (f - 10) as f32 / 200.0;
+            let got = track.mix_buffer[f * 2];
+            assert!(
+                (got - expected).abs() < 1e-6,
+                "post-wrap frame {f}: expected source[{}]={}, got {} \
+                 (would be {} without the fix)",
+                f - 10,
+                expected,
+                got,
+                (90 + f) as f32 / 200.0,
+            );
+        }
+    }
+
+    #[test]
+    fn arrangement_loop_without_crossing_is_unchanged() {
+        // When the block doesn't cross the loop boundary, behaviour
+        // should be identical to rendering without a loop.
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+                (0..100).map(|i| i as f32 / 100.0).collect(),
+            ],
+            sample_rate: 44_100,
+        });
+        let mut track = EngineTrack::new(TrackId::new());
+        track.clips.push(EngineClip {
+            id: ClipId::new(),
+            audio,
+            position: 0,
+            source_offset: 0,
+            duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+        let rendered = track.render(10, 20, 2, Some((0, 100)));
+        assert!(rendered);
+        for f in 0..20 {
+            let expected = (10 + f) as f32 / 100.0;
+            let got = track.mix_buffer[f * 2];
+            assert!(
+                (got - expected).abs() < 1e-6,
+                "frame {f}: expected {expected}, got {got}",
             );
         }
     }
