@@ -121,17 +121,19 @@ impl EffectKnobWidget {
     fn set_value_message(&self, value: f32) -> Message {
         match self.target {
             KnobTarget::Effect(effect_id) => {
-                Message::SetEffectParam(self.track_id, effect_id, self.param_index, value)
+                Message::set_effect_param(self.track_id, effect_id, self.param_index, value)
             }
             KnobTarget::Instrument => {
-                Message::SetInstrumentParam(self.track_id, self.param_index, value)
+                Message::set_instrument_param(self.track_id, self.param_index, value)
             }
-            KnobTarget::DrumPad { pad_index, param } => Message::SetDrumPadParam {
-                track_id: self.track_id,
-                pad_index,
-                param,
-                value,
-            },
+            KnobTarget::DrumPad { pad_index, param } => {
+                Message::Devices(crate::domains::devices::DevicesMsg::SetDrumPadParam {
+                    track_id: self.track_id,
+                    pad_index,
+                    param,
+                    value,
+                })
+            }
         }
     }
 

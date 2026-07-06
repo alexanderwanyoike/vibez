@@ -28,7 +28,7 @@ pub fn view_effect_slot<'a>(
 
     // ── Title bar: [●] Name …          [On] [▲] [▼] [×] ──
     let dot = button(text("\u{25CF}").size(9).color(dot_color))
-        .on_press(Message::ToggleEffectBypass(track_id, effect.id))
+        .on_press(Message::toggle_effect_bypass(track_id, effect.id))
         .padding([2, 3])
         .style(move |_theme: &Theme, status| {
             let bg = match status {
@@ -98,7 +98,7 @@ pub fn view_effect_slot<'a>(
     };
     let make_bypass = move || {
         button(text(bypass_label).size(9).color(bypass_color))
-            .on_press(Message::ToggleEffectBypass(track_id, effect.id))
+            .on_press(Message::toggle_effect_bypass(track_id, effect.id))
             .padding([2, 5])
             .style(move |_theme: &Theme, status| {
                 let bg = match status {
@@ -127,7 +127,7 @@ pub fn view_effect_slot<'a>(
             icons::CHEVRON_UP,
             th::TEXT_DIM,
             th::TEXT,
-            Message::MoveEffectUp(track_id, effect.id),
+            Message::move_effect_up(track_id, effect.id),
         )
         .into()
     };
@@ -136,7 +136,7 @@ pub fn view_effect_slot<'a>(
             icons::CHEVRON_DOWN,
             th::TEXT_DIM,
             th::TEXT,
-            Message::MoveEffectDown(track_id, effect.id),
+            Message::move_effect_down(track_id, effect.id),
         )
         .into()
     };
@@ -144,7 +144,7 @@ pub fn view_effect_slot<'a>(
         icons::X,
         th::TEXT_DIM,
         th::DANGER,
-        Message::RemoveEffect(track_id, effect.id),
+        Message::remove_effect(track_id, effect.id),
     )
     .into();
 

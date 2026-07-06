@@ -290,7 +290,7 @@ impl App {
         self.state.selection_end_beats = 0.0;
         self.state.scroll_offset_beats = 0.0;
         self.state.context_menu = None;
-        self.state.device_context_menu = None;
+        self.state.devices.context_menu = None;
         self.state.file_menu_open = false;
         self.state.editing_track_name = None;
         self.state.editing_clip_name = None;
@@ -1665,6 +1665,23 @@ impl App {
         })
     }
 
+    /// Route cross-domain effects requested by the devices domain.
+    fn apply_devices_action(&mut self, action: crate::domains::devices::DevicesAction) {
+        if let Some(key) = action.close_gui {
+            if let Some(ref mut mgr) = self.plugin_window_manager {
+                mgr.close(key);
+            }
+            self.plugin_gui_raw_ptrs.remove(&key);
+            self.plugin_state_ptrs.remove(&key);
+        }
+        if let Some(track_id) = action.select_track {
+            self.state.selected_track = Some(track_id);
+        }
+        if let Some(status) = action.status {
+            self.state.status_text = status;
+        }
+    }
+
     /// Route a cross-domain effect requested by the transport domain.
     fn apply_transport_action(
         &mut self,
@@ -2040,20 +2057,9 @@ impl App {
                 | Message::SetTrackPan(..)
                 | Message::SetTrackMute(_)
                 | Message::SetTrackSolo(_)
-                | Message::AddEffect(..)
-                | Message::RemoveEffect(..)
-                | Message::SetEffectParam(..)
-                | Message::ToggleEffectBypass(..)
-                | Message::MoveEffectUp(..)
-                | Message::MoveEffectDown(..)
                 | Message::AddInstrumentTrack
-                | Message::SetInstrumentParam(..)
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
-                | Message::ClearDrumRackPad(..)
-                | Message::SetDrumPadParam { .. }
-                | Message::SetDrumPadOneShot { .. }
-                | Message::SetDrumPadChokeGroup { .. }
                 | Message::BrowserSampleDecoded(..)
                 | Message::ToggleClipLoop(..)
                 | Message::SetClipLoopRegion { .. }
@@ -2093,8 +2099,6 @@ impl App {
                 | Message::RenameTrack(..)
                 | Message::RenameClip(..)
                 | Message::AddMidiTrack
-                | Message::SetTrackInstrument(..)
-                | Message::RemoveTrackInstrument(_)
                 | Message::HalveNoteClip(..)
                 | Message::QuantizeNoteClip { .. }
                 | Message::AudioQuantizeReady { .. }
@@ -2103,7 +2107,7 @@ impl App {
                 | Message::ClipWarpReady { .. }
                 | Message::ClearClipWarp { .. }
                 | Message::ClipAutoWarpReady { .. }
-        );
+        ) || matches!(&message, Message::Devices(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot();
             self.mark_project_dirty();
@@ -2130,6 +2134,19 @@ impl App {
                     self.state.transport.update(msg, &mut engine, ctx)
                 };
                 return self.apply_transport_action(action);
+            }
+            // Devices domain: same routing pattern. Tracks are the
+            // shared model handed in explicitly; the returned action
+            // carries GUI teardown / selection / status effects.
+            Message::Devices(msg) => {
+                let sample_rate = self.state.transport.sample_rate;
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state
+                        .devices
+                        .update(msg, &mut engine, &mut self.state.tracks, sample_rate)
+                };
+                self.apply_devices_action(action);
             }
 
             // -- Workspace --
@@ -2277,18 +2294,6 @@ impl App {
                     "Removed {removed_name}. {} track(s) remain.",
                     self.state.tracks.len()
                 );
-            }
-            Message::AuditionNote {
-                track_id,
-                pitch,
-                on,
-            } => {
-                self.send_command(EngineCommand::AuditionNote {
-                    track_id,
-                    pitch,
-                    velocity: 100,
-                    on,
-                });
             }
             Message::DeleteKeyPressed => {
                 // Never delete anything while a text field is being
@@ -2460,112 +2465,6 @@ impl App {
             }
 
             // -- Effects --
-            Message::AddEffect(track_id, effect_type) => {
-                let effect_id = vibez_core::id::EffectId::new();
-                let fx = vibez_dsp::factory::create_effect(
-                    effect_type,
-                    self.state.transport.sample_rate as f32,
-                );
-                let descriptors = fx.param_descriptors();
-                let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
-
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.effects.push(UiEffect {
-                        id: effect_id,
-                        effect_type,
-                        bypass: false,
-                        params,
-                        descriptors,
-                        plugin_name: None,
-                        has_plugin_gui: false,
-                        plugin_ref: None,
-                    });
-                }
-                self.send_command(EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position: None,
-                });
-                self.state.device_context_menu = None;
-                self.state.status_text = format!("Added {} effect", effect_type.name());
-            }
-            Message::RemoveEffect(track_id, effect_id) => {
-                // Close plugin GUI window if open
-                let gui_key = PluginGuiKey::Effect {
-                    track_id,
-                    effect_id,
-                };
-                if let Some(ref mut mgr) = self.plugin_window_manager {
-                    mgr.close(gui_key);
-                }
-                self.plugin_gui_raw_ptrs.remove(&gui_key);
-                self.plugin_state_ptrs.remove(&gui_key);
-
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.effects.retain(|e| e.id != effect_id);
-                }
-                self.send_command(EngineCommand::RemoveEffect(track_id, effect_id));
-                self.state.status_text = "Removed effect".to_string();
-            }
-            Message::SetEffectParam(track_id, effect_id, param_index, value) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
-                        if param_index < effect.params.len() {
-                            let desc = &effect.descriptors[param_index];
-                            let clamped = value.clamp(desc.min, desc.max);
-                            effect.params[param_index] = clamped;
-                            self.send_command(EngineCommand::SetEffectParam {
-                                track_id,
-                                effect_id,
-                                param_index,
-                                value: clamped,
-                            });
-                        }
-                    }
-                }
-            }
-            Message::ToggleEffectBypass(track_id, effect_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
-                        effect.bypass = !effect.bypass;
-                        let bypass = effect.bypass;
-                        self.send_command(EngineCommand::SetEffectBypass {
-                            track_id,
-                            effect_id,
-                            bypass,
-                        });
-                    }
-                }
-            }
-            Message::MoveEffectUp(track_id, effect_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
-                        if idx > 0 {
-                            track.effects.swap(idx, idx - 1);
-                            self.send_command(EngineCommand::MoveEffect {
-                                track_id,
-                                effect_id,
-                                new_index: idx - 1,
-                            });
-                        }
-                    }
-                }
-            }
-            Message::MoveEffectDown(track_id, effect_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
-                        if idx + 1 < track.effects.len() {
-                            track.effects.swap(idx, idx + 1);
-                            self.send_command(EngineCommand::MoveEffect {
-                                track_id,
-                                effect_id,
-                                new_index: idx + 1,
-                            });
-                        }
-                    }
-                }
-            }
 
             // -- Instrument tracks --
             Message::AddInstrumentTrack => {
@@ -2582,19 +2481,6 @@ impl App {
                 self.state.tracks.push(track);
                 self.state.selected_track = Some(id);
                 self.state.status_text = format!("{} tracks", self.state.tracks.len());
-            }
-            Message::SetInstrumentParam(track_id, param_index, value) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if param_index < track.instrument_params.len() {
-                        track.instrument_params[param_index] = value;
-                    }
-                }
-                self.send_command(EngineCommand::SetInstrumentParam {
-                    track_id,
-                    param_index,
-                    value,
-                });
-                self.state.status_text = format!("Param {param_index} = {value:.2}");
             }
 
             // -- Sampler --
@@ -2678,101 +2564,6 @@ impl App {
             Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
                 self.state.selected_track = Some(track_id);
                 self.state.status_text = format!("Drum pad load error: {err}");
-            }
-            Message::ClearDrumRackPad(track_id, pad_index) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        *pad = UiDrumPad::default();
-                    }
-                }
-                self.sync_drum_rack_pad_state(track_id, pad_index);
-                self.send_command(EngineCommand::ClearDrumRackPad {
-                    track_id,
-                    pad_index,
-                });
-                self.state.status_text = format!("Cleared pad {}", pad_index + 1);
-            }
-            Message::SelectDrumRackPad(track_id, pad_index) => {
-                // Audition the pad like Ableton: hear it on click.
-                let pitch = 36 + pad_index.min(127) as u8;
-                self.send_command(EngineCommand::AuditionNote {
-                    track_id,
-                    pitch,
-                    velocity: 100,
-                    on: true,
-                });
-                self.send_command(EngineCommand::AuditionNote {
-                    track_id,
-                    pitch,
-                    velocity: 100,
-                    on: false,
-                });
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    let max_index = track.drum_rack_pads.len().saturating_sub(1);
-                    track.selected_drum_pad = pad_index.min(max_index);
-                }
-                self.state.selected_track = Some(track_id);
-            }
-            Message::SetDrumPadParam {
-                track_id,
-                pad_index,
-                param,
-                value,
-            } => {
-                let mut changed = false;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        match param {
-                            DrumPadParam::Gain => pad.gain = value.clamp(0.0, 2.0),
-                            DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
-                            DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
-                            DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
-                            DrumPadParam::CoarseTune => {
-                                pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
-                            }
-                            DrumPadParam::FineTune => pad.fine_tune = value.clamp(-100.0, 100.0),
-                        }
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.sync_drum_rack_pad_state(track_id, pad_index);
-                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
-                }
-            }
-            Message::SetDrumPadOneShot {
-                track_id,
-                pad_index,
-                one_shot,
-            } => {
-                let mut changed = false;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        pad.one_shot = one_shot;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.sync_drum_rack_pad_state(track_id, pad_index);
-                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
-                }
-            }
-            Message::SetDrumPadChokeGroup {
-                track_id,
-                pad_index,
-                choke_group,
-            } => {
-                let mut changed = false;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
-                        pad.choke_group = choke_group;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.sync_drum_rack_pad_state(track_id, pad_index);
-                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
-                }
             }
 
             // -- Clip looping --
@@ -4436,7 +4227,7 @@ impl App {
                 self.state.editing_track_name = None;
                 self.state.editing_clip_name = None;
                 self.state.edit_name_text.clear();
-                self.state.device_context_menu = None;
+                self.state.devices.context_menu = None;
             }
             Message::RenameTrack(track_id, new_name) => {
                 if let Some(track) = self.state.find_track_mut(track_id) {
@@ -4472,53 +4263,6 @@ impl App {
             }
 
             // -- Instrument attach/detach --
-            Message::SetTrackInstrument(track_id, instrument_kind) => {
-                let sample_rate = self.state.transport.sample_rate as f32;
-                let instrument_params = default_instrument_params(instrument_kind, sample_rate);
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.has_instrument = true;
-                    track.instrument_kind = Some(instrument_kind);
-                    track.sample_name = None;
-                    track.sample_source = None;
-                    track.sample_audio = None;
-                    track.instrument_params = instrument_params.clone();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
-                    track.selected_drum_pad = 0;
-                }
-                self.send_command(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
-                for (param_index, value) in instrument_params.into_iter().enumerate() {
-                    self.send_command(EngineCommand::SetInstrumentParam {
-                        track_id,
-                        param_index,
-                        value,
-                    });
-                }
-                self.state.device_context_menu = None;
-                self.state.status_text = format!("Added {}", instrument_kind.name());
-            }
-            Message::RemoveTrackInstrument(track_id) => {
-                // Close plugin GUI window if open
-                let gui_key = PluginGuiKey::Instrument { track_id };
-                if let Some(ref mut mgr) = self.plugin_window_manager {
-                    mgr.close(gui_key);
-                }
-                self.plugin_gui_raw_ptrs.remove(&gui_key);
-                self.plugin_state_ptrs.remove(&gui_key);
-
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.has_instrument = false;
-                    track.instrument_kind = None;
-                    track.sample_name = None;
-                    track.sample_source = None;
-                    track.instrument_params.clear();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
-                    track.selected_drum_pad = 0;
-                    track.plugin_instrument_name = None;
-                    track.has_plugin_instrument_gui = false;
-                }
-                self.send_command(EngineCommand::RemoveTrackInstrument(track_id));
-                self.state.status_text = "Removed instrument".to_string();
-            }
 
             // -- Pattern halve --
             Message::HalveNoteClip(track_id, clip_id) => {
@@ -4551,37 +4295,6 @@ impl App {
             }
 
             // -- Device context menu --
-            Message::ShowDeviceContextMenu { x, y, track_id } => {
-                use crate::state::{DeviceContextMenu, DeviceMenuCategory};
-                let is_midi = self
-                    .state
-                    .find_track(track_id)
-                    .is_some_and(|t| t.kind.is_midi());
-                self.state.device_context_menu = Some(DeviceContextMenu {
-                    x,
-                    y,
-                    track_id,
-                    category: Some(if is_midi {
-                        DeviceMenuCategory::Instruments
-                    } else {
-                        DeviceMenuCategory::Effects
-                    }),
-                    search: String::new(),
-                });
-            }
-            Message::DismissDeviceContextMenu => {
-                self.state.device_context_menu = None;
-            }
-            Message::SetDeviceMenuCategory(category) => {
-                if let Some(ref mut menu) = self.state.device_context_menu {
-                    menu.category = Some(category);
-                }
-            }
-            Message::DeviceMenuSearch(query) => {
-                if let Some(ref mut menu) = self.state.device_context_menu {
-                    menu.search = query;
-                }
-            }
 
             // -- Sample browser --
             Message::ToggleSampleBrowser => {
@@ -4871,7 +4584,7 @@ impl App {
                             self.send_command(EngineCommand::StartPreview(audio));
                             self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
                         }
-                        return self.update(Message::SelectDrumRackPad(track_id, pad_index));
+                        return self.update(Message::select_drum_rack_pad(track_id, pad_index));
                     }
                 }
             }
@@ -5160,7 +4873,7 @@ impl App {
 
             // -- Plugin loading --
             Message::AddPluginToTrack(track_id, plugin_id) => {
-                self.state.device_context_menu = None;
+                self.state.devices.context_menu = None;
                 if let Some(info) = self
                     .state
                     .plugin_settings
@@ -6287,7 +6000,7 @@ impl App {
             stack![base_layout, self.view_context_menu_overlay()].into()
         } else if self.state.editing_clip_name.is_some() {
             stack![base_layout, self.view_rename_overlay()].into()
-        } else if self.state.device_context_menu.is_some() {
+        } else if self.state.devices.context_menu.is_some() {
             stack![base_layout, self.view_device_context_menu_overlay()].into()
         } else {
             base_layout
@@ -8720,11 +8433,13 @@ impl App {
 
         // Wrap in mouse_area for right-click context menu
         mouse_area(content)
-            .on_right_press(Message::ShowDeviceContextMenu {
-                x: self.state.cursor_x,
-                y: self.state.cursor_y,
-                track_id,
-            })
+            .on_right_press(Message::Devices(
+                crate::domains::devices::DevicesMsg::ShowContextMenu {
+                    x: self.state.cursor_x,
+                    y: self.state.cursor_y,
+                    track_id,
+                },
+            ))
             .into()
     }
 
@@ -8883,7 +8598,7 @@ impl App {
             icons::X,
             th::TEXT_DIM,
             th::DANGER,
-            Message::RemoveTrackInstrument(track_id),
+            Message::remove_track_instrument(track_id),
         )
         .into();
 
@@ -8911,7 +8626,7 @@ impl App {
         let title = Self::device_title_bar(Self::device_title_row(
             "Synth",
             track_color,
-            Some(Message::RemoveTrackInstrument(track_id)),
+            Some(Message::remove_track_instrument(track_id)),
         ));
 
         let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
@@ -8949,7 +8664,7 @@ impl App {
                     .align_x(iced::Alignment::Center)
                     .color(if active { th::BG_DARK } else { th::TEXT_DIM }),
             )
-            .on_press(Message::SetInstrumentParam(track_id, 0, i as f32))
+            .on_press(Message::set_instrument_param(track_id, 0, i as f32))
             .padding([3, 4])
             .style(move |_theme: &Theme, _status| button::Style {
                 background: Some(if active { th::ACCENT } else { th::BG_DARK }.into()),
@@ -9032,7 +8747,7 @@ impl App {
         let title = Self::device_title_bar(Self::device_title_row(
             "Sampler",
             track_color,
-            Some(Message::RemoveTrackInstrument(track_id)),
+            Some(Message::remove_track_instrument(track_id)),
         ));
 
         let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
@@ -9169,7 +8884,7 @@ impl App {
         let title = Self::device_title_bar(Self::device_title_row(
             "Drum Rack",
             track_color,
-            Some(Message::RemoveTrackInstrument(track_id)),
+            Some(Message::remove_track_instrument(track_id)),
         ));
 
         let mut grid = column![].spacing(4);
@@ -9263,7 +8978,7 @@ impl App {
             });
 
         let clear_btn = button(text("Clear").size(9).color(th::TEXT_DIM))
-            .on_press(Message::ClearDrumRackPad(track_id, selected_pad))
+            .on_press(Message::clear_drum_rack_pad(track_id, selected_pad))
             .padding([2, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
@@ -9373,11 +9088,13 @@ impl App {
         } else {
             th::TEXT_DIM
         }))
-        .on_press(Message::SetDrumPadOneShot {
-            track_id,
-            pad_index: selected_pad,
-            one_shot: !one_shot_active,
-        })
+        .on_press(Message::Devices(
+            crate::domains::devices::DevicesMsg::SetDrumPadOneShot {
+                track_id,
+                pad_index: selected_pad,
+                one_shot: !one_shot_active,
+            },
+        ))
         .padding([2, 6])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(
@@ -9422,11 +9139,13 @@ impl App {
                         .size(9)
                         .color(if active { th::ACCENT } else { th::TEXT_DIM }),
                 )
-                .on_press(Message::SetDrumPadChokeGroup {
-                    track_id,
-                    pad_index: selected_pad,
-                    choke_group: group,
-                })
+                .on_press(Message::Devices(
+                    crate::domains::devices::DevicesMsg::SetDrumPadChokeGroup {
+                        track_id,
+                        pad_index: selected_pad,
+                        choke_group: group,
+                    },
+                ))
                 .padding([2, 6])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
@@ -9495,7 +9214,7 @@ impl App {
     fn view_device_context_menu_overlay(&self) -> Element<'_, Message> {
         use crate::state::DeviceMenuCategory;
 
-        let menu = self.state.device_context_menu.as_ref().unwrap();
+        let menu = self.state.devices.context_menu.as_ref().unwrap();
         let track_id = menu.track_id;
         let is_midi = self
             .state
@@ -9512,7 +9231,7 @@ impl App {
                 (th::BG_ELEVATED, th::TEXT_DIM)
             };
             let inst_tab = button(text("Instruments").size(11).color(tc))
-                .on_press(Message::SetDeviceMenuCategory(
+                .on_press(Message::set_device_menu_category(
                     DeviceMenuCategory::Instruments,
                 ))
                 .padding([4, 10])
@@ -9539,7 +9258,9 @@ impl App {
             (th::BG_ELEVATED, th::TEXT_DIM)
         };
         let fx_tab = button(text("Effects").size(11).color(tc))
-            .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Effects))
+            .on_press(Message::set_device_menu_category(
+                DeviceMenuCategory::Effects,
+            ))
             .padding([4, 10])
             .style(move |_theme: &Theme, _status| button::Style {
                 background: Some(bg.into()),
@@ -9565,7 +9286,9 @@ impl App {
             (th::BG_ELEVATED, th::TEXT_DIM)
         };
         let plugins_tab = button(text("Plugins").size(11).color(tc))
-            .on_press(Message::SetDeviceMenuCategory(DeviceMenuCategory::Plugins))
+            .on_press(Message::set_device_menu_category(
+                DeviceMenuCategory::Plugins,
+            ))
             .padding([4, 10])
             .style(move |_theme: &Theme, _status| button::Style {
                 background: Some(bg.into()),
@@ -9585,7 +9308,7 @@ impl App {
 
         // Search input
         let search_input = text_input("Search...", &menu.search)
-            .on_input(Message::DeviceMenuSearch)
+            .on_input(Message::device_menu_search)
             .size(12)
             .width(Length::Fill);
 
@@ -9606,7 +9329,7 @@ impl App {
                         continue;
                     }
                     let btn = button(text(name).size(12).color(th::TEXT))
-                        .on_press(Message::SetTrackInstrument(track_id, kind))
+                        .on_press(Message::set_track_instrument(track_id, kind))
                         .padding([6, 10])
                         .width(Length::Fill)
                         .style(|_theme: &Theme, status| {
@@ -9704,7 +9427,7 @@ impl App {
                         continue;
                     }
                     let btn = button(text(name).size(12).color(th::TEXT))
-                        .on_press(Message::AddEffect(track_id, et))
+                        .on_press(Message::add_effect(track_id, et))
                         .padding([6, 10])
                         .width(Length::Fill)
                         .style(|_theme: &Theme, status| {
@@ -9773,7 +9496,7 @@ impl App {
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
-            .on_press(Message::DismissDeviceContextMenu)
+            .on_press(Message::dismiss_device_menu())
             .into()
     }
 
@@ -11293,13 +11016,4 @@ fn is_supported_audio_file(path: &PathBuf) -> bool {
             )
         })
         .unwrap_or(false)
-}
-
-fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<f32> {
-    let instrument = vibez_instruments::create_instrument(kind, sample_rate);
-    instrument
-        .param_descriptors()
-        .iter()
-        .map(|descriptor| descriptor.default)
-        .collect()
 }
