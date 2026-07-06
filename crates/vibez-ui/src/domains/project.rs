@@ -11,7 +11,67 @@ use vibez_core::effect::PluginDeviceInfo;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_plugin_host::gui::PluginGuiKey;
 
-use crate::state::ProjectSnapshot;
+use crate::state::{ProjectSnapshot, ProjectState};
+
+/// Messages the project domain handles (file menu + undo history).
+#[derive(Debug, Clone)]
+pub enum ProjectMsg {
+    ToggleFileMenu,
+    DismissFileMenu,
+    Undo,
+    Redo,
+}
+
+/// Read-only cross-domain facts for project updates.
+#[derive(Debug)]
+pub struct ProjectCtx {
+    /// A snapshot of the CURRENT editable state, taken by the router
+    /// just before this update; undo/redo push it onto the opposite
+    /// stack.
+    pub snapshot_now: ProjectSnapshot,
+}
+
+/// Cross-domain effects requested by a project update.
+#[derive(Debug, Default)]
+pub struct ProjectAction {
+    /// Status bar text.
+    pub status: Option<String>,
+    /// Restore this snapshot (tears down and replays the engine).
+    pub apply_snapshot: Option<ProjectSnapshot>,
+}
+
+impl ProjectState {
+    pub fn update(&mut self, msg: ProjectMsg, ctx: ProjectCtx) -> ProjectAction {
+        let mut action = ProjectAction::default();
+        match msg {
+            ProjectMsg::ToggleFileMenu => {
+                self.file_menu_open = !self.file_menu_open;
+            }
+            ProjectMsg::DismissFileMenu => {
+                self.file_menu_open = false;
+            }
+            ProjectMsg::Undo => {
+                let Some(snapshot) = self.history.pop_undo() else {
+                    action.status = Some("Nothing to undo".to_string());
+                    return action;
+                };
+                self.history.push_redo(ctx.snapshot_now);
+                action.apply_snapshot = Some(snapshot);
+                action.status = Some("Undo".to_string());
+            }
+            ProjectMsg::Redo => {
+                let Some(snapshot) = self.history.pop_redo() else {
+                    action.status = Some("Nothing to redo".to_string());
+                    return action;
+                };
+                self.history.push_undo(ctx.snapshot_now);
+                action.apply_snapshot = Some(snapshot);
+                action.status = Some("Redo".to_string());
+            }
+        }
+        action
+    }
+}
 
 /// Plugin reload work orders extracted from a snapshot.
 #[derive(Debug, Default)]
@@ -143,6 +203,32 @@ mod tests {
         let mut snap = snapshot_with(vec![effect(Some(plugin_device("eq")))]);
         let requests = collect_plugin_reload_requests(&mut snap, |_| None);
         assert_eq!(requests.effects[0].3.state_b64.as_deref(), Some("stale"));
+    }
+
+    fn ctx() -> ProjectCtx {
+        ProjectCtx {
+            snapshot_now: snapshot_with(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn undo_pops_history_and_stashes_current_state_for_redo() {
+        let mut p = ProjectState::default();
+        p.history.push_undo(snapshot_with(Vec::new()));
+        let action = p.update(ProjectMsg::Undo, ctx());
+        assert!(action.apply_snapshot.is_some());
+        assert_eq!(action.status.as_deref(), Some("Undo"));
+        assert_eq!(p.history.undo.len(), 0);
+        assert_eq!(p.history.redo.len(), 1);
+    }
+
+    #[test]
+    fn undo_with_empty_history_reports_and_applies_nothing() {
+        let mut p = ProjectState::default();
+        let action = p.update(ProjectMsg::Undo, ctx());
+        assert!(action.apply_snapshot.is_none());
+        assert_eq!(action.status.as_deref(), Some("Nothing to undo"));
+        assert_eq!(p.history.redo.len(), 0);
     }
 
     #[test]

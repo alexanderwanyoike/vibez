@@ -11,6 +11,7 @@ use iced::{Color, Element, Length, Subscription, Task, Theme};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
@@ -136,9 +137,7 @@ struct App {
     /// Populated when the user opens the MIDI picker; used so the UI
     /// can show a dropdown without re-scanning on every frame.
     midi_input_ports: Vec<String>,
-
     // Undo / redo
-    undo_history: crate::state::UndoHistory,
 }
 
 pub fn run() -> iced::Result {
@@ -235,7 +234,6 @@ impl App {
             dropbox_client,
             midi_input,
             midi_input_ports: Vec::new(),
-            undo_history: crate::state::UndoHistory::default(),
         };
 
         // Inform the engine of the actual sample rate
@@ -261,7 +259,7 @@ impl App {
     }
 
     fn mark_project_dirty(&mut self) {
-        self.state.project_dirty = true;
+        self.state.project.dirty = true;
     }
 
     fn clear_project_runtime(&mut self) {
@@ -298,7 +296,7 @@ impl App {
         self.state.scroll_offset_beats = 0.0;
         self.state.context_menu = None;
         self.state.devices.context_menu = None;
-        self.state.file_menu_open = false;
+        self.state.project.file_menu_open = false;
         self.state.editing_track_name = None;
         self.state.editing_clip_name = None;
         self.state.edit_name_text.clear();
@@ -309,9 +307,9 @@ impl App {
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
-        self.state.current_project_path = None;
-        self.state.project_dirty = false;
-        self.undo_history.clear();
+        self.state.project.current_path = None;
+        self.state.project.dirty = false;
+        self.state.project.history.clear();
         self.state.status_text = "New project".to_string();
     }
 
@@ -819,7 +817,8 @@ impl App {
         Project {
             name: self
                 .state
-                .current_project_path
+                .project
+                .current_path
                 .as_ref()
                 .and_then(|path| path.file_stem())
                 .map(|name| name.to_string_lossy().to_string())
@@ -860,7 +859,7 @@ impl App {
         )> = Vec::new();
         let mut plugin_instrument_requests: Vec<(TrackId, vibez_core::effect::PluginDeviceInfo)> =
             Vec::new();
-        self.undo_history.clear();
+        self.state.project.history.clear();
         self.state.transport.bpm = loaded.project.bpm;
         self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
@@ -1100,8 +1099,8 @@ impl App {
 
         self.state.arrangement.selected_track =
             self.state.arrangement.tracks.first().map(|track| track.id);
-        self.state.current_project_path = Some(loaded.path.clone());
-        self.state.project_dirty = false;
+        self.state.project.current_path = Some(loaded.path.clone());
+        self.state.project.dirty = false;
         self.state.status_text = if loaded.warnings.is_empty() {
             format!("Opened {}", loaded.path.display())
         } else {
@@ -1234,7 +1233,7 @@ impl App {
     }
 
     fn next_bounce_path(&self) -> PathBuf {
-        let base = match &self.state.current_project_path {
+        let base = match &self.state.project.current_path {
             Some(project_path) => project_path
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
@@ -1370,7 +1369,7 @@ impl App {
 
     fn push_undo_snapshot(&mut self) {
         let snapshot = self.take_snapshot();
-        self.undo_history.push_undo(snapshot);
+        self.state.project.history.push_undo(snapshot);
     }
 
     fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
@@ -1545,28 +1544,6 @@ impl App {
                 });
             }
         }
-    }
-
-    fn undo(&mut self) {
-        let Some(snapshot) = self.undo_history.pop_undo() else {
-            self.state.status_text = "Nothing to undo".to_string();
-            return;
-        };
-        let redo = self.take_snapshot();
-        self.undo_history.push_redo(redo);
-        self.apply_snapshot(snapshot);
-        self.state.status_text = "Undo".to_string();
-    }
-
-    fn redo(&mut self) {
-        let Some(snapshot) = self.undo_history.pop_redo() else {
-            self.state.status_text = "Nothing to redo".to_string();
-            return;
-        };
-        let undo = self.take_snapshot();
-        self.undo_history.push_undo(undo);
-        self.apply_snapshot(snapshot);
-        self.state.status_text = "Redo".to_string();
     }
 
     fn dispatch_audio_quantize(
@@ -1966,7 +1943,7 @@ impl App {
             }
         }
         self.state.status_text = format!("Warped to {:.0} BPM", success.warped_to_bpm);
-        self.state.project_dirty = true;
+        self.state.project.dirty = true;
     }
 
     /// If auto-warp-on-import is enabled, return a background task
@@ -2029,7 +2006,7 @@ impl App {
                      Use the clip's Warp button to apply it manually.",
                     bpm, confidence
                 );
-                self.state.project_dirty = true;
+                self.state.project.dirty = true;
             }
             AutoWarpOutcome::Warped { success, .. } => {
                 self.apply_clip_warp_success(track_id, clip_id, success);
@@ -2073,7 +2050,7 @@ impl App {
             }
         }
         self.state.status_text = "Cleared clip warp".to_string();
-        self.state.project_dirty = true;
+        self.state.project.dirty = true;
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -2131,8 +2108,8 @@ impl App {
                     | Message::OpenProject
                     | Message::SaveProject
                     | Message::SaveProjectAs
-                    | Message::ToggleFileMenu
-                    | Message::DismissFileMenu
+                    | Message::Project(ProjectMsg::ToggleFileMenu)
+                    | Message::Project(ProjectMsg::DismissFileMenu)
                     | Message::ProjectOpenPathSelected(_)
                     | Message::ProjectSavePathSelected(_)
                     | Message::ProjectLoaded(_)
@@ -2257,6 +2234,18 @@ impl App {
             Message::Browser(msg) => {
                 let action = self.state.browser.update(msg);
                 return self.apply_browser_action(action);
+            }
+            Message::Project(msg) => {
+                let ctx = crate::domains::project::ProjectCtx {
+                    snapshot_now: self.take_snapshot(),
+                };
+                let action = self.state.project.update(msg, ctx);
+                if let Some(status) = action.status {
+                    self.state.status_text = status;
+                }
+                if let Some(snapshot) = action.apply_snapshot {
+                    self.apply_snapshot(snapshot);
+                }
             }
 
             // -- Workspace --
@@ -2947,11 +2936,11 @@ impl App {
 
             // -- File menu --
             Message::NewProject => {
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
                 self.reset_to_new_project();
             }
             Message::OpenProject => {
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
                 return Task::perform(
                     async {
                         let handle = rfd::AsyncFileDialog::new()
@@ -2965,15 +2954,15 @@ impl App {
                 );
             }
             Message::SaveProject => {
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
                 let project = self.project_from_state();
-                if let Some(path) = self.state.current_project_path.clone() {
+                if let Some(path) = self.state.project.current_path.clone() {
                     return Task::perform(save_project_async(path, project), Message::ProjectSaved);
                 }
                 return self.update(Message::SaveProjectAs);
             }
             Message::SaveProjectAs => {
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
                 return Task::perform(
                     async {
                         let handle = rfd::AsyncFileDialog::new()
@@ -2986,12 +2975,6 @@ impl App {
                     },
                     Message::ProjectSavePathSelected,
                 );
-            }
-            Message::ToggleFileMenu => {
-                self.state.file_menu_open = !self.state.file_menu_open;
-            }
-            Message::DismissFileMenu => {
-                self.state.file_menu_open = false;
             }
             Message::ProjectOpenPathSelected(path) => {
                 if let Some(path) = path {
@@ -3025,8 +3008,8 @@ impl App {
             },
             Message::ProjectSaved(result) => match result {
                 Ok(path) => {
-                    self.state.current_project_path = Some(path.clone());
-                    self.state.project_dirty = false;
+                    self.state.project.current_path = Some(path.clone());
+                    self.state.project.dirty = false;
                     self.state.status_text = format!("Saved {}", path.display());
                 }
                 Err(err) => {
@@ -3037,7 +3020,7 @@ impl App {
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
             }
             Message::CloseSettings => {
                 self.state.settings_open = false;
@@ -3367,7 +3350,7 @@ impl App {
                     self.state.clip_bpm_edit.remove(&clip_id);
                     self.state.status_text =
                         format!("Detected {:.1} BPM (confidence {:.2})", b, confidence);
-                    self.state.project_dirty = true;
+                    self.state.project.dirty = true;
                 }
                 None => {
                     self.state.status_text =
@@ -3397,7 +3380,7 @@ impl App {
                         }
                     }
                     self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                    self.state.project_dirty = true;
+                    self.state.project.dirty = true;
                 }
             }
             Message::SetClipNominalBpm {
@@ -3411,7 +3394,7 @@ impl App {
                     }
                 }
                 self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                self.state.project_dirty = true;
+                self.state.project.dirty = true;
             }
             Message::WarpClipToProject { track_id, clip_id } => {
                 return self.dispatch_warp_clip_to_project(track_id, clip_id);
@@ -3431,19 +3414,14 @@ impl App {
             }
 
             // -- Undo / redo --
-            Message::Undo => {
-                self.undo();
-            }
-            Message::Redo => {
-                self.redo();
-            }
 
             // -- Export --
             Message::ExportProject => {
-                self.state.file_menu_open = false;
+                self.state.project.file_menu_open = false;
                 let default_name = self
                     .state
-                    .current_project_path
+                    .project
+                    .current_path
                     .as_ref()
                     .and_then(|p| p.file_stem())
                     .map(|n| format!("{}.wav", n.to_string_lossy()))
@@ -4035,7 +4013,7 @@ impl App {
 
         if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
-        } else if self.state.file_menu_open {
+        } else if self.state.project.file_menu_open {
             stack![base_layout, self.view_file_menu_overlay()].into()
         } else if self.state.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
@@ -4083,7 +4061,7 @@ impl App {
         );
 
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
-        let save_label = if self.state.project_dirty {
+        let save_label = if self.state.project.dirty {
             "Save*"
         } else {
             "Save"
@@ -4143,7 +4121,7 @@ impl App {
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
-            .on_press(Message::DismissFileMenu)
+            .on_press(Message::Project(ProjectMsg::DismissFileMenu))
             .into()
     }
 
@@ -5046,7 +5024,7 @@ impl App {
         let tabs = row![arrange_tab, mix_tab].spacing(4);
 
         let file_btn = button(text("File").size(13).color(th::TEXT_DIM))
-            .on_press(Message::ToggleFileMenu)
+            .on_press(Message::Project(ProjectMsg::ToggleFileMenu))
             .padding([6, 14])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
@@ -8464,12 +8442,12 @@ fn global_key_handler(
             "0" => Some(Message::ZoomToFit),
             "z" | "Z" => {
                 if modifiers.shift() {
-                    Some(Message::Redo)
+                    Some(Message::Project(ProjectMsg::Redo))
                 } else {
-                    Some(Message::Undo)
+                    Some(Message::Project(ProjectMsg::Undo))
                 }
             }
-            "y" | "Y" => Some(Message::Redo),
+            "y" | "Y" => Some(Message::Project(ProjectMsg::Redo)),
             _ => None,
         },
         _ => None,

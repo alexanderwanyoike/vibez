@@ -385,6 +385,16 @@ pub struct ProjectSnapshot {
     pub next_track_number: u32,
 }
 
+/// Project domain slice: file-menu visibility, the current file,
+/// the dirty flag, and the undo/redo history.
+#[derive(Debug, Default)]
+pub struct ProjectState {
+    pub file_menu_open: bool,
+    pub current_path: Option<PathBuf>,
+    pub dirty: bool,
+    pub history: UndoHistory,
+}
+
 #[derive(Debug, Default)]
 pub struct UndoHistory {
     pub undo: VecDeque<ProjectSnapshot>,
@@ -623,12 +633,11 @@ pub struct AppState {
     pub devices: crate::domains::devices::DevicesState,
 
     // File menu / Settings
-    pub file_menu_open: bool,
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
-    pub current_project_path: Option<PathBuf>,
-    pub project_dirty: bool,
+    // Project domain slice (file menu, path, dirty flag, undo).
+    pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
     /// import. Mirrored from `UiSettings::auto_warp_on_import`.
     pub auto_warp_on_import: bool,
@@ -675,12 +684,10 @@ impl Default for AppState {
             edit_name_text: String::new(),
             clip_bpm_edit: HashMap::new(),
             devices: crate::domains::devices::DevicesState::default(),
-            file_menu_open: false,
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
-            current_project_path: None,
-            project_dirty: false,
+            project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
             browser: BrowserState::default(),
