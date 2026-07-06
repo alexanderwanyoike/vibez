@@ -13,6 +13,8 @@ use vibez_core::midi::MidiNote;
 
 /// Width of the piano key area on the left.
 const KEY_WIDTH: f32 = 52.0;
+/// Wider key lane when pads carry sample-name labels (drum tracks).
+const DRUM_KEY_WIDTH: f32 = 110.0;
 /// Height of each piano key row.
 const KEY_HEIGHT: f32 = 16.0;
 /// Height of the ruler strip at the top.
@@ -28,7 +30,7 @@ const NUM_ROWS: u8 = HIGH_NOTE - LOW_NOTE;
 /// Resize handle width in pixels.
 const RESIZE_HANDLE_PX: f32 = 6.0;
 
-/// Black key width as fraction of KEY_WIDTH.
+/// Black key width as fraction of self.key_width().
 const BLACK_KEY_RATIO: f32 = 0.60;
 
 /// Scroll speed: pixels per wheel tick.
@@ -107,16 +109,24 @@ impl PianoRollWidget {
         }
     }
 
+    fn key_width(&self) -> f32 {
+        if self.key_labels.is_empty() {
+            self.key_width()
+        } else {
+            DRUM_KEY_WIDTH
+        }
+    }
+
     fn beat_to_x(&self, beat: f64, bounds: &Rectangle) -> f32 {
-        let grid_width = bounds.width - KEY_WIDTH;
+        let grid_width = bounds.width - self.key_width();
         let total = self.total_beats.max(1.0);
         KEY_WIDTH + (beat / total) as f32 * grid_width
     }
 
     fn x_to_beat(&self, x: f32, bounds: &Rectangle) -> f64 {
-        let grid_width = bounds.width - KEY_WIDTH;
+        let grid_width = bounds.width - self.key_width();
         let total = self.total_beats.max(1.0);
-        ((x - KEY_WIDTH) / grid_width) as f64 * total
+        ((x - self.key_width()) / grid_width) as f64 * total
     }
 
     fn pitch_to_y(&self, pitch: u8) -> f32 {
@@ -133,7 +143,7 @@ impl PianoRollWidget {
     /// Hit test: find note at position, return (index, near_right_edge).
     fn hit_test_note(&self, pos: Point, bounds: &Rectangle) -> Option<(usize, bool)> {
         let clip_data = self.clip.as_ref()?;
-        let grid_width = bounds.width - KEY_WIDTH;
+        let grid_width = bounds.width - self.key_width();
         let total = self.total_beats.max(1.0);
 
         for (idx, note) in clip_data.notes.iter().enumerate() {
@@ -294,7 +304,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
-        let grid_width = w - KEY_WIDTH;
+        let grid_width = w - self.key_width();
         let total = self.total_beats.max(1.0);
         let grid_ppb = grid_width / total as f32;
 
@@ -320,7 +330,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             let row_bg = if is_black { BLACK_ROW_BG } else { WHITE_ROW_BG };
 
             frame.fill_rectangle(
-                iced::Point::new(KEY_WIDTH, y),
+                iced::Point::new(self.key_width(), y),
                 iced::Size::new(grid_width, KEY_HEIGHT),
                 row_bg,
             );
@@ -333,7 +343,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 (GRID_LINE, 0.5)
             };
             let hline = canvas::Path::line(
-                iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                iced::Point::new(self.key_width(), y + KEY_HEIGHT),
                 iced::Point::new(w, y + KEY_HEIGHT),
             );
             frame.stroke(
@@ -357,14 +367,14 @@ impl canvas::Program<Message> for PianoRollWidget {
             if !is_black_key(pitch) {
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
-                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
+                    iced::Size::new(self.key_width(), KEY_HEIGHT),
                     WHITE_KEY_COLOR,
                 );
 
                 // Key border
                 let border = canvas::Path::line(
                     iced::Point::new(0.0, y + KEY_HEIGHT),
-                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                    iced::Point::new(self.key_width(), y + KEY_HEIGHT),
                 );
                 frame.stroke(
                     &border,
@@ -376,7 +386,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         }
 
         // Second pass: draw black keys on top (narrower, covering left portion)
-        let black_key_width = KEY_WIDTH * BLACK_KEY_RATIO;
+        let black_key_width = self.key_width() * BLACK_KEY_RATIO;
         for i in first_visible..last_visible {
             let pitch = HIGH_NOTE - 1 - i as u8;
             let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
@@ -389,7 +399,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 // Dark fill for the background area behind black key
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
-                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
+                    iced::Size::new(self.key_width(), KEY_HEIGHT),
                     Color {
                         r: 0.14,
                         g: 0.14,
@@ -408,7 +418,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 // Key border
                 let border = canvas::Path::line(
                     iced::Point::new(0.0, y + KEY_HEIGHT),
-                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                    iced::Point::new(self.key_width(), y + KEY_HEIGHT),
                 );
                 frame.stroke(
                     &border,
@@ -450,8 +460,8 @@ impl canvas::Program<Message> for PianoRollWidget {
 
         // Key area separator (vertical line at right edge of piano)
         let sep = canvas::Path::line(
-            iced::Point::new(KEY_WIDTH, RULER_HEIGHT),
-            iced::Point::new(KEY_WIDTH, h),
+            iced::Point::new(self.key_width(), RULER_HEIGHT),
+            iced::Point::new(self.key_width(), h),
         );
         frame.stroke(
             &sep,
@@ -1102,7 +1112,7 @@ impl canvas::Program<Message> for PianoRollWidget {
 
                     if let Some(ref drag) = state.drag {
                         if let Some(ref clip_data) = self.clip {
-                            let grid_width = bounds.width - KEY_WIDTH;
+                            let grid_width = bounds.width - self.key_width();
                             let total = self.total_beats.max(1.0);
                             let beats_per_pixel = total / grid_width as f64;
 
@@ -1231,7 +1241,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                         if original_notes.len() > 1 {
                             if let Some(ref clip_data) = self.clip {
                                 if let Some(pos) = state.last_cursor {
-                                    let grid_width = bounds.width - KEY_WIDTH;
+                                    let grid_width = bounds.width - self.key_width();
                                     let total = self.total_beats.max(1.0);
                                     let beats_per_pixel = total / grid_width as f64;
 
@@ -1293,26 +1303,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                 state.shift_held = false;
             }
 
-            // ── Keyboard: Delete → remove selected notes ──
-            //
-            // Backspace is intentionally not bound because iced 0.13 canvas
-            // receives keyboard events even when a text input is focused.
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete),
-                ..
-            }) => {
-                if let Some(ref clip_data) = self.clip {
-                    if !clip_data.selected_notes.is_empty() {
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::RemoveSelectedNotes(
-                                self.track_id,
-                                clip_data.clip_id,
-                            )),
-                        );
-                    }
-                }
-            }
+            // Delete/Backspace are handled centrally by the global
+            // DeleteKeyPressed shortcut (context-aware, respects text
+            // input focus). Canvases must NOT bind them: every canvas
+            // receives keyboard events, so two canvases binding the
+            // same key race each other (the timeline used to win and
+            // delete the clip while the piano roll wanted the note).
 
             // ── Keyboard: Arrow keys → nudge selected notes ──
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {

@@ -9883,9 +9883,15 @@ fn drum_pad_key_labels(track: &UiTrack) -> std::collections::HashMap<u8, String>
     let mut labels = std::collections::HashMap::new();
     if track.instrument_kind == Some(InstrumentKind::DrumRack) {
         for (i, pad) in track.drum_rack_pads.iter().enumerate() {
+            // Only pads with samples get a name; empty pads keep a
+            // plain key so the lane stays readable.
+            let Some(name) = pad.name.as_deref() else {
+                continue;
+            };
             let pitch = BASE_PAD_NOTE + i as u8;
-            let name = pad.name.clone().unwrap_or_else(|| format!("Pad {}", i + 1));
-            labels.insert(pitch, name);
+            // Strip the file extension; it is noise at 9px.
+            let clean = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+            labels.insert(pitch, clean.to_string());
         }
     }
     labels
