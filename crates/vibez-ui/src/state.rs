@@ -504,6 +504,11 @@ pub struct ArrangementState {
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    // Time selection (visible brackets; independent from the loop).
+    pub time_selection_active: bool,
+    pub selection_start_beats: f64,
+    pub selection_end_beats: f64,
+    pub time_selection_track: Option<TrackId>,
 }
 
 pub struct AppState {
@@ -532,14 +537,6 @@ pub struct AppState {
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
 
-    // Arrangement loop
-    // Time selection (visible brackets on arrangement — independent from loop)
-    pub time_selection_active: bool,
-    pub selection_start_beats: f64,
-    pub selection_end_beats: f64,
-    /// Track whose lane was dragged to create the current time selection,
-    /// if any. `None` means the selection is arrangement-wide (ruler drag).
-    pub time_selection_track: Option<TrackId>,
 
     // Context menu
     pub context_menu: Option<ContextMenu>,
@@ -632,10 +629,6 @@ impl Default for AppState {
                 ..ArrangementState::default()
             },
             detail_panel_tab: DetailPanelTab::Clip,
-            time_selection_active: false,
-            selection_start_beats: 0.0,
-            selection_end_beats: 0.0,
-            time_selection_track: None,
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,

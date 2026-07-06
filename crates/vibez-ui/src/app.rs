@@ -287,9 +287,9 @@ impl App {
         self.state.transport.loop_enabled = false;
         self.state.transport.loop_start_beats = 0.0;
         self.state.transport.loop_end_beats = 4.0;
-        self.state.time_selection_active = false;
-        self.state.selection_start_beats = 0.0;
-        self.state.selection_end_beats = 0.0;
+        self.state.arrangement.time_selection_active = false;
+        self.state.arrangement.selection_start_beats = 0.0;
+        self.state.arrangement.selection_end_beats = 0.0;
         self.state.scroll_offset_beats = 0.0;
         self.state.context_menu = None;
         self.state.devices.context_menu = None;
@@ -1729,8 +1729,8 @@ impl App {
         match action {
             TransportAction::None => Task::none(),
             TransportAction::ClearTimeSelection => {
-                self.state.time_selection_active = false;
-                self.state.time_selection_track = None;
+                self.state.arrangement.time_selection_active = false;
+                self.state.arrangement.time_selection_track = None;
                 Task::none()
             }
             TransportAction::TempoChanged { old_bpm, new_bpm } => {
@@ -2150,10 +2150,10 @@ impl App {
             Message::Transport(msg) => {
                 let ctx = crate::domains::transport::TransportCtx {
                     total_duration_samples: self.state.total_duration_samples(),
-                    time_selection: if self.state.time_selection_active {
+                    time_selection: if self.state.arrangement.time_selection_active {
                         Some((
-                            self.state.selection_start_beats,
-                            self.state.selection_end_beats,
+                            self.state.arrangement.selection_start_beats,
+                            self.state.arrangement.selection_end_beats,
                         ))
                     } else {
                         None
@@ -3736,13 +3736,13 @@ impl App {
             // If time selection is active → split all clips at region boundaries.
             // Otherwise → split selected clips at the playhead.
             Message::SplitSelectedAtPlayhead => {
-                if self.state.time_selection_active
-                    && self.state.selection_end_beats > self.state.selection_start_beats
+                if self.state.arrangement.time_selection_active
+                    && self.state.arrangement.selection_end_beats > self.state.arrangement.selection_start_beats
                 {
                     return self.update(Message::SplitClipsAtRegion {
-                        start_beats: self.state.selection_start_beats,
-                        end_beats: self.state.selection_end_beats,
-                        track_id: self.state.time_selection_track,
+                        start_beats: self.state.arrangement.selection_start_beats,
+                        end_beats: self.state.arrangement.selection_end_beats,
+                        track_id: self.state.arrangement.time_selection_track,
                     });
                 }
 
@@ -3814,18 +3814,18 @@ impl App {
                 end_beats,
                 track_id,
             } => {
-                self.state.selection_start_beats = start_beats;
-                self.state.selection_end_beats = end_beats;
-                self.state.time_selection_active = true;
-                self.state.time_selection_track = track_id;
+                self.state.arrangement.selection_start_beats = start_beats;
+                self.state.arrangement.selection_end_beats = end_beats;
+                self.state.arrangement.time_selection_active = true;
+                self.state.arrangement.time_selection_track = track_id;
                 if let Some(tid) = track_id {
                     self.state.arrangement.selected_track = Some(tid);
                 }
             }
             Message::SetSelectionAsLoop => {
                 self.state.context_menu = None;
-                self.state.transport.loop_start_beats = self.state.selection_start_beats;
-                self.state.transport.loop_end_beats = self.state.selection_end_beats;
+                self.state.transport.loop_start_beats = self.state.arrangement.selection_start_beats;
+                self.state.transport.loop_end_beats = self.state.arrangement.selection_end_beats;
                 let start = self
                     .state
                     .beats_to_samples(self.state.transport.loop_start_beats);
@@ -3839,9 +3839,9 @@ impl App {
                 }
             }
             Message::SetTimeSelectionActive(active) => {
-                self.state.time_selection_active = active;
+                self.state.arrangement.time_selection_active = active;
                 if !active {
-                    self.state.time_selection_track = None;
+                    self.state.arrangement.time_selection_track = None;
                 }
             }
             Message::CursorMoved(x, y) => {
@@ -3946,7 +3946,7 @@ impl App {
                 }
                 self.state.arrangement.selected_clips.clear();
                 self.state.arrangement.selected_note_clip = None;
-                self.state.time_selection_active = false;
+                self.state.arrangement.time_selection_active = false;
                 let count = audio_removals.len() + note_removals.len();
                 self.state.status_text = format!("Deleted {count} clips in region");
             }
@@ -4053,8 +4053,8 @@ impl App {
             }
             Message::CreateNoteClipFromSelection(track_id) => {
                 self.state.context_menu = None;
-                if !self.state.time_selection_active
-                    || self.state.selection_end_beats <= self.state.selection_start_beats
+                if !self.state.arrangement.time_selection_active
+                    || self.state.arrangement.selection_end_beats <= self.state.arrangement.selection_start_beats
                 {
                     self.state.status_text = "No time selection active".to_string();
                     return Task::none();
@@ -4067,9 +4067,9 @@ impl App {
                     }
                 }
                 let clip_id = ClipId::new();
-                let position_beats = self.state.selection_start_beats;
+                let position_beats = self.state.arrangement.selection_start_beats;
                 let duration_beats =
-                    self.state.selection_end_beats - self.state.selection_start_beats;
+                    self.state.arrangement.selection_end_beats - self.state.arrangement.selection_start_beats;
                 if let Some(track) = self.state.find_track_mut(track_id) {
                     track.note_clips.push(UiNoteClip {
                         id: clip_id,
@@ -4868,23 +4868,23 @@ impl App {
             // -- Bounce / resample --
             Message::BounceSelectionToAudio => {
                 self.state.context_menu = None;
-                if !self.state.time_selection_active
-                    || self.state.selection_end_beats <= self.state.selection_start_beats
+                if !self.state.arrangement.time_selection_active
+                    || self.state.arrangement.selection_end_beats <= self.state.arrangement.selection_start_beats
                 {
                     self.state.status_text = "No time selection active".to_string();
                     return Task::none();
                 }
                 let start = self
                     .state
-                    .beats_to_samples(self.state.selection_start_beats);
-                let end = self.state.beats_to_samples(self.state.selection_end_beats);
+                    .beats_to_samples(self.state.arrangement.selection_start_beats);
+                let end = self.state.beats_to_samples(self.state.arrangement.selection_end_beats);
                 return self.dispatch_bounce(
                     vibez_engine::render::BounceMode::Master,
                     (start, end),
                     start,
                     format!(
                         "Selection {:.2}–{:.2}",
-                        self.state.selection_start_beats, self.state.selection_end_beats
+                        self.state.arrangement.selection_start_beats, self.state.arrangement.selection_end_beats
                     ),
                 );
             }
@@ -7868,9 +7868,9 @@ impl App {
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
-            time_selection_active: self.state.time_selection_active,
-            selection_start_beats: self.state.selection_start_beats,
-            selection_end_beats: self.state.selection_end_beats,
+            time_selection_active: self.state.arrangement.time_selection_active,
+            selection_start_beats: self.state.arrangement.selection_start_beats,
+            selection_end_beats: self.state.arrangement.selection_end_beats,
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -8004,10 +8004,10 @@ impl App {
                 self.state.transport.loop_enabled,
                 self.state.transport.loop_start_beats,
                 self.state.transport.loop_end_beats,
-                self.state.time_selection_active,
-                self.state.selection_start_beats,
-                self.state.selection_end_beats,
-                self.state.time_selection_track,
+                self.state.arrangement.time_selection_active,
+                self.state.arrangement.selection_start_beats,
+                self.state.arrangement.selection_end_beats,
+                self.state.arrangement.time_selection_track,
                 self.state.drag_source.is_some(),
             );
             let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
