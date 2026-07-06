@@ -85,10 +85,9 @@ impl canvas::Program<Message> for KnobWidget {
         frame.fill(&bg_circle, theme::KNOB_BG);
 
         let arc_radius = radius - 2.0;
-        let segments = 40;
 
         // Background arc (full 270° range)
-        let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END, segments);
+        let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END);
         frame.stroke(
             &bg_arc,
             canvas::Stroke::default()
@@ -99,7 +98,7 @@ impl canvas::Program<Message> for KnobWidget {
         // Value arc (filled portion) using track color
         let value_angle = ARC_START + self.value * (ARC_END - ARC_START);
         if self.value > 0.005 {
-            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle, segments);
+            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle);
             frame.stroke(
                 &value_arc,
                 canvas::Stroke::default()
@@ -267,26 +266,16 @@ impl canvas::Program<Message> for KnobWidget {
     }
 }
 
-fn build_arc(
-    center: iced::Point,
-    radius: f32,
-    start: f32,
-    end: f32,
-    segments: usize,
-) -> canvas::Path {
+fn build_arc(center: iced::Point, radius: f32, start: f32, end: f32) -> canvas::Path {
+    // Native arc geometry: true curves stay antialiased at any size,
+    // unlike the segment polylines that caused visible stair-step
+    // artifacting on small knobs.
     canvas::Path::new(|builder| {
-        let step = (end - start) / segments as f32;
-        for i in 0..=segments {
-            let angle = start + step * i as f32;
-            let point = iced::Point::new(
-                center.x + radius * angle.cos(),
-                center.y + radius * angle.sin(),
-            );
-            if i == 0 {
-                builder.move_to(point);
-            } else {
-                builder.line_to(point);
-            }
-        }
+        builder.arc(canvas::path::Arc {
+            center,
+            radius,
+            start_angle: iced::Radians(start),
+            end_angle: iced::Radians(end),
+        });
     })
 }
