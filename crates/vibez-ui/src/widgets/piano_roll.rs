@@ -111,7 +111,7 @@ impl PianoRollWidget {
 
     fn key_width(&self) -> f32 {
         if self.key_labels.is_empty() {
-            self.key_width()
+            KEY_WIDTH
         } else {
             DRUM_KEY_WIDTH
         }
@@ -120,7 +120,7 @@ impl PianoRollWidget {
     fn beat_to_x(&self, beat: f64, bounds: &Rectangle) -> f32 {
         let grid_width = bounds.width - self.key_width();
         let total = self.total_beats.max(1.0);
-        KEY_WIDTH + (beat / total) as f32 * grid_width
+        self.key_width() + (beat / total) as f32 * grid_width
     }
 
     fn x_to_beat(&self, x: f32, bounds: &Rectangle) -> f64 {
@@ -477,7 +477,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
             // Snap to half-pixel for crisp 1px rendering (avoids blurry subpixel splits)
-            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
+            let x = (self.key_width() + (beat / total) as f32 * grid_width).floor() + 0.5;
             if x > w {
                 break;
             }
@@ -734,7 +734,7 @@ impl canvas::Program<Message> for PianoRollWidget {
 
         // ── Playhead ──
         let playhead_x = self.beat_to_x(self.playhead_beats, &bounds);
-        if playhead_x >= KEY_WIDTH {
+        if playhead_x >= self.key_width() {
             let playhead_line = canvas::Path::line(
                 iced::Point::new(playhead_x, RULER_HEIGHT),
                 iced::Point::new(playhead_x, h),
@@ -770,7 +770,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         // Ruler tick marks and labels
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
-            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
+            let x = (self.key_width() + (beat / total) as f32 * grid_width).floor() + 0.5;
             if x > w {
                 break;
             }
@@ -823,7 +823,7 @@ impl canvas::Program<Message> for PianoRollWidget {
         }
 
         // Ruler playhead marker
-        if playhead_x >= KEY_WIDTH {
+        if playhead_x >= self.key_width() {
             let marker = canvas::Path::line(
                 iced::Point::new(playhead_x, 0.0),
                 iced::Point::new(playhead_x, RULER_HEIGHT),
@@ -866,7 +866,7 @@ impl canvas::Program<Message> for PianoRollWidget {
 
         // Select mode: hover over note edge
         if let Some(pos) = cursor.position_in(bounds) {
-            if pos.x >= KEY_WIDTH && pos.y > RULER_HEIGHT {
+            if pos.x >= self.key_width() && pos.y > RULER_HEIGHT {
                 if let Some((_idx, near_right)) = self.hit_test_note(pos, &bounds) {
                     if near_right {
                         return mouse::Interaction::ResizingHorizontally;
@@ -910,7 +910,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     }
 
                     // Only handle clicks in the grid area
-                    if pos.x < KEY_WIDTH {
+                    if pos.x < self.key_width() {
                         return (canvas::event::Status::Ignored, None);
                     }
 
@@ -1408,4 +1408,18 @@ impl canvas::Program<Message> for PianoRollWidget {
 /// Returns true if the given MIDI pitch is a black key.
 fn is_black_key(pitch: u8) -> bool {
     matches!(pitch % 12, 1 | 3 | 6 | 8 | 10)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn key_width_is_finite_for_both_lane_modes() {
+        let mut w = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
+        assert_eq!(w.key_width(), KEY_WIDTH);
+        w.key_labels.insert(36, "Kick".to_string());
+        assert_eq!(w.key_width(), DRUM_KEY_WIDTH);
+    }
 }
