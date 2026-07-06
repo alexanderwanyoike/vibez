@@ -73,18 +73,34 @@ Cross-domain rules:
 
 ## Remaining tranches
 
-Progress 2026-07-07 (stacked PR chain, merge bottom-up):
+Progress 2026-07-07 (stacked PR chain, MERGE BOTTOM-UP:
+#22 -> #23 -> #24 -> #25 -> #26 -> #27; merging out of order
+auto-closes the PRs above the gap when base branches are deleted):
 - 3b-1 clips selection/move/resize/loop: DONE (PR #22).
-- 3b-2 clips split/join/region ops + join helpers: DONE (PR #23,
-  stacked on #22). ArrangementCtx gained playhead_samples/
-  playhead_beats; ArrangementAction gained close_context_menu.
-- 4 piano roll: DONE (PR #24, stacked on #23). New PianoRollState
-  slice (scroll_y, edit_mode); PianoRollMsg with 19 variants;
-  quantize_note_clip + default_loop_end moved into the domain.
-  Widget construction sites were wrapped in place with a
-  paren/brace-matching script (Message::X{..} ->
-  Message::PianoRoll(PianoRollMsg::X{..})) instead of constructor
-  helpers; both approaches work, matching beats regex.
+- 3b-2 clips split/join/region ops + join helpers: DONE (PR #23).
+  ArrangementCtx gained playhead_samples/playhead_beats;
+  ArrangementAction gained close_context_menu.
+- 4 piano roll: DONE (PR #24). PianoRollState slice (scroll_y,
+  edit_mode); PianoRollMsg with 19 variants; quantize_note_clip +
+  default_loop_end moved into the domain. Widget construction
+  sites were wrapped in place with a paren/brace-matching script
+  (Message::X{..} -> Message::PianoRoll(PianoRollMsg::X{..}))
+  instead of constructor helpers; both approaches work, matching
+  beats regex.
+- 5a browser sync tranche: DONE (PR #25). BrowserState slice
+  (library, drag-drop, DropboxUiState); 13 sync messages.
+  BrowserAction routes persist-settings / expand-dropbox-root /
+  drop-on-arrangement back through the router.
+- undo-drops-plugins FIX: DONE (PR #26). domains/project.rs
+  collect_plugin_reload_requests strips plugin devices from the
+  snapshot into reload work orders; apply_snapshot feeds them to
+  spawn_project_plugin_loads (the project-open pipeline). Live
+  instances get their state captured pre-teardown so parameters
+  survive undo exactly.
+- 6 project domain: DONE (PR #27). ProjectState slice
+  (file_menu_open, current_path, dirty, history); ProjectMsg
+  Undo/Redo with pure stack bookkeeping (router passes
+  snapshot_now in ctx, receives apply_snapshot in the action).
 
 Still to do:
 - 3b-3 clip async/warp orchestration: AddClipToTrack,
@@ -93,11 +109,17 @@ Still to do:
   DetectClipBpm, ClipBpmDetected, SetClipNominalBpm, quantize
   audio), bounce. These spawn iced Tasks; keep the Task::perform
   in app.rs and move the state math into domain fns the arm calls.
-- 5 browser: sample browser, preview, Dropbox, drag-drop dispatch.
-  Same async caveat: rfd dialogs and decode stay as Tasks in
-  app.rs; library/selection/drag state moves to a BrowserState
-  slice.
-- 6 project: save/load/undo/export/snapshots (also fix: snapshots
-  drop plugin devices; see dogfood #22 note).
+- 5b browser async: dialogs, decode/preview, Dropbox HTTP,
+  import/drop dispatch (dispatch_drop_on_arrangement and friends).
+- 6b project async: save/load/export orchestration + the engine
+  replay helpers (replay_track_to_engine, load handling).
 - 7 services: plugin load pipeline (poll_plugin_loads + bg loaders),
   scanning, plugin window manager glue behind channel interfaces.
+  Hardest and least mechanical; do it last, with the app running
+  for smoke tests after every step (plugin teardown ordering is
+  segfault territory, see apply_snapshot's comment).
+
+Final count this session: app.rs ~7,700 lines (from 11,305),
+60 UI unit tests (from zero), six domain modules (transport,
+devices, arrangement, piano_roll, browser, project) plus the
+shared EngineHandle seam in domains/mod.rs.
