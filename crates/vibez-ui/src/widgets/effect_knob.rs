@@ -5,7 +5,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
-use crate::message::Message;
+use crate::message::{DrumPadParam, Message};
 use crate::theme;
 use vibez_core::id::{EffectId, TrackId};
 
@@ -28,6 +28,10 @@ const DOUBLE_CLICK_MS: u64 = 300;
 pub enum KnobTarget {
     Effect(EffectId),
     Instrument,
+    DrumPad {
+        pad_index: usize,
+        param: DrumPadParam,
+    },
 }
 
 /// Generalized rotary knob widget for device parameters with
@@ -90,6 +94,30 @@ impl EffectKnobWidget {
         }
     }
 
+    /// Knob bound to a drum rack pad parameter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_drum_pad(
+        track_id: TrackId,
+        pad_index: usize,
+        param: DrumPadParam,
+        value: f32,
+        min: f32,
+        max: f32,
+        default: f32,
+        arc_color: Color,
+    ) -> Self {
+        Self {
+            track_id,
+            target: KnobTarget::DrumPad { pad_index, param },
+            param_index: 0,
+            value,
+            min,
+            max,
+            default,
+            arc_color,
+        }
+    }
+
     fn set_value_message(&self, value: f32) -> Message {
         match self.target {
             KnobTarget::Effect(effect_id) => {
@@ -98,6 +126,12 @@ impl EffectKnobWidget {
             KnobTarget::Instrument => {
                 Message::SetInstrumentParam(self.track_id, self.param_index, value)
             }
+            KnobTarget::DrumPad { pad_index, param } => Message::SetDrumPadParam {
+                track_id: self.track_id,
+                pad_index,
+                param,
+                value,
+            },
         }
     }
 

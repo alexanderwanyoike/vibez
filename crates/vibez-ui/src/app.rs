@@ -28,8 +28,8 @@ use vibez_project::Project;
 
 use crate::icons;
 use crate::message::{
-    BrowserImportTarget, LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message,
-    ProjectLoadResult, SampleLibraryScanResult,
+    BrowserImportTarget, DrumPadParam, LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData,
+    Message, ProjectLoadResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowEvent, PluginWindowManager};
 use crate::state::{
@@ -1956,6 +1956,9 @@ impl App {
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
                 | Message::ClearDrumRackPad(..)
+                | Message::SetDrumPadParam { .. }
+                | Message::SetDrumPadOneShot { .. }
+                | Message::SetDrumPadChokeGroup { .. }
                 | Message::BrowserSampleDecoded(..)
                 | Message::ToggleClipLoop(..)
                 | Message::SetClipLoopRegion { .. }
@@ -2645,6 +2648,67 @@ impl App {
                     track.selected_drum_pad = pad_index.min(max_index);
                 }
                 self.state.selected_track = Some(track_id);
+            }
+            Message::SetDrumPadParam {
+                track_id,
+                pad_index,
+                param,
+                value,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        match param {
+                            DrumPadParam::Gain => pad.gain = value.clamp(0.0, 2.0),
+                            DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
+                            DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
+                            DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
+                            DrumPadParam::CoarseTune => {
+                                pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
+                            }
+                            DrumPadParam::FineTune => pad.fine_tune = value.clamp(-100.0, 100.0),
+                        }
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
+            }
+            Message::SetDrumPadOneShot {
+                track_id,
+                pad_index,
+                one_shot,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        pad.one_shot = one_shot;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
+            }
+            Message::SetDrumPadChokeGroup {
+                track_id,
+                pad_index,
+                choke_group,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.state.find_track_mut(track_id) {
+                    if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
+                        pad.choke_group = choke_group;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    self.sync_drum_rack_pad_state(track_id, pad_index);
+                    self.state.status_text = format!("Pad {} updated", pad_index + 1);
+                }
             }
 
             // -- Clip looping --
@@ -8839,6 +8903,7 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
+        use crate::widgets::effect_knob::EffectKnobWidget;
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Sampler").size(11).color(th::TEXT);
 
@@ -8874,19 +8939,52 @@ impl App {
             .spacing(6)
             .align_y(iced::Alignment::Center);
 
-        let param_names = ["Attack", "Decay", "Sustain", "Release", "Volume"];
-        let mut params_col = column![].spacing(2);
-        for pn in &param_names {
-            let label = text(*pn).size(9).color(th::TEXT_DIM);
-            let value = text("\u{2014}").size(8).color(th::TEXT_MUTED);
-            params_col = params_col.push(column![label, value].spacing(1));
+        let descriptors = vibez_instruments::sampler::SAMPLER_PARAMS;
+        let mut param_rows = column![].spacing(6);
+        let mut current_row = row![].spacing(8);
+        let mut count = 0;
+        for (i, descriptor) in descriptors.iter().enumerate() {
+            let value = track
+                .instrument_params
+                .get(i)
+                .copied()
+                .unwrap_or(descriptor.default);
+            let knob = EffectKnobWidget::for_instrument(
+                track_id,
+                i,
+                value,
+                descriptor.min,
+                descriptor.max,
+                descriptor.default,
+                track_color,
+            );
+            let knob_canvas: Element<'a, Message> = canvas(knob)
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0))
+                .into();
+            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
+            let value_label = text(format!("{value:.2}{}", descriptor.unit))
+                .size(8)
+                .color(th::TEXT_MUTED);
+            let param_col = column![knob_canvas, label, value_label]
+                .spacing(1)
+                .align_x(iced::Alignment::Center);
+            current_row = current_row.push(param_col);
+            count += 1;
+            if count % 4 == 0 {
+                param_rows = param_rows.push(current_row);
+                current_row = row![].spacing(8);
+            }
+        }
+        if count % 4 != 0 {
+            param_rows = param_rows.push(current_row);
         }
 
-        let body = container(column![sample_row, params_col].spacing(6))
-            .padding([6, 6])
+        let body = container(column![sample_row, param_rows].spacing(6))
+            .padding([6, 7])
             .width(Length::Fill);
 
-        Self::device_card(column![title, body].width(Length::Fixed(140.0)))
+        Self::device_card(column![title, body].width(Length::Fixed(260.0)))
     }
 
     fn view_drum_rack_device<'a>(
@@ -8895,6 +8993,7 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
+        use crate::widgets::effect_knob::EffectKnobWidget;
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Drum Rack").size(11).color(th::TEXT);
         let selected_pad = track
@@ -8983,6 +9082,7 @@ impl App {
             .as_ref()
             .map(MediaSourceRef::display_name)
             .unwrap_or_else(|| "Use the browser or Load".to_string());
+        let selected_pad_state = &track.drum_rack_pads[selected_pad];
 
         let load_btn = button(text("Load").size(9).color(th::TEXT))
             .on_press(Message::LoadDrumRackPadSample(track_id, selected_pad))
@@ -9033,7 +9133,177 @@ impl App {
         ]
         .spacing(4);
 
-        let body = container(column![grid, footer].spacing(8))
+        let drum_params = [
+            (
+                "Gain",
+                format!("{:.2}", selected_pad_state.gain),
+                selected_pad_state.gain,
+                0.0,
+                2.0,
+                1.0,
+                DrumPadParam::Gain,
+            ),
+            (
+                "Pan",
+                format!("{:.2}", selected_pad_state.pan),
+                selected_pad_state.pan,
+                -1.0,
+                1.0,
+                0.0,
+                DrumPadParam::Pan,
+            ),
+            (
+                "Start",
+                format!("{:.0}%", selected_pad_state.start * 100.0),
+                selected_pad_state.start,
+                0.0,
+                1.0,
+                0.0,
+                DrumPadParam::Start,
+            ),
+            (
+                "End",
+                format!("{:.0}%", selected_pad_state.end * 100.0),
+                selected_pad_state.end,
+                0.0,
+                1.0,
+                1.0,
+                DrumPadParam::End,
+            ),
+            (
+                "Coarse",
+                format!("{}st", selected_pad_state.coarse_tune),
+                selected_pad_state.coarse_tune as f32,
+                -24.0,
+                24.0,
+                0.0,
+                DrumPadParam::CoarseTune,
+            ),
+            (
+                "Fine",
+                format!("{:.0}ct", selected_pad_state.fine_tune),
+                selected_pad_state.fine_tune,
+                -100.0,
+                100.0,
+                0.0,
+                DrumPadParam::FineTune,
+            ),
+        ];
+
+        let mut param_rows = column![].spacing(6);
+        let mut current_row = row![].spacing(8);
+        for (i, (label_text, value_text, value, min, max, default, param)) in
+            drum_params.iter().enumerate()
+        {
+            let knob = EffectKnobWidget::for_drum_pad(
+                track_id,
+                selected_pad,
+                *param,
+                *value,
+                *min,
+                *max,
+                *default,
+                track_color,
+            );
+            let knob_canvas: Element<'a, Message> = canvas(knob)
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0))
+                .into();
+            let label = text(*label_text).size(9).color(th::TEXT_DIM);
+            let value_label = text(value_text.clone()).size(8).color(th::TEXT_MUTED);
+            let param_col = column![knob_canvas, label, value_label]
+                .spacing(1)
+                .align_x(iced::Alignment::Center);
+            current_row = current_row.push(param_col);
+            if (i + 1) % 3 == 0 {
+                param_rows = param_rows.push(current_row);
+                current_row = row![].spacing(8);
+            }
+        }
+
+        let one_shot_active = selected_pad_state.one_shot;
+        let one_shot_btn = button(text("One-shot").size(9).color(if one_shot_active {
+            th::ACCENT
+        } else {
+            th::TEXT_DIM
+        }))
+        .on_press(Message::SetDrumPadOneShot {
+            track_id,
+            pad_index: selected_pad,
+            one_shot: !one_shot_active,
+        })
+        .padding([2, 6])
+        .style(move |_theme: &Theme, _status| button::Style {
+            background: Some(
+                if one_shot_active {
+                    th::ACCENT_DIM
+                } else {
+                    th::BG_DARK
+                }
+                .into(),
+            ),
+            text_color: if one_shot_active {
+                th::ACCENT
+            } else {
+                th::TEXT_DIM
+            },
+            border: iced::Border {
+                color: if one_shot_active {
+                    th::ACCENT_DIM
+                } else {
+                    th::BORDER
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let mut choke_row = row![text("Choke").size(9).color(th::TEXT_DIM)]
+            .spacing(2)
+            .align_y(iced::Alignment::Center);
+        for (group, label) in [
+            (None, "Off"),
+            (Some(1), "1"),
+            (Some(2), "2"),
+            (Some(3), "3"),
+            (Some(4), "4"),
+        ] {
+            let active = selected_pad_state.choke_group == group;
+            let btn =
+                button(
+                    text(label)
+                        .size(9)
+                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                )
+                .on_press(Message::SetDrumPadChokeGroup {
+                    track_id,
+                    pad_index: selected_pad,
+                    choke_group: group,
+                })
+                .padding([2, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
+                    text_color: if active { th::ACCENT } else { th::TEXT_DIM },
+                    border: iced::Border {
+                        color: if active { th::ACCENT_DIM } else { th::BORDER },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+            choke_row = choke_row.push(btn);
+        }
+
+        let editor = column![
+            param_rows,
+            row![one_shot_btn, choke_row]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+        ]
+        .spacing(6);
+
+        let body = container(column![grid, footer, editor].spacing(8))
             .padding([6, 6])
             .width(Length::Fill);
 
