@@ -10,6 +10,7 @@ pub mod arrangement;
 pub mod browser;
 pub mod devices;
 pub mod piano_roll;
+pub mod project;
 pub mod transport;
 
 use vibez_engine::commands::EngineCommand;

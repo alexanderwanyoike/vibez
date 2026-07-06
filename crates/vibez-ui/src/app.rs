@@ -1373,7 +1373,17 @@ impl App {
         self.undo_history.push_undo(snapshot);
     }
 
-    fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
+    fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        // Plugin devices cannot live inside snapshots; strip them
+        // into reload requests first, capturing the live state of
+        // instances that still exist so undo keeps their exact
+        // parameters. Must happen before the pointer maps are
+        // cleared below.
+        let reloads =
+            crate::domains::project::collect_plugin_reload_requests(&mut snapshot, |key| {
+                self.capture_device_state(key)
+            });
+
         // Plugin instances die with their tracks below. Their GUI
         // windows and raw pointers MUST go first: the window manager
         // pumps VST3 run-loop timers every tick, and pumping a freed
@@ -1421,6 +1431,10 @@ impl App {
         for track in &tracks {
             self.replay_track_to_engine(track);
         }
+
+        // Reload plugin devices through the project-open pipeline;
+        // they re-enter the chains at their recorded positions.
+        self.spawn_project_plugin_loads(reloads.effects, reloads.instruments);
     }
 
     fn replay_track_to_engine(&mut self, track: &UiTrack) {
