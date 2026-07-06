@@ -267,7 +267,11 @@ impl App {
 
         self.state.tracks.clear();
         // The engine drops all plugin instances with their tracks;
-        // stale raw pointers must go with them.
+        // their GUI windows and stale raw pointers must go with them
+        // (pumping a closed plugin's run-loop timers segfaults).
+        if let Some(ref mut mgr) = self.plugin_window_manager {
+            mgr.close_all();
+        }
         self.plugin_gui_raw_ptrs.clear();
         self.plugin_state_ptrs.clear();
         self.state.selected_track = None;
@@ -1347,6 +1351,17 @@ impl App {
     }
 
     fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        // Plugin instances die with their tracks below. Their GUI
+        // windows and raw pointers MUST go first: the window manager
+        // pumps VST3 run-loop timers every tick, and pumping a freed
+        // plugin is a guaranteed segfault (dogfood crash #22:
+        // delete clip + undo while playing).
+        if let Some(ref mut mgr) = self.plugin_window_manager {
+            mgr.close_all();
+        }
+        self.plugin_gui_raw_ptrs.clear();
+        self.plugin_state_ptrs.clear();
+
         // Tear down the engine side.
         let existing_track_ids: Vec<TrackId> = self.state.tracks.iter().map(|t| t.id).collect();
         for track_id in existing_track_ids {
