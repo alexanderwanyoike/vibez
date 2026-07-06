@@ -22,10 +22,19 @@ const SCROLL_STEP: f32 = 0.02;
 /// Double-click window in milliseconds.
 const DOUBLE_CLICK_MS: u64 = 300;
 
-/// Generalized rotary knob widget for effect parameters with arbitrary min/max.
+/// What a parameter knob controls: an effect slot or the track's
+/// native instrument. Determines which message value changes emit.
+#[derive(Clone, Copy)]
+pub enum KnobTarget {
+    Effect(EffectId),
+    Instrument,
+}
+
+/// Generalized rotary knob widget for device parameters with
+/// arbitrary min/max (effects and native instruments).
 pub struct EffectKnobWidget {
     pub track_id: TrackId,
-    pub effect_id: EffectId,
+    pub target: KnobTarget,
     pub param_index: usize,
     pub value: f32,
     pub min: f32,
@@ -48,13 +57,47 @@ impl EffectKnobWidget {
     ) -> Self {
         Self {
             track_id,
-            effect_id,
+            target: KnobTarget::Effect(effect_id),
             param_index,
             value,
             min,
             max,
             default,
             arc_color,
+        }
+    }
+
+    /// Knob bound to the track's native instrument parameter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn for_instrument(
+        track_id: TrackId,
+        param_index: usize,
+        value: f32,
+        min: f32,
+        max: f32,
+        default: f32,
+        arc_color: Color,
+    ) -> Self {
+        Self {
+            track_id,
+            target: KnobTarget::Instrument,
+            param_index,
+            value,
+            min,
+            max,
+            default,
+            arc_color,
+        }
+    }
+
+    fn set_value_message(&self, value: f32) -> Message {
+        match self.target {
+            KnobTarget::Effect(effect_id) => {
+                Message::SetEffectParam(self.track_id, effect_id, self.param_index, value)
+            }
+            KnobTarget::Instrument => {
+                Message::SetInstrumentParam(self.track_id, self.param_index, value)
+            }
         }
     }
 
@@ -192,12 +235,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
                             state.last_click = None;
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::SetEffectParam(
-                                    self.track_id,
-                                    self.effect_id,
-                                    self.param_index,
-                                    self.default,
-                                )),
+                                Some(self.set_value_message(self.default)),
                             );
                         }
                     }
@@ -238,12 +276,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SetEffectParam(
-                                self.track_id,
-                                self.effect_id,
-                                self.param_index,
-                                new_value,
-                            )),
+                            Some(self.set_value_message(new_value)),
                         );
                     }
                 }
@@ -269,12 +302,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::SetEffectParam(
-                            self.track_id,
-                            self.effect_id,
-                            self.param_index,
-                            new_value,
-                        )),
+                        Some(self.set_value_message(new_value)),
                     );
                 }
             }

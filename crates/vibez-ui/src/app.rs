@@ -8581,7 +8581,7 @@ impl App {
                         devices_row = devices_row.push(card);
                     }
                     _ => {
-                        let synth_card = self.view_synth_device(track_id, track_color);
+                        let synth_card = self.view_synth_device(track_id, track, track_color);
                         devices_row = devices_row.push(synth_card);
                     }
                 }
@@ -8738,23 +8738,98 @@ impl App {
     }
 
     /// Synth device card for instrument tracks.
-    fn view_synth_device(&self, _track_id: TrackId, track_color: Color) -> Element<'_, Message> {
+    fn view_synth_device<'a>(
+        &'a self,
+        track_id: TrackId,
+        track: &'a UiTrack,
+        track_color: Color,
+    ) -> Element<'a, Message> {
+        use crate::widgets::effect_knob::EffectKnobWidget;
         let dot = text("\u{25CF}").size(8).color(track_color);
         let name = text("Synth").size(11).color(th::TEXT);
 
         let title =
             Self::device_title_bar(row![dot, name].spacing(4).align_y(iced::Alignment::Center));
 
-        let param_names = ["Attack", "Decay", "Sustain", "Release"];
-        let mut params_col = column![].spacing(3);
-        for pn in &param_names {
-            let label = text(*pn).size(9).color(th::TEXT_DIM);
-            let value = text("0.50").size(8).color(th::TEXT_MUTED);
-            params_col = params_col.push(column![label, value].spacing(1));
-        }
-        let body = container(params_col).padding([6, 6]).width(Length::Fill);
+        let descriptors = vibez_instruments::synth::SYNTH_PARAMS;
 
-        Self::device_card(column![title, body].width(Length::Fixed(120.0)))
+        // Param 0 is the waveform: a selector reads better than a knob.
+        let wave_value = track
+            .instrument_params
+            .first()
+            .copied()
+            .unwrap_or(descriptors[0].default)
+            .round() as usize;
+        let mut wave_row = row![].spacing(2);
+        for (i, label) in ["Sin", "Saw", "Sqr", "Tri"].iter().enumerate() {
+            let active = wave_value == i;
+            let btn =
+                button(
+                    text(*label)
+                        .size(9)
+                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                )
+                .on_press(Message::SetInstrumentParam(track_id, 0, i as f32))
+                .padding([2, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
+                    text_color: if active { th::ACCENT } else { th::TEXT_DIM },
+                    border: iced::Border {
+                        color: if active { th::ACCENT_DIM } else { th::BORDER },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+            wave_row = wave_row.push(btn);
+        }
+
+        // Remaining params get real knobs, four per row.
+        let mut param_rows = column![].spacing(6);
+        let mut current_row = row![].spacing(8);
+        let mut count = 0;
+        for (i, descriptor) in descriptors.iter().enumerate().skip(1) {
+            let value = track
+                .instrument_params
+                .get(i)
+                .copied()
+                .unwrap_or(descriptor.default);
+            let knob = EffectKnobWidget::for_instrument(
+                track_id,
+                i,
+                value,
+                descriptor.min,
+                descriptor.max,
+                descriptor.default,
+                track_color,
+            );
+            let knob_canvas: Element<'a, Message> = canvas(knob)
+                .width(Length::Fixed(32.0))
+                .height(Length::Fixed(32.0))
+                .into();
+            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
+            let value_label = text(format!("{value:.2}{}", descriptor.unit))
+                .size(8)
+                .color(th::TEXT_MUTED);
+            let param_col = column![knob_canvas, label, value_label]
+                .spacing(1)
+                .align_x(iced::Alignment::Center);
+            current_row = current_row.push(param_col);
+            count += 1;
+            if count % 4 == 0 {
+                param_rows = param_rows.push(current_row);
+                current_row = row![].spacing(8);
+            }
+        }
+        if count % 4 != 0 {
+            param_rows = param_rows.push(current_row);
+        }
+
+        let body = container(column![wave_row, param_rows].spacing(6))
+            .padding([6, 7])
+            .width(Length::Fill);
+
+        Self::device_card(column![title, body].width(Length::Fixed(260.0)))
     }
 
     /// Sampler device card.
