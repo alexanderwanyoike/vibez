@@ -79,6 +79,9 @@ unsafe impl Send for TimerEntry {}
 pub struct RunLoopRegistry {
     event_handlers: Vec<EventHandlerEntry>,
     timers: Vec<TimerEntry>,
+    /// Plugin-initiated view resize (IPlugFrame::resizeView), for the
+    /// window manager to apply to the host window.
+    pending_resize: Option<(u32, u32)>,
 }
 
 impl RunLoopRegistry {
@@ -257,16 +260,31 @@ unsafe extern "system" fn frame_release(this: *mut Frame) -> u32 {
 }
 
 unsafe extern "system" fn resize_view(
-    _this: *mut Frame,
+    this: *mut Frame,
     view: *mut c_void,
     rect: *mut c_void,
 ) -> i32 {
     if view.is_null() || rect.is_null() {
         return K_INVALID_ARGUMENT;
     }
-    // Accept the request and echo it back via IPlugView::onSize
-    // (vtable [10]). Resizing the host X11 window itself is bug #9
-    // territory; this keeps plugin-initiated resizes consistent.
+    #[repr(C)]
+    struct ViewRect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+    // Record the requested size for the window manager to apply to
+    // the host window, then accept via IPlugView::onSize (vtable
+    // [10]) so the view lays out for what it asked.
+    let r = &*(rect as *const ViewRect);
+    let w = (r.right - r.left).max(0) as u32;
+    let h = (r.bottom - r.top).max(0) as u32;
+    if w > 0 && h > 0 {
+        if let Ok(mut reg) = (*(*this).registry).lock() {
+            reg.pending_resize = Some((w, h));
+        }
+    }
     type OnSizeFn = unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32;
     let vtbl = *(view as *const *const *const c_void);
     let on_size: OnSizeFn = std::mem::transmute(*vtbl.add(10));
@@ -402,6 +420,14 @@ impl HostPlugFrame {
     /// Fire due timers and ready fds for this view's plugin.
     pub fn service(&self) {
         service_registry(&self.registry);
+    }
+
+    /// Take a plugin-initiated resize request, if any.
+    pub fn take_pending_resize(&self) -> Option<(u32, u32)> {
+        self.registry
+            .lock()
+            .ok()
+            .and_then(|mut reg| reg.pending_resize.take())
     }
 }
 

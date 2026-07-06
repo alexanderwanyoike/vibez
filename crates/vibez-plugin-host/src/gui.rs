@@ -39,6 +39,23 @@ impl PluginGuiHandle {
         }
     }
 
+    /// CLAP plugin pointer for matching plugin-initiated resize
+    /// requests; None for VST3.
+    pub fn clap_plugin_ptr(&self) -> Option<usize> {
+        match self {
+            PluginGuiHandle::Clap(h) => Some(h.plugin_ptr as usize),
+            PluginGuiHandle::Vst3(_) => None,
+        }
+    }
+
+    /// Plugin-initiated resize request (VST3 IPlugFrame::resizeView).
+    pub fn take_pending_resize(&self) -> Option<(u32, u32)> {
+        match self {
+            PluginGuiHandle::Clap(_) => None,
+            PluginGuiHandle::Vst3(h) => h.frame.as_ref().and_then(|f| f.take_pending_resize()),
+        }
+    }
+
     /// Whether the plugin actually supports a GUI.
     pub fn has_gui(&self) -> bool {
         match self {
