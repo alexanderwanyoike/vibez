@@ -8871,12 +8871,15 @@ impl App {
                 .width(Length::Fixed(32.0))
                 .height(Length::Fixed(32.0))
                 .into();
-            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
+            let label = text(short_param_name(descriptor.name))
+                .size(9)
+                .color(th::TEXT_DIM);
             let value_label = text(format!("{value:.2}{}", descriptor.unit))
                 .size(8)
                 .color(th::TEXT_MUTED);
             let param_col = column![knob_canvas, label, value_label]
                 .spacing(1)
+                .width(Length::Fixed(52.0))
                 .align_x(iced::Alignment::Center);
             current_row = current_row.push(param_col);
             count += 1;
@@ -8962,12 +8965,15 @@ impl App {
                 .width(Length::Fixed(32.0))
                 .height(Length::Fixed(32.0))
                 .into();
-            let label = text(descriptor.name).size(9).color(th::TEXT_DIM);
+            let label = text(short_param_name(descriptor.name))
+                .size(9)
+                .color(th::TEXT_DIM);
             let value_label = text(format!("{value:.2}{}", descriptor.unit))
                 .size(8)
                 .color(th::TEXT_MUTED);
             let param_col = column![knob_canvas, label, value_label]
                 .spacing(1)
+                .width(Length::Fixed(52.0))
                 .align_x(iced::Alignment::Center);
             current_row = current_row.push(param_col);
             count += 1;
@@ -9213,6 +9219,7 @@ impl App {
             let value_label = text(value_text.clone()).size(8).color(th::TEXT_MUTED);
             let param_col = column![knob_canvas, label, value_label]
                 .spacing(1)
+                .width(Length::Fixed(52.0))
                 .align_x(iced::Alignment::Center);
             current_row = current_row.push(param_col);
             if (i + 1) % 3 == 0 {
@@ -10241,6 +10248,17 @@ impl App {
                 _ => None,
             }),
         ])
+    }
+}
+
+/// Compact display name for a device parameter: multi-word
+/// descriptor names wrap illegibly under a 32px knob.
+fn short_param_name(name: &str) -> &str {
+    match name {
+        "Filter Cutoff" => "Cutoff",
+        "Filter Res" => "Res",
+        "Root Note" => "Root",
+        other => other,
     }
 }
 
