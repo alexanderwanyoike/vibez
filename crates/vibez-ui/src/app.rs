@@ -9,6 +9,7 @@ use iced::widget::{
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use rtrb::{Consumer, Producer};
@@ -191,11 +192,14 @@ impl App {
                 sample_rate,
                 ..Default::default()
             },
-            sample_browser_open: ui_settings.sample_browser_open,
-            sample_browser_roots: ui_settings.sample_library_roots,
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
-            dropbox: dropbox_ui_state,
+            browser: crate::state::BrowserState {
+                open: ui_settings.sample_browser_open,
+                roots: ui_settings.sample_library_roots,
+                dropbox: dropbox_ui_state,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -237,13 +241,13 @@ impl App {
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
 
-        let startup_task = if app.state.sample_browser_roots.is_empty() {
+        let startup_task = if app.state.browser.roots.is_empty() {
             Task::none()
         } else {
-            app.state.sample_browser_scan_in_progress = true;
+            app.state.browser.scan_in_progress = true;
             Task::perform(
-                scan_sample_library_async(app.state.sample_browser_roots.clone()),
-                Message::SampleLibraryScanned,
+                scan_sample_library_async(app.state.browser.roots.clone()),
+                |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
             )
         };
 
@@ -313,8 +317,8 @@ impl App {
 
     fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
-            sample_library_roots: self.state.sample_browser_roots.clone(),
-            sample_browser_open: self.state.sample_browser_open,
+            sample_library_roots: self.state.browser.roots.clone(),
+            sample_browser_open: self.state.browser.open,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
@@ -325,9 +329,10 @@ impl App {
     }
 
     fn selected_sample_browser_entry(&self) -> Option<&SampleBrowserEntry> {
-        let selected = self.state.sample_browser_selected_source.as_ref()?;
+        let selected = self.state.browser.selected_source.as_ref()?;
         self.state
-            .sample_browser_entries
+            .browser
+            .entries
             .iter()
             .find(|entry| &entry.source == selected)
     }
@@ -1736,6 +1741,27 @@ impl App {
         Task::none()
     }
 
+    /// Route cross-domain effects requested by the browser domain.
+    fn apply_browser_action(
+        &mut self,
+        action: crate::domains::browser::BrowserAction,
+    ) -> Task<Message> {
+        if let Some(status) = action.status {
+            self.state.status_text = status;
+        }
+        if action.persist_settings {
+            self.persist_ui_settings();
+        }
+        if action.expand_dropbox_root && self.dropbox_client.is_some() {
+            return self.update(Message::DropboxExpandFolder(String::new()));
+        }
+        if let Some((track_id, beat, source)) = action.drop_on_arrangement {
+            let position_samples = self.state.beats_to_samples(beat);
+            return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
+        }
+        Task::none()
+    }
+
     /// Route cross-domain effects requested by the piano roll domain.
     fn apply_piano_roll_action(&mut self, action: crate::domains::piano_roll::PianoRollAction) {
         if action.close_context_menu {
@@ -2214,6 +2240,10 @@ impl App {
                 };
                 self.apply_piano_roll_action(action);
             }
+            Message::Browser(msg) => {
+                let action = self.state.browser.update(msg);
+                return self.apply_browser_action(action);
+            }
 
             // -- Workspace --
             Message::SwitchWorkspace(ws) => {
@@ -2646,10 +2676,6 @@ impl App {
             // -- Device context menu --
 
             // -- Sample browser --
-            Message::ToggleSampleBrowser => {
-                self.state.sample_browser_open = !self.state.sample_browser_open;
-                self.persist_ui_settings();
-            }
             Message::ToggleAutoWarpOnImport => {
                 self.state.auto_warp_on_import = !self.state.auto_warp_on_import;
                 self.persist_ui_settings();
@@ -2732,120 +2758,35 @@ impl App {
             }
             Message::SampleLibraryRootSelected(path) => {
                 if let Some(path) = path {
-                    if !self
-                        .state
-                        .sample_browser_roots
-                        .iter()
-                        .any(|root| root == &path)
-                    {
-                        self.state.sample_browser_roots.push(path.clone());
-                        self.state.sample_browser_roots.sort();
+                    if !self.state.browser.roots.iter().any(|root| root == &path) {
+                        self.state.browser.roots.push(path.clone());
+                        self.state.browser.roots.sort();
                         self.persist_ui_settings();
                     }
-                    self.state.sample_browser_scan_in_progress = true;
+                    self.state.browser.scan_in_progress = true;
                     self.state.status_text = format!("Scanning {}...", path.display());
                     return Task::perform(
-                        scan_sample_library_async(self.state.sample_browser_roots.clone()),
-                        Message::SampleLibraryScanned,
+                        scan_sample_library_async(self.state.browser.roots.clone()),
+                        |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
                     );
                 }
             }
-            Message::RemoveSampleLibraryRoot(path) => {
-                self.state.sample_browser_roots.retain(|root| root != &path);
-                if self
-                    .state
-                    .sample_browser_root_filter
-                    .as_ref()
-                    .is_some_and(|root| root == &path)
-                {
-                    self.state.sample_browser_root_filter = None;
-                }
-                self.state
-                    .sample_browser_entries
-                    .retain(|entry| entry.root_path != path);
-                if self
-                    .state
-                    .sample_browser_selected_source
-                    .as_ref()
-                    .and_then(|selected| {
-                        self.state
-                            .sample_browser_entries
-                            .iter()
-                            .find(|entry| &entry.source == selected)
-                    })
-                    .is_none()
-                {
-                    self.state.sample_browser_selected_source = None;
-                }
-                self.persist_ui_settings();
-                self.state.status_text = "Removed sample root".to_string();
-            }
             Message::RescanSampleLibrary => {
-                self.state.sample_browser_scan_in_progress = true;
+                self.state.browser.scan_in_progress = true;
                 self.state.status_text = "Rescanning sample library...".to_string();
                 return Task::perform(
-                    scan_sample_library_async(self.state.sample_browser_roots.clone()),
-                    Message::SampleLibraryScanned,
+                    scan_sample_library_async(self.state.browser.roots.clone()),
+                    |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
                 );
-            }
-            Message::SampleLibraryScanned(result) => {
-                self.state.sample_browser_scan_in_progress = false;
-                match result {
-                    Ok(scan) => {
-                        self.state.sample_browser_entries = scan.entries;
-                        if self
-                            .state
-                            .sample_browser_selected_source
-                            .as_ref()
-                            .and_then(|selected| {
-                                self.state
-                                    .sample_browser_entries
-                                    .iter()
-                                    .find(|entry| &entry.source == selected)
-                            })
-                            .is_none()
-                        {
-                            self.state.sample_browser_selected_source = self
-                                .state
-                                .sample_browser_entries
-                                .first()
-                                .map(|entry| entry.source.clone());
-                        }
-                        self.state.status_text = if scan.warnings.is_empty() {
-                            format!(
-                                "Indexed {} samples",
-                                self.state.sample_browser_entries.len()
-                            )
-                        } else {
-                            format!(
-                                "Indexed {} samples with {} warning(s)",
-                                self.state.sample_browser_entries.len(),
-                                scan.warnings.len()
-                            )
-                        };
-                    }
-                    Err(err) => {
-                        self.state.status_text = format!("Sample scan error: {err}");
-                    }
-                }
-            }
-            Message::SampleBrowserSearchChanged(query) => {
-                self.state.sample_browser_search = query;
-            }
-            Message::SelectSampleBrowserRoot(root) => {
-                self.state.sample_browser_root_filter = root;
-            }
-            Message::SelectSampleBrowserEntry(source) => {
-                self.state.sample_browser_selected_source = Some(source);
             }
             Message::ClickLocalBrowserEntry(source) => {
                 // Previously auto-previewed on click; now click only
                 // selects. Preview fires via the speaker icon (see
                 // `Message::PreviewLocalEntry`).
-                self.state.sample_browser_selected_source = Some(source);
+                self.state.browser.selected_source = Some(source);
             }
             Message::PreviewLocalEntry(source) => {
-                self.state.sample_browser_selected_source = Some(source.clone());
+                self.state.browser.selected_source = Some(source.clone());
                 if let MediaSourceRef::LocalFile { path } = source {
                     self.state.status_text = "Previewing...".to_string();
                     return Task::perform(
@@ -2855,54 +2796,23 @@ impl App {
                 }
             }
             // -- Drag-and-drop from sample browser --
-            Message::StartDragSample { source, label } => {
-                self.state.status_text = format!("Dragging {label} - drop on a lane or drum pad");
-                self.state.drag_source = Some(source);
-                self.state.drag_label = Some(label);
-                self.state.drag_hover_track = None;
-                self.state.drag_hover_beat = 0.0;
-            }
-            Message::DragHoverTrack { track_id, beat } => {
-                self.state.drag_hover_track = Some(track_id);
-                self.state.drag_hover_beat = beat;
-            }
-            Message::EndDragSample => {
-                if let Some(source) = self.state.drag_source.take() {
-                    self.state.drag_label = None;
-                    // If a drop target was hovered recently, route the drop
-                    // there instead of cancelling. Protects against
-                    // sub-pixel release-outside-bounds misses.
-                    if let Some(track_id) = self.state.drag_hover_track.take() {
-                        let position_samples =
-                            self.state.beats_to_samples(self.state.drag_hover_beat);
-                        self.state.drag_hover_beat = 0.0;
-                        return self.dispatch_drop_on_arrangement(
-                            track_id,
-                            position_samples,
-                            source,
-                        );
-                    }
-                    self.state.drag_hover_beat = 0.0;
-                    self.state.status_text = "Drag cancelled".to_string();
-                }
-            }
             Message::DropSampleOnArrangement {
                 track_id,
                 position_samples,
             } => {
-                let Some(source) = self.state.drag_source.take() else {
+                let Some(source) = self.state.browser.drag_source.take() else {
                     return Task::none();
                 };
-                self.state.drag_label = None;
+                self.state.browser.drag_label = None;
                 return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
             }
             Message::DropSampleOnDrumPad {
                 track_id,
                 pad_index,
             } => {
-                match self.state.drag_source.take() {
+                match self.state.browser.drag_source.take() {
                     Some(source) => {
-                        self.state.drag_label = None;
+                        self.state.browser.drag_label = None;
                         return self.dispatch_drop_for_target(
                             source,
                             BrowserImportTarget::DrumRackPad {
@@ -2939,10 +2849,10 @@ impl App {
                 }
             }
             Message::DropSampleOnSampler { track_id } => {
-                let Some(source) = self.state.drag_source.take() else {
+                let Some(source) = self.state.browser.drag_source.take() else {
                     return Task::none();
                 };
-                self.state.drag_label = None;
+                self.state.browser.drag_label = None;
                 return self
                     .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
@@ -3576,45 +3486,32 @@ impl App {
             }
 
             // -- Sample browser mode --
-            Message::SetSampleBrowserMode(mode) => {
-                self.state.sample_browser_mode = mode;
-                if mode == crate::state::SampleBrowserMode::Dropbox
-                    && self.dropbox_client.is_some()
-                    && !self.state.dropbox.folders.contains_key("")
-                    && !self.state.dropbox.listing_in_progress.contains("")
-                {
-                    return self.update(Message::DropboxExpandFolder(String::new()));
-                }
-            }
 
             // -- Dropbox --
-            Message::SetDropboxAppKey(key) => {
-                self.state.dropbox.app_key_input = key;
-            }
             Message::SaveDropboxAppKey => {
-                let value = self.state.dropbox.app_key_input.trim().to_string();
+                let value = self.state.browser.dropbox.app_key_input.trim().to_string();
                 self.dropbox_settings.app_key = if value.is_empty() { None } else { Some(value) };
                 if let Err(err) = self.dropbox_settings.save() {
-                    self.state.dropbox.last_error = Some(format!("save settings: {err}"));
+                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
                 }
-                self.state.dropbox.has_app_key =
+                self.state.browser.dropbox.has_app_key =
                     load_app_key_with_env_override(&self.dropbox_settings).is_some();
                 self.state.status_text = "Dropbox app key saved".to_string();
             }
             Message::ConnectDropbox => {
                 let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) else {
-                    self.state.dropbox.last_error = Some(
+                    self.state.browser.dropbox.last_error = Some(
                         "No Dropbox app key set. Register an app at dropbox.com/developers/apps \
                         and paste the App key above."
                             .into(),
                     );
                     return Task::none();
                 };
-                if self.state.dropbox.auth_in_progress {
+                if self.state.browser.dropbox.auth_in_progress {
                     return Task::none();
                 }
-                self.state.dropbox.auth_in_progress = true;
-                self.state.dropbox.last_error = None;
+                self.state.browser.dropbox.auth_in_progress = true;
+                self.state.browser.dropbox.last_error = None;
                 self.state.status_text = "Opening Dropbox authorisation...".to_string();
                 return Task::perform(connect_dropbox_async(app_key), |result| {
                     Message::DropboxConnected(result.map(|(info, tokens)| {
@@ -3623,7 +3520,7 @@ impl App {
                 });
             }
             Message::DropboxConnected(Ok(outcome)) => {
-                self.state.dropbox.auth_in_progress = false;
+                self.state.browser.dropbox.auth_in_progress = false;
                 if let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) {
                     let client = DropboxClient::new(app_key, outcome.tokens.clone());
                     self.dropbox_client = Some(Arc::new(client));
@@ -3631,40 +3528,49 @@ impl App {
                 self.dropbox_settings.tokens = Some(outcome.tokens.clone());
                 self.dropbox_settings.account_email = Some(outcome.info.email.clone());
                 if let Err(err) = self.dropbox_settings.save() {
-                    self.state.dropbox.last_error = Some(format!("save settings: {err}"));
+                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
                 }
-                self.state.dropbox.connected = true;
-                self.state.dropbox.account_email = Some(outcome.info.email.clone());
+                self.state.browser.dropbox.connected = true;
+                self.state.browser.dropbox.account_email = Some(outcome.info.email.clone());
                 self.state.status_text = format!("Dropbox connected: {}", outcome.info.email);
             }
             Message::DropboxConnected(Err(err)) => {
-                self.state.dropbox.auth_in_progress = false;
-                self.state.dropbox.last_error = Some(err.clone());
+                self.state.browser.dropbox.auth_in_progress = false;
+                self.state.browser.dropbox.last_error = Some(err.clone());
                 self.state.status_text = format!("Dropbox connect failed: {err}");
             }
             Message::DisconnectDropbox => {
                 self.dropbox_client = None;
                 self.dropbox_settings.clear_tokens();
                 let _ = self.dropbox_settings.save();
-                self.state.dropbox = crate::state::DropboxUiState {
-                    app_key_input: self.state.dropbox.app_key_input.clone(),
-                    has_app_key: self.state.dropbox.has_app_key,
+                self.state.browser.dropbox = crate::state::DropboxUiState {
+                    app_key_input: self.state.browser.dropbox.app_key_input.clone(),
+                    has_app_key: self.state.browser.dropbox.has_app_key,
                     ..Default::default()
                 };
                 self.state.status_text = "Dropbox disconnected".to_string();
             }
             Message::DropboxExpandFolder(path) => {
-                self.state.dropbox.expanded.insert(path.clone());
-                if self.state.dropbox.folders.contains_key(&path)
-                    || self.state.dropbox.listing_in_progress.contains(&path)
+                self.state.browser.dropbox.expanded.insert(path.clone());
+                if self.state.browser.dropbox.folders.contains_key(&path)
+                    || self
+                        .state
+                        .browser
+                        .dropbox
+                        .listing_in_progress
+                        .contains(&path)
                 {
                     return Task::none();
                 }
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
+                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
-                self.state.dropbox.listing_in_progress.insert(path.clone());
+                self.state
+                    .browser
+                    .dropbox
+                    .listing_in_progress
+                    .insert(path.clone());
                 return Task::perform(
                     list_dropbox_folder_async(client, path),
                     |result| match result {
@@ -3679,54 +3585,43 @@ impl App {
                     },
                 );
             }
-            Message::DropboxCollapseFolder(path) => {
-                self.state.dropbox.expanded.remove(&path);
-            }
             Message::DropboxFolderListed { path, result } => {
-                self.state.dropbox.listing_in_progress.remove(&path);
+                self.state.browser.dropbox.listing_in_progress.remove(&path);
                 match result {
                     Ok(entries) => {
-                        self.state.dropbox.folders.insert(path, entries);
+                        self.state.browser.dropbox.folders.insert(path, entries);
                     }
                     Err(err) => {
-                        self.state.dropbox.last_error = Some(err.clone());
+                        self.state.browser.dropbox.last_error = Some(err.clone());
                         self.state.status_text = format!("Dropbox error: {err}");
                     }
                 }
             }
-            Message::DropboxSelectEntry(entry) => {
-                self.state.dropbox.selected_path = Some(entry.path_lower.clone());
-                self.state.sample_browser_selected_source = Some(MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower,
-                    display_path: entry.path_display,
-                    rev: entry.rev,
-                });
-            }
             Message::DropboxPreview(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
+                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
-                self.state.dropbox.preview_in_progress = true;
+                self.state.browser.dropbox.preview_in_progress = true;
                 self.state.status_text = format!("Fetching preview: {}", entry.name);
                 return Task::perform(fetch_dropbox_sample_async(client, cache, entry), |result| {
                     Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio))
                 });
             }
             Message::DropboxPreviewReady(Ok(audio)) => {
-                self.state.dropbox.preview_in_progress = false;
+                self.state.browser.dropbox.preview_in_progress = false;
                 self.send_command(EngineCommand::StartPreview(audio));
                 self.state.status_text = "Preview playing".to_string();
             }
             Message::DropboxPreviewReady(Err(err)) => {
-                self.state.dropbox.preview_in_progress = false;
-                self.state.dropbox.last_error = Some(err.clone());
+                self.state.browser.dropbox.preview_in_progress = false;
+                self.state.browser.dropbox.last_error = Some(err.clone());
                 self.state.status_text = format!("Preview error: {err}");
             }
             Message::DropboxImportToArrangement(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
+                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let cache = self.dropbox_cache.clone();
@@ -3745,7 +3640,7 @@ impl App {
             }
             Message::DropboxImportToDevice(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.dropbox.last_error = Some("Not connected to Dropbox".into());
+                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let Some(target) = self.selected_browser_device_target() else {
@@ -4103,7 +3998,7 @@ impl App {
             Workspace::Mix => self.view_mixer(),
         };
         let content: Element<'_, Message> =
-            if self.state.workspace == Workspace::Arrange && self.state.sample_browser_open {
+            if self.state.workspace == Workspace::Arrange && self.state.browser.open {
                 row![self.view_sample_browser_panel(), workspace_content]
                     .height(Length::FillPortion(5))
                     .into()
@@ -4121,7 +4016,7 @@ impl App {
         // Outer mouse_area cancels an active sample-drag on any release
         // that wasn't captured by a drop target (clip canvas, drum pad).
         let base_layout: Element<'_, Message> = mouse_area(layout_container)
-            .on_release(Message::EndDragSample)
+            .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
 
         if self.state.settings_open {
@@ -4707,8 +4602,8 @@ impl App {
         .size(11)
         .color(th::TEXT_DIM);
 
-        let app_key_input = text_input("App key", &self.state.dropbox.app_key_input)
-            .on_input(Message::SetDropboxAppKey)
+        let app_key_input = text_input("App key", &self.state.browser.dropbox.app_key_input)
+            .on_input(|s| Message::Browser(BrowserMsg::SetDropboxAppKey(s)))
             .on_submit(Message::SaveDropboxAppKey)
             .size(13)
             .width(Length::Fill);
@@ -4736,9 +4631,10 @@ impl App {
             .spacing(8)
             .align_y(iced::Alignment::Center);
 
-        let account_line: Element<'_, Message> = if self.state.dropbox.connected {
+        let account_line: Element<'_, Message> = if self.state.browser.dropbox.connected {
             let email = self
                 .state
+                .browser
                 .dropbox
                 .account_email
                 .clone()
@@ -4747,7 +4643,7 @@ impl App {
                 .size(12)
                 .color(th::ACCENT)
                 .into()
-        } else if self.state.dropbox.auth_in_progress {
+        } else if self.state.browser.dropbox.auth_in_progress {
             text("Waiting for browser authorisation...")
                 .size(12)
                 .color(th::TEXT_DIM)
@@ -4756,10 +4652,11 @@ impl App {
             text("Not connected").size(12).color(th::TEXT_DIM).into()
         };
 
-        let can_connect = self.state.dropbox.has_app_key && !self.state.dropbox.auth_in_progress;
-        let connect_label = if self.state.dropbox.auth_in_progress {
+        let can_connect =
+            self.state.browser.dropbox.has_app_key && !self.state.browser.dropbox.auth_in_progress;
+        let connect_label = if self.state.browser.dropbox.auth_in_progress {
             "Connecting..."
-        } else if self.state.dropbox.connected {
+        } else if self.state.browser.dropbox.connected {
             "Reconnect"
         } else {
             "Connect"
@@ -4787,7 +4684,7 @@ impl App {
             })
         };
 
-        let disconnect_btn: Element<'_, Message> = if self.state.dropbox.connected {
+        let disconnect_btn: Element<'_, Message> = if self.state.browser.dropbox.connected {
             button(text("Disconnect").size(12).color(th::TEXT_DIM))
                 .on_press(Message::DisconnectDropbox)
                 .padding([6, 12])
@@ -4811,7 +4708,7 @@ impl App {
         };
 
         let error_line: Element<'_, Message> =
-            if let Some(err) = self.state.dropbox.last_error.clone() {
+            if let Some(err) = self.state.browser.dropbox.last_error.clone() {
                 text(err).size(11).color(th::DANGER).into()
             } else {
                 horizontal_space().width(Length::Shrink).into()
@@ -5150,7 +5047,7 @@ impl App {
                 }
             });
 
-        let browser_active = self.state.sample_browser_open;
+        let browser_active = self.state.browser.open;
         let browser_btn = button(
             row![
                 icons::icon(icons::AUDIO_WAVEFORM)
@@ -5169,7 +5066,7 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center),
         )
-        .on_press(Message::ToggleSampleBrowser)
+        .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
         .padding([6, 14])
         .style(move |_theme: &Theme, status| {
             let bg = if browser_active {
@@ -5221,7 +5118,7 @@ impl App {
     fn view_sample_browser_panel(&self) -> Element<'_, Message> {
         let tab_bar = {
             let local_active = matches!(
-                self.state.sample_browser_mode,
+                self.state.browser.mode,
                 crate::state::SampleBrowserMode::Local
             );
             let dropbox_active = !local_active;
@@ -5231,7 +5128,7 @@ impl App {
                         .size(11)
                         .color(if active { th::ACCENT } else { th::TEXT_DIM }),
                 )
-                .on_press(Message::SetSampleBrowserMode(mode))
+                .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(mode)))
                 .padding([4, 12])
                 .style(move |_theme: &Theme, status| {
                     let bg = if active {
@@ -5267,7 +5164,7 @@ impl App {
             .spacing(0)
         };
 
-        let body: Element<'_, Message> = match self.state.sample_browser_mode {
+        let body: Element<'_, Message> = match self.state.browser.mode {
             crate::state::SampleBrowserMode::Local => self.view_local_sample_browser(),
             crate::state::SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
         };
@@ -5428,9 +5325,7 @@ impl App {
                     ..Default::default()
                 }
             });
-        if !self.state.sample_browser_roots.is_empty()
-            && !self.state.sample_browser_scan_in_progress
-        {
+        if !self.state.browser.roots.is_empty() && !self.state.browser.scan_in_progress {
             rescan_btn = rescan_btn.on_press(Message::RescanSampleLibrary);
         }
 
@@ -5438,7 +5333,7 @@ impl App {
             .spacing(6)
             .align_y(iced::Alignment::Center);
 
-        if self.state.sample_browser_roots.is_empty() {
+        if self.state.browser.roots.is_empty() {
             let empty = column![
                 header,
                 text("Add a root folder to index your sample library.")
@@ -5469,7 +5364,7 @@ impl App {
         };
 
         let mut roots_col = column![].spacing(4);
-        let all_active = self.state.sample_browser_root_filter.is_none();
+        let all_active = self.state.browser.root_filter.is_none();
         let mut all_btn = button(text("All Roots").size(11).color(if all_active {
             th::ACCENT
         } else {
@@ -5496,13 +5391,14 @@ impl App {
                 ..Default::default()
             }
         });
-        all_btn = all_btn.on_press(Message::SelectSampleBrowserRoot(None));
+        all_btn = all_btn.on_press(Message::Browser(BrowserMsg::SelectSampleBrowserRoot(None)));
         roots_col = roots_col.push(all_btn);
 
-        for root in &self.state.sample_browser_roots {
+        for root in &self.state.browser.roots {
             let active = self
                 .state
-                .sample_browser_root_filter
+                .browser
+                .root_filter
                 .as_ref()
                 .is_some_and(|selected| selected == root);
             let mut filter_btn = button(text(root_label(root)).size(11).color(if active {
@@ -5534,10 +5430,14 @@ impl App {
                     ..Default::default()
                 }
             });
-            filter_btn = filter_btn.on_press(Message::SelectSampleBrowserRoot(Some(root.clone())));
+            filter_btn = filter_btn.on_press(Message::Browser(
+                BrowserMsg::SelectSampleBrowserRoot(Some(root.clone())),
+            ));
 
             let remove_btn = button(icons::icon(icons::X).size(10).color(th::DANGER))
-                .on_press(Message::RemoveSampleLibraryRoot(root.clone()))
+                .on_press(Message::Browser(BrowserMsg::RemoveSampleLibraryRoot(
+                    root.clone(),
+                )))
                 .padding([3, 6])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
@@ -5561,19 +5461,21 @@ impl App {
             );
         }
 
-        let search = text_input("Search samples...", &self.state.sample_browser_search)
-            .on_input(Message::SampleBrowserSearchChanged)
+        let search = text_input("Search samples...", &self.state.browser.search)
+            .on_input(|s| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(s)))
             .size(12)
             .width(Length::Fill);
 
-        let search_lower = self.state.sample_browser_search.to_lowercase();
+        let search_lower = self.state.browser.search.to_lowercase();
         let mut filtered_entries: Vec<&SampleBrowserEntry> = self
             .state
-            .sample_browser_entries
+            .browser
+            .entries
             .iter()
             .filter(|entry| {
                 self.state
-                    .sample_browser_root_filter
+                    .browser
+                    .root_filter
                     .as_ref()
                     .is_none_or(|root| &entry.root_path == root)
             })
@@ -5581,7 +5483,7 @@ impl App {
             .collect();
         filtered_entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
-        let selected_source = self.state.sample_browser_selected_source.as_ref();
+        let selected_source = self.state.browser.selected_source.as_ref();
         let selected_entry = self.selected_sample_browser_entry();
         let selected_target = self.selected_browser_device_target();
 
@@ -5624,10 +5526,10 @@ impl App {
                 ..Default::default()
             });
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
-                .on_press(Message::StartDragSample {
+                .on_press(Message::Browser(BrowserMsg::StartDragSample {
                     source: entry.source.clone(),
                     label: entry.name.clone(),
-                })
+                }))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
             let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::TEXT_DIM))
@@ -5672,8 +5574,8 @@ impl App {
         let count_label = text(format!(
             "{} shown / {} indexed{}",
             filtered_entries.len().min(400),
-            self.state.sample_browser_entries.len(),
-            if self.state.sample_browser_scan_in_progress {
+            self.state.browser.entries.len(),
+            if self.state.browser.scan_in_progress {
                 " (scanning...)"
             } else {
                 ""
@@ -5774,8 +5676,8 @@ impl App {
     fn view_dropbox_browser(&self) -> Element<'_, Message> {
         let title = text("Dropbox").size(14).color(th::ACCENT);
 
-        if !self.state.dropbox.connected {
-            let hint = if self.state.dropbox.auth_in_progress {
+        if !self.state.browser.dropbox.connected {
+            let hint = if self.state.browser.dropbox.auth_in_progress {
                 "Waiting for browser authorisation..."
             } else {
                 "Connect in Settings > Dropbox to browse your library."
@@ -5787,13 +5689,19 @@ impl App {
                 .into();
         }
 
-        let account = self.state.dropbox.account_email.clone().unwrap_or_default();
+        let account = self
+            .state
+            .browser
+            .dropbox
+            .account_email
+            .clone()
+            .unwrap_or_default();
         let header = column![title, text(account).size(11).color(th::TEXT_DIM),].spacing(2);
 
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
         self.render_dropbox_tree(String::new(), 0, &mut rows);
         if rows.is_empty() {
-            let msg = if self.state.dropbox.listing_in_progress.contains("") {
+            let msg = if self.state.browser.dropbox.listing_in_progress.contains("") {
                 "Listing your Dropbox..."
             } else {
                 "Empty (or still fetching)."
@@ -5872,7 +5780,7 @@ impl App {
         };
 
         let error_line: Element<'_, Message> =
-            if let Some(err) = self.state.dropbox.last_error.clone() {
+            if let Some(err) = self.state.browser.dropbox.last_error.clone() {
                 text(err).size(10).color(th::DANGER).into()
             } else {
                 horizontal_space().width(Length::Shrink).into()
@@ -5904,7 +5812,7 @@ impl App {
         depth: usize,
         rows: &mut Vec<Element<'_, Message>>,
     ) {
-        let Some(entries) = self.state.dropbox.folders.get(&path) else {
+        let Some(entries) = self.state.browser.dropbox.folders.get(&path) else {
             return;
         };
         let mut sorted: Vec<&DropboxEntry> = entries.iter().collect();
@@ -5912,8 +5820,14 @@ impl App {
             (!a.is_folder, a.name.to_lowercase()).cmp(&(!b.is_folder, b.name.to_lowercase()))
         });
         for entry in sorted {
-            let expanded = self.state.dropbox.expanded.contains(&entry.path_lower);
-            let selected = self.state.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
+            let expanded = self
+                .state
+                .browser
+                .dropbox
+                .expanded
+                .contains(&entry.path_lower);
+            let selected =
+                self.state.browser.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
 
             let prefix = if entry.is_folder {
                 if expanded {
@@ -5930,12 +5844,12 @@ impl App {
             let label = format!("{indent}{prefix}{}", entry.name);
             let msg = if entry.is_folder {
                 if expanded {
-                    Message::DropboxCollapseFolder(entry.path_lower.clone())
+                    Message::Browser(BrowserMsg::DropboxCollapseFolder(entry.path_lower.clone()))
                 } else {
                     Message::DropboxExpandFolder(entry.path_lower.clone())
                 }
             } else {
-                Message::DropboxSelectEntry(entry.clone())
+                Message::Browser(BrowserMsg::DropboxSelectEntry(entry.clone()))
             };
             if entry.is_supported_audio() {
                 // Audio rows use a container + mouse_area so press events
@@ -5963,10 +5877,10 @@ impl App {
                     rev: entry.rev.clone(),
                 };
                 let dragger: Element<'_, Message> = mouse_area(row_body)
-                    .on_press(Message::StartDragSample {
+                    .on_press(Message::Browser(BrowserMsg::StartDragSample {
                         source,
                         label: entry.name.clone(),
-                    })
+                    }))
                     .on_release(msg)
                     .into();
                 let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::ACCENT))
@@ -6033,8 +5947,8 @@ impl App {
     }
 
     fn selected_dropbox_entry(&self) -> Option<DropboxEntry> {
-        let selected = self.state.dropbox.selected_path.as_ref()?;
-        for entries in self.state.dropbox.folders.values() {
+        let selected = self.state.browser.dropbox.selected_path.as_ref()?;
+        for entries in self.state.browser.dropbox.folders.values() {
             if let Some(entry) = entries.iter().find(|e| &e.path_lower == selected) {
                 return Some(entry.clone());
             }
@@ -6226,7 +6140,7 @@ impl App {
                 self.state.arrangement.selection_start_beats,
                 self.state.arrangement.selection_end_beats,
                 self.state.arrangement.time_selection_track,
-                self.state.drag_source.is_some(),
+                self.state.browser.drag_source.is_some(),
             );
             let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
                 .width(Length::Fill)

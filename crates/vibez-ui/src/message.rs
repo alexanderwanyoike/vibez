@@ -155,6 +155,7 @@ pub enum Message {
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
+    Browser(crate::domains::browser::BrowserMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
@@ -245,7 +246,6 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Result<ProjectLoadResult, String>),
     ProjectSaved(Result<PathBuf, String>),
-    ToggleSampleBrowser,
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
@@ -262,30 +262,12 @@ pub enum Message {
     CloseMidiInput,
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
-    RemoveSampleLibraryRoot(PathBuf),
     RescanSampleLibrary,
-    SampleLibraryScanned(Result<SampleLibraryScanResult, String>),
-    SampleBrowserSearchChanged(String),
-    SelectSampleBrowserRoot(Option<PathBuf>),
-    SelectSampleBrowserEntry(MediaSourceRef),
     /// Click in the Local sample browser: select only, no preview.
     ClickLocalBrowserEntry(MediaSourceRef),
     /// Speaker-icon click on a Local browser row: audition.
     PreviewLocalEntry(MediaSourceRef),
     LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
-
-    // Drag-and-drop from sample browser
-    StartDragSample {
-        source: MediaSourceRef,
-        label: String,
-    },
-    EndDragSample,
-    /// Fired by a clip canvas whenever the cursor moves while a sample
-    /// drag is in flight and the cursor is inside that lane.
-    DragHoverTrack {
-        track_id: TrackId,
-        beat: f64,
-    },
     DropSampleOnArrangement {
         track_id: TrackId,
         position_samples: u64,
@@ -424,22 +406,16 @@ pub enum Message {
     ExportPathSelected(Option<PathBuf>),
     ExportComplete(Result<PathBuf, String>),
 
-    // Sample browser mode
-    SetSampleBrowserMode(crate::state::SampleBrowserMode),
-
     // Dropbox
-    SetDropboxAppKey(String),
     SaveDropboxAppKey,
     ConnectDropbox,
     DropboxConnected(Result<DropboxConnectOutcome, String>),
     DisconnectDropbox,
     DropboxExpandFolder(String),
-    DropboxCollapseFolder(String),
     DropboxFolderListed {
         path: String,
         result: Result<Vec<DropboxEntry>, String>,
     },
-    DropboxSelectEntry(DropboxEntry),
     DropboxPreview(DropboxEntry),
     DropboxPreviewReady(Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),
