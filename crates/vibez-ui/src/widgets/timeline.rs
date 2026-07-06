@@ -5,6 +5,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
@@ -1743,11 +1744,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 if *is_note_clip {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::ResizeNoteClipDuration {
-                                            track_id,
-                                            clip_id: *clip_id,
-                                            new_duration_beats: snapped,
-                                        }),
+                                        Some(Message::PianoRoll(
+                                            PianoRollMsg::ResizeNoteClipDuration {
+                                                track_id,
+                                                clip_id: *clip_id,
+                                                new_duration_beats: snapped,
+                                            },
+                                        )),
                                     );
                                 } else {
                                     let spb = self.spb();

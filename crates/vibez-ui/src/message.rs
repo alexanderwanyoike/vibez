@@ -4,7 +4,7 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -154,6 +154,7 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
+    PianoRoll(crate::domains::piano_roll::PianoRollMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
@@ -199,58 +200,6 @@ pub enum Message {
     // Snap grid
     SetSnapGrid(SnapGrid),
 
-    // Clip looping
-    ToggleNoteClipLoop(TrackId, ClipId),
-    SetNoteClipLoopRegion {
-        track_id: TrackId,
-        clip_id: ClipId,
-        loop_start_beats: f64,
-        loop_end_beats: f64,
-    },
-
-    // Piano roll / note clips
-    AddNoteClipToTrack(TrackId),
-    SelectNoteClip(TrackId, ClipId),
-    AddNote {
-        track_id: TrackId,
-        clip_id: ClipId,
-        pitch: u8,
-        start_beat: f64,
-        duration_beats: f64,
-    },
-    RemoveNote(TrackId, ClipId, usize),
-    EditNote(TrackId, ClipId, usize, MidiNote),
-    SelectNote(TrackId, ClipId, Option<usize>, bool),
-    SelectAllNotes(TrackId, ClipId),
-    RemoveSelectedNotes(TrackId, ClipId),
-    NudgeSelectedNotes {
-        track_id: TrackId,
-        clip_id: ClipId,
-        delta_beats: f64,
-        delta_semitones: i8,
-    },
-    /// Batch-move notes to absolute positions (used by multi-note drag on release).
-    MoveNotesAbsolute {
-        track_id: TrackId,
-        clip_id: ClipId,
-        /// (note_index, new_start_beat, new_pitch)
-        moves: Vec<(usize, f64, u8)>,
-    },
-
-    // Clip operations
-    DoubleNoteClip(TrackId, ClipId),
-    CropNoteClip(TrackId, ClipId),
-
-    // Piano roll scroll
-    PianoRollScrollY(f32),
-
-    // Arrangement clip interaction
-    ResizeNoteClipDuration {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_duration_beats: f64,
-    },
-
     // Detail panel tabs
     SwitchDetailTab(DetailPanelTab),
 
@@ -276,12 +225,6 @@ pub enum Message {
     // MIDI track (no auto-synth)
 
     // Instrument attach/detach
-
-    // Pattern halve
-    HalveNoteClip(TrackId, ClipId),
-
-    // Edit mode
-    TogglePianoRollEditMode,
 
     // Device context menu
 
@@ -394,12 +337,6 @@ pub enum Message {
         is_note_clip: bool,
     },
     BounceComplete(Result<BounceOutcome, String>),
-
-    // Quantize
-    QuantizeNoteClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-    },
     QuantizeAudioClip {
         track_id: TrackId,
         clip_id: ClipId,

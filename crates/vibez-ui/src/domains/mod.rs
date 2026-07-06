@@ -8,6 +8,7 @@
 
 pub mod arrangement;
 pub mod devices;
+pub mod piano_roll;
 pub mod transport;
 
 use vibez_engine::commands::EngineCommand;
