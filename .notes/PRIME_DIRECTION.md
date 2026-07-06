@@ -227,3 +227,18 @@ Before building a feature, ask:
 `Does this help finish more usable electronic tracks per day?`
 
 If the answer is no, it is probably not part of the current phase.
+
+
+## Amendment 2026-07-06: next phase is architecture
+
+The stabilization phase worked (user is producing tracks), but
+app.rs is an 11k-line monolith holding update(), all views, and all
+orchestration. Agreed next phase after the current bug tail:
+establish a real architecture with the goals, in the user's words:
+make the project maintainable, isolate bugs, allow testing.
+Sketch to evaluate when we start: split Message by domain
+(transport/tracks/clips/piano-roll/devices/plugins/project) with
+per-domain update controllers owning their state slice; extract view
+families into widgets/ modules (device cards already moved); pull
+the async pipelines (plugin loads, warp, project IO) into services
+with channel interfaces so they unit-test without iced.
