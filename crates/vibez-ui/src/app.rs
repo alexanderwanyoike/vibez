@@ -1782,7 +1782,8 @@ impl App {
                     }
                 }
                 self.state.status_text = format!(
-                    "Detected {:.1} BPM (confidence {:.2}, below warp threshold)",
+                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
+                     Use the clip's Warp button to apply it manually.",
                     bpm, confidence
                 );
                 self.state.project_dirty = true;
@@ -10142,6 +10143,21 @@ impl App {
                             .color(th::METER_YELLOW),
                     );
                 }
+            }
+        } else if let Some(detected) = clip.original_bpm {
+            // Auto-warp declined (low confidence) or was never run:
+            // the clip knows its tempo and it disagrees with the
+            // project. Say so loudly instead of a status-bar whisper;
+            // the Warp button on this same row is the one-click fix.
+            if (detected - self.state.bpm).abs() > 0.5 {
+                row_widgets = row_widgets.push(
+                    text(format!(
+                        "OUT OF TEMPO: clip {detected:.1} BPM vs project {:.0}",
+                        self.state.bpm
+                    ))
+                    .size(10)
+                    .color(th::METER_YELLOW),
+                );
             }
         }
 
