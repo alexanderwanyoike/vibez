@@ -929,11 +929,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                             state.audition_pitch = Some(pitch);
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::AuditionNote {
-                                    track_id: self.track_id,
-                                    pitch,
-                                    on: true,
-                                }),
+                                Some(Message::audition_note(self.track_id, pitch, true)),
                             );
                         }
                         return (canvas::event::Status::Ignored, None);
@@ -1257,11 +1253,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(pitch) = state.audition_pitch.take() {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::AuditionNote {
-                            track_id: self.track_id,
-                            pitch,
-                            on: false,
-                        }),
+                        Some(Message::audition_note(self.track_id, pitch, false)),
                     );
                 }
                 if let Some(drag) = state.drag.take() {

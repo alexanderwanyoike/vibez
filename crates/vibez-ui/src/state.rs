@@ -566,7 +566,7 @@ pub struct AppState {
     pub piano_roll_edit_mode: PianoRollEditMode,
 
     // Device context menu
-    pub device_context_menu: Option<DeviceContextMenu>,
+    pub devices: crate::domains::devices::DevicesState,
 
     // File menu / Settings
     pub file_menu_open: bool,
@@ -645,7 +645,7 @@ impl Default for AppState {
             edit_name_text: String::new(),
             clip_bpm_edit: HashMap::new(),
             piano_roll_edit_mode: PianoRollEditMode::default(),
-            device_context_menu: None,
+            devices: crate::domains::devices::DevicesState::default(),
             file_menu_open: false,
             settings_open: false,
             settings_tab: SettingsTab::default(),

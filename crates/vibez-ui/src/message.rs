@@ -12,8 +12,8 @@ use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, DetailPanelTab, DeviceMenuCategory,
-    SampleBrowserEntry, SettingsTab, SnapGrid, Workspace,
+    ArrangementSelection, ContextMenuTarget, DetailPanelTab, SampleBrowserEntry, SettingsTab,
+    SnapGrid, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +151,8 @@ pub struct ProjectLoadResult {
 pub enum Message {
     /// Transport domain (playback, tempo, arrangement loop).
     Transport(crate::domains::transport::TransportMsg),
+    /// Devices domain (effect chain, instruments, drum pads, menu).
+    Devices(crate::domains::devices::DevicesMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
@@ -186,16 +188,9 @@ pub enum Message {
     },
 
     // Effects
-    AddEffect(TrackId, EffectType),
-    RemoveEffect(TrackId, EffectId),
-    SetEffectParam(TrackId, EffectId, usize, f32),
-    ToggleEffectBypass(TrackId, EffectId),
-    MoveEffectUp(TrackId, EffectId),
-    MoveEffectDown(TrackId, EffectId),
 
     // Instrument tracks
     AddInstrumentTrack,
-    SetInstrumentParam(TrackId, usize, f32),
 
     // Sampler
     LoadSamplerSample(TrackId),
@@ -206,24 +201,6 @@ pub enum Message {
     DrumRackPadFileSelected(TrackId, usize, Option<PathBuf>),
     DrumRackPadSampleDecoded(TrackId, usize, Arc<DecodedAudio>, String, MediaSourceRef),
     DrumRackPadDecodeError(TrackId, usize, String),
-    ClearDrumRackPad(TrackId, usize),
-    SelectDrumRackPad(TrackId, usize),
-    SetDrumPadParam {
-        track_id: TrackId,
-        pad_index: usize,
-        param: DrumPadParam,
-        value: f32,
-    },
-    SetDrumPadOneShot {
-        track_id: TrackId,
-        pad_index: usize,
-        one_shot: bool,
-    },
-    SetDrumPadChokeGroup {
-        track_id: TrackId,
-        pad_index: usize,
-        choke_group: Option<u8>,
-    },
 
     // Zoom / scroll
     ZoomIn,
@@ -387,8 +364,6 @@ pub enum Message {
     AddMidiTrack,
 
     // Instrument attach/detach
-    SetTrackInstrument(TrackId, InstrumentKind),
-    RemoveTrackInstrument(TrackId),
 
     // Pattern halve
     HalveNoteClip(TrackId, ClipId),
@@ -397,25 +372,10 @@ pub enum Message {
     TogglePianoRollEditMode,
 
     // Device context menu
-    ShowDeviceContextMenu {
-        x: f32,
-        y: f32,
-        track_id: TrackId,
-    },
-    DismissDeviceContextMenu,
-    SetDeviceMenuCategory(DeviceMenuCategory),
-    DeviceMenuSearch(String),
 
     // Cursor tracking
     CursorMoved(f32, f32),
     DeleteKeyPressed,
-    /// Preview a pitch on a track's instrument (piano-roll key press
-    /// or drum pad click). `on: false` releases it.
-    AuditionNote {
-        track_id: TrackId,
-        pitch: u8,
-        on: bool,
-    },
     WindowResized(f32, f32),
     MouseReleased,
 
@@ -635,4 +595,68 @@ pub enum Message {
     DropboxPreviewReady(Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),
     DropboxImportToDevice(DropboxEntry),
+}
+
+/// Arity-preserving constructor helpers so call sites read cleanly
+/// and mechanical migrations stay parenthesis-balanced.
+impl Message {
+    pub fn add_effect(t: TrackId, e: EffectType) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::AddEffect(t, e))
+    }
+    pub fn remove_effect(t: TrackId, e: EffectId) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::RemoveEffect(t, e))
+    }
+    pub fn set_effect_param(t: TrackId, e: EffectId, i: usize, v: f32) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
+            t, e, i, v,
+        ))
+    }
+    pub fn toggle_effect_bypass(t: TrackId, e: EffectId) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::ToggleEffectBypass(
+            t, e,
+        ))
+    }
+    pub fn move_effect_up(t: TrackId, e: EffectId) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::MoveEffectUp(t, e))
+    }
+    pub fn move_effect_down(t: TrackId, e: EffectId) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::MoveEffectDown(t, e))
+    }
+    pub fn set_track_instrument(t: TrackId, k: InstrumentKind) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetTrackInstrument(
+            t, k,
+        ))
+    }
+    pub fn remove_track_instrument(t: TrackId) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::RemoveTrackInstrument(
+            t,
+        ))
+    }
+    pub fn set_instrument_param(t: TrackId, i: usize, v: f32) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetInstrumentParam(
+            t, i, v,
+        ))
+    }
+    pub fn select_drum_rack_pad(t: TrackId, p: usize) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SelectDrumRackPad(t, p))
+    }
+    pub fn clear_drum_rack_pad(t: TrackId, p: usize) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::ClearDrumRackPad(t, p))
+    }
+    pub fn audition_note(track_id: TrackId, pitch: u8, on: bool) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::AuditionNote {
+            track_id,
+            pitch,
+            on,
+        })
+    }
+    pub fn dismiss_device_menu() -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::DismissContextMenu)
+    }
+    pub fn set_device_menu_category(c: crate::state::DeviceMenuCategory) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetMenuCategory(c))
+    }
+    pub fn device_menu_search(q: String) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::MenuSearch(q))
+    }
 }
