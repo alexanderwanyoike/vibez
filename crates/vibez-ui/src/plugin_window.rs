@@ -34,6 +34,9 @@ struct OpenPluginWindow {
     gui_handle: PluginGuiHandle,
     #[allow(dead_code)]
     title: String,
+    /// Last size forwarded to the plugin, to filter duplicate
+    /// ConfigureNotify events.
+    size: (u16, u16),
 }
 
 /// Synchronous plugin window manager that runs on the UI thread.
@@ -197,6 +200,24 @@ impl PluginWindowManager {
             }
         }
 
+        // Resize policy (dogfood bug #9): plugins that cannot resize
+        // get a hard-locked window (min == max size hints), so the WM
+        // never exposes dead framebuffer space; resizable plugins get
+        // their resizes forwarded from ConfigureNotify in poll_events.
+        let can_resize = handle.can_resize();
+        if !can_resize {
+            let hints = x11rb::properties::WmSizeHints {
+                min_size: Some((width as i32, height as i32)),
+                max_size: Some((width as i32, height as i32)),
+                ..Default::default()
+            };
+            let _ = hints.set_normal_hints(&self.conn, window_id);
+        }
+        eprintln!(
+            "vibez: open_window — plugin can_resize={can_resize}, window {}locked",
+            if can_resize { "un" } else { "" }
+        );
+
         eprintln!("vibez: open_window — calling show()");
         handle.show();
         let _ = self.conn.flush();
@@ -213,6 +234,7 @@ impl PluginWindowManager {
                 x11_window_id: window_id,
                 gui_handle: handle,
                 title,
+                size: (width as u16, height as u16),
             },
         );
 
@@ -266,6 +288,20 @@ impl PluginWindowManager {
         loop {
             match self.conn.poll_for_event() {
                 Ok(Some(event)) => {
+                    if let x11rb::protocol::Event::ConfigureNotify(cfg) = &event {
+                        if let Some(win) = self
+                            .windows
+                            .values_mut()
+                            .find(|w| w.x11_window_id == cfg.window)
+                        {
+                            let new_size = (cfg.width, cfg.height);
+                            if new_size != win.size && new_size.0 > 0 && new_size.1 > 0 {
+                                win.size = new_size;
+                                win.gui_handle
+                                    .set_size(new_size.0 as u32, new_size.1 as u32);
+                            }
+                        }
+                    }
                     if let x11rb::protocol::Event::ClientMessage(cm) = event {
                         if cm.format == 32 && cm.data.as_data32()[0] == self.wm_delete_window {
                             let key = self

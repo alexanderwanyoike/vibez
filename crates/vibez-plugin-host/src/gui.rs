@@ -47,6 +47,22 @@ impl PluginGuiHandle {
         }
     }
 
+    /// Whether the plugin GUI supports live resizing by the host.
+    pub fn can_resize(&self) -> bool {
+        match self {
+            PluginGuiHandle::Clap(h) => h.can_resize(),
+            PluginGuiHandle::Vst3(h) => h.can_resize(),
+        }
+    }
+
+    /// Forward a host-window resize to the plugin GUI.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        match self {
+            PluginGuiHandle::Clap(h) => h.set_size(width, height),
+            PluginGuiHandle::Vst3(h) => h.set_size(width, height),
+        }
+    }
+
     /// Query the preferred GUI size from the plugin.
     pub fn get_size(&self) -> Option<(u32, u32)> {
         match self {
@@ -114,6 +130,30 @@ pub struct ClapGuiHandle {
 unsafe impl Send for ClapGuiHandle {}
 
 impl ClapGuiHandle {
+    /// CLAP `clap_plugin_gui::can_resize`.
+    pub fn can_resize(&self) -> bool {
+        if self.gui_ext.is_null() {
+            return false;
+        }
+        let gui = unsafe { &*self.gui_ext };
+        match gui.can_resize {
+            Some(f) => unsafe { f(self.plugin_ptr) },
+            None => false,
+        }
+    }
+
+    /// CLAP `clap_plugin_gui::set_size`.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        if self.gui_ext.is_null() {
+            return false;
+        }
+        let gui = unsafe { &*self.gui_ext };
+        match gui.set_size {
+            Some(f) => unsafe { f(self.plugin_ptr, width, height) },
+            None => false,
+        }
+    }
+
     /// Create a new CLAP GUI handle from a raw `*const c_void` pointer.
     /// This is the safe-to-call-from-anywhere entry point that avoids
     /// exposing `clap_plugin` types to crates that don't depend on `clap-sys`.
@@ -278,6 +318,41 @@ impl Vst3GuiHandle {
             frame: None,
             open: false,
         })
+    }
+
+    /// IPlugView::canResize - vtable [13]. kResultTrue (0) means yes.
+    pub fn can_resize(&self) -> bool {
+        if self.plug_view.is_null() {
+            return false;
+        }
+        type CanResizeFn = unsafe extern "system" fn(*mut c_void) -> i32;
+        let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
+        let can_resize: CanResizeFn = unsafe { std::mem::transmute(*vtbl.add(13)) };
+        unsafe { can_resize(self.plug_view) == 0 }
+    }
+
+    /// IPlugView::onSize - vtable [10]. Rect uses left/top/right/bottom.
+    pub fn set_size(&mut self, width: u32, height: u32) -> bool {
+        if self.plug_view.is_null() {
+            return false;
+        }
+        #[repr(C)]
+        struct ViewRect {
+            left: i32,
+            top: i32,
+            right: i32,
+            bottom: i32,
+        }
+        type OnSizeFn = unsafe extern "system" fn(*mut c_void, *mut ViewRect) -> i32;
+        let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
+        let on_size: OnSizeFn = unsafe { std::mem::transmute(*vtbl.add(10)) };
+        let mut rect = ViewRect {
+            left: 0,
+            top: 0,
+            right: width as i32,
+            bottom: height as i32,
+        };
+        unsafe { on_size(self.plug_view, &mut rect) == 0 }
     }
 
     /// Pump this view's run loop (timers + fd handlers). JUCE editors
