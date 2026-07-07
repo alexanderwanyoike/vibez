@@ -5,6 +5,9 @@ use std::thread::ThreadId;
 use std::time::Instant;
 
 use clap_sys::ext::gui::{clap_host_gui, CLAP_EXT_GUI};
+// The FD flag constants are only read by poll_fds (Unix) and tests,
+// so the Windows lib build sees them as unused.
+#[cfg_attr(not(unix), allow(unused_imports))]
 use clap_sys::ext::posix_fd_support::{
     clap_host_posix_fd_support, clap_posix_fd_flags, CLAP_EXT_POSIX_FD_SUPPORT,
     CLAP_POSIX_FD_ERROR, CLAP_POSIX_FD_READ, CLAP_POSIX_FD_WRITE,
@@ -262,6 +265,12 @@ fn poll_timers() {
     }
 }
 
+/// CLAP posix-fd support is a Unix-only contract; there is no poll()
+/// to link against on Windows, where registered fds simply never fire.
+#[cfg(not(unix))]
+fn poll_fds() {}
+
+#[cfg(unix)]
 fn poll_fds() {
     let Ok(fds) = CLAP_FDS.lock() else { return };
 
@@ -317,6 +326,7 @@ fn poll_fds() {
 }
 
 // Minimal poll() FFI — avoids adding libc as a dependency
+#[cfg(unix)]
 #[repr(C)]
 struct Pollfd {
     fd: i32,
@@ -324,10 +334,14 @@ struct Pollfd {
     revents: i16,
 }
 
+#[cfg(unix)]
 const POLLIN: i16 = 0x001;
+#[cfg(unix)]
 const POLLOUT: i16 = 0x004;
+#[cfg(unix)]
 const POLLERR: i16 = 0x008;
 
+#[cfg(unix)]
 extern "C" {
     fn poll(fds: *mut Pollfd, nfds: u64, timeout: i32) -> i32;
 }
@@ -856,6 +870,7 @@ mod tests {
 
     // ── FD polling tests ──
 
+    #[cfg(unix)]
     #[test]
     fn test_poll_fds_fires_on_ready_pipe() {
         let _serial = serialize_and_reset();
@@ -900,6 +915,7 @@ mod tests {
         clear_registries();
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_poll_fds_does_not_fire_empty_pipe() {
         let _serial = serialize_and_reset();
@@ -951,8 +967,9 @@ mod tests {
         let _ = is_on_clap_main_thread();
     }
 
-    // ── Minimal libc FFI for pipe tests ──
+    // ── Minimal libc FFI for pipe tests (Unix-only, like poll_fds) ──
 
+    #[cfg(unix)]
     extern "C" {
         #[link_name = "pipe"]
         fn libc_pipe(pipefd: *mut i32) -> i32;

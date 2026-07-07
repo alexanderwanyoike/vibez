@@ -133,21 +133,19 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if state.dragging {
-                    if let Some(pos) = cursor.position_in(bounds) {
-                        let delta = pos.x - state.last_x;
-                        state.last_x = pos.x;
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    let delta = pos.x - state.last_x;
+                    state.last_x = pos.x;
 
-                        let track_w = bounds.width - 8.0;
-                        let gain_delta = delta / track_w * 2.0;
-                        let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
+                    let track_w = bounds.width - 8.0;
+                    let gain_delta = delta / track_w * 2.0;
+                    let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
 
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::set_track_gain(self.track_id, new_gain)),
-                        );
-                    }
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::set_track_gain(self.track_id, new_gain)),
+                    );
                 }
             }
             _ => {}
@@ -284,21 +282,19 @@ impl canvas::Program<Message> for FaderWidget {
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if state.dragging {
-                    if let Some(pos) = cursor.position_in(bounds) {
-                        let delta = state.last_y - pos.y;
-                        state.last_y = pos.y;
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    let delta = state.last_y - pos.y;
+                    state.last_y = pos.y;
 
-                        let track_h = bounds.height - 8.0;
-                        let gain_delta = delta / track_h * 2.0;
-                        let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
+                    let track_h = bounds.height - 8.0;
+                    let gain_delta = delta / track_h * 2.0;
+                    let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
 
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::set_track_gain(self.track_id, new_gain)),
-                        );
-                    }
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::set_track_gain(self.track_id, new_gain)),
+                    );
                 }
             }
             _ => {}
