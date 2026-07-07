@@ -155,6 +155,7 @@ pub enum Message {
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
+    Automation(crate::domains::automation::AutomationMsg),
     View(crate::domains::view::ViewMsg),
 
     // Workspace

@@ -388,8 +388,14 @@ impl App {
 
             // Track header (iced widgets)
             let editing = self.state.view.editing_track_name == Some(track.id);
-            let header =
-                view_track_header(track, selected, editing, &self.state.view.edit_name_text);
+            let automation_open = self.state.automation_ui.expanded.contains(&track.id);
+            let header = view_track_header(
+                track,
+                selected,
+                editing,
+                &self.state.view.edit_name_text,
+                automation_open,
+            );
 
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
@@ -425,6 +431,10 @@ impl App {
             let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
 
             track_rows = track_rows.push(track_row);
+
+            if automation_open {
+                track_rows = self.push_automation_lanes(track_rows, track, track_color);
+            }
         }
 
         let content = column![ruler_row, minimap_row, track_rows];
@@ -720,5 +730,143 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    /// Lane strip under an expanded track: one row per lane plus the
+    /// add-lane picker.
+    fn push_automation_lanes<'a>(
+        &'a self,
+        mut rows: iced::widget::Column<'a, Message>,
+        track: &'a crate::state::UiTrack,
+        track_color: iced::Color,
+    ) -> iced::widget::Column<'a, Message> {
+        use crate::domains::automation::{target_label, AutomationMsg};
+        use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
+
+        for lane in &track.automation {
+            let label = target_label(&lane.target, track);
+            let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::TEXT_DIM))
+                .on_press(Message::Automation(AutomationMsg::RemoveLane {
+                    track_id: track.id,
+                    lane_id: lane.id,
+                }))
+                .padding([1, 4])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: None,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                });
+            let lane_header = container(
+                row![
+                    text(label).size(11).color(th::TEXT_DIM),
+                    horizontal_space(),
+                    remove
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([0, 10])
+            .width(Length::Fixed(
+                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+            ))
+            .height(Length::Fixed(LANE_HEIGHT))
+            .align_y(iced::alignment::Vertical::Center)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                ..Default::default()
+            });
+
+            let selected = match self.state.automation_ui.selected {
+                Some((t, l, i)) if t == track.id && l == lane.id => Some(i),
+                _ => None,
+            };
+            let widget = AutomationLaneWidget {
+                track_id: track.id,
+                lane_id: lane.id,
+                points: lane.points.clone(),
+                color: track_color,
+                zoom_level: self.state.view.zoom_level,
+                scroll_offset_beats: self.state.view.scroll_offset_beats,
+                selected,
+            };
+            let lane_canvas: Element<'_, Message> = canvas(widget)
+                .width(Length::Fill)
+                .height(Length::Fixed(LANE_HEIGHT))
+                .into();
+            rows = rows.push(row![lane_header, lane_canvas].height(Length::Fixed(LANE_HEIGHT)));
+        }
+
+        // Add-lane picker: gain/pan plus every built-in effect param.
+        let mut choices: Vec<LaneChoice> = vec![
+            LaneChoice {
+                label: "Volume".to_string(),
+                target: vibez_core::automation::AutomationTarget::TrackGain,
+            },
+            LaneChoice {
+                label: "Pan".to_string(),
+                target: vibez_core::automation::AutomationTarget::TrackPan,
+            },
+        ];
+        for effect in &track.effects {
+            for (param_index, d) in effect.descriptors.iter().enumerate() {
+                let effect_name = effect
+                    .plugin_name
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", effect.effect_type));
+                choices.push(LaneChoice {
+                    label: format!("{effect_name}: {}", d.name),
+                    target: vibez_core::automation::AutomationTarget::EffectParam {
+                        effect_id: effect.id,
+                        param_index,
+                    },
+                });
+            }
+        }
+        choices.retain(|c| !track.automation.iter().any(|l| l.target == c.target));
+
+        let track_id = track.id;
+        let picker = iced::widget::pick_list(choices, None::<LaneChoice>, move |choice| {
+            Message::Automation(AutomationMsg::AddLane {
+                track_id,
+                target: choice.target,
+            })
+        })
+        .placeholder("+ Add automation")
+        .text_size(11)
+        .padding([2, 8]);
+
+        let picker_row = row![
+            container(picker)
+                .padding([2, 10])
+                .width(Length::Fixed(
+                    crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+                ))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BG_SURFACE.into()),
+                    ..Default::default()
+                }),
+            container(text(""))
+                .width(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.18).into()),
+                    ..Default::default()
+                })
+        ]
+        .height(Length::Fixed(26.0));
+        rows.push(picker_row)
+    }
+}
+
+/// One option in the add-lane picker.
+#[derive(Debug, Clone, PartialEq)]
+struct LaneChoice {
+    label: String,
+    target: vibez_core::automation::AutomationTarget,
+}
+
+impl std::fmt::Display for LaneChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
     }
 }

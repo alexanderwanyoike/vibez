@@ -3,6 +3,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Theme};
 
+use crate::domains::automation::AutomationMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use crate::icons;
@@ -25,6 +26,7 @@ pub fn view_track_header<'a>(
     selected: bool,
     editing_name: bool,
     edit_text: &'a str,
+    automation_open: bool,
 ) -> Element<'a, Message> {
     let track_color = th::track_color(track.color_index);
 
@@ -94,10 +96,36 @@ pub fn view_track_header<'a>(
             }
         });
 
+    let auto_btn = {
+        let color = if automation_open {
+            th::ACCENT
+        } else {
+            th::TEXT_DIM
+        };
+        button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(color))
+            .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                track.id,
+            )))
+            .padding([2, 4])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            })
+    };
+
     let name_row = row![
         type_icon,
         name_widget,
         horizontal_space(),
+        auto_btn,
         add_btn,
         delete_btn
     ]
