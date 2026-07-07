@@ -127,9 +127,18 @@ bounce, Dropbox HTTP), the engine replay routines
 (replay_track_to_engine, project load), subscriptions, and the
 views. Their state mutation already flows through domain methods.
 
-Final count: app.rs 8,492 lines (from 11,305), 68 UI unit tests
-(from zero), seven domain modules (transport, devices,
-arrangement, piano_roll, browser, project, view) plus
-services/plugin_loader.rs and the shared EngineHandle seam in
-domains/mod.rs. Full merge order:
-#28 -> #22 -> #23 -> #24 -> #25 -> #26 -> #27 -> #29 -> #30.
+House rule established by Alex: NO SOURCE FILE OVER 1,000 LINES.
+PR #31 (file granularity) enforces it workspace-wide: app.rs
+became the app/ directory (16 files: router in update.rs, topic
+modules, views by area), state/ splits slices from UI data types,
+timeline/ and piano_roll/ split widgets from their drawing,
+domains/arrangement/ splits ops and tests out, and vibez-engine's
+test modules moved to files. Workspace max is now 999 lines.
+Keep it that way: when a file approaches the bar, split along the
+seams above rather than letting it grow.
+
+Final count: 68 UI unit tests (from zero), seven domain modules
+(transport, devices, arrangement, piano_roll, browser, project,
+view) plus services/plugin_loader.rs and the shared EngineHandle
+seam in domains/mod.rs. Full merge order:
+#28 -> #22 -> #23 -> #24 -> #25 -> #26 -> #27 -> #29 -> #30 -> #31.
