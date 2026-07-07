@@ -21,6 +21,7 @@ use vibez_core::id::{LaneId, TrackId};
 
 use crate::domains::automation::AutomationMsg;
 use crate::message::Message;
+use crate::state::SnapGrid;
 use crate::theme as th;
 
 pub const LANE_HEIGHT: f32 = 56.0;
@@ -39,6 +40,8 @@ pub struct AutomationLaneWidget {
     pub color: Color,
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
+    /// Grid for beat snapping (hold shift to bypass).
+    pub snap: SnapGrid,
     pub selected: Option<usize>,
     /// The parameter's current un-automated value (normalized), for
     /// the dotted reference line.
@@ -60,6 +63,7 @@ pub struct LaneInteraction {
     last_click: Option<(Instant, Point)>,
     alt: bool,
     ctrl: bool,
+    shift: bool,
 }
 
 impl AutomationLaneWidget {
@@ -73,6 +77,16 @@ impl AutomationLaneWidget {
 
     fn x_to_beat(&self, x: f32) -> f64 {
         (x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats).max(0.0)
+    }
+
+    /// Cursor x to beat, snapped to the grid unless shift is held.
+    fn x_to_snapped_beat(&self, x: f32, state: &LaneInteraction) -> f64 {
+        let beat = self.x_to_beat(x);
+        if state.shift {
+            beat
+        } else {
+            self.snap.snap_beat(beat).max(0.0)
+        }
     }
 
     fn value_to_y(&self, value: f32, height: f32) -> f32 {
@@ -289,6 +303,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         if let canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(m)) = event {
             state.alt = m.alt();
             state.ctrl = m.control();
+            state.shift = m.shift();
             return (canvas::event::Status::Ignored, None);
         }
 
@@ -340,7 +355,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 // Ctrl: sweep-erase.
                 if state.ctrl {
-                    let beat = self.x_to_beat(pos.x);
+                    let beat = self.x_to_snapped_beat(pos.x, state);
                     state.erase_drag = Some((beat, beat));
                     state.last_click = None;
                     return (canvas::event::Status::Captured, None);
@@ -396,7 +411,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                             Some(Message::Automation(AutomationMsg::AddPoint {
                                 track_id: self.track_id,
                                 lane_id: self.lane_id,
-                                beat: self.x_to_beat(pos.x),
+                                beat: self.x_to_snapped_beat(pos.x, state),
                                 value: self.y_to_value(pos.y, h),
                             })),
                         );
@@ -414,7 +429,11 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if let Some((index, _, _)) = state.drag {
-                    state.drag = Some((index, self.x_to_beat(pos.x), self.y_to_value(pos.y, h)));
+                    state.drag = Some((
+                        index,
+                        self.x_to_snapped_beat(pos.x, state),
+                        self.y_to_value(pos.y, h),
+                    ));
                     return (canvas::event::Status::Captured, None);
                 }
                 if let Some((index, orig, press_y, _)) = state.curve_drag {
@@ -423,7 +442,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                     return (canvas::event::Status::Captured, None);
                 }
                 if let Some((b0, _)) = state.erase_drag {
-                    state.erase_drag = Some((b0, self.x_to_beat(pos.x)));
+                    state.erase_drag = Some((b0, self.x_to_snapped_beat(pos.x, state)));
                     return (canvas::event::Status::Captured, None);
                 }
                 (canvas::event::Status::Ignored, None)

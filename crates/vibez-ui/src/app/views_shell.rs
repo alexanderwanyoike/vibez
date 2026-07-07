@@ -789,6 +789,7 @@ impl App {
                 color: track_color,
                 zoom_level: self.state.view.zoom_level,
                 scroll_offset_beats: self.state.view.scroll_offset_beats,
+                snap: self.state.view.snap_grid,
                 selected,
                 reference,
                 min_label,
@@ -808,6 +809,7 @@ impl App {
             Some((tid, q)) if *tid == track.id => Some(q.clone()),
             _ => None,
         };
+        let picker_open = picker_query.is_some();
 
         let panel: Element<'_, Message> = if let Some(query) = picker_query {
             let mut choices: Vec<LaneChoice> = vec![
@@ -976,6 +978,7 @@ impl App {
             container(
                 button(text("+ Add automation").size(11).color(th::TEXT_DIM))
                     .on_press(Message::Automation(AutomationMsg::OpenLanePicker(track_id)))
+                    .width(Length::Fill)
                     .padding([3, 10])
                     .style(|_theme: &Theme, status| {
                         let bg = match status {
@@ -1000,22 +1003,22 @@ impl App {
             .into()
         };
 
-        let filler = container(text(""))
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.18).into()),
-                ..Default::default()
-            });
+        // Collapsed: the button sits inside the header column like a
+        // lane header. Open: the search panel widens over the lane
+        // area like a dropdown.
+        let panel_width = if picker_open {
+            crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH + 300.0
+        } else {
+            crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH
+        };
         let picker_row = row![
             container(panel)
-                .width(Length::Fixed(
-                    crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH + 220.0,
-                ))
+                .width(Length::Fixed(panel_width))
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::BG_SURFACE.into()),
                     ..Default::default()
                 }),
-            filler
+            iced::widget::horizontal_space()
         ];
         rows.push(picker_row)
     }
