@@ -152,7 +152,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
     ]
     .spacing(4)
     .padding(8)
-    .width(Length::Fixed(112.0))
+    .width(Length::Fixed(94.0))
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
@@ -215,7 +215,7 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
     const LMF: iced::Color = iced::Color::from_rgb(0.36, 0.48, 0.72);
     const LF: iced::Color = iced::Color::from_rgb(0.65, 0.46, 0.28);
 
-    let mut bands = column![].spacing(4).align_x(iced::Alignment::Center);
+    let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
 
     // Header: EQ label + IN (bypass) toggle.
     let in_btn = {
@@ -261,7 +261,7 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         if i > 0 {
             bands = bands.push(
                 container(text(""))
-                    .width(Length::Fixed(88.0))
+                    .width(Length::Fixed(74.0))
                     .height(Length::Fixed(1.0))
                     .style(|_theme: &Theme| container::Style {
                         background: Some(
@@ -333,7 +333,7 @@ fn view_eq_band<'a>(
         ]
         .spacing(3)
         .align_y(iced::Alignment::Center),
-        knob(gain_i, 30.0),
+        knob(gain_i, 26.0),
     ]
     .spacing(1)
     .align_x(iced::Alignment::Center);
@@ -368,7 +368,7 @@ fn view_eq_band<'a>(
         })
         .into()
     } else {
-        column![text("Q").size(7).color(dim), knob(third_i, 20.0)]
+        column![text("Q").size(7).color(dim), knob(third_i, 16.0)]
             .spacing(1)
             .align_x(iced::Alignment::Center)
             .into()
@@ -382,20 +382,18 @@ fn view_eq_band<'a>(
         })
         .size(7)
         .color(dim),
-        knob(freq_i, 26.0),
+        knob(freq_i, 22.0),
     ]
     .spacing(1)
     .align_x(iced::Alignment::Center);
 
     row![
         column![gain_col, third_el]
-            .spacing(3)
+            .spacing(2)
             .align_x(iced::Alignment::Center),
-        iced::widget::horizontal_space(),
-        column![text("").size(10), freq_col].align_x(iced::Alignment::Center),
+        column![text("").size(6), freq_col].align_x(iced::Alignment::Center),
     ]
-    .width(Length::Fill)
-    .padding([0, 6])
+    .spacing(9)
     .align_y(iced::Alignment::Start)
     .into()
 }
