@@ -69,6 +69,9 @@ devices, browser, project, view), each owning its own state and messages and
 unit-tested without the GUI. The UI thread and audio thread communicate over
 lock-free ring buffers.
 
+For the full tour, threading model, message flow, and how plugins, projects,
+and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Contributing
 
 Issues and pull requests are welcome. CI must stay green on Linux, macOS, and
