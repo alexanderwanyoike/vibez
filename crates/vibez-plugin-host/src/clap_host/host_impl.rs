@@ -262,6 +262,12 @@ fn poll_timers() {
     }
 }
 
+/// CLAP posix-fd support is a Unix-only contract; there is no poll()
+/// to link against on Windows, where registered fds simply never fire.
+#[cfg(not(unix))]
+fn poll_fds() {}
+
+#[cfg(unix)]
 fn poll_fds() {
     let Ok(fds) = CLAP_FDS.lock() else { return };
 
@@ -317,6 +323,7 @@ fn poll_fds() {
 }
 
 // Minimal poll() FFI — avoids adding libc as a dependency
+#[cfg(unix)]
 #[repr(C)]
 struct Pollfd {
     fd: i32,
@@ -324,10 +331,14 @@ struct Pollfd {
     revents: i16,
 }
 
+#[cfg(unix)]
 const POLLIN: i16 = 0x001;
+#[cfg(unix)]
 const POLLOUT: i16 = 0x004;
+#[cfg(unix)]
 const POLLERR: i16 = 0x008;
 
+#[cfg(unix)]
 extern "C" {
     fn poll(fds: *mut Pollfd, nfds: u64, timeout: i32) -> i32;
 }

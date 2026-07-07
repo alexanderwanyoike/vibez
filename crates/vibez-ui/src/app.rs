@@ -9319,7 +9319,7 @@ impl App {
                                 || p.vendor.to_lowercase().contains(&search_lower)
                         })
                         .collect();
-                    filtered.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                    filtered.sort_by_key(|a| a.name.to_lowercase());
                     est_rows = filtered.len().div_ceil(PLUGIN_GRID_COLS);
                     for chunk in filtered.chunks(PLUGIN_GRID_COLS) {
                         let mut grid_row = row![].spacing(2);

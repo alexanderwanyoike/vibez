@@ -401,28 +401,28 @@ impl canvas::Program<Message> for EffectKnobWidget {
             }
 
             // Scroll wheel
-            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                if cursor.is_over(bounds) {
-                    let scroll_y = match delta {
-                        mouse::ScrollDelta::Lines { y, .. } => y,
-                        mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
-                    };
+            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(bounds) =>
+            {
+                let scroll_y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => y,
+                    mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
+                };
 
-                    let step = if state.shift_held {
-                        SCROLL_STEP / FINE_DIVISOR
-                    } else {
-                        SCROLL_STEP
-                    };
+                let step = if state.shift_held {
+                    SCROLL_STEP / FINE_DIVISOR
+                } else {
+                    SCROLL_STEP
+                };
 
-                    let norm = self.normalized();
-                    let new_norm = (norm + scroll_y * step).clamp(0.0, 1.0);
-                    let new_value = self.denormalize(new_norm);
+                let norm = self.normalized();
+                let new_norm = (norm + scroll_y * step).clamp(0.0, 1.0);
+                let new_value = self.denormalize(new_norm);
 
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(self.set_value_message(new_value)),
-                    );
-                }
+                return (
+                    canvas::event::Status::Captured,
+                    Some(self.set_value_message(new_value)),
+                );
             }
 
             _ => {}
