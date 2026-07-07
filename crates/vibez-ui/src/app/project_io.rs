@@ -146,6 +146,7 @@ impl App {
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
+            automation: track.automation.clone(),
         }
     }
 

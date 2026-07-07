@@ -1,4 +1,5 @@
 pub mod audio_buffer;
+pub mod automation;
 pub mod constants;
 pub mod effect;
 pub mod id;

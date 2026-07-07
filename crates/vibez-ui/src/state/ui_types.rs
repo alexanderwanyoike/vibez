@@ -176,6 +176,8 @@ pub struct UiTrack {
     pub sample_audio: Option<Arc<DecodedAudio>>,
     pub instrument_params: Vec<f32>,
     pub drum_rack_pads: Vec<UiDrumPad>,
+    /// Automation lanes (mirrored to the engine like note clips).
+    pub automation: Vec<vibez_core::automation::AutomationLane>,
     pub selected_drum_pad: usize,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
@@ -208,6 +210,7 @@ impl UiTrack {
             sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
+            automation: Vec::new(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
@@ -241,6 +244,7 @@ impl UiTrack {
             sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
+            automation: Vec::new(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
