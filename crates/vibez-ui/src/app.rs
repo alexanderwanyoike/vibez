@@ -1587,72 +1587,6 @@ impl App {
         })
     }
 
-    fn apply_audio_quantize_success(
-        &mut self,
-        track_id: TrackId,
-        old_clip_id: ClipId,
-        success: crate::message::AudioQuantizeSuccess,
-    ) {
-        self.send_command(EngineCommand::RemoveClip(track_id, old_clip_id));
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.retain(|c| c.id != old_clip_id);
-        }
-        self.state
-            .arrangement
-            .selected_clips
-            .retain(|sel| match sel {
-                ArrangementSelection::AudioClip {
-                    clip_id: cid,
-                    track_id: tid,
-                } => !(*tid == track_id && *cid == old_clip_id),
-                _ => true,
-            });
-
-        self.send_command(EngineCommand::AddClip {
-            track_id,
-            clip_id: success.new_clip_id,
-            audio: Arc::clone(&success.new_audio),
-            position: success.new_position,
-            source_offset: 0,
-            duration: success.new_duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        });
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
-                id: success.new_clip_id,
-                name: success.new_name,
-                audio: Arc::clone(&success.new_audio),
-                source: None,
-                position: success.new_position,
-                source_offset: 0,
-                duration: success.new_duration,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-        self.state
-            .arrangement
-            .selected_clips
-            .insert(ArrangementSelection::AudioClip {
-                track_id,
-                clip_id: success.new_clip_id,
-            });
-
-        let duration_seconds =
-            success.new_duration as f64 / self.state.transport.sample_rate as f64;
-        self.state.status_text = format!(
-            "Quantized {} slice(s) to {} ({:.1}s)",
-            success.slice_count, success.grid_label, duration_seconds
-        );
-    }
-
     fn dispatch_detect_clip_bpm(&mut self, track_id: TrackId, clip_id: ClipId) -> Task<Message> {
         let Some(track) = self.state.find_track(track_id) else {
             self.state.status_text = "Track not found".to_string();
@@ -1728,6 +1662,9 @@ impl App {
         }
         if let Some(status) = action.status {
             self.state.status_text = status;
+        }
+        if action.mark_dirty {
+            self.state.project.dirty = true;
         }
         Task::none()
     }
@@ -1914,38 +1851,6 @@ impl App {
         })
     }
 
-    fn apply_clip_warp_success(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: crate::message::ClipWarpSuccess,
-    ) {
-        self.send_command(EngineCommand::ReplaceClipAudio {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&success.audio),
-            duration: success.new_duration,
-            source_offset: success.new_source_offset,
-            loop_start: success.new_loop_start,
-            loop_end: success.new_loop_end,
-        });
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.audio = Arc::clone(&success.audio);
-                clip.duration = success.new_duration;
-                clip.source_offset = success.new_source_offset;
-                clip.loop_start = success.new_loop_start;
-                clip.loop_end = success.new_loop_end;
-                clip.original_bpm = Some(success.detected_bpm);
-                clip.warped = true;
-                clip.warped_to_bpm = Some(success.warped_to_bpm);
-                clip.original_audio = Some(Arc::clone(&success.original_audio));
-            }
-        }
-        self.state.status_text = format!("Warped to {:.0} BPM", success.warped_to_bpm);
-        self.state.project.dirty = true;
-    }
-
     /// If auto-warp-on-import is enabled, return a background task
     /// that detects the imported clip's BPM and warps it to the
     /// project tempo. Call this right after a clip is inserted into
@@ -1977,80 +1882,6 @@ impl App {
                 outcome,
             }
         })
-    }
-
-    fn apply_auto_warp_outcome(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-        outcome: crate::message::AutoWarpOutcome,
-    ) {
-        use crate::message::AutoWarpOutcome;
-        match outcome {
-            AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Point the user at the manual
-                // workflow in the clip detail panel.
-                self.state.status_text =
-                    "Auto-warp: could not detect BPM. Select the clip and type the source \
-                     BPM in the Warp row, then press Enter and click Warp."
-                        .to_string();
-            }
-            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                self.state.status_text = format!(
-                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
-                     Use the clip's Warp button to apply it manually.",
-                    bpm, confidence
-                );
-                self.state.project.dirty = true;
-            }
-            AutoWarpOutcome::Warped { success, .. } => {
-                self.apply_clip_warp_success(track_id, clip_id, success);
-            }
-        }
-    }
-
-    fn apply_clear_clip_warp(&mut self, track_id: TrackId, clip_id: ClipId) {
-        let restore = self
-            .state
-            .find_track(track_id)
-            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
-            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
-        if let Some(original) = restore {
-            let original_frames = original.num_frames() as u64;
-            self.send_command(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&original),
-                duration: original_frames,
-                source_offset: 0,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                    clip.audio = original;
-                    clip.duration = original_frames;
-                    clip.source_offset = 0;
-                    clip.loop_start = 0;
-                    clip.loop_end = 0;
-                    clip.warped = false;
-                    clip.warped_to_bpm = None;
-                    clip.original_audio = None;
-                }
-            }
-        } else if let Some(track) = self.state.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-            }
-        }
-        self.state.status_text = "Cleared clip warp".to_string();
-        self.state.project.dirty = true;
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -2149,10 +1980,7 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
                 | Message::Arrangement(ArrangementMsg::AddMidiTrack)
                 | Message::AudioQuantizeReady { .. }
-                | Message::SetClipNominalBpm { .. }
-                | Message::SubmitClipBpm { .. }
                 | Message::ClipWarpReady { .. }
-                | Message::ClearClipWarp { .. }
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
@@ -2928,7 +2756,16 @@ impl App {
                 clip_id,
                 outcome,
             } => {
-                self.apply_auto_warp_outcome(track_id, clip_id, outcome);
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.arrangement.apply_auto_warp_outcome(
+                        &mut engine,
+                        track_id,
+                        clip_id,
+                        outcome,
+                    )
+                };
+                return self.apply_arrangement_action(action);
             }
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser load error: {err}");
@@ -3325,7 +3162,20 @@ impl App {
                 old_clip_id,
                 result,
             } => match result {
-                Ok(success) => self.apply_audio_quantize_success(track_id, old_clip_id, success),
+                Ok(success) => {
+                    let sample_rate = self.state.transport.sample_rate;
+                    let action = {
+                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                        self.state.arrangement.apply_audio_quantize_success(
+                            &mut engine,
+                            track_id,
+                            old_clip_id,
+                            success,
+                            sample_rate,
+                        )
+                    };
+                    return self.apply_arrangement_action(action);
+                }
                 Err(err) => {
                     self.state.status_text = format!("Quantize failed: {err}");
                 }
@@ -3340,61 +3190,12 @@ impl App {
                 clip_id,
                 bpm,
                 confidence,
-            } => match bpm {
-                Some(b) => {
-                    if let Some(track) = self.state.find_track_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(b);
-                        }
-                    }
-                    self.state.clip_bpm_edit.remove(&clip_id);
-                    self.state.status_text =
-                        format!("Detected {:.1} BPM (confidence {:.2})", b, confidence);
-                    self.state.project.dirty = true;
-                }
-                None => {
-                    self.state.status_text =
-                        "Could not detect BPM. Type the source BPM in the Warp row and \
-                         press Enter, then click Warp."
-                            .to_string();
-                }
-            },
-            Message::ClipBpmInputChanged {
-                track_id: _,
-                clip_id,
-                text,
             } => {
-                self.state.clip_bpm_edit.insert(clip_id, text);
-            }
-            Message::SubmitClipBpm { track_id, clip_id } => {
-                let parsed = self
+                let action = self
                     .state
-                    .clip_bpm_edit
-                    .remove(&clip_id)
-                    .and_then(|t| t.parse::<f64>().ok())
-                    .filter(|b| *b > 0.0 && *b < 1_000.0);
-                if let Some(bpm) = parsed {
-                    if let Some(track) = self.state.find_track_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(bpm);
-                        }
-                    }
-                    self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                    self.state.project.dirty = true;
-                }
-            }
-            Message::SetClipNominalBpm {
-                track_id,
-                clip_id,
-                bpm,
-            } => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                self.state.project.dirty = true;
+                    .arrangement
+                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
+                return self.apply_arrangement_action(action);
             }
             Message::WarpClipToProject { track_id, clip_id } => {
                 return self.dispatch_warp_clip_to_project(track_id, clip_id);
@@ -3404,14 +3205,22 @@ impl App {
                 clip_id,
                 result,
             } => match result {
-                Ok(success) => self.apply_clip_warp_success(track_id, clip_id, success),
+                Ok(success) => {
+                    let action = {
+                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                        self.state.arrangement.apply_clip_warp_success(
+                            &mut engine,
+                            track_id,
+                            clip_id,
+                            success,
+                        )
+                    };
+                    return self.apply_arrangement_action(action);
+                }
                 Err(err) => {
                     self.state.status_text = format!("Warp failed: {err}");
                 }
             },
-            Message::ClearClipWarp { track_id, clip_id } => {
-                self.apply_clear_clip_warp(track_id, clip_id);
-            }
 
             // -- Undo / redo --
 
@@ -7917,18 +7726,24 @@ impl App {
             .unwrap_or_default();
         let text_value = self
             .state
+            .arrangement
             .clip_bpm_edit
             .get(&clip_id)
             .cloned()
             .unwrap_or(default_text);
 
         let bpm_input = text_input("BPM", &text_value)
-            .on_input(move |t| Message::ClipBpmInputChanged {
+            .on_input(move |t| {
+                Message::Arrangement(ArrangementMsg::ClipBpmInputChanged {
+                    track_id,
+                    clip_id,
+                    text: t,
+                })
+            })
+            .on_submit(Message::Arrangement(ArrangementMsg::SubmitClipBpm {
                 track_id,
                 clip_id,
-                text: t,
-            })
-            .on_submit(Message::SubmitClipBpm { track_id, clip_id })
+            }))
             .size(11)
             .width(Length::Fixed(70.0));
 
@@ -7969,7 +7784,10 @@ impl App {
 
         if clip.warped {
             let clear_btn = button(text("Clear warp").size(11).color(th::TEXT_DIM))
-                .on_press(Message::ClearClipWarp { track_id, clip_id })
+                .on_press(Message::Arrangement(ArrangementMsg::ClearClipWarp {
+                    track_id,
+                    clip_id,
+                }))
                 .padding([4, 10])
                 .style(button_style);
             row_widgets = row_widgets.push(clear_btn);

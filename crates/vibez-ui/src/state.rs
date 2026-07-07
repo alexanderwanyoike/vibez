@@ -580,6 +580,10 @@ pub struct ArrangementState {
     /// An arrangement drag (move/resize) is active; drives edge
     /// auto-scroll on ticks.
     pub drag_resize_active: bool,
+    /// In-flight text edits for the clip BPM field in the clip detail
+    /// panel; a missing entry means show the committed
+    /// `UiClip::original_bpm` value instead.
+    pub clip_bpm_edit: HashMap<ClipId, String>,
 }
 
 pub struct AppState {
@@ -625,10 +629,6 @@ pub struct AppState {
     pub edit_name_text: String,
     /// In-progress manual BPM input text keyed by clip id. Only
     /// populated while the user is actively editing the field in the
-    /// clip detail panel; `None` / missing means show the committed
-    /// `UiClip::original_bpm` value instead.
-    pub clip_bpm_edit: HashMap<ClipId, String>,
-
     // Device context menu
     pub devices: crate::domains::devices::DevicesState,
 
@@ -682,7 +682,6 @@ impl Default for AppState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
-            clip_bpm_edit: HashMap::new(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
