@@ -45,9 +45,14 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then VERSION="dev-${GITHUB_SHA::7}"; fi
+          BARE="${VERSION#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            VERSION="dev-${GITHUB_SHA::7}"
+            # Debian/plist versions must start with a digit.
+            BARE="0.0.0-dev-${GITHUB_SHA::7}"
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "bare=${BARE}" >> "$GITHUB_OUTPUT"
 
       - name: Build
         run: cargo build --release -p vibez --bins
@@ -123,7 +128,7 @@ jobs:
         run: |
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
             //DMyAppVersion="${{ steps.version.outputs.bare }}" \
-            //O"$(pwd -W)" packaging/windows/vibez.iss
+            packaging/windows/vibez.iss
           mv vibez-setup.exe \
             "vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}-setup.exe"
 
