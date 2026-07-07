@@ -124,9 +124,10 @@ fn helper_binary() -> Option<PathBuf> {
     let dir = exe.parent()?;
     // Same directory as the app binary; one level up covers cargo's
     // target/<profile>/examples/ layout.
+    let name = format!("vibez-plugin-scan{}", std::env::consts::EXE_SUFFIX);
     [dir, dir.parent()?]
         .iter()
-        .map(|d| d.join("vibez-plugin-scan"))
+        .map(|d| d.join(&name))
         .find(|p| p.is_file())
 }
 
