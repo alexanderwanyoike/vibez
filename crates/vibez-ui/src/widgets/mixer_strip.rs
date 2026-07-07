@@ -152,7 +152,7 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
     ]
     .spacing(4)
     .padding(8)
-    .width(Length::Fixed(108.0))
+    .width(Length::Fixed(112.0))
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
@@ -215,7 +215,7 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
     const LMF: iced::Color = iced::Color::from_rgb(0.36, 0.48, 0.72);
     const LF: iced::Color = iced::Color::from_rgb(0.65, 0.46, 0.28);
 
-    let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
+    let mut bands = column![].spacing(4).align_x(iced::Alignment::Center);
 
     // Header: EQ label + IN (bypass) toggle.
     let in_btn = {
@@ -256,7 +256,26 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         (3, 4, 5, false, LMF, "LMF"),
         (0, 1, 2, true, LF, "LF"),
     ];
-    for (gain_i, freq_i, third_i, is_bell_toggle, color, label) in rows {
+    for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in
+        rows.into_iter().enumerate()
+    {
+        if i > 0 {
+            bands = bands.push(
+                container(text(""))
+                    .width(Length::Fixed(72.0))
+                    .height(Length::Fixed(1.0))
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(
+                            iced::Color {
+                                a: 0.5,
+                                ..th::BORDER
+                            }
+                            .into(),
+                        ),
+                        ..Default::default()
+                    }),
+            );
+        }
         bands = bands.push(view_eq_band(
             track.id,
             eq,
@@ -283,7 +302,7 @@ fn view_eq_band<'a>(
     color: iced::Color,
     label: &'static str,
 ) -> Element<'a, Message> {
-    let knob = |i: usize| -> Element<'a, Message> {
+    let knob = |i: usize, size: f32| -> Element<'a, Message> {
         let d = &eq.descriptors[i];
         let w = EffectKnobWidget::new(
             track_id,
@@ -296,25 +315,44 @@ fn view_eq_band<'a>(
             color,
         );
         canvas(w)
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(24.0))
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
             .into()
     };
 
-    let third: Element<'a, Message> = if bell_toggle {
+    // Console stagger: the gain knob rides high on the left, the
+    // frequency knob sits low on the right, Q (or the bell switch)
+    // tucks under the gain. The eye zig-zags down the strip.
+    let dim = iced::Color {
+        a: 0.75,
+        ..th::TEXT_DIM
+    };
+    let gain_col = column![
+        row![
+            text(label).size(8).color(color),
+            text("dB").size(7).color(dim)
+        ]
+        .spacing(3)
+        .align_y(iced::Alignment::Center),
+        knob(gain_i, 30.0),
+    ]
+    .spacing(1)
+    .align_x(iced::Alignment::Center);
+
+    let third_el: Element<'a, Message> = if bell_toggle {
         let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-        button(
-            text("B")
-                .size(8)
-                .color(if bell_on { th::BG_DARK } else { th::TEXT_DIM }),
-        )
+        button(text("BELL").size(6).color(if bell_on {
+            th::BG_DARK
+        } else {
+            th::TEXT_DIM
+        }))
         .on_press(Message::set_effect_param(
             track_id,
             eq.id,
             third_i,
             if bell_on { 0.0 } else { 1.0 },
         ))
-        .padding([2, 4])
+        .padding([2, 3])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(if bell_on {
                 color.into()
@@ -331,17 +369,29 @@ fn view_eq_band<'a>(
         })
         .into()
     } else {
-        knob(third_i)
+        column![text("Q").size(7).color(dim), knob(third_i, 20.0)]
+            .spacing(1)
+            .align_x(iced::Alignment::Center)
+            .into()
     };
 
-    column![
-        text(label).size(8).color(color),
-        row![knob(gain_i), knob(freq_i), third]
-            .spacing(3)
-            .align_y(iced::Alignment::Center),
+    let freq_col = column![
+        text(if freq_i == 10 || freq_i == 7 { "kHz" } else { "Hz" })
+            .size(7)
+            .color(dim),
+        knob(freq_i, 26.0),
     ]
     .spacing(1)
-    .align_x(iced::Alignment::Center)
+    .align_x(iced::Alignment::Center);
+
+    row![
+        column![gain_col, third_el]
+            .spacing(3)
+            .align_x(iced::Alignment::Center),
+        column![text("").size(10), freq_col].align_x(iced::Alignment::Center),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Start)
     .into()
 }
 
