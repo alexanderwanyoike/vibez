@@ -290,9 +290,9 @@ impl ClapGuiHandle {
 // ── VST3 GUI Handle ──
 
 /// VST3 IEditController IID: {DCD7BBE3-7742-448D-A874-AACC979C759E}
-pub(crate) const IEDIT_CONTROLLER_IID: [u8; 16] = [
+pub(crate) const IEDIT_CONTROLLER_IID: [u8; 16] = crate::vst3_tuid([
     0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D, 0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E,
-];
+]);
 
 pub struct Vst3GuiHandle {
     /// IEditController COM pointer (own refcount, stays on UI thread).
