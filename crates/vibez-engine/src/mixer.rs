@@ -164,6 +164,17 @@ impl EngineTrack {
         (gain, pan)
     }
 
+    /// Zero the mix buffer: an idle block for a track with no source
+    /// signal, so the effect chain can still run (tails, queued
+    /// plugin param changes).
+    pub fn clear_buffer(&mut self, frames: usize, channels: usize) {
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
+        }
+    }
+
     /// Render the instrument with no clip events (transport stopped):
     /// lets auditioned/held notes sound and plugin event queues drain.
     /// Returns true when the buffer has signal.

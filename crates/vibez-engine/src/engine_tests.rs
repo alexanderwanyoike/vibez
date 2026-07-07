@@ -1167,3 +1167,46 @@ fn removing_a_lane_restores_the_knob_value() {
         "removing the lane should restore the track gain"
     );
 }
+
+#[test]
+fn effect_tails_ring_out_after_stop() {
+    // A delay tail must keep sounding after the transport stops:
+    // effect chains process while stopped. (This is also what
+    // delivers queued plugin param changes without pressing play.)
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let sr = engine.sample_rate() as usize;
+    let (tid, _cid) = constant_clip_track(&mut cmd_tx, sr);
+
+    let effect_id = vibez_core::id::EffectId::new();
+    cmd_tx
+        .push(EngineCommand::AddEffect {
+            track_id: tid,
+            effect_id,
+            effect_type: vibez_core::effect::EffectType::Delay,
+            position: None,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    // Delay time defaults to 500 ms: play well past it so echoes
+    // exist, then listen for them after stop.
+    let mut buf = vec![0.0f32; 1024];
+    for _ in 0..60 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+    }
+    cmd_tx.push(EngineCommand::Stop).unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2); // drains Stop, first stopped block
+
+    let mut tail = 0.0f32;
+    for _ in 0..40 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        tail += buf.iter().map(|s| s.abs()).sum::<f32>();
+    }
+    assert!(
+        tail > 0.01,
+        "delay tail should ring out after stop, got {tail}"
+    );
+}

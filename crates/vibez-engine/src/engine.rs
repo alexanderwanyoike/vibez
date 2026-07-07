@@ -928,11 +928,24 @@ impl AudioEngine {
     fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
         let has_solo = any_solo(&self.tracks);
         for track in &mut self.tracks {
-            if track.instrument.is_none() || track.mute || (has_solo && !track.solo) {
+            if track.mute || (has_solo && !track.solo) {
                 continue;
             }
-            if !track.render_instrument_idle(frames, channels) {
+            // Instruments render so auditioned notes sound; every
+            // effect chain keeps processing while stopped so delay
+            // and reverb tails ring out and queued plugin parameter
+            // changes (knob edits, automation) actually reach the
+            // plugin instead of waiting for play.
+            let has_signal = if track.instrument.is_some() {
+                track.render_instrument_idle(frames, channels)
+            } else {
+                false
+            };
+            if !has_signal && track.effects.is_empty() {
                 continue;
+            }
+            if !has_signal && track.instrument.is_none() {
+                track.clear_buffer(frames, channels);
             }
             track.process_effects(frames, channels);
             let gain = track.gain;
