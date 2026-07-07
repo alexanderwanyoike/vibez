@@ -1035,10 +1035,12 @@ fn gain_lane_ramps_track_volume_down() {
     lane.insert_point(AutomationPoint {
         beat: 0.0,
         value: 1.0,
+        curve: 0.0,
     });
     lane.insert_point(AutomationPoint {
         beat: 2.0,
         value: 0.0,
+        curve: 0.0,
     });
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
@@ -1092,14 +1094,17 @@ fn pan_lane_moves_signal_between_channels() {
     lane.insert_point(AutomationPoint {
         beat: 0.0,
         value: 0.0,
+        curve: 0.0,
     });
     lane.insert_point(AutomationPoint {
         beat: 1.0,
         value: 0.0,
+        curve: 0.0,
     });
     lane.insert_point(AutomationPoint {
         beat: 1.01,
         value: 1.0,
+        curve: 0.0,
     });
     cmd_tx
         .push(EngineCommand::SetAutomationLane {
@@ -1140,6 +1145,7 @@ fn removing_a_lane_restores_the_knob_value() {
     lane.insert_point(AutomationPoint {
         beat: 0.0,
         value: 0.0,
+        curve: 0.0,
     });
     let lane_id = lane.id;
     cmd_tx

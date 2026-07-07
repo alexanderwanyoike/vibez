@@ -358,10 +358,12 @@ mod automation_persistence_tests {
         lane.insert_point(AutomationPoint {
             beat: 0.0,
             value: 1.0,
+            curve: 0.0,
         });
         lane.insert_point(AutomationPoint {
             beat: 8.0,
             value: 0.25,
+            curve: 0.5,
         });
         track.automation.push(lane.clone());
 

@@ -56,6 +56,24 @@ pub enum AutomationMsg {
     /// Delete-key routing (higher priority than clip deletion when a
     /// point is selected).
     DeleteSelectedPoint,
+    /// Set the curve of the segment leaving point `index` (drag
+    /// release of an alt-drag; -1..1, 0 = linear).
+    SetCurve {
+        track_id: TrackId,
+        lane_id: LaneId,
+        index: usize,
+        curve: f32,
+    },
+    /// Remove every point in a beat range (ctrl-drag erase).
+    RemovePointsInRange {
+        track_id: TrackId,
+        lane_id: LaneId,
+        start_beat: f64,
+        end_beat: f64,
+    },
+    OpenLanePicker(TrackId),
+    LanePickerQuery(String),
+    CloseLanePicker,
 }
 
 impl AutomationMsg {
@@ -63,7 +81,11 @@ impl AutomationMsg {
     pub fn marks_dirty(&self) -> bool {
         !matches!(
             self,
-            AutomationMsg::ToggleTrackLanes(_) | AutomationMsg::SelectPoint { .. }
+            AutomationMsg::ToggleTrackLanes(_)
+                | AutomationMsg::SelectPoint { .. }
+                | AutomationMsg::OpenLanePicker(_)
+                | AutomationMsg::LanePickerQuery(_)
+                | AutomationMsg::CloseLanePicker
         )
     }
 }
@@ -82,6 +104,8 @@ pub struct AutomationState {
     pub expanded: HashSet<TrackId>,
     /// The selected point: (track, lane, point index).
     pub selected: Option<(TrackId, LaneId, usize)>,
+    /// The open add-lane picker, with its search query.
+    pub picker: Option<(TrackId, String)>,
 }
 
 fn find_lane_mut(
@@ -102,6 +126,73 @@ fn sync_lane(engine: &mut impl EngineHandle, track_id: TrackId, lane: &Automatio
         track_id,
         lane: lane.clone(),
     });
+}
+
+/// The target's CURRENT (un-automated) value, normalized 0..1.
+/// This seeds new lanes and draws the reference line. Track gain's
+/// native range is 0..2 (see the arrangement domain clamp).
+pub fn normalized_target_value(target: &AutomationTarget, track: &UiTrack) -> Option<f32> {
+    match target {
+        AutomationTarget::TrackGain => Some((track.gain / 2.0).clamp(0.0, 1.0)),
+        AutomationTarget::TrackPan => Some(track.pan.clamp(0.0, 1.0)),
+        AutomationTarget::EffectParam {
+            effect_id,
+            param_index,
+        } => {
+            let effect = track.effects.iter().find(|e| e.id == *effect_id)?;
+            let d = effect.descriptors.get(*param_index)?;
+            let v = effect
+                .params
+                .get(*param_index)
+                .copied()
+                .unwrap_or(d.default);
+            Some(((v - d.min) / (d.max - d.min).max(f32::EPSILON)).clamp(0.0, 1.0))
+        }
+        AutomationTarget::InstrumentParam { param_index } => {
+            if !track.plugin_instrument_descriptors.is_empty() {
+                let d = track.plugin_instrument_descriptors.get(*param_index)?;
+                // Plugin values are not mirrored UI-side; use the default.
+                Some(((d.default - d.min) / (d.max - d.min).max(f32::EPSILON)).clamp(0.0, 1.0))
+            } else {
+                let kind = track.instrument_kind?;
+                let d = vibez_instruments::descriptors_for(kind).get(*param_index)?;
+                let v = track
+                    .instrument_params
+                    .get(*param_index)
+                    .copied()
+                    .unwrap_or(d.default);
+                Some(((v - d.min) / (d.max - d.min).max(f32::EPSILON)).clamp(0.0, 1.0))
+            }
+        }
+        AutomationTarget::PluginParam { .. } => None,
+    }
+}
+
+/// The static descriptor behind a target, when one exists (effect
+/// and instrument params). Gain/pan have implicit ranges.
+pub fn target_descriptor(
+    target: &AutomationTarget,
+    track: &UiTrack,
+) -> Option<&'static vibez_core::effect::ParamDescriptor> {
+    match target {
+        AutomationTarget::EffectParam {
+            effect_id,
+            param_index,
+        } => track
+            .effects
+            .iter()
+            .find(|e| e.id == *effect_id)?
+            .descriptors
+            .get(*param_index),
+        AutomationTarget::InstrumentParam { param_index } => {
+            if !track.plugin_instrument_descriptors.is_empty() {
+                track.plugin_instrument_descriptors.get(*param_index)
+            } else {
+                vibez_instruments::descriptors_for(track.instrument_kind?).get(*param_index)
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Human-readable name for a lane target, for lane headers and the
@@ -172,11 +263,20 @@ impl AutomationState {
                     action.status = Some("That parameter already has a lane".to_string());
                     return action;
                 }
-                let lane = AutomationLane::new(target);
+                let mut lane = AutomationLane::new(target);
+                // Start where the knob already is.
+                if let Some(value) = normalized_target_value(&target, track) {
+                    lane.insert_point(AutomationPoint {
+                        beat: 0.0,
+                        value,
+                        curve: 0.0,
+                    });
+                }
                 sync_lane(engine, track_id, &lane);
                 let label = target_label(&target, track);
                 track.automation.push(lane);
                 self.expanded.insert(track_id);
+                self.picker = None;
                 action.status = Some(format!("Added automation lane: {label}"));
             }
             AutomationMsg::RemoveLane { track_id, lane_id } => {
@@ -201,6 +301,7 @@ impl AutomationState {
                 let point = AutomationPoint {
                     beat: beat.max(0.0),
                     value: value.clamp(0.0, 1.0),
+                    curve: 0.0,
                 };
                 lane.insert_point(point);
                 let index = lane
@@ -225,10 +326,12 @@ impl AutomationState {
                 if index >= lane.points.len() {
                     return action;
                 }
+                let curve = lane.points[index].curve;
                 lane.points.remove(index);
                 let point = AutomationPoint {
                     beat: beat.max(0.0),
                     value: value.clamp(0.0, 1.0),
+                    curve,
                 };
                 lane.insert_point(point);
                 let new_index = lane
@@ -265,6 +368,58 @@ impl AutomationState {
                 index,
             } => {
                 self.selected = index.map(|i| (track_id, lane_id, i));
+            }
+            AutomationMsg::SetCurve {
+                track_id,
+                lane_id,
+                index,
+                curve,
+            } => {
+                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                    return action;
+                };
+                if index >= lane.points.len() {
+                    return action;
+                }
+                lane.points[index].curve = curve.clamp(-1.0, 1.0);
+                let lane = lane.clone();
+                sync_lane(engine, track_id, &lane);
+            }
+            AutomationMsg::RemovePointsInRange {
+                track_id,
+                lane_id,
+                start_beat,
+                end_beat,
+            } => {
+                let (lo, hi) = if start_beat <= end_beat {
+                    (start_beat, end_beat)
+                } else {
+                    (end_beat, start_beat)
+                };
+                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                    return action;
+                };
+                let before = lane.points.len();
+                lane.points.retain(|p| p.beat < lo || p.beat > hi);
+                if lane.points.len() != before {
+                    let lane = lane.clone();
+                    sync_lane(engine, track_id, &lane);
+                    if matches!(self.selected, Some((t, l, _)) if t == track_id && l == lane_id) {
+                        self.selected = None;
+                    }
+                    action.status = Some(format!("Erased {} point(s)", before - lane.points.len()));
+                }
+            }
+            AutomationMsg::OpenLanePicker(track_id) => {
+                self.picker = Some((track_id, String::new()));
+            }
+            AutomationMsg::LanePickerQuery(query) => {
+                if let Some((_, q)) = &mut self.picker {
+                    *q = query;
+                }
+            }
+            AutomationMsg::CloseLanePicker => {
+                self.picker = None;
             }
             AutomationMsg::DeleteSelectedPoint => {
                 if let Some((track_id, lane_id, index)) = self.selected.take() {

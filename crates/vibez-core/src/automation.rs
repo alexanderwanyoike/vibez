@@ -16,6 +16,25 @@ use crate::id::{EffectId, LaneId};
 pub struct AutomationPoint {
     pub beat: f64,
     pub value: f32,
+    /// Shape of the segment LEAVING this point: 0 is linear,
+    /// positive bends toward the destination late (ease-in),
+    /// negative early (ease-out). Range -1..1.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub curve: f32,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
+/// Apply a segment's curve shaping to linear progress `t` (0..1).
+pub fn shape(t: f32, curve: f32) -> f32 {
+    if curve == 0.0 {
+        return t;
+    }
+    // Exponent sweep: curve -1 -> t^(1/8) (early), +1 -> t^8 (late).
+    let exp = 2.0_f32.powf(curve * 3.0);
+    t.powf(exp)
 }
 
 /// What a lane drives.
@@ -77,7 +96,7 @@ impl AutomationLane {
         if span <= f64::EPSILON {
             return Some(b.value);
         }
-        let t = ((beat - a.beat) / span) as f32;
+        let t = shape(((beat - a.beat) / span) as f32, a.curve);
         Some(a.value + (b.value - a.value) * t)
     }
 
@@ -109,6 +128,7 @@ mod tests {
             l.insert_point(AutomationPoint {
                 beat: *beat,
                 value: *value,
+                curve: 0.0,
             });
         }
         l
@@ -141,6 +161,7 @@ mod tests {
         l.insert_point(AutomationPoint {
             beat: 4.0,
             value: 0.9,
+            curve: 0.0,
         });
         assert_eq!(l.points.len(), 3);
         assert_eq!(l.value_at(4.0), Some(0.9));
@@ -152,5 +173,44 @@ mod tests {
         let json = serde_json::to_string(&l).unwrap();
         let back: AutomationLane = serde_json::from_str(&json).unwrap();
         assert_eq!(l, back);
+    }
+}
+
+#[cfg(test)]
+mod curve_tests {
+    use super::*;
+
+    #[test]
+    fn curve_bends_interpolation() {
+        let mut l = AutomationLane::new(AutomationTarget::TrackGain);
+        l.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 0.0,
+            curve: 1.0, // strong ease-in: stays low, rises late
+        });
+        l.insert_point(AutomationPoint {
+            beat: 8.0,
+            value: 1.0,
+            curve: 0.0,
+        });
+        let mid = l.value_at(4.0).unwrap();
+        assert!(mid < 0.05, "eased-in midpoint should hug the start: {mid}");
+        // Linear again once the curve resets.
+        l.points[0].curve = 0.0;
+        assert_eq!(l.value_at(4.0), Some(0.5));
+    }
+
+    #[test]
+    fn zero_curve_serializes_compactly_and_loads_back() {
+        let mut l = AutomationLane::new(AutomationTarget::TrackPan);
+        l.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 0.5,
+            curve: 0.0,
+        });
+        let json = serde_json::to_string(&l).unwrap();
+        assert!(!json.contains("curve"));
+        let back: AutomationLane = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.points[0].curve, 0.0);
     }
 }
