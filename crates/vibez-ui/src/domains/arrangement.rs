@@ -6,6 +6,8 @@
 //! tranche; they follow this same pattern.
 
 use std::collections::HashSet;
+
+use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
@@ -106,6 +108,24 @@ pub enum ArrangementMsg {
     },
     CreateClipFromSelection,
     CreateNoteClipFromSelection(TrackId),
+    ClipBpmInputChanged {
+        track_id: TrackId,
+        clip_id: ClipId,
+        text: String,
+    },
+    SubmitClipBpm {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SetClipNominalBpm {
+        track_id: TrackId,
+        clip_id: ClipId,
+        bpm: f64,
+    },
+    ClearClipWarp {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
 }
 
 impl ArrangementMsg {
@@ -119,6 +139,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::SetTimeSelection { .. }
                 | ArrangementMsg::SetTimeSelectionActive(_)
                 | ArrangementMsg::SetSelectionAsLoop
+                | ArrangementMsg::ClipBpmInputChanged { .. }
         )
     }
 }
@@ -139,6 +160,8 @@ pub struct ArrangementAction {
     pub scroll_to_beat: Option<f64>,
     /// Dismiss the arrangement context menu.
     pub close_context_menu: bool,
+    /// The project content changed outside the undo-snapshot path.
+    pub mark_dirty: bool,
 }
 
 /// Read-only cross-domain facts for arrangement updates.
@@ -1354,6 +1377,267 @@ impl ArrangementState {
                     .insert(ArrangementSelection::NoteClip { track_id, clip_id });
                 action.status = Some("Created note clip from selection".to_string());
             }
+            ArrangementMsg::ClipBpmInputChanged {
+                track_id: _,
+                clip_id,
+                text,
+            } => {
+                self.clip_bpm_edit.insert(clip_id, text);
+            }
+            ArrangementMsg::SubmitClipBpm { track_id, clip_id } => {
+                let parsed = self
+                    .clip_bpm_edit
+                    .remove(&clip_id)
+                    .and_then(|t| t.parse::<f64>().ok())
+                    .filter(|b| *b > 0.0 && *b < 1_000.0);
+                if let Some(bpm) = parsed {
+                    if let Some(track) = self.find_track_mut(track_id) {
+                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                            clip.original_bpm = Some(bpm);
+                        }
+                    }
+                    action.status = Some(format!("Clip BPM set to {:.1}", bpm));
+                    action.mark_dirty = true;
+                }
+            }
+            ArrangementMsg::SetClipNominalBpm {
+                track_id,
+                clip_id,
+                bpm,
+            } => {
+                if let Some(track) = self.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.original_bpm = Some(bpm);
+                    }
+                }
+                action.status = Some(format!("Clip BPM set to {:.1}", bpm));
+                action.mark_dirty = true;
+            }
+            ArrangementMsg::ClearClipWarp { track_id, clip_id } => {
+                return self.apply_clear_clip_warp(engine, track_id, clip_id);
+            }
+        }
+        action
+    }
+
+    /// A background warp finished: swap in the stretched audio and
+    /// record the warp geometry on the clip.
+    pub fn apply_clip_warp_success(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        clip_id: ClipId,
+        success: ClipWarpSuccess,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        engine.send(EngineCommand::ReplaceClipAudio {
+            track_id,
+            clip_id,
+            audio: Arc::clone(&success.audio),
+            duration: success.new_duration,
+            source_offset: success.new_source_offset,
+            loop_start: success.new_loop_start,
+            loop_end: success.new_loop_end,
+        });
+        if let Some(track) = self.find_track_mut(track_id) {
+            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                clip.audio = Arc::clone(&success.audio);
+                clip.duration = success.new_duration;
+                clip.source_offset = success.new_source_offset;
+                clip.loop_start = success.new_loop_start;
+                clip.loop_end = success.new_loop_end;
+                clip.original_bpm = Some(success.detected_bpm);
+                clip.warped = true;
+                clip.warped_to_bpm = Some(success.warped_to_bpm);
+                clip.original_audio = Some(Arc::clone(&success.original_audio));
+            }
+        }
+        action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
+        action.mark_dirty = true;
+        action
+    }
+
+    /// An auto-warp-on-import attempt finished.
+    pub fn apply_auto_warp_outcome(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        clip_id: ClipId,
+        outcome: AutoWarpOutcome,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        match outcome {
+            AutoWarpOutcome::NotDetected => {
+                // Nothing to apply. Point the user at the manual
+                // workflow in the clip detail panel.
+                action.status = Some(
+                    "Auto-warp: could not detect BPM. Select the clip and type the source \
+                     BPM in the Warp row, then press Enter and click Warp."
+                        .to_string(),
+                );
+            }
+            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
+                if let Some(track) = self.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.original_bpm = Some(bpm);
+                    }
+                }
+                action.status = Some(format!(
+                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
+                     Use the clip's Warp button to apply it manually.",
+                    bpm, confidence
+                ));
+                action.mark_dirty = true;
+            }
+            AutoWarpOutcome::Warped { success, .. } => {
+                return self.apply_clip_warp_success(engine, track_id, clip_id, success);
+            }
+        }
+        action
+    }
+
+    /// Restore a warped clip's original audio (or just drop the warp
+    /// flags when the original is gone).
+    pub fn apply_clear_clip_warp(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        clip_id: ClipId,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        let restore = self
+            .find_track(track_id)
+            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
+            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
+        if let Some(original) = restore {
+            let original_frames = original.num_frames() as u64;
+            engine.send(EngineCommand::ReplaceClipAudio {
+                track_id,
+                clip_id,
+                audio: Arc::clone(&original),
+                duration: original_frames,
+                source_offset: 0,
+                loop_start: 0,
+                loop_end: 0,
+            });
+            if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                    clip.audio = original;
+                    clip.duration = original_frames;
+                    clip.source_offset = 0;
+                    clip.loop_start = 0;
+                    clip.loop_end = 0;
+                    clip.warped = false;
+                    clip.warped_to_bpm = None;
+                    clip.original_audio = None;
+                }
+            }
+        } else if let Some(track) = self.find_track_mut(track_id) {
+            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                clip.warped = false;
+                clip.warped_to_bpm = None;
+            }
+        }
+        action.status = Some("Cleared clip warp".to_string());
+        action.mark_dirty = true;
+        action
+    }
+
+    /// A background audio quantize finished: replace the source clip
+    /// with the newly rendered one and select it.
+    pub fn apply_audio_quantize_success(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        old_clip_id: ClipId,
+        success: AudioQuantizeSuccess,
+        sample_rate: u32,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
+        if let Some(track) = self.find_track_mut(track_id) {
+            track.clips.retain(|c| c.id != old_clip_id);
+        }
+        self.selected_clips.retain(|sel| match sel {
+            ArrangementSelection::AudioClip {
+                clip_id: cid,
+                track_id: tid,
+            } => !(*tid == track_id && *cid == old_clip_id),
+            _ => true,
+        });
+
+        engine.send(EngineCommand::AddClip {
+            track_id,
+            clip_id: success.new_clip_id,
+            audio: Arc::clone(&success.new_audio),
+            position: success.new_position,
+            source_offset: 0,
+            duration: success.new_duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        });
+        if let Some(track) = self.find_track_mut(track_id) {
+            track.clips.push(UiClip {
+                id: success.new_clip_id,
+                name: success.new_name,
+                audio: Arc::clone(&success.new_audio),
+                source: None,
+                position: success.new_position,
+                source_offset: 0,
+                duration: success.new_duration,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
+            });
+        }
+        self.selected_clips.insert(ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: success.new_clip_id,
+        });
+
+        let duration_seconds = success.new_duration as f64 / sample_rate.max(1) as f64;
+        action.status = Some(format!(
+            "Quantized {} slice(s) to {} ({:.1}s)",
+            success.slice_count, success.grid_label, duration_seconds
+        ));
+        action
+    }
+
+    /// A background BPM detection finished.
+    pub fn apply_clip_bpm_detected(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        bpm: Option<f64>,
+        confidence: f32,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        match bpm {
+            Some(b) => {
+                if let Some(track) = self.find_track_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        clip.original_bpm = Some(b);
+                    }
+                }
+                self.clip_bpm_edit.remove(&clip_id);
+                action.status = Some(format!(
+                    "Detected {:.1} BPM (confidence {:.2})",
+                    b, confidence
+                ));
+                action.mark_dirty = true;
+            }
+            None => {
+                action.status = Some(
+                    "Could not detect BPM. Type the source BPM in the Warp row and \
+                     press Enter, then click Warp."
+                        .to_string(),
+                );
+            }
         }
         action
     }
@@ -1859,5 +2143,98 @@ mod tests {
         assert_eq!(clip.position_beats, 4.0);
         assert_eq!(clip.duration_beats, 4.0);
         assert_eq!(a.selected_note_clip, Some((midi_tid, clip.id)));
+    }
+
+    fn warp_success(
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    ) -> crate::message::ClipWarpSuccess {
+        crate::message::ClipWarpSuccess {
+            original_audio: Arc::clone(&audio),
+            audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.0; 2000]],
+                sample_rate: 44100,
+            }),
+            new_duration: 2000,
+            new_source_offset: 0,
+            new_loop_start: 0,
+            new_loop_end: 0,
+            detected_bpm: 128.0,
+            warped_to_bpm: 120.0,
+        }
+    }
+
+    #[test]
+    fn warp_then_clear_roundtrips_clip_geometry() {
+        let mut a = arrangement_with_tracks(1);
+        let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
+        let original = Arc::clone(&a.tracks[0].clips[0].audio);
+        let mut engine = RecordingEngine::default();
+
+        let action =
+            a.apply_clip_warp_success(&mut engine, tid, cid, warp_success(Arc::clone(&original)));
+        let clip = &a.tracks[0].clips[0];
+        assert!(clip.warped);
+        assert_eq!(clip.duration, 2000);
+        assert_eq!(clip.warped_to_bpm, Some(120.0));
+        assert_eq!(clip.original_bpm, Some(128.0));
+        assert!(clip.original_audio.is_some());
+        assert!(action.mark_dirty);
+        assert!(matches!(
+            engine.0[0],
+            EngineCommand::ReplaceClipAudio { .. }
+        ));
+
+        let action = a.apply_clear_clip_warp(&mut engine, tid, cid);
+        let clip = &a.tracks[0].clips[0];
+        assert!(!clip.warped);
+        assert_eq!(clip.duration, 1000);
+        assert!(clip.original_audio.is_none());
+        assert!(Arc::ptr_eq(&clip.audio, &original));
+        assert!(action.mark_dirty);
+    }
+
+    #[test]
+    fn bpm_detected_commits_and_clears_pending_edit() {
+        let mut a = arrangement_with_tracks(1);
+        let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
+        a.clip_bpm_edit.insert(cid, "999".to_string());
+        let action = a.apply_clip_bpm_detected(tid, cid, Some(174.0), 0.9);
+        assert_eq!(a.tracks[0].clips[0].original_bpm, Some(174.0));
+        assert!(a.clip_bpm_edit.is_empty());
+        assert!(action.mark_dirty);
+
+        let action = a.apply_clip_bpm_detected(tid, cid, None, 0.0);
+        assert!(!action.mark_dirty);
+        assert!(action.status.unwrap().contains("Could not detect BPM"));
+    }
+
+    #[test]
+    fn submit_clip_bpm_parses_and_rejects_garbage() {
+        let mut a = arrangement_with_tracks(1);
+        let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
+        let mut engine = RecordingEngine::default();
+        a.clip_bpm_edit.insert(cid, "140.5".to_string());
+        let action = a.update(
+            ArrangementMsg::SubmitClipBpm {
+                track_id: tid,
+                clip_id: cid,
+            },
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+        assert_eq!(a.tracks[0].clips[0].original_bpm, Some(140.5));
+        assert!(action.mark_dirty);
+
+        a.clip_bpm_edit.insert(cid, "not a number".to_string());
+        let action = a.update(
+            ArrangementMsg::SubmitClipBpm {
+                track_id: tid,
+                clip_id: cid,
+            },
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+        assert!(!action.mark_dirty);
+        assert_eq!(a.tracks[0].clips[0].original_bpm, Some(140.5));
     }
 }

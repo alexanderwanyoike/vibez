@@ -13,6 +13,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
+use crate::domains::view::ViewMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
@@ -293,13 +294,13 @@ impl App {
         self.state.arrangement.time_selection_active = false;
         self.state.arrangement.selection_start_beats = 0.0;
         self.state.arrangement.selection_end_beats = 0.0;
-        self.state.scroll_offset_beats = 0.0;
-        self.state.context_menu = None;
+        self.state.view.scroll_offset_beats = 0.0;
+        self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
-        self.state.editing_track_name = None;
-        self.state.editing_clip_name = None;
-        self.state.edit_name_text.clear();
+        self.state.view.editing_track_name = None;
+        self.state.view.editing_clip_name = None;
+        self.state.view.edit_name_text.clear();
     }
 
     fn reset_to_new_project(&mut self) {
@@ -1587,72 +1588,6 @@ impl App {
         })
     }
 
-    fn apply_audio_quantize_success(
-        &mut self,
-        track_id: TrackId,
-        old_clip_id: ClipId,
-        success: crate::message::AudioQuantizeSuccess,
-    ) {
-        self.send_command(EngineCommand::RemoveClip(track_id, old_clip_id));
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.retain(|c| c.id != old_clip_id);
-        }
-        self.state
-            .arrangement
-            .selected_clips
-            .retain(|sel| match sel {
-                ArrangementSelection::AudioClip {
-                    clip_id: cid,
-                    track_id: tid,
-                } => !(*tid == track_id && *cid == old_clip_id),
-                _ => true,
-            });
-
-        self.send_command(EngineCommand::AddClip {
-            track_id,
-            clip_id: success.new_clip_id,
-            audio: Arc::clone(&success.new_audio),
-            position: success.new_position,
-            source_offset: 0,
-            duration: success.new_duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        });
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
-                id: success.new_clip_id,
-                name: success.new_name,
-                audio: Arc::clone(&success.new_audio),
-                source: None,
-                position: success.new_position,
-                source_offset: 0,
-                duration: success.new_duration,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-        self.state
-            .arrangement
-            .selected_clips
-            .insert(ArrangementSelection::AudioClip {
-                track_id,
-                clip_id: success.new_clip_id,
-            });
-
-        let duration_seconds =
-            success.new_duration as f64 / self.state.transport.sample_rate as f64;
-        self.state.status_text = format!(
-            "Quantized {} slice(s) to {} ({:.1}s)",
-            success.slice_count, success.grid_label, duration_seconds
-        );
-    }
-
     fn dispatch_detect_clip_bpm(&mut self, track_id: TrackId, clip_id: ClipId) -> Task<Message> {
         let Some(track) = self.state.find_track(track_id) else {
             self.state.status_text = "Track not found".to_string();
@@ -1686,16 +1621,16 @@ impl App {
         action: crate::domains::arrangement::ArrangementAction,
     ) -> Task<Message> {
         if action.close_context_menu {
-            self.state.context_menu = None;
+            self.state.view.context_menu = None;
         }
         if action.focus_clip_tab {
-            self.state.detail_panel_tab = DetailPanelTab::Clip;
+            self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
         if let Some(beat) = action.scroll_to_beat {
             self.auto_scroll_to_beat(beat);
         }
         if let Some((start, end)) = action.loop_from_selection {
-            self.state.context_menu = None;
+            self.state.view.context_menu = None;
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             let _ = self.state.transport.update(
                 crate::domains::transport::TransportMsg::SetArrangementLoopRegion {
@@ -1729,6 +1664,43 @@ impl App {
         if let Some(status) = action.status {
             self.state.status_text = status;
         }
+        if action.mark_dirty {
+            self.state.project.dirty = true;
+        }
+        Task::none()
+    }
+
+    /// Route cross-domain effects requested by the view domain.
+    fn apply_view_action(&mut self, action: crate::domains::view::ViewAction) -> Task<Message> {
+        if let Some((track_id, clip_id, is_note_clip)) = action.select_clip {
+            let selection = if is_note_clip {
+                ArrangementSelection::NoteClip { track_id, clip_id }
+            } else {
+                ArrangementSelection::AudioClip { track_id, clip_id }
+            };
+            if !self.state.arrangement.selected_clips.contains(&selection) {
+                self.state.arrangement.selected_clips.clear();
+                self.state.arrangement.selected_clips.insert(selection);
+            }
+            self.state.arrangement.selected_track = Some(track_id);
+        }
+        if action.end_drag_resize {
+            self.state.arrangement.drag_resize_active = false;
+        }
+        if action.close_device_menu {
+            self.state.devices.context_menu = None;
+        }
+        if let Some(rename) = action.rename {
+            use crate::domains::view::RenameRequest;
+            return match rename {
+                RenameRequest::Track(track_id, name) => {
+                    self.update(Message::rename_track(track_id, name))
+                }
+                RenameRequest::Clip(track_id, clip_id, name) => {
+                    self.update(Message::rename_clip(track_id, clip_id, name))
+                }
+            };
+        }
         Task::none()
     }
 
@@ -1756,7 +1728,7 @@ impl App {
     /// Route cross-domain effects requested by the piano roll domain.
     fn apply_piano_roll_action(&mut self, action: crate::domains::piano_roll::PianoRollAction) {
         if action.close_context_menu {
-            self.state.context_menu = None;
+            self.state.view.context_menu = None;
         }
         if let Some(sel) = action.select_note_clip {
             self.state.arrangement.selected_note_clip = Some(sel);
@@ -1914,38 +1886,6 @@ impl App {
         })
     }
 
-    fn apply_clip_warp_success(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: crate::message::ClipWarpSuccess,
-    ) {
-        self.send_command(EngineCommand::ReplaceClipAudio {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&success.audio),
-            duration: success.new_duration,
-            source_offset: success.new_source_offset,
-            loop_start: success.new_loop_start,
-            loop_end: success.new_loop_end,
-        });
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.audio = Arc::clone(&success.audio);
-                clip.duration = success.new_duration;
-                clip.source_offset = success.new_source_offset;
-                clip.loop_start = success.new_loop_start;
-                clip.loop_end = success.new_loop_end;
-                clip.original_bpm = Some(success.detected_bpm);
-                clip.warped = true;
-                clip.warped_to_bpm = Some(success.warped_to_bpm);
-                clip.original_audio = Some(Arc::clone(&success.original_audio));
-            }
-        }
-        self.state.status_text = format!("Warped to {:.0} BPM", success.warped_to_bpm);
-        self.state.project.dirty = true;
-    }
-
     /// If auto-warp-on-import is enabled, return a background task
     /// that detects the imported clip's BPM and warps it to the
     /// project tempo. Call this right after a clip is inserted into
@@ -1979,108 +1919,35 @@ impl App {
         })
     }
 
-    fn apply_auto_warp_outcome(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-        outcome: crate::message::AutoWarpOutcome,
-    ) {
-        use crate::message::AutoWarpOutcome;
-        match outcome {
-            AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Point the user at the manual
-                // workflow in the clip detail panel.
-                self.state.status_text =
-                    "Auto-warp: could not detect BPM. Select the clip and type the source \
-                     BPM in the Warp row, then press Enter and click Warp."
-                        .to_string();
-            }
-            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                self.state.status_text = format!(
-                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
-                     Use the clip's Warp button to apply it manually.",
-                    bpm, confidence
-                );
-                self.state.project.dirty = true;
-            }
-            AutoWarpOutcome::Warped { success, .. } => {
-                self.apply_clip_warp_success(track_id, clip_id, success);
-            }
-        }
-    }
-
-    fn apply_clear_clip_warp(&mut self, track_id: TrackId, clip_id: ClipId) {
-        let restore = self
-            .state
-            .find_track(track_id)
-            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
-            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
-        if let Some(original) = restore {
-            let original_frames = original.num_frames() as u64;
-            self.send_command(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&original),
-                duration: original_frames,
-                source_offset: 0,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.state.find_track_mut(track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                    clip.audio = original;
-                    clip.duration = original_frames;
-                    clip.source_offset = 0;
-                    clip.loop_start = 0;
-                    clip.loop_end = 0;
-                    clip.warped = false;
-                    clip.warped_to_bpm = None;
-                    clip.original_audio = None;
-                }
-            }
-        } else if let Some(track) = self.state.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-            }
-        }
-        self.state.status_text = "Cleared clip warp".to_string();
-        self.state.project.dirty = true;
-    }
-
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
-        let ppb = 20.0 * self.state.zoom_level as f64;
+        let ppb = 20.0 * self.state.view.zoom_level as f64;
         // Conservative estimate of canvas width (window minus track headers)
         let canvas_width = 1400.0_f64;
         let visible_beats = canvas_width / ppb;
-        let visible_end = self.state.scroll_offset_beats + visible_beats;
+        let visible_end = self.state.view.scroll_offset_beats + visible_beats;
         let margin = 2.0_f64;
 
         if clip_end_beat > visible_end - margin {
             let delta = clip_end_beat - visible_end + margin * 2.0;
             let total = self.state.total_beats();
-            self.state.scroll_offset_beats =
-                (self.state.scroll_offset_beats + delta).clamp(0.0, total);
+            self.state.view.scroll_offset_beats =
+                (self.state.view.scroll_offset_beats + delta).clamp(0.0, total);
         }
         // Also scroll left when dragging toward the left edge
-        if clip_end_beat < self.state.scroll_offset_beats + margin
-            && self.state.scroll_offset_beats > 0.0
+        if clip_end_beat < self.state.view.scroll_offset_beats + margin
+            && self.state.view.scroll_offset_beats > 0.0
         {
-            let delta = self.state.scroll_offset_beats + margin - clip_end_beat;
-            self.state.scroll_offset_beats = (self.state.scroll_offset_beats - delta).max(0.0);
+            let delta = self.state.view.scroll_offset_beats + margin - clip_end_beat;
+            self.state.view.scroll_offset_beats =
+                (self.state.view.scroll_offset_beats - delta).max(0.0);
         }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         // Auto-dismiss context menu on any action except tick/engine/menu events
-        if self.state.context_menu.is_some() {
+        if self.state.view.context_menu.is_some() {
             let keep_menu = matches!(
                 message,
                 Message::Tick
@@ -2088,8 +1955,8 @@ impl App {
                     | Message::EngineMetering { .. }
                     | Message::Transport(TransportMsg::EngineStopped)
                     | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
-                    | Message::ShowContextMenu { .. }
-                    | Message::DismissContextMenu
+                    | Message::View(ViewMsg::ShowContextMenu { .. })
+                    | Message::View(ViewMsg::DismissContextMenu)
                     | Message::Arrangement(ArrangementMsg::DeleteClipsInRegion { .. })
                     | Message::Arrangement(ArrangementMsg::SetSelectionAsLoop)
                     | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
@@ -2100,10 +1967,10 @@ impl App {
                     | Message::Arrangement(ArrangementMsg::SplitNoteClip { .. })
                     | Message::Arrangement(ArrangementMsg::SplitClipsAtRegion { .. })
                     | Message::Arrangement(ArrangementMsg::CreateNoteClipFromSelection(_))
-                    | Message::EditNameText(_)
-                    | Message::CursorMoved(_, _)
-                    | Message::WindowResized(_, _)
-                    | Message::MouseReleased
+                    | Message::View(ViewMsg::EditNameText(_))
+                    | Message::View(ViewMsg::CursorMoved(_, _))
+                    | Message::View(ViewMsg::WindowResized(_, _))
+                    | Message::View(ViewMsg::MouseReleased)
                     | Message::NewProject
                     | Message::OpenProject
                     | Message::SaveProject
@@ -2123,7 +1990,7 @@ impl App {
                     | Message::PluginLoadError(_)
             );
             if !keep_menu {
-                self.state.context_menu = None;
+                self.state.view.context_menu = None;
             }
         }
 
@@ -2149,10 +2016,7 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
                 | Message::Arrangement(ArrangementMsg::AddMidiTrack)
                 | Message::AudioQuantizeReady { .. }
-                | Message::SetClipNominalBpm { .. }
-                | Message::SubmitClipBpm { .. }
                 | Message::ClipWarpReady { .. }
-                | Message::ClearClipWarp { .. }
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
@@ -2218,7 +2082,7 @@ impl App {
             }
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self.state.snap_grid,
+                    snap_grid: self.state.view.snap_grid,
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -2235,6 +2099,16 @@ impl App {
                 let action = self.state.browser.update(msg);
                 return self.apply_browser_action(action);
             }
+            Message::View(msg) => {
+                let ctx = crate::domains::view::ViewCtx {
+                    total_beats: self.state.total_beats(),
+                };
+                let action = self
+                    .state
+                    .view
+                    .update(msg, &self.state.arrangement.tracks, ctx);
+                return self.apply_view_action(action);
+            }
             Message::Project(msg) => {
                 let ctx = crate::domains::project::ProjectCtx {
                     snapshot_now: self.take_snapshot(),
@@ -2249,44 +2123,10 @@ impl App {
             }
 
             // -- Workspace --
-            Message::SwitchWorkspace(ws) => {
-                self.state.workspace = ws;
-            }
-
-            Message::SwitchDetailTab(tab) => {
-                self.state.detail_panel_tab = tab;
-            }
 
             // -- Zoom / scroll --
-            Message::ZoomIn => {
-                self.state.zoom_level = (self.state.zoom_level * 1.25).min(16.0);
-            }
-            Message::ZoomOut => {
-                self.state.zoom_level = (self.state.zoom_level / 1.25).max(0.01);
-            }
-            Message::SetZoom(level) => {
-                self.state.zoom_level = level.clamp(0.01, 16.0);
-            }
-            Message::ZoomToFit => {
-                let content_beats = self.state.total_beats();
-                if content_beats > 0.0 {
-                    // Conservative estimate of canvas width (window minus track headers)
-                    let canvas_width = 1400.0_f32;
-                    let target_ppb = canvas_width / content_beats as f32;
-                    self.state.zoom_level = (target_ppb / 20.0).clamp(0.01, 16.0);
-                    self.state.scroll_offset_beats = 0.0;
-                }
-            }
-            Message::ScrollArrangement(delta) => {
-                let total = self.state.total_beats();
-                self.state.scroll_offset_beats =
-                    (self.state.scroll_offset_beats + delta).clamp(0.0, total);
-            }
 
             // -- Snap grid --
-            Message::SetSnapGrid(grid) => {
-                self.state.snap_grid = grid;
-            }
 
             // -- Engine events --
             Message::Tick => {
@@ -2306,26 +2146,26 @@ impl App {
                     // Right edge: estimate window right ~= track header + canvas
                     // Use cursor_x relative to a conservative right boundary
                     let right_boundary = 1600.0_f32; // reasonable default
-                    if self.state.cursor_x > right_boundary - edge_zone {
-                        let overshoot = ((self.state.cursor_x - (right_boundary - edge_zone))
+                    if self.state.view.cursor_x > right_boundary - edge_zone {
+                        let overshoot = ((self.state.view.cursor_x - (right_boundary - edge_zone))
                             / edge_zone)
                             .clamp(0.0, 3.0) as f64;
                         let delta = overshoot * 2.0;
                         let total = self.state.total_beats();
-                        self.state.scroll_offset_beats =
-                            (self.state.scroll_offset_beats + delta).clamp(0.0, total);
+                        self.state.view.scroll_offset_beats =
+                            (self.state.view.scroll_offset_beats + delta).clamp(0.0, total);
                     }
                     // Left edge
                     let left_boundary = 230.0_f32; // ~track header width
-                    if self.state.cursor_x < left_boundary + edge_zone
-                        && self.state.scroll_offset_beats > 0.0
+                    if self.state.view.cursor_x < left_boundary + edge_zone
+                        && self.state.view.scroll_offset_beats > 0.0
                     {
-                        let overshoot = ((left_boundary + edge_zone - self.state.cursor_x)
+                        let overshoot = ((left_boundary + edge_zone - self.state.view.cursor_x)
                             / edge_zone)
                             .clamp(0.0, 3.0) as f64;
                         let delta = overshoot * 2.0;
-                        self.state.scroll_offset_beats =
-                            (self.state.scroll_offset_beats - delta).max(0.0);
+                        self.state.view.scroll_offset_beats =
+                            (self.state.view.scroll_offset_beats - delta).max(0.0);
                     }
                 }
             }
@@ -2338,7 +2178,8 @@ impl App {
             Message::DeleteKeyPressed => {
                 // Never delete anything while a text field is being
                 // edited; backspace belongs to the text there.
-                if self.state.editing_track_name.is_some() || self.state.editing_clip_name.is_some()
+                if self.state.view.editing_track_name.is_some()
+                    || self.state.view.editing_clip_name.is_some()
                 {
                     return Task::none();
                 }
@@ -2560,113 +2401,12 @@ impl App {
 
             // -- Arrangement loop --
             // -- Time selection + context menu --
-            Message::CursorMoved(x, y) => {
-                self.state.cursor_x = x;
-                self.state.cursor_y = y;
-            }
-            Message::WindowResized(w, h) => {
-                self.state.window_width = w;
-                self.state.window_height = h;
-            }
-            Message::MouseReleased => {
-                self.state.arrangement.drag_resize_active = false;
-            }
-            Message::ShowContextMenu { x, y, target } => {
-                // For ArrangementEmpty from mouse_area (no cursor coords),
-                // use the globally tracked cursor position instead.
-                let (menu_x, menu_y) = if matches!(target, ContextMenuTarget::ArrangementEmpty) {
-                    (self.state.cursor_x, self.state.cursor_y)
-                } else {
-                    (x, y)
-                };
-                // Also select the clip if targeting one (add to set if not already there)
-                if let ContextMenuTarget::Clip {
-                    track_id,
-                    clip_id,
-                    is_note_clip,
-                } = &target
-                {
-                    let selection = if *is_note_clip {
-                        ArrangementSelection::NoteClip {
-                            track_id: *track_id,
-                            clip_id: *clip_id,
-                        }
-                    } else {
-                        ArrangementSelection::AudioClip {
-                            track_id: *track_id,
-                            clip_id: *clip_id,
-                        }
-                    };
-                    if !self.state.arrangement.selected_clips.contains(&selection) {
-                        self.state.arrangement.selected_clips.clear();
-                        self.state.arrangement.selected_clips.insert(selection);
-                    }
-                    self.state.arrangement.selected_track = Some(*track_id);
-                }
-                self.state.context_menu = Some(crate::state::ContextMenu {
-                    x: menu_x,
-                    y: menu_y,
-                    target,
-                });
-            }
-            Message::DismissContextMenu => {
-                self.state.context_menu = None;
-            }
 
             // -- Clip creation from region --
 
             // -- Track reordering --
 
             // -- Renaming --
-            Message::StartEditingTrackName(track_id) => {
-                if let Some(track) = self.state.find_track(track_id) {
-                    self.state.edit_name_text = track.name.clone();
-                    self.state.editing_track_name = Some(track_id);
-                    self.state.editing_clip_name = None;
-                }
-            }
-            Message::StartEditingClipName(track_id, clip_id) => {
-                self.state.context_menu = None;
-                let name = self.state.find_track(track_id).and_then(|t| {
-                    t.clips
-                        .iter()
-                        .find(|c| c.id == clip_id)
-                        .map(|c| c.name.clone())
-                        .or_else(|| {
-                            t.note_clips
-                                .iter()
-                                .find(|c| c.id == clip_id)
-                                .map(|c| c.name.clone())
-                        })
-                });
-                if let Some(name) = name {
-                    self.state.edit_name_text = name;
-                    self.state.editing_clip_name = Some((track_id, clip_id));
-                    self.state.editing_track_name = None;
-                }
-            }
-            Message::EditNameText(t) => {
-                self.state.edit_name_text = t;
-            }
-            Message::FinishEditing => {
-                let new_name = self.state.edit_name_text.clone();
-                if let Some(track_id) = self.state.editing_track_name.take() {
-                    if !new_name.is_empty() {
-                        return self.update(Message::rename_track(track_id, new_name));
-                    }
-                }
-                if let Some((track_id, clip_id)) = self.state.editing_clip_name.take() {
-                    if !new_name.is_empty() {
-                        return self.update(Message::rename_clip(track_id, clip_id, new_name));
-                    }
-                }
-            }
-            Message::CancelEditing => {
-                self.state.editing_track_name = None;
-                self.state.editing_clip_name = None;
-                self.state.edit_name_text.clear();
-                self.state.devices.context_menu = None;
-            }
 
             // -- MIDI track (no auto-synth) --
 
@@ -2928,7 +2668,16 @@ impl App {
                 clip_id,
                 outcome,
             } => {
-                self.apply_auto_warp_outcome(track_id, clip_id, outcome);
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.arrangement.apply_auto_warp_outcome(
+                        &mut engine,
+                        track_id,
+                        clip_id,
+                        outcome,
+                    )
+                };
+                return self.apply_arrangement_action(action);
             }
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser load error: {err}");
@@ -3229,7 +2978,7 @@ impl App {
 
             // -- Bounce / resample --
             Message::BounceSelectionToAudio => {
-                self.state.context_menu = None;
+                self.state.view.context_menu = None;
                 if !self.state.arrangement.time_selection_active
                     || self.state.arrangement.selection_end_beats
                         <= self.state.arrangement.selection_start_beats
@@ -3259,7 +3008,7 @@ impl App {
                 clip_id,
                 is_note_clip,
             } => {
-                self.state.context_menu = None;
+                self.state.view.context_menu = None;
                 let (range, insert_pos, name) = if is_note_clip {
                     let spb =
                         self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
@@ -3309,8 +3058,8 @@ impl App {
 
             // -- Quantize --
             Message::QuantizeAudioClip { track_id, clip_id } => {
-                self.state.context_menu = None;
-                let grid = self.state.snap_grid;
+                self.state.view.context_menu = None;
+                let grid = self.state.view.snap_grid;
                 return self.dispatch_audio_quantize(track_id, clip_id, grid);
             }
             Message::QuantizeAudioClipAt {
@@ -3325,7 +3074,20 @@ impl App {
                 old_clip_id,
                 result,
             } => match result {
-                Ok(success) => self.apply_audio_quantize_success(track_id, old_clip_id, success),
+                Ok(success) => {
+                    let sample_rate = self.state.transport.sample_rate;
+                    let action = {
+                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                        self.state.arrangement.apply_audio_quantize_success(
+                            &mut engine,
+                            track_id,
+                            old_clip_id,
+                            success,
+                            sample_rate,
+                        )
+                    };
+                    return self.apply_arrangement_action(action);
+                }
                 Err(err) => {
                     self.state.status_text = format!("Quantize failed: {err}");
                 }
@@ -3340,61 +3102,12 @@ impl App {
                 clip_id,
                 bpm,
                 confidence,
-            } => match bpm {
-                Some(b) => {
-                    if let Some(track) = self.state.find_track_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(b);
-                        }
-                    }
-                    self.state.clip_bpm_edit.remove(&clip_id);
-                    self.state.status_text =
-                        format!("Detected {:.1} BPM (confidence {:.2})", b, confidence);
-                    self.state.project.dirty = true;
-                }
-                None => {
-                    self.state.status_text =
-                        "Could not detect BPM. Type the source BPM in the Warp row and \
-                         press Enter, then click Warp."
-                            .to_string();
-                }
-            },
-            Message::ClipBpmInputChanged {
-                track_id: _,
-                clip_id,
-                text,
             } => {
-                self.state.clip_bpm_edit.insert(clip_id, text);
-            }
-            Message::SubmitClipBpm { track_id, clip_id } => {
-                let parsed = self
+                let action = self
                     .state
-                    .clip_bpm_edit
-                    .remove(&clip_id)
-                    .and_then(|t| t.parse::<f64>().ok())
-                    .filter(|b| *b > 0.0 && *b < 1_000.0);
-                if let Some(bpm) = parsed {
-                    if let Some(track) = self.state.find_track_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(bpm);
-                        }
-                    }
-                    self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                    self.state.project.dirty = true;
-                }
-            }
-            Message::SetClipNominalBpm {
-                track_id,
-                clip_id,
-                bpm,
-            } => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                self.state.status_text = format!("Clip BPM set to {:.1}", bpm);
-                self.state.project.dirty = true;
+                    .arrangement
+                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
+                return self.apply_arrangement_action(action);
             }
             Message::WarpClipToProject { track_id, clip_id } => {
                 return self.dispatch_warp_clip_to_project(track_id, clip_id);
@@ -3404,14 +3117,22 @@ impl App {
                 clip_id,
                 result,
             } => match result {
-                Ok(success) => self.apply_clip_warp_success(track_id, clip_id, success),
+                Ok(success) => {
+                    let action = {
+                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                        self.state.arrangement.apply_clip_warp_success(
+                            &mut engine,
+                            track_id,
+                            clip_id,
+                            success,
+                        )
+                    };
+                    return self.apply_arrangement_action(action);
+                }
                 Err(err) => {
                     self.state.status_text = format!("Warp failed: {err}");
                 }
             },
-            Message::ClearClipWarp { track_id, clip_id } => {
-                self.apply_clear_clip_warp(track_id, clip_id);
-            }
 
             // -- Undo / redo --
 
@@ -3985,12 +3706,12 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let header = self.view_header();
 
-        let workspace_content = match self.state.workspace {
+        let workspace_content = match self.state.view.workspace {
             Workspace::Arrange => self.view_arrangement(),
             Workspace::Mix => self.view_mixer(),
         };
         let content: Element<'_, Message> =
-            if self.state.workspace == Workspace::Arrange && self.state.browser.open {
+            if self.state.view.workspace == Workspace::Arrange && self.state.browser.open {
                 row![self.view_sample_browser_panel(), workspace_content]
                     .height(Length::FillPortion(5))
                     .into()
@@ -4015,9 +3736,9 @@ impl App {
             stack![base_layout, self.view_settings_modal()].into()
         } else if self.state.project.file_menu_open {
             stack![base_layout, self.view_file_menu_overlay()].into()
-        } else if self.state.context_menu.is_some() {
+        } else if self.state.view.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
-        } else if self.state.editing_clip_name.is_some() {
+        } else if self.state.view.editing_clip_name.is_some() {
             stack![base_layout, self.view_rename_overlay()].into()
         } else if self.state.devices.context_menu.is_some() {
             stack![base_layout, self.view_device_context_menu_overlay()].into()
@@ -4721,9 +4442,9 @@ impl App {
     }
 
     fn view_rename_overlay(&self) -> Element<'_, Message> {
-        let input = text_input("Name", &self.state.edit_name_text)
-            .on_input(Message::EditNameText)
-            .on_submit(Message::FinishEditing)
+        let input = text_input("Name", &self.state.view.edit_name_text)
+            .on_input(|t| Message::View(ViewMsg::EditNameText(t)))
+            .on_submit(Message::View(ViewMsg::FinishEditing))
             .size(14)
             .width(Length::Fixed(250.0));
 
@@ -4747,11 +4468,13 @@ impl App {
 
         let centered = center(dialog).width(Length::Fill).height(Length::Fill);
 
-        mouse_area(centered).on_press(Message::CancelEditing).into()
+        mouse_area(centered)
+            .on_press(Message::View(ViewMsg::CancelEditing))
+            .into()
     }
 
     fn view_context_menu_overlay(&self) -> Element<'_, Message> {
-        let menu = self.state.context_menu.as_ref().unwrap();
+        let menu = self.state.view.context_menu.as_ref().unwrap();
         let x = menu.x;
         let y = menu.y;
 
@@ -4827,7 +4550,7 @@ impl App {
                 col = col.push(menu_btn(
                     icons::PENCIL,
                     "Rename".into(),
-                    Message::StartEditingClipName(track_id, clip_id),
+                    Message::View(ViewMsg::StartEditingClipName(track_id, clip_id)),
                 ));
 
                 // Bounce to audio
@@ -4845,13 +4568,13 @@ impl App {
                 if is_note_clip {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.snap_grid.label()),
+                        format!("Quantize ({})", self.state.view.snap_grid.label()),
                         Message::PianoRoll(PianoRollMsg::QuantizeNoteClip { track_id, clip_id }),
                     ));
                 } else {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.snap_grid.label()),
+                        format!("Quantize ({})", self.state.view.snap_grid.label()),
                         Message::QuantizeAudioClip { track_id, clip_id },
                     ));
                 }
@@ -4945,7 +4668,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .on_press(Message::DismissContextMenu)
+        .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
     }
 
@@ -4954,7 +4677,7 @@ impl App {
 
         // Workspace tabs
         let arrange_tab = {
-            let active = self.state.workspace == Workspace::Arrange;
+            let active = self.state.view.workspace == Workspace::Arrange;
             let (bg, text_color, border_color) = if active {
                 (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
             } else {
@@ -4972,7 +4695,7 @@ impl App {
                 .spacing(4)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::SwitchWorkspace(Workspace::Arrange))
+            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Arrange)))
             .padding([6, 14])
             .style(move |_theme: &Theme, _status| button::Style {
                 background: Some(bg.into()),
@@ -4987,7 +4710,7 @@ impl App {
         };
 
         let mix_tab = {
-            let active = self.state.workspace == Workspace::Mix;
+            let active = self.state.view.workspace == Workspace::Mix;
             let (bg, text_color, border_color) = if active {
                 (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
             } else {
@@ -5007,7 +4730,7 @@ impl App {
                 .spacing(4)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::SwitchWorkspace(Workspace::Mix))
+            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Mix)))
             .padding([6, 14])
             .style(move |_theme: &Theme, _status| button::Style {
                 background: Some(bg.into()),
@@ -5967,19 +5690,19 @@ impl App {
                         ..Default::default()
                     }),
             )
-            .on_right_press(Message::ShowContextMenu {
+            .on_right_press(Message::View(ViewMsg::ShowContextMenu {
                 x: 400.0,
                 y: 300.0,
                 target: ContextMenuTarget::ArrangementEmpty,
-            })
+            }))
             .into();
         }
 
         let playhead_beats = self.state.position_beats();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
-        let zoom_level = self.state.zoom_level;
-        let scroll_offset = self.state.scroll_offset_beats;
+        let zoom_level = self.state.view.zoom_level;
+        let scroll_offset = self.state.view.scroll_offset_beats;
         let total_beats = self.state.total_beats();
 
         // Beat-based ruler across the top (offset by track header width)
@@ -6105,8 +5828,9 @@ impl App {
                 .collect();
 
             // Track header (iced widgets)
-            let editing = self.state.editing_track_name == Some(track.id);
-            let header = view_track_header(track, selected, editing, &self.state.edit_name_text);
+            let editing = self.state.view.editing_track_name == Some(track.id);
+            let header =
+                view_track_header(track, selected, editing, &self.state.view.edit_name_text);
 
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
@@ -6163,11 +5887,11 @@ impl App {
                     ..Default::default()
                 }),
         )
-        .on_right_press(Message::ShowContextMenu {
+        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
             x: 400.0,
             y: 300.0,
             target: ContextMenuTarget::ArrangementEmpty,
-        })
+        }))
         .into()
     }
 
@@ -6248,11 +5972,11 @@ impl App {
                     ..Default::default()
                 }),
         )
-        .on_right_press(Message::ShowContextMenu {
+        .on_right_press(Message::View(ViewMsg::ShowContextMenu {
             x: 400.0,
             y: 300.0,
             target: ContextMenuTarget::ArrangementEmpty,
-        })
+        }))
         .into()
     }
 
@@ -6270,7 +5994,7 @@ impl App {
 
             // Tab bar
             let clip_tab = {
-                let active = self.state.detail_panel_tab == DetailPanelTab::Clip;
+                let active = self.state.view.detail_panel_tab == DetailPanelTab::Clip;
                 let (bg, text_color, border_color) = if active {
                     (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
                 } else {
@@ -6281,7 +6005,9 @@ impl App {
                     )
                 };
                 button(text("Clip").size(12).color(text_color))
-                    .on_press(Message::SwitchDetailTab(DetailPanelTab::Clip))
+                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
+                        DetailPanelTab::Clip,
+                    )))
                     .padding([4, 12])
                     .style(move |_theme: &Theme, _status| button::Style {
                         background: Some(bg.into()),
@@ -6295,7 +6021,7 @@ impl App {
                     })
             };
             let devices_tab = {
-                let active = self.state.detail_panel_tab == DetailPanelTab::Devices;
+                let active = self.state.view.detail_panel_tab == DetailPanelTab::Devices;
                 let (bg, text_color, border_color) = if active {
                     (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
                 } else {
@@ -6306,7 +6032,9 @@ impl App {
                     )
                 };
                 button(text("Devices").size(12).color(text_color))
-                    .on_press(Message::SwitchDetailTab(DetailPanelTab::Devices))
+                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
+                        DetailPanelTab::Devices,
+                    )))
                     .padding([4, 12])
                     .style(move |_theme: &Theme, _status| button::Style {
                         background: Some(bg.into()),
@@ -6322,7 +6050,7 @@ impl App {
             let tab_bar = row![clip_tab, devices_tab].spacing(4).padding([4, 8]);
 
             // Tab content
-            let tab_content: Element<'_, Message> = match self.state.detail_panel_tab {
+            let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
                 DetailPanelTab::Clip => {
                     let is_midi = track.kind.is_midi();
                     // Check for note clip selection on this MIDI track
@@ -6381,7 +6109,7 @@ impl App {
         // arrangement flexes instead); the Clip tab keeps flexible
         // height for the piano roll. Window-fraction heights clipped
         // cards or demanded ugly vertical scrollbars.
-        let panel_height = if self.state.detail_panel_tab == DetailPanelTab::Devices {
+        let panel_height = if self.state.view.detail_panel_tab == DetailPanelTab::Devices {
             Length::Fixed(th::DEVICE_BODY_H + 96.0)
         } else {
             Length::FillPortion(2)
@@ -6484,8 +6212,8 @@ impl App {
         mouse_area(content)
             .on_right_press(Message::Devices(
                 crate::domains::devices::DevicesMsg::ShowContextMenu {
-                    x: self.state.cursor_x,
-                    y: self.state.cursor_y,
+                    x: self.state.view.cursor_x,
+                    y: self.state.view.cursor_y,
                     track_id,
                 },
             ))
@@ -7560,8 +7288,11 @@ impl App {
         // enough that the estimated content stays on-screen (the
         // devices panel lives at the bottom of the window).
         let est_h = est_list_h + 90.0;
-        let menu_y = menu.y.min(self.state.window_height - est_h).max(0.0);
-        let menu_x = menu.x.min(self.state.window_width - menu_w - 16.0).max(0.0);
+        let menu_y = menu.y.min(self.state.view.window_height - est_h).max(0.0);
+        let menu_x = menu
+            .x
+            .min(self.state.view.window_width - menu_w - 16.0)
+            .max(0.0);
         let padded = column![
             vertical_space().height(Length::Fixed(menu_y)),
             row![horizontal_space().width(Length::Fixed(menu_x)), menu_card,]
@@ -7615,7 +7346,7 @@ impl App {
                         clip_relative_playhead,
                         clip.duration_beats,
                         track_color,
-                        self.state.snap_grid,
+                        self.state.view.snap_grid,
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     )
@@ -7791,14 +7522,14 @@ impl App {
         use crate::state::SnapGrid;
         let mut snap_row = row![].spacing(2);
         for &grid in SnapGrid::all() {
-            let is_active = self.state.snap_grid == grid;
+            let is_active = self.state.view.snap_grid == grid;
             let (bg, text_color) = if is_active {
                 (th::ACCENT_DIM, th::ACCENT)
             } else {
                 (th::BG_ELEVATED, th::TEXT_DIM)
             };
             let btn = button(text(grid.label()).size(10).color(text_color))
-                .on_press(Message::SetSnapGrid(grid))
+                .on_press(Message::View(ViewMsg::SetSnapGrid(grid)))
                 .padding([2, 6])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(bg.into()),
@@ -7917,18 +7648,24 @@ impl App {
             .unwrap_or_default();
         let text_value = self
             .state
+            .arrangement
             .clip_bpm_edit
             .get(&clip_id)
             .cloned()
             .unwrap_or(default_text);
 
         let bpm_input = text_input("BPM", &text_value)
-            .on_input(move |t| Message::ClipBpmInputChanged {
+            .on_input(move |t| {
+                Message::Arrangement(ArrangementMsg::ClipBpmInputChanged {
+                    track_id,
+                    clip_id,
+                    text: t,
+                })
+            })
+            .on_submit(Message::Arrangement(ArrangementMsg::SubmitClipBpm {
                 track_id,
                 clip_id,
-                text: t,
-            })
-            .on_submit(Message::SubmitClipBpm { track_id, clip_id })
+            }))
             .size(11)
             .width(Length::Fixed(70.0));
 
@@ -7969,7 +7706,10 @@ impl App {
 
         if clip.warped {
             let clear_btn = button(text("Clear warp").size(11).color(th::TEXT_DIM))
-                .on_press(Message::ClearClipWarp { track_id, clip_id })
+                .on_press(Message::Arrangement(ArrangementMsg::ClearClipWarp {
+                    track_id,
+                    clip_id,
+                }))
                 .padding([4, 10])
                 .style(button_style);
             row_widgets = row_widgets.push(clear_btn);
@@ -8240,14 +7980,14 @@ impl App {
             iced::keyboard::on_key_press(global_key_handler),
             iced::event::listen_with(|event, _status, _id| match event {
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                    Some(Message::CursorMoved(position.x, position.y))
+                    Some(Message::View(ViewMsg::CursorMoved(position.x, position.y)))
                 }
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                     iced::mouse::Button::Left,
-                )) => Some(Message::MouseReleased),
-                iced::Event::Window(iced::window::Event::Resized(size)) => {
-                    Some(Message::WindowResized(size.width, size.height))
-                }
+                )) => Some(Message::View(ViewMsg::MouseReleased)),
+                iced::Event::Window(iced::window::Event::Resized(size)) => Some(Message::View(
+                    ViewMsg::WindowResized(size.width, size.height),
+                )),
                 _ => None,
             }),
         ])
@@ -8394,7 +8134,7 @@ fn global_key_handler(
 
     // Escape: cancel editing
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
-        return Some(Message::CancelEditing);
+        return Some(Message::View(ViewMsg::CancelEditing));
     }
 
     // Delete/Backspace: context-resolved in update() (selected notes
@@ -8439,7 +8179,7 @@ fn global_key_handler(
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
             "l" => Some(Message::Transport(TransportMsg::ToggleArrangementLoop)),
-            "0" => Some(Message::ZoomToFit),
+            "0" => Some(Message::View(ViewMsg::ZoomToFit)),
             "z" | "Z" => {
                 if modifiers.shift() {
                     Some(Message::Project(ProjectMsg::Redo))

@@ -4,6 +4,7 @@ use iced::widget::{
 use iced::{Element, Length, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::view::ViewMsg;
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
@@ -40,15 +41,15 @@ pub fn view_track_header<'a>(
     // Name: if editing, show text_input; if selected, click starts rename; else click selects
     let name_widget: Element<'_, Message> = if editing_name {
         text_input("Name", edit_text)
-            .on_input(Message::EditNameText)
-            .on_submit(Message::FinishEditing)
+            .on_input(|t| Message::View(ViewMsg::EditNameText(t)))
+            .on_submit(Message::View(ViewMsg::FinishEditing))
             .size(13)
             .width(Length::Fill)
             .into()
     } else {
         let name_color = if track.mute { th::TEXT_DIM } else { th::TEXT };
         let msg = if selected {
-            Message::StartEditingTrackName(track.id)
+            Message::View(ViewMsg::StartEditingTrackName(track.id))
         } else {
             Message::select_track(track.id)
         };

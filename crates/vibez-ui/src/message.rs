@@ -11,9 +11,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
-use crate::state::{
-    ContextMenuTarget, DetailPanelTab, SampleBrowserEntry, SettingsTab, SnapGrid, Workspace,
-};
+use crate::state::{SampleBrowserEntry, SettingsTab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrumPadParam {
@@ -157,9 +155,9 @@ pub enum Message {
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
+    View(crate::domains::view::ViewMsg),
 
     // Workspace
-    SwitchWorkspace(Workspace),
 
     // Engine events
     Tick,
@@ -193,36 +191,18 @@ pub enum Message {
     DrumRackPadDecodeError(TrackId, usize, String),
 
     // Zoom / scroll
-    ZoomIn,
-    ZoomOut,
-    SetZoom(f32),
-    ZoomToFit,
-    ScrollArrangement(f64),
 
     // Snap grid
-    SetSnapGrid(SnapGrid),
 
     // Detail panel tabs
-    SwitchDetailTab(DetailPanelTab),
 
     // Arrangement loop
 
     // Time selection + context menu
-    ShowContextMenu {
-        x: f32,
-        y: f32,
-        target: ContextMenuTarget,
-    },
-    DismissContextMenu,
 
     // Track reordering
 
     // Renaming
-    StartEditingTrackName(TrackId),
-    StartEditingClipName(TrackId, ClipId),
-    EditNameText(String),
-    FinishEditing,
-    CancelEditing,
 
     // MIDI track (no auto-synth)
 
@@ -231,10 +211,7 @@ pub enum Message {
     // Device context menu
 
     // Cursor tracking
-    CursorMoved(f32, f32),
     DeleteKeyPressed,
-    WindowResized(f32, f32),
-    MouseReleased,
 
     // File menu
     NewProject,
@@ -351,23 +328,9 @@ pub enum Message {
         confidence: f32,
     },
     /// Manual BPM text field input change (ephemeral, before commit).
-    ClipBpmInputChanged {
-        track_id: TrackId,
-        clip_id: ClipId,
-        text: String,
-    },
     /// Commit a manually-entered nominal BPM for the clip.
-    SetClipNominalBpm {
-        track_id: TrackId,
-        clip_id: ClipId,
-        bpm: f64,
-    },
     /// Parse the in-progress `clip_bpm_edit` text and commit it as the
     /// clip's nominal BPM (wired to the BPM text input's Enter key).
-    SubmitClipBpm {
-        track_id: TrackId,
-        clip_id: ClipId,
-    },
     /// Kick off a background warp-to-project-tempo for the clip.
     WarpClipToProject {
         track_id: TrackId,
@@ -381,10 +344,6 @@ pub enum Message {
     },
     /// Revert the clip's audio to the un-warped `original_audio` and
     /// clear warp metadata.
-    ClearClipWarp {
-        track_id: TrackId,
-        clip_id: ClipId,
-    },
     /// Auto-warp pass completed for a freshly-imported clip. The
     /// outcome bundles three cases: the detector refused
     /// (`NotDetected`), detected but confidence below the user's

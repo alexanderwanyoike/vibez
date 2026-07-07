@@ -312,6 +312,48 @@ impl SnapGrid {
     }
 }
 
+/// View domain slice: everything about how the project is being
+/// looked at, none of it part of the project itself.
+#[derive(Debug)]
+pub struct ViewState {
+    pub workspace: Workspace,
+    pub detail_panel_tab: DetailPanelTab,
+    pub zoom_level: f32,
+    pub scroll_offset_beats: f64,
+    pub snap_grid: SnapGrid,
+    pub context_menu: Option<ContextMenu>,
+    /// Cursor tracking (for right-click positioning from mouse_area).
+    pub cursor_x: f32,
+    pub cursor_y: f32,
+    /// Last known window size, for clamping popup menus on-screen.
+    pub window_width: f32,
+    pub window_height: f32,
+    // Inline renaming
+    pub editing_track_name: Option<TrackId>,
+    pub editing_clip_name: Option<(TrackId, ClipId)>,
+    pub edit_name_text: String,
+}
+
+impl Default for ViewState {
+    fn default() -> Self {
+        Self {
+            workspace: Workspace::Arrange,
+            detail_panel_tab: DetailPanelTab::Clip,
+            zoom_level: 1.0,
+            scroll_offset_beats: 0.0,
+            snap_grid: SnapGrid::Eighth,
+            context_menu: None,
+            cursor_x: 0.0,
+            cursor_y: 0.0,
+            window_width: 1400.0,
+            window_height: 900.0,
+            editing_track_name: None,
+            editing_clip_name: None,
+            edit_name_text: String::new(),
+        }
+    }
+}
+
 /// Right-click context menu state.
 #[derive(Debug, Clone)]
 pub struct ContextMenu {
@@ -580,6 +622,10 @@ pub struct ArrangementState {
     /// An arrangement drag (move/resize) is active; drives edge
     /// auto-scroll on ticks.
     pub drag_resize_active: bool,
+    /// In-flight text edits for the clip BPM field in the clip detail
+    /// panel; a missing entry means show the committed
+    /// `UiClip::original_bpm` value instead.
+    pub clip_bpm_edit: HashMap<ClipId, String>,
 }
 
 pub struct AppState {
@@ -592,43 +638,16 @@ pub struct AppState {
 
     // UI
     pub status_text: String,
-    pub workspace: Workspace,
+    // View domain slice (workspace, zoom, snap, menus, renames).
+    pub view: ViewState,
 
-    // Zoom / scroll (arrangement timeline)
-    pub zoom_level: f32,
-    pub scroll_offset_beats: f64,
-
-    // Piano roll
-    pub snap_grid: SnapGrid,
     pub piano_roll: PianoRollState,
 
     // Arrangement domain slice (tracks, selection, numbering).
     pub arrangement: ArrangementState,
 
-    // Detail panel tab
-    pub detail_panel_tab: DetailPanelTab,
-
-    // Context menu
-    pub context_menu: Option<ContextMenu>,
-
-    // Cursor tracking (for right-click positioning from mouse_area)
-    pub cursor_x: f32,
-    pub cursor_y: f32,
-
-    // Last known window size, for clamping popup menus on-screen
-    pub window_width: f32,
-    pub window_height: f32,
-
-    // Inline renaming
-    pub editing_track_name: Option<TrackId>,
-    pub editing_clip_name: Option<(TrackId, ClipId)>,
-    pub edit_name_text: String,
     /// In-progress manual BPM input text keyed by clip id. Only
     /// populated while the user is actively editing the field in the
-    /// clip detail panel; `None` / missing means show the committed
-    /// `UiClip::original_bpm` value instead.
-    pub clip_bpm_edit: HashMap<ClipId, String>,
-
     // Device context menu
     pub devices: crate::domains::devices::DevicesState,
 
@@ -664,25 +683,12 @@ impl Default for AppState {
             peak_l: 0.0,
             peak_r: 0.0,
             status_text: "Ready — Add a track to get started".to_string(),
-            workspace: Workspace::Arrange,
-            zoom_level: 1.0,
-            scroll_offset_beats: 0.0,
-            snap_grid: SnapGrid::Eighth,
+            view: ViewState::default(),
             piano_roll: PianoRollState::default(),
             arrangement: ArrangementState {
                 next_track_number: 1,
                 ..ArrangementState::default()
             },
-            detail_panel_tab: DetailPanelTab::Clip,
-            context_menu: None,
-            cursor_x: 0.0,
-            cursor_y: 0.0,
-            window_width: 1400.0,
-            window_height: 900.0,
-            editing_track_name: None,
-            editing_clip_name: None,
-            edit_name_text: String::new(),
-            clip_bpm_edit: HashMap::new(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
@@ -739,7 +745,7 @@ impl AppState {
     /// Pixels per beat at the current zoom level.
     #[allow(dead_code)]
     pub fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.zoom_level
+        20.0 * self.view.zoom_level
     }
 
     /// Number of beats visible in a canvas of the given width.
@@ -751,13 +757,13 @@ impl AppState {
     /// Convert a beat value to a pixel x coordinate in the viewport.
     #[allow(dead_code)]
     pub fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        ((beat - self.view.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
     }
 
     /// Convert a pixel x coordinate in the viewport to a beat value.
     #[allow(dead_code)]
     pub fn x_to_beat(&self, x: f32) -> f64 {
-        x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
+        x as f64 / self.pixels_per_beat() as f64 + self.view.scroll_offset_beats
     }
 
     /// Total duration in beats across all tracks, with generous padding.

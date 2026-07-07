@@ -8,6 +8,7 @@ use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
+use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
 use crate::theme;
@@ -459,14 +460,18 @@ impl canvas::Program<Message> for RulerWidget {
                                     .clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(overshoot as f64 * 2.0)),
+                                    Some(Message::View(ViewMsg::ScrollArrangement(
+                                        overshoot as f64 * 2.0,
+                                    ))),
                                 );
                             }
                             if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
                                 let overshoot = ((edge_zone - local_x) / edge_zone).clamp(0.0, 3.0);
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(-(overshoot as f64 * 2.0))),
+                                    Some(Message::View(ViewMsg::ScrollArrangement(
+                                        -(overshoot as f64 * 2.0),
+                                    ))),
                                 );
                             }
                         }
@@ -553,7 +558,7 @@ impl canvas::Program<Message> for RulerWidget {
                     {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ShowContextMenu {
+                            Some(Message::View(ViewMsg::ShowContextMenu {
                                 x: screen_x,
                                 y: screen_y,
                                 target: ContextMenuTarget::TimeSelection {
@@ -561,17 +566,17 @@ impl canvas::Program<Message> for RulerWidget {
                                     end_beats: self.selection_end_beats,
                                     track_id: None,
                                 },
-                            }),
+                            })),
                         );
                     }
 
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::ShowContextMenu {
+                        Some(Message::View(ViewMsg::ShowContextMenu {
                             x: screen_x,
                             y: screen_y,
                             target: ContextMenuTarget::ArrangementEmpty,
-                        }),
+                        })),
                     );
                 }
             }
@@ -585,22 +590,28 @@ impl canvas::Program<Message> for RulerWidget {
                     if dx.abs() > dy.abs() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
+                            Some(Message::View(ViewMsg::ScrollArrangement(-dx as f64 * 2.0))),
                         );
                     }
                     // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
                         if dy > 0.0 {
-                            return (canvas::event::Status::Captured, Some(Message::ZoomIn));
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::View(ViewMsg::ZoomIn)),
+                            );
                         } else {
-                            return (canvas::event::Status::Captured, Some(Message::ZoomOut));
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::View(ViewMsg::ZoomOut)),
+                            );
                         }
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ScrollArrangement(dy as f64 * 2.0)),
+                            Some(Message::View(ViewMsg::ScrollArrangement(dy as f64 * 2.0))),
                         );
                     }
                 }
@@ -1541,7 +1552,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     if let Some((clip_id, is_note_clip, _, _, _)) = self.hit_test(pos.x) {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ShowContextMenu {
+                            Some(Message::View(ViewMsg::ShowContextMenu {
                                 x: screen_x,
                                 y: screen_y,
                                 target: ContextMenuTarget::Clip {
@@ -1549,7 +1560,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     clip_id,
                                     is_note_clip,
                                 },
-                            }),
+                            })),
                         );
                     }
 
@@ -1562,7 +1573,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         if beat >= self.selection_start_beats && beat <= self.selection_end_beats {
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::ShowContextMenu {
+                                Some(Message::View(ViewMsg::ShowContextMenu {
                                     x: screen_x,
                                     y: screen_y,
                                     target: ContextMenuTarget::TimeSelection {
@@ -1570,7 +1581,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         end_beats: self.selection_end_beats,
                                         track_id: Some(self.track_id),
                                     },
-                                }),
+                                })),
                             );
                         }
                     }
@@ -1578,11 +1589,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     // No clip, no time selection — show arrangement-empty context menu
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::ShowContextMenu {
+                        Some(Message::View(ViewMsg::ShowContextMenu {
                             x: screen_x,
                             y: screen_y,
                             target: ContextMenuTarget::ArrangementEmpty,
-                        }),
+                        })),
                     );
                 }
             }
@@ -1831,22 +1842,28 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     if dx.abs() > dy.abs() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ScrollArrangement(-dx as f64 * 2.0)),
+                            Some(Message::View(ViewMsg::ScrollArrangement(-dx as f64 * 2.0))),
                         );
                     }
                     // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
                         if dy > 0.0 {
-                            return (canvas::event::Status::Captured, Some(Message::ZoomIn));
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::View(ViewMsg::ZoomIn)),
+                            );
                         } else {
-                            return (canvas::event::Status::Captured, Some(Message::ZoomOut));
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::View(ViewMsg::ZoomOut)),
+                            );
                         }
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::ScrollArrangement(dy as f64 * 2.0)),
+                            Some(Message::View(ViewMsg::ScrollArrangement(dy as f64 * 2.0))),
                         );
                     }
                 }
@@ -2118,7 +2135,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                     state.drag = Some(MinimapDragAction::Seeking);
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::ScrollArrangement(delta)),
+                        Some(Message::View(ViewMsg::ScrollArrangement(delta))),
                     );
                 }
             }
@@ -2137,7 +2154,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                 let delta = target - self.scroll_offset_beats;
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(delta)),
+                                    Some(Message::View(ViewMsg::ScrollArrangement(delta))),
                                 );
                             }
                             MinimapDragAction::Seeking => {
@@ -2146,7 +2163,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                 let delta = target - self.scroll_offset_beats;
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::ScrollArrangement(delta)),
+                                    Some(Message::View(ViewMsg::ScrollArrangement(delta))),
                                 );
                             }
                         }
