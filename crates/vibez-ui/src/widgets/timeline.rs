@@ -5,6 +5,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use crate::message::Message;
@@ -1598,7 +1599,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         let beat = self.x_to_beat(local.x).max(0.0).round();
                         return (
                             canvas::event::Status::Ignored,
-                            Some(Message::DragHoverTrack { track_id, beat }),
+                            Some(Message::Browser(BrowserMsg::DragHoverTrack {
+                                track_id,
+                                beat,
+                            })),
                         );
                     }
                 }

@@ -440,6 +440,48 @@ pub enum SampleBrowserMode {
     Dropbox,
 }
 
+/// Browser domain slice: sample library, Dropbox browsing, and
+/// drag-and-drop from the browser into the arrangement.
+#[derive(Debug, Clone)]
+pub struct BrowserState {
+    pub open: bool,
+    pub search: String,
+    pub roots: Vec<PathBuf>,
+    pub entries: Vec<SampleBrowserEntry>,
+    pub root_filter: Option<PathBuf>,
+    pub selected_source: Option<MediaSourceRef>,
+    pub scan_in_progress: bool,
+    pub mode: SampleBrowserMode,
+    pub dropbox: DropboxUiState,
+    pub drag_source: Option<MediaSourceRef>,
+    pub drag_label: Option<String>,
+    /// Most recent track the cursor has been confirmed over while a drag
+    /// is in flight. Used as the drop target if the release happens on a
+    /// sub-pixel boundary between lanes.
+    pub drag_hover_track: Option<TrackId>,
+    pub drag_hover_beat: f64,
+}
+
+impl Default for BrowserState {
+    fn default() -> Self {
+        Self {
+            open: true,
+            search: String::new(),
+            roots: Vec::new(),
+            entries: Vec::new(),
+            root_filter: None,
+            selected_source: None,
+            scan_in_progress: false,
+            mode: SampleBrowserMode::default(),
+            dropbox: DropboxUiState::default(),
+            drag_source: None,
+            drag_label: None,
+            drag_hover_track: None,
+            drag_hover_beat: 0.0,
+        }
+    }
+}
+
 /// UI-side state for the Dropbox browser and Settings tab.
 #[derive(Debug, Default, Clone)]
 pub struct DropboxUiState {
@@ -587,37 +629,19 @@ pub struct AppState {
     pub settings_buffer_size: u32,
     pub current_project_path: Option<PathBuf>,
     pub project_dirty: bool,
-    pub sample_browser_open: bool,
     /// Automatically detect sample BPM and warp to project tempo on
     /// import. Mirrored from `UiSettings::auto_warp_on_import`.
     pub auto_warp_on_import: bool,
     /// Minimum BPM-detect confidence required to auto-warp. Mirrored
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
-    pub sample_browser_search: String,
-    pub sample_browser_roots: Vec<PathBuf>,
-    pub sample_browser_entries: Vec<SampleBrowserEntry>,
-    pub sample_browser_root_filter: Option<PathBuf>,
-    pub sample_browser_selected_source: Option<MediaSourceRef>,
-    pub sample_browser_scan_in_progress: bool,
-    pub sample_browser_mode: SampleBrowserMode,
+    // Browser domain slice (sample library, Dropbox, drag-drop).
+    pub browser: BrowserState,
 
     // Plugin hosting
     pub plugin_settings: PluginSettings,
     pub plugin_scan_in_progress: bool,
     pub plugin_scan_status: String,
-
-    // Dropbox
-    pub dropbox: DropboxUiState,
-
-    // Drag-and-drop from sample browser
-    pub drag_source: Option<MediaSourceRef>,
-    pub drag_label: Option<String>,
-    /// Most recent track the cursor has been confirmed over while a drag
-    /// is in flight. Used as the drop target if the release happens on a
-    /// sub-pixel boundary between lanes.
-    pub drag_hover_track: Option<TrackId>,
-    pub drag_hover_beat: f64,
 }
 
 impl Default for AppState {
@@ -657,24 +681,12 @@ impl Default for AppState {
             settings_buffer_size: 512,
             current_project_path: None,
             project_dirty: false,
-            sample_browser_open: true,
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
-            sample_browser_search: String::new(),
-            sample_browser_roots: Vec::new(),
-            sample_browser_entries: Vec::new(),
-            sample_browser_root_filter: None,
-            sample_browser_selected_source: None,
-            sample_browser_scan_in_progress: false,
-            sample_browser_mode: SampleBrowserMode::default(),
+            browser: BrowserState::default(),
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),
-            dropbox: DropboxUiState::default(),
-            drag_source: None,
-            drag_label: None,
-            drag_hover_track: None,
-            drag_hover_beat: 0.0,
         }
     }
 }
