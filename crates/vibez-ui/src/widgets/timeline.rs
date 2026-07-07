@@ -2130,11 +2130,11 @@ impl canvas::Program<Message> for ArrangementMinimap {
                     }
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if state.drag.is_some() {
-                    state.drag = None;
-                    return (canvas::event::Status::Captured, None);
-                }
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left))
+                if state.drag.is_some() =>
+            {
+                state.drag = None;
+                return (canvas::event::Status::Captured, None);
             }
             _ => {}
         }
