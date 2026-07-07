@@ -1,12 +1,8 @@
 # vibez
 
-An open-source digital audio workstation for electronic music, written in pure Rust.
+A small open-source DAW for electronic music, written in Rust.
 
 ![vibez playing the demo project](docs/screenshot.png)
-
-vibez is built for producers and DJs who live in the arrangement view: warp loops
-to your project tempo, sketch patterns in the piano roll, stack devices per track,
-and host your VST3/CLAP plugins, all in a fast native app.
 
 ## Features
 
@@ -68,11 +64,10 @@ vibez is a Cargo workspace:
 | `vibez-dropbox` | Dropbox sample browser backend |
 | `vibez-ui` | The app: iced GUI, domain modules, message router |
 
-The UI follows a strict domain architecture: each concern (transport, arrangement,
-piano roll, devices, browser, project, view) owns its state slice and message enum,
-talks to the engine through one injected interface, and is unit-tested without the
-GUI. The UI thread and audio thread communicate over lock-free ring buffers only.
-No source file exceeds 1,000 lines; that is a house rule.
+The UI is organized into domain modules (transport, arrangement, piano roll,
+devices, browser, project, view), each owning its own state and messages and
+unit-tested without the GUI. The UI thread and audio thread communicate over
+lock-free ring buffers.
 
 ## Contributing
 
