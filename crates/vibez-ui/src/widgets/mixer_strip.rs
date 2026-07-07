@@ -256,13 +256,12 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         (3, 4, 5, false, LMF, "LMF"),
         (0, 1, 2, true, LF, "LF"),
     ];
-    for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in
-        rows.into_iter().enumerate()
+    for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in rows.into_iter().enumerate()
     {
         if i > 0 {
             bands = bands.push(
                 container(text(""))
-                    .width(Length::Fixed(72.0))
+                    .width(Length::Fixed(88.0))
                     .height(Length::Fixed(1.0))
                     .style(|_theme: &Theme| container::Style {
                         background: Some(
@@ -341,11 +340,11 @@ fn view_eq_band<'a>(
 
     let third_el: Element<'a, Message> = if bell_toggle {
         let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-        button(text("BELL").size(6).color(if bell_on {
-            th::BG_DARK
-        } else {
-            th::TEXT_DIM
-        }))
+        button(
+            text("BELL")
+                .size(6)
+                .color(if bell_on { th::BG_DARK } else { th::TEXT_DIM }),
+        )
         .on_press(Message::set_effect_param(
             track_id,
             eq.id,
@@ -376,9 +375,13 @@ fn view_eq_band<'a>(
     };
 
     let freq_col = column![
-        text(if freq_i == 10 || freq_i == 7 { "kHz" } else { "Hz" })
-            .size(7)
-            .color(dim),
+        text(if freq_i == 10 || freq_i == 7 {
+            "kHz"
+        } else {
+            "Hz"
+        })
+        .size(7)
+        .color(dim),
         knob(freq_i, 26.0),
     ]
     .spacing(1)
@@ -388,9 +391,11 @@ fn view_eq_band<'a>(
         column![gain_col, third_el]
             .spacing(3)
             .align_x(iced::Alignment::Center),
+        iced::widget::horizontal_space(),
         column![text("").size(10), freq_col].align_x(iced::Alignment::Center),
     ]
-    .spacing(8)
+    .width(Length::Fill)
+    .padding([0, 6])
     .align_y(iced::Alignment::Start)
     .into()
 }
