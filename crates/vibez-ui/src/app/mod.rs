@@ -77,15 +77,20 @@ pub fn run() -> iced::Result {
         .theme(App::theme)
         .antialiasing(true)
         .subscription(App::subscription)
-        .window(iced::window::Settings {
-            icon,
-            platform_specific: iced::window::settings::PlatformSpecific {
-                // WM_CLASS / app_id: lets docks and taskbars match the
-                // window to a vibez.desktop entry instead of guessing.
-                application_id: "vibez".to_string(),
+        .window({
+            #[allow(unused_mut)]
+            let mut settings = iced::window::Settings {
+                icon,
                 ..Default::default()
-            },
-            ..Default::default()
+            };
+            // WM_CLASS / app_id: lets docks and taskbars match the
+            // window to a vibez.desktop entry instead of guessing.
+            // The field only exists in the Linux settings variant.
+            #[cfg(target_os = "linux")]
+            {
+                settings.platform_specific.application_id = "vibez".to_string();
+            }
+            settings
         })
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
