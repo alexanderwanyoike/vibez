@@ -351,7 +351,7 @@ fn view_eq_band<'a>(
             third_i,
             if bell_on { 0.0 } else { 1.0 },
         ))
-        .padding([2, 3])
+        .padding([3, 6])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(if bell_on {
                 color.into()
@@ -368,7 +368,7 @@ fn view_eq_band<'a>(
         })
         .into()
     } else {
-        column![text("Q").size(7).color(dim), knob(third_i, 16.0)]
+        column![text("Q").size(7).color(dim), knob(third_i, 22.0)]
             .spacing(1)
             .align_x(iced::Alignment::Center)
             .into()
