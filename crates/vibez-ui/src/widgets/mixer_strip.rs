@@ -14,7 +14,7 @@ use crate::widgets::vu_meter::VuMeterWidget;
 use vibez_core::midi::TrackKind;
 
 /// Render a single mixer channel strip for a track.
-pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
+pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message> {
     let track_color = th::track_color(track.color_index);
 
     // Track name + type icon
@@ -156,17 +156,24 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
-    container(strip)
+    let body = container(strip)
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Style {
             background: Some(th::BG_SURFACE.into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: if selected { th::ACCENT } else { th::BORDER },
                 width: 1.0,
                 radius: 2.0.into(),
             },
             ..Default::default()
-        })
+        });
+
+    // Clicking anywhere on the strip chrome selects the track, so
+    // the detail panel follows the mixer like it follows the
+    // arrangement headers. Knobs, faders, and buttons still win
+    // their own clicks.
+    iced::widget::mouse_area(body)
+        .on_press(Message::select_track(track.id))
         .into()
 }
 

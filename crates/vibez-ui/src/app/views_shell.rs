@@ -488,7 +488,8 @@ impl App {
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.arrangement.tracks {
-            let strip = view_mixer_strip(track);
+            let selected = self.state.arrangement.selected_track == Some(track.id);
+            let strip = view_mixer_strip(track, selected);
             strips = strips.push(strip);
         }
 
