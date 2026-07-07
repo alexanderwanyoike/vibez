@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use vibez_core::effect::EffectType;
 
 use iced::Task;
 
@@ -400,6 +401,37 @@ impl App {
                     track_id: track_info.id,
                     effect_id: effect_info.id,
                     bypass: effect_info.bypass,
+                });
+            }
+
+            // Console model: every channel has its EQ. Backfill for
+            // projects saved before the channel EQ existed.
+            if !track
+                .effects
+                .iter()
+                .any(|e| e.effect_type == EffectType::Eq && e.plugin_ref.is_none())
+            {
+                let effect_id = EffectId::new();
+                let fx = vibez_dsp::factory::create_effect(
+                    EffectType::Eq,
+                    self.state.transport.sample_rate as f32,
+                );
+                let descriptors = fx.param_descriptors();
+                track.effects.push(UiEffect {
+                    id: effect_id,
+                    effect_type: EffectType::Eq,
+                    bypass: false,
+                    params: descriptors.iter().map(|d| d.default).collect(),
+                    descriptors,
+                    plugin_name: None,
+                    has_plugin_gui: false,
+                    plugin_ref: None,
+                });
+                self.send_command(EngineCommand::AddEffect {
+                    track_id: track_info.id,
+                    effect_id,
+                    effect_type: EffectType::Eq,
+                    position: None,
                 });
             }
 

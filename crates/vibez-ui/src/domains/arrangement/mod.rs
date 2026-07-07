@@ -174,6 +174,31 @@ pub struct ArrangementCtx {
     pub playhead_beats: f64,
 }
 
+/// Every channel carries an SSL-style EQ, console style: create it
+/// flat (passthrough) alongside the track.
+fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTrack) {
+    let effect_id = vibez_core::id::EffectId::new();
+    let effect_type = vibez_core::effect::EffectType::Eq;
+    let descriptors = vibez_dsp::factory::create_effect(effect_type, 48_000.0).param_descriptors();
+    let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
+    track.effects.push(crate::state::UiEffect {
+        id: effect_id,
+        effect_type,
+        bypass: false,
+        params,
+        descriptors,
+        plugin_name: None,
+        has_plugin_gui: false,
+        plugin_ref: None,
+    });
+    engine.send(EngineCommand::AddEffect {
+        track_id: track.id,
+        effect_id,
+        effect_type,
+        position: None,
+    });
+}
+
 impl ArrangementState {
     fn find_track(&self, track_id: TrackId) -> Option<&UiTrack> {
         self.tracks.iter().find(|t| t.id == track_id)
@@ -228,7 +253,9 @@ impl ArrangementState {
                 let id = TrackId::new();
                 let name = format!("Track {track_num}");
                 engine.send(EngineCommand::AddTrack(id, name.clone()));
-                self.tracks.push(UiTrack::new(id, name, color_index));
+                let mut track = UiTrack::new(id, name, color_index);
+                attach_channel_eq(engine, &mut track);
+                self.tracks.push(track);
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", self.tracks.len()));
             }
@@ -241,6 +268,7 @@ impl ArrangementState {
                 engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
                 let mut track = UiTrack::new_instrument(id, name, TrackKind::Midi, color_index);
                 track.has_instrument = false;
+                attach_channel_eq(engine, &mut track);
                 self.tracks.push(track);
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", self.tracks.len()));

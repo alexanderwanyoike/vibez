@@ -143,9 +143,9 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
 
     let strip = column![
         name_row,
+        eq_section,
         knob_canvas,
         pan_label,
-        eq_section,
         fader_meter,
         gain_label,
         mute_solo_row,
