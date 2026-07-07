@@ -48,6 +48,7 @@ serde_json = "1"
 [package]
 name = "vibez"
 version.workspace = true
+description = "A small open-source DAW for electronic music"
 edition.workspace = true
 license.workspace = true
 
@@ -58,3 +59,25 @@ iced = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading = "0.8"
+
+[package.metadata.deb]
+maintainer = "Alex Wanyoike"
+copyright = "2026 Alex Wanyoike"
+license-file = ["LICENSE", "0"]
+extended-description = "A small open-source DAW for electronic music, written in Rust. Multi-track arrangement, warping, piano roll, built-in instruments and effects, VST3/CLAP plugin hosting."
+section = "sound"
+depends = "$auto"
+assets = [
+    ["target/release/vibez", "usr/bin/", "755"],
+    ["target/release/vibez-plugin-scan", "usr/bin/", "755"],
+    ["assets/linux/vibez.desktop", "usr/share/applications/", "644"],
+    ["assets/icon/vibez.svg", "usr/share/icons/hicolor/scalable/apps/vibez.svg", "644"],
+    ["assets/icon/vibez-16.png", "usr/share/icons/hicolor/16x16/apps/vibez.png", "644"],
+    ["assets/icon/vibez-32.png", "usr/share/icons/hicolor/32x32/apps/vibez.png", "644"],
+    ["assets/icon/vibez-48.png", "usr/share/icons/hicolor/48x48/apps/vibez.png", "644"],
+    ["assets/icon/vibez-64.png", "usr/share/icons/hicolor/64x64/apps/vibez.png", "644"],
+    ["assets/icon/vibez-128.png", "usr/share/icons/hicolor/128x128/apps/vibez.png", "644"],
+    ["assets/icon/vibez-256.png", "usr/share/icons/hicolor/256x256/apps/vibez.png", "644"],
+    ["assets/icon/vibez-512.png", "usr/share/icons/hicolor/512x512/apps/vibez.png", "644"],
+    ["assets/demo.vibez", "usr/share/vibez/demo.vibez", "644"],
+]
