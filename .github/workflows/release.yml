@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            archive: tar.gz
+          - os: macos-latest
+            label: macos-arm64
+            archive: tar.gz
+          - os: macos-15-intel
+            label: macos-x86_64
+            archive: tar.gz
+          - os: windows-latest
+            label: windows-x86_64
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
+
+      - name: Build
+        run: cargo build --release -p vibez --bins
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then VERSION="dev-${GITHUB_SHA::7}"; fi
+          PKG="vibez-${VERSION}-${{ matrix.label }}"
+          mkdir -p "stage/${PKG}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/vibez.exe target/release/vibez-plugin-scan.exe "stage/${PKG}/"
+          else
+            cp target/release/vibez target/release/vibez-plugin-scan "stage/${PKG}/"
+          fi
+          cp README.md LICENSE assets/demo.vibez "stage/${PKG}/"
+          cd stage
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "../${PKG}.zip" "${PKG}" > /dev/null
+          else
+            tar czf "../${PKG}.tar.gz" "${PKG}"
+          fi
+          cd ..
+          ls -la vibez-*.*
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibez-${{ matrix.label }}
+          path: |
+            vibez-*.tar.gz
+            vibez-*.zip
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            vibez-*.tar.gz
+            vibez-*.zip
+          draft: false
+          generate_release_notes: true
