@@ -56,6 +56,7 @@ jobs:
           fi
           cp README.md LICENSE assets/demo.vibez "stage/${PKG}/"
           mkdir -p "stage/${PKG}/icon" && cp assets/icon/vibez.svg assets/icon/vibez-*.png assets/icon/vibez.ico "stage/${PKG}/icon/"
+          if [ "${{ runner.os }}" = "Linux" ]; then cp assets/linux/vibez.desktop "stage/${PKG}/"; fi
           cd stage
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z a "../${PKG}.zip" "${PKG}" > /dev/null

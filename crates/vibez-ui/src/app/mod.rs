@@ -79,6 +79,12 @@ pub fn run() -> iced::Result {
         .subscription(App::subscription)
         .window(iced::window::Settings {
             icon,
+            platform_specific: iced::window::settings::PlatformSpecific {
+                // WM_CLASS / app_id: lets docks and taskbars match the
+                // window to a vibez.desktop entry instead of guessing.
+                application_id: "vibez".to_string(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .window_size((1400.0, 900.0))

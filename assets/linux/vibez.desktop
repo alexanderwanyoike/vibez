@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=vibez
+Comment=A small open-source DAW for electronic music
+Exec=vibez
+Icon=vibez
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+StartupWMClass=vibez
