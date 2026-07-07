@@ -335,7 +335,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             );
 
             // Horizontal grid line
-            let is_c = pitch % 12 == 0;
+            let is_c = pitch.is_multiple_of(12);
             let (line_color, line_width) = if is_c {
                 (OCTAVE_LINE, 1.0)
             } else {

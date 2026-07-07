@@ -237,26 +237,26 @@ impl canvas::Program<Message> for KnobWidget {
             }
 
             // Scroll wheel
-            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                if cursor.is_over(bounds) {
-                    let scroll_y = match delta {
-                        mouse::ScrollDelta::Lines { y, .. } => y,
-                        mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
-                    };
+            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(bounds) =>
+            {
+                let scroll_y = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => y,
+                    mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
+                };
 
-                    let step = if state.shift_held {
-                        SCROLL_STEP / FINE_DIVISOR
-                    } else {
-                        SCROLL_STEP
-                    };
+                let step = if state.shift_held {
+                    SCROLL_STEP / FINE_DIVISOR
+                } else {
+                    SCROLL_STEP
+                };
 
-                    let new_pan = (self.value + scroll_y * step).clamp(0.0, 1.0);
+                let new_pan = (self.value + scroll_y * step).clamp(0.0, 1.0);
 
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::set_track_pan(self.track_id, new_pan)),
-                    );
-                }
+                return (
+                    canvas::event::Status::Captured,
+                    Some(Message::set_track_pan(self.track_id, new_pan)),
+                );
             }
 
             _ => {}
