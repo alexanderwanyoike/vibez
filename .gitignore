@@ -10,3 +10,6 @@ Thumbs.db
 *.ogg
 !assets/**
 .env
+
+# Private dev notes live outside the repo (~/Code/Apps/vibez-private-notes)
+.notes/
