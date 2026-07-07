@@ -126,7 +126,26 @@ pub fn target_label(target: &AutomationTarget, track: &UiTrack) -> String {
                 None => format!("{effect_name}: P{param_index}"),
             }
         }
-        AutomationTarget::InstrumentParam { param_index } => format!("Instrument P{param_index}"),
+        AutomationTarget::InstrumentParam { param_index } => {
+            let (name, descriptors) = if !track.plugin_instrument_descriptors.is_empty() {
+                (
+                    track.plugin_instrument_name.as_deref().unwrap_or("Plugin"),
+                    track.plugin_instrument_descriptors,
+                )
+            } else {
+                (
+                    "Instrument",
+                    track
+                        .instrument_kind
+                        .map(vibez_instruments::descriptors_for)
+                        .unwrap_or(&[]),
+                )
+            };
+            match descriptors.get(*param_index) {
+                Some(d) => format!("{name}: {}", d.name),
+                None => format!("{name} P{param_index}"),
+            }
+        }
         AutomationTarget::PluginParam { .. } => "Plugin param".to_string(),
     }
 }

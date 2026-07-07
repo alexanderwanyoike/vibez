@@ -183,6 +183,9 @@ pub struct UiTrack {
     pub plugin_instrument_name: Option<String>,
     /// Persistent identity of the plugin instrument, if any.
     pub plugin_instrument_ref: Option<vibez_core::effect::PluginDeviceInfo>,
+    /// Parameters of the plugin instrument (leaked 'static by the
+    /// wrapper); empty for built-in instruments.
+    pub plugin_instrument_descriptors: &'static [vibez_core::effect::ParamDescriptor],
     /// Whether the plugin instrument has a native GUI.
     pub has_plugin_instrument_gui: bool,
 }
@@ -214,6 +217,7 @@ impl UiTrack {
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
+            plugin_instrument_descriptors: &[],
             has_plugin_instrument_gui: false,
         }
     }
@@ -248,6 +252,7 @@ impl UiTrack {
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
+            plugin_instrument_descriptors: &[],
             has_plugin_instrument_gui: false,
         }
     }

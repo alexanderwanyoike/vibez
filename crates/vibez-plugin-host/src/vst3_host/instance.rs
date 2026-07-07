@@ -26,6 +26,10 @@ pub struct Vst3PluginInstance {
     controller_is_separate: bool,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
+    /// VST3 ParamIDs, index-aligned with the descriptors.
+    param_ids: Vec<u32>,
+    /// (id, normalized value) queued for the next process block.
+    pending_params: Vec<(u32, f64)>,
     buffer_adapter: AudioBufferAdapter,
     /// Separate output buffers: VST3 process() is out-of-place by
     /// default and JUCE plugins do not reliably write in-place.
@@ -187,6 +191,144 @@ static PARAM_CHANGES_STUB: ParamChangesStub = ParamChangesStub {
 
 fn param_changes_stub() -> *mut std::ffi::c_void {
     &PARAM_CHANGES_STUB as *const ParamChangesStub as *mut std::ffi::c_void
+}
+
+// ── Live IParameterChanges (input) ──
+// Stack-allocated per process() call; spec-compliant plugins do not
+// retain the pointer past the call.
+
+#[repr(C)]
+struct LiveParamQueue {
+    vtbl: *const ParamQueueVtbl,
+    id: u32,
+    value: f64,
+}
+
+unsafe extern "system" fn lpq_parameter_id(this: *mut std::ffi::c_void) -> u32 {
+    unsafe { (*(this as *const LiveParamQueue)).id }
+}
+unsafe extern "system" fn lpq_point_count(_this: *mut std::ffi::c_void) -> i32 {
+    1
+}
+unsafe extern "system" fn lpq_get_point(
+    this: *mut std::ffi::c_void,
+    index: i32,
+    offset: *mut i32,
+    value: *mut f64,
+) -> i32 {
+    if index != 0 {
+        return 1; // kResultFalse
+    }
+    unsafe {
+        if !offset.is_null() {
+            *offset = 0;
+        }
+        if !value.is_null() {
+            *value = (*(this as *const LiveParamQueue)).value;
+        }
+    }
+    0
+}
+
+static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
+    query_interface: pc_query_interface,
+    add_ref: pc_add_ref,
+    release: pc_release,
+    get_parameter_id: lpq_parameter_id,
+    get_point_count: lpq_point_count,
+    get_point: lpq_get_point,
+    add_point: pq_add_point,
+};
+
+#[repr(C)]
+struct LiveParamChanges {
+    vtbl: *const ParamChangesVtbl,
+    queues: *const LiveParamQueue,
+    len: usize,
+}
+
+unsafe extern "system" fn lpc_count(this: *mut std::ffi::c_void) -> i32 {
+    unsafe { (*(this as *const LiveParamChanges)).len as i32 }
+}
+unsafe extern "system" fn lpc_get_data(
+    this: *mut std::ffi::c_void,
+    index: i32,
+) -> *mut std::ffi::c_void {
+    let changes = unsafe { &*(this as *const LiveParamChanges) };
+    if index < 0 || index as usize >= changes.len {
+        return std::ptr::null_mut();
+    }
+    unsafe { changes.queues.add(index as usize) as *mut std::ffi::c_void }
+}
+
+static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
+    query_interface: pc_query_interface,
+    add_ref: pc_add_ref,
+    release: pc_release,
+    get_parameter_count: lpc_count,
+    get_parameter_data: lpc_get_data,
+    add_parameter_data: pc_add_data,
+};
+
+/// Enumerate parameters via IEditController.
+/// Vtable slots: FUnknown 0-2, IPluginBase 3-4, then
+/// setComponentState(5) setState(6) getState(7) getParameterCount(8)
+/// getParameterInfo(9) ... getParamNormalized(14).
+fn query_vst3_params(
+    controller: *mut std::ffi::c_void,
+) -> (Vec<ParamDescriptor>, Vec<f32>, Vec<u32>) {
+    type GetCountFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> i32;
+    type GetInfoFn = unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        i32,
+        *mut vst3::Steinberg::Vst::ParameterInfo,
+    ) -> i32;
+    type GetNormalizedFn = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> f64;
+
+    let mut descriptors = Vec::new();
+    let mut values = Vec::new();
+    let mut ids = Vec::new();
+
+    unsafe {
+        let vtbl = *(controller as *const *const *const std::ffi::c_void);
+        let get_count: GetCountFn = std::mem::transmute(*vtbl.add(8));
+        let get_info: GetInfoFn = std::mem::transmute(*vtbl.add(9));
+        let get_normalized: GetNormalizedFn = std::mem::transmute(*vtbl.add(14));
+
+        let count = get_count(controller).max(0);
+        for i in 0..count {
+            let mut info: vst3::Steinberg::Vst::ParameterInfo = std::mem::zeroed();
+            if get_info(controller, i, &mut info) != 0 {
+                continue;
+            }
+            // Skip read-only / hidden params.
+            const CAN_AUTOMATE: i32 = 1 << 0;
+            const IS_READ_ONLY: i32 = 1 << 1;
+            if info.flags & IS_READ_ONLY != 0 {
+                continue;
+            }
+            if info.flags & CAN_AUTOMATE == 0 {
+                continue;
+            }
+            let title: String = char16_to_string(&info.title);
+            let name_static: &'static str = Box::leak(title.into_boxed_str());
+            descriptors.push(ParamDescriptor {
+                name: name_static,
+                min: 0.0,
+                max: 1.0,
+                default: info.defaultNormalizedValue as f32,
+                unit: "",
+            });
+            values.push(get_normalized(controller, info.id) as f32);
+            ids.push(info.id);
+        }
+    }
+    (descriptors, values, ids)
+}
+
+fn char16_to_string(chars: &[u16]) -> String {
+    let units: Vec<u16> = chars.iter().take_while(|&&c| c != 0).copied().collect();
+    String::from_utf16_lossy(&units)
 }
 
 /// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
@@ -548,6 +690,8 @@ impl Vst3PluginInstance {
             controller_is_separate,
             param_descriptors: Vec::new(),
             param_values: Vec::new(),
+            param_ids: Vec::new(),
+            pending_params: Vec::new(),
             buffer_adapter,
             out_adapter,
             audio_in_buses,
@@ -557,6 +701,15 @@ impl Vst3PluginInstance {
             sample_rate,
             active: false,
         };
+
+        // Enumerate parameters from the edit controller (VST3 params
+        // are always normalized 0..1).
+        if !instance.controller.is_null() {
+            let (descriptors, values, ids) = query_vst3_params(instance.controller);
+            instance.param_descriptors = descriptors;
+            instance.param_values = values;
+            instance.param_ids = ids;
+        }
 
         instance.prepare(sample_rate, max_buffer_size);
         instance.activate();
@@ -627,6 +780,8 @@ impl PluginInstance for Vst3PluginInstance {
     fn set_param(&mut self, index: usize, value: f32) -> bool {
         if index < self.param_values.len() {
             self.param_values[index] = value;
+            self.pending_params
+                .push((self.param_ids[index], value.clamp(0.0, 1.0) as f64));
             true
         } else {
             false
@@ -706,6 +861,23 @@ impl PluginInstance for Vst3PluginInstance {
             })
             .collect();
 
+        // Automation param changes for this block; storage must
+        // outlive the process() call below.
+        let live_queues: Vec<LiveParamQueue> = self
+            .pending_params
+            .drain(..)
+            .map(|(id, value)| LiveParamQueue {
+                vtbl: &LIVE_PARAM_QUEUE_VTBL,
+                id,
+                value,
+            })
+            .collect();
+        let live_changes = LiveParamChanges {
+            vtbl: &LIVE_PARAM_CHANGES_VTBL,
+            queues: live_queues.as_ptr(),
+            len: live_queues.len(),
+        };
+
         let mut process_data = ProcessDataRaw {
             process_mode: 0,
             symbolic_sample_size: 0,
@@ -714,7 +886,11 @@ impl PluginInstance for Vst3PluginInstance {
             num_outputs,
             inputs: input_buses.as_mut_ptr(),
             outputs: output_buses.as_mut_ptr(),
-            input_parameter_changes: param_changes_stub(),
+            input_parameter_changes: if live_queues.is_empty() {
+                param_changes_stub()
+            } else {
+                &live_changes as *const LiveParamChanges as *mut std::ffi::c_void
+            },
             output_parameter_changes: param_changes_stub(),
             input_events: std::ptr::null_mut(),
             output_events: std::ptr::null_mut(),

@@ -140,12 +140,22 @@ impl EngineTrack {
                     param_index,
                 } => {
                     if let Some(slot) = self.effects.iter_mut().find(|e| e.id == effect_id) {
-                        slot.effect.set_param(param_index, value);
+                        // Lanes are normalized 0..1; parameters live in
+                        // their native descriptor range.
+                        let native = match slot.effect.param_descriptors().get(param_index) {
+                            Some(d) => d.min + value * (d.max - d.min),
+                            None => value,
+                        };
+                        slot.effect.set_param(param_index, native);
                     }
                 }
                 AutomationTarget::InstrumentParam { param_index } => {
                     if let Some(instrument) = self.instrument.as_mut() {
-                        instrument.set_param(param_index, value);
+                        let native = match instrument.param_descriptors().get(param_index) {
+                            Some(d) => d.min + value * (d.max - d.min),
+                            None => value,
+                        };
+                        instrument.set_param(param_index, native);
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}

@@ -15,6 +15,17 @@ use sampler::Sampler;
 use synth::SubtractiveSynth;
 
 /// Trait implemented by all instruments (synths, samplers, etc.).
+/// Parameter descriptors for an instrument kind, without building
+/// an instance (UI pickers, automation lane labels).
+pub fn descriptors_for(kind: InstrumentKind) -> &'static [ParamDescriptor] {
+    match kind {
+        InstrumentKind::SubtractiveSynth => synth::SYNTH_PARAMS,
+        InstrumentKind::Sampler => sampler::SAMPLER_PARAMS,
+        // The drum rack has per-pad state, no top-level params.
+        InstrumentKind::DrumRack => &[],
+    }
+}
+
 pub trait Instrument: Send {
     fn instrument_kind(&self) -> InstrumentKind;
     fn param_descriptors(&self) -> &'static [ParamDescriptor];

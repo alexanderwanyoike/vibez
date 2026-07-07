@@ -808,6 +808,35 @@ impl App {
                 target: vibez_core::automation::AutomationTarget::TrackPan,
             },
         ];
+        if !track.plugin_instrument_descriptors.is_empty() {
+            let name = track
+                .plugin_instrument_name
+                .clone()
+                .unwrap_or_else(|| "Plugin".to_string());
+            for (param_index, d) in track.plugin_instrument_descriptors.iter().enumerate() {
+                choices.push(LaneChoice {
+                    label: format!("{name}: {}", d.name),
+                    target: vibez_core::automation::AutomationTarget::InstrumentParam {
+                        param_index,
+                    },
+                });
+            }
+        }
+        if let Some(kind) = track.instrument_kind {
+            let instrument_name = match kind {
+                vibez_core::midi::InstrumentKind::SubtractiveSynth => "Synth",
+                vibez_core::midi::InstrumentKind::Sampler => "Sampler",
+                vibez_core::midi::InstrumentKind::DrumRack => "Drum Rack",
+            };
+            for (param_index, d) in vibez_instruments::descriptors_for(kind).iter().enumerate() {
+                choices.push(LaneChoice {
+                    label: format!("{instrument_name}: {}", d.name),
+                    target: vibez_core::automation::AutomationTarget::InstrumentParam {
+                        param_index,
+                    },
+                });
+            }
+        }
         for effect in &track.effects {
             for (param_index, d) in effect.descriptors.iter().enumerate() {
                 let effect_name = effect
