@@ -64,10 +64,23 @@ struct App {
 }
 
 pub fn run() -> iced::Result {
+    // Raw 64x64 RGBA (assets/icon/vibez-64.rgba, generated from
+    // assets/icon/vibez.svg) so the window icon needs no image
+    // decoder in the dependency tree.
+    let icon = iced::window::icon::from_rgba(
+        include_bytes!("../../../../assets/icon/vibez-64.rgba").to_vec(),
+        64,
+        64,
+    )
+    .ok();
     iced::application("vibez", App::update, App::view)
         .theme(App::theme)
         .antialiasing(true)
         .subscription(App::subscription)
+        .window(iced::window::Settings {
+            icon,
+            ..Default::default()
+        })
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
         .run_with(App::new)
