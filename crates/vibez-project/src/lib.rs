@@ -344,3 +344,50 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod automation_persistence_tests {
+    use super::*;
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    use vibez_core::track::TrackInfo;
+
+    #[test]
+    fn lanes_survive_a_save_load_roundtrip() {
+        let mut track = TrackInfo::new("T1");
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 1.0,
+        });
+        lane.insert_point(AutomationPoint {
+            beat: 8.0,
+            value: 0.25,
+        });
+        track.automation.push(lane.clone());
+
+        let project = Project {
+            name: "roundtrip".to_string(),
+            tracks: vec![track],
+            ..Default::default()
+        };
+
+        let dir = std::env::temp_dir().join("vibez-lane-roundtrip-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.vibez");
+        project.save_to_file(&path).unwrap();
+        let loaded = Project::load_from_file(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(loaded.tracks[0].automation, vec![lane]);
+    }
+
+    #[test]
+    fn projects_without_lanes_still_load() {
+        // Backcompat: pre-automation files have no `automation` key.
+        let json = r#"{"name":"old","bpm":120.0,"sample_rate":48000,
+            "tracks":[{"id":1,"name":"T","gain":1.0,"pan":0.5,
+            "mute":false,"solo":false}],"clips":[]}"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert!(project.tracks[0].automation.is_empty());
+    }
+}
