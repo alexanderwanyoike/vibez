@@ -64,10 +64,34 @@ struct App {
 }
 
 pub fn run() -> iced::Result {
+    // Raw 64x64 RGBA (assets/icon/vibez-64.rgba, generated from
+    // assets/icon/vibez.svg) so the window icon needs no image
+    // decoder in the dependency tree.
+    let icon = iced::window::icon::from_rgba(
+        include_bytes!("../../../../assets/icon/vibez-64.rgba").to_vec(),
+        64,
+        64,
+    )
+    .ok();
     iced::application("vibez", App::update, App::view)
         .theme(App::theme)
         .antialiasing(true)
         .subscription(App::subscription)
+        .window({
+            #[allow(unused_mut)]
+            let mut settings = iced::window::Settings {
+                icon,
+                ..Default::default()
+            };
+            // WM_CLASS / app_id: lets docks and taskbars match the
+            // window to a vibez.desktop entry instead of guessing.
+            // The field only exists in the Linux settings variant.
+            #[cfg(target_os = "linux")]
+            {
+                settings.platform_specific.application_id = "vibez".to_string();
+            }
+            settings
+        })
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
         .run_with(App::new)
