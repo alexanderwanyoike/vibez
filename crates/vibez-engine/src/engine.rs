@@ -159,6 +159,10 @@ impl AudioEngine {
     }
 
     /// Read the tracks (for inspection / testing).
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     pub fn tracks(&self) -> &[EngineTrack] {
         &self.tracks
     }
@@ -246,6 +250,20 @@ impl AudioEngine {
                 continue;
             }
 
+            // Block-rate automation: evaluate every lane at the
+            // segment-start beat. Effect/instrument params apply in
+            // place; gain/pan come back as overrides for the sum
+            // stage below.
+            let beat = {
+                let bpm = self.transport.bpm();
+                if bpm > 0.0 {
+                    pos as f64 * bpm / (self.sample_rate as f64 * 60.0)
+                } else {
+                    0.0
+                }
+            };
+            let (auto_gain, auto_pan) = track.apply_automation(beat);
+
             let loop_region = self.transport.active_loop_region();
             let rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
@@ -267,8 +285,8 @@ impl AudioEngine {
                 continue;
             }
 
-            let gain = track.gain;
-            let (pan_l, pan_r) = equal_power_pan(track.pan);
+            let gain = auto_gain.unwrap_or(track.gain);
+            let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let track_id = track.id;
             let buf_size = frames * channels;
 
@@ -505,6 +523,19 @@ impl AudioEngine {
                 EngineCommand::SetTrackGain(id, gain) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
                         track.gain = gain;
+                    }
+                }
+                EngineCommand::SetAutomationLane { track_id, lane } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        match track.automation.iter_mut().find(|l| l.id == lane.id) {
+                            Some(existing) => *existing = lane,
+                            None => track.automation.push(lane),
+                        }
+                    }
+                }
+                EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.automation.retain(|l| l.id != lane_id);
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
@@ -897,11 +928,24 @@ impl AudioEngine {
     fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
         let has_solo = any_solo(&self.tracks);
         for track in &mut self.tracks {
-            if track.instrument.is_none() || track.mute || (has_solo && !track.solo) {
+            if track.mute || (has_solo && !track.solo) {
                 continue;
             }
-            if !track.render_instrument_idle(frames, channels) {
+            // Instruments render so auditioned notes sound; every
+            // effect chain keeps processing while stopped so delay
+            // and reverb tails ring out and queued plugin parameter
+            // changes (knob edits, automation) actually reach the
+            // plugin instead of waiting for play.
+            let has_signal = if track.instrument.is_some() {
+                track.render_instrument_idle(frames, channels)
+            } else {
+                false
+            };
+            if !has_signal && track.effects.is_empty() {
                 continue;
+            }
+            if !has_signal && track.instrument.is_none() {
+                track.clear_buffer(frames, channels);
             }
             track.process_effects(frames, channels);
             let gain = track.gain;

@@ -71,6 +71,16 @@ pub enum EngineCommand {
     },
     /// Set the gain for a track.
     SetTrackGain(TrackId, f32),
+    /// Upsert one automation lane (whole-lane replace; points are
+    /// built on the UI thread).
+    SetAutomationLane {
+        track_id: TrackId,
+        lane: vibez_core::automation::AutomationLane,
+    },
+    RemoveAutomationLane {
+        track_id: TrackId,
+        lane_id: vibez_core::id::LaneId,
+    },
     /// Set the pan for a track (0.0 = left, 0.5 = center, 1.0 = right).
     SetTrackPan(TrackId, f32),
     /// Set the mute state for a track.

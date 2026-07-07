@@ -306,6 +306,7 @@ mod tests {
             instrument: None,
             native_instrument: None,
             plugin_instrument: None,
+            automation: Vec::new(),
         }
     }
 
@@ -524,6 +525,7 @@ mod tests {
             instrument: Some(InstrumentKind::SubtractiveSynth),
             native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
             plugin_instrument: None,
+            automation: Vec::new(),
         };
         let note_clip = NoteClipInfo {
             id: cid,
@@ -573,6 +575,7 @@ mod tests {
             instrument: None,
             native_instrument: None,
             plugin_instrument: None,
+            automation: Vec::new(),
         };
         let req = BounceRequest {
             tracks: vec![track],

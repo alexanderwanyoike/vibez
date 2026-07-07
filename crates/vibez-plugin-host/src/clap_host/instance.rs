@@ -22,6 +22,12 @@ pub struct ClapPluginInstance {
     _lib: libloading::Library,
     param_descriptors: Vec<ParamDescriptor>,
     param_values: Vec<f32>,
+    /// CLAP param ids and cookies, index-aligned with the
+    /// descriptors (cookies stored as usize to stay Send).
+    param_ids: Vec<u32>,
+    param_cookies: Vec<usize>,
+    /// (id, cookie, native value) queued for the next process block.
+    pending_params: Vec<(u32, usize, f64)>,
     buffer_adapter: AudioBufferAdapter,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
@@ -182,7 +188,7 @@ impl ClapPluginInstance {
             return Err("Plugin init() failed".into());
         }
 
-        let (param_descriptors, param_values) = query_params(plugin_ptr);
+        let (param_descriptors, param_values, param_ids, param_cookies) = query_params(plugin_ptr);
         let buffer_adapter = AudioBufferAdapter::new(2, max_buffer_size as usize);
 
         let mut instance = Self {
@@ -192,6 +198,9 @@ impl ClapPluginInstance {
             _lib: partial.lib,
             param_descriptors,
             param_values,
+            param_ids,
+            param_cookies,
+            pending_params: Vec::new(),
             buffer_adapter,
             note_events: Vec::new(),
             sample_rate,
@@ -219,7 +228,10 @@ impl ClapPluginInstance {
     }
 }
 
-fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f32>) {
+#[allow(clippy::type_complexity)]
+fn query_params(
+    plugin_ptr: *const clap_plugin,
+) -> (Vec<ParamDescriptor>, Vec<f32>, Vec<u32>, Vec<usize>) {
     let plugin_ref = unsafe { &*plugin_ptr };
 
     let ext_ptr =
@@ -227,7 +239,7 @@ fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f3
             as *const clap_plugin_params;
 
     if ext_ptr.is_null() {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     }
 
     let params_ext = unsafe { &*ext_ptr };
@@ -235,6 +247,8 @@ fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f3
 
     let mut descriptors = Vec::with_capacity(count);
     let mut values = Vec::with_capacity(count);
+    let mut ids = Vec::with_capacity(count);
+    let mut cookies = Vec::with_capacity(count);
 
     for i in 0..count {
         let mut info = clap_sys::ext::params::clap_param_info {
@@ -275,9 +289,11 @@ fn query_params(plugin_ptr: *const clap_plugin) -> (Vec<ParamDescriptor>, Vec<f3
             unit: "",
         });
         values.push(value as f32);
+        ids.push(info.id);
+        cookies.push(info.cookie as usize);
     }
 
-    (descriptors, values)
+    (descriptors, values, ids, cookies)
 }
 
 impl PluginInstance for ClapPluginInstance {
@@ -304,6 +320,12 @@ impl PluginInstance for ClapPluginInstance {
     fn set_param(&mut self, index: usize, value: f32) -> bool {
         if index < self.param_values.len() {
             self.param_values[index] = value;
+            // Deliver as a CLAP param event on the next process block.
+            self.pending_params.push((
+                self.param_ids[index],
+                self.param_cookies[index],
+                value as f64,
+            ));
             true
         } else {
             false
@@ -352,9 +374,45 @@ impl PluginInstance for ClapPluginInstance {
             input_events_storage.push(ClapNoteEventWrapper(event));
         }
 
+        // Param events (automation): delivered at block start.
+        let param_events_storage: Vec<clap_sys::events::clap_event_param_value> = self
+            .pending_params
+            .drain(..)
+            .map(
+                |(id, cookie, value)| clap_sys::events::clap_event_param_value {
+                    header: clap_event_header {
+                        size: std::mem::size_of::<clap_sys::events::clap_event_param_value>()
+                            as u32,
+                        time: 0,
+                        space_id: CLAP_CORE_EVENT_SPACE_ID,
+                        type_: clap_sys::events::CLAP_EVENT_PARAM_VALUE,
+                        flags: 0,
+                    },
+                    param_id: id,
+                    cookie: cookie as *mut std::ffi::c_void,
+                    note_id: -1,
+                    port_index: -1,
+                    channel: -1,
+                    key: -1,
+                    value,
+                },
+            )
+            .collect();
+
+        // Merge into one header list: params first (time 0), then the
+        // time-sorted notes.
+        let mut event_headers: Vec<*const clap_event_header> =
+            Vec::with_capacity(param_events_storage.len() + input_events_storage.len());
+        for pe in &param_events_storage {
+            event_headers.push(&pe.header as *const clap_event_header);
+        }
+        for ne in &input_events_storage {
+            event_headers.push(&ne.0.header as *const clap_event_header);
+        }
+
         // Create input/output event lists
         let input_events = ClapInputEvents {
-            events: &input_events_storage,
+            events: &event_headers,
         };
         let input_events_clap = clap_input_events {
             ctx: &input_events as *const ClapInputEvents as *const std::ffi::c_void
@@ -498,7 +556,9 @@ impl Drop for ClapPluginInstance {
 struct ClapNoteEventWrapper(clap_event_note);
 
 struct ClapInputEvents<'a> {
-    events: &'a [ClapNoteEventWrapper],
+    /// Type-erased event headers (notes and param values), sorted by
+    /// time. The pointed-to storage outlives the process() call.
+    events: &'a [*const clap_event_header],
 }
 
 unsafe extern "C" fn input_events_size(list: *const clap_input_events) -> u32 {
@@ -512,7 +572,7 @@ unsafe extern "C" fn input_events_get(
 ) -> *const clap_event_header {
     let events = &*((*list).ctx as *const ClapInputEvents);
     if (index as usize) < events.events.len() {
-        &events.events[index as usize].0.header as *const clap_event_header
+        events.events[index as usize]
     } else {
         std::ptr::null()
     }

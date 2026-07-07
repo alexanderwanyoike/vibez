@@ -83,6 +83,8 @@ pub struct EngineTrack {
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
     pub note_clips: Vec<EngineNoteClip>,
+    /// Automation lanes, evaluated once per render segment.
+    pub automation: Vec<vibez_core::automation::AutomationLane>,
     pub instrument: Option<Box<dyn Instrument>>,
     /// Scratch storage for batch rendering: (frame_offset, pitch, velocity)
     timed_note_ons: Vec<(u32, u8, u8)>,
@@ -109,10 +111,67 @@ impl EngineTrack {
             mix_buffer: Vec::new(),
             effects: Vec::new(),
             note_clips: Vec::new(),
+            automation: Vec::new(),
             instrument: None,
             timed_note_ons: Vec::new(),
             timed_note_offs: Vec::new(),
             active_notes: 0,
+        }
+    }
+
+    /// Evaluate every automation lane at `beat` (block-rate): effect
+    /// and instrument parameters are applied in place; gain and pan
+    /// come back as overrides for the mix stage. Plugin parameter
+    /// lanes are handled by the plugin event path, not here.
+    pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
+        use vibez_core::automation::AutomationTarget;
+        let mut gain = None;
+        let mut pan = None;
+        for lane_idx in 0..self.automation.len() {
+            let lane = &self.automation[lane_idx];
+            let Some(value) = lane.value_at(beat) else {
+                continue;
+            };
+            match lane.target {
+                AutomationTarget::TrackGain => gain = Some(value),
+                AutomationTarget::TrackPan => pan = Some(value),
+                AutomationTarget::EffectParam {
+                    effect_id,
+                    param_index,
+                } => {
+                    if let Some(slot) = self.effects.iter_mut().find(|e| e.id == effect_id) {
+                        // Lanes are normalized 0..1; parameters live in
+                        // their native descriptor range.
+                        let native = match slot.effect.param_descriptors().get(param_index) {
+                            Some(d) => d.min + value * (d.max - d.min),
+                            None => value,
+                        };
+                        slot.effect.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::InstrumentParam { param_index } => {
+                    if let Some(instrument) = self.instrument.as_mut() {
+                        let native = match instrument.param_descriptors().get(param_index) {
+                            Some(d) => d.min + value * (d.max - d.min),
+                            None => value,
+                        };
+                        instrument.set_param(param_index, native);
+                    }
+                }
+                AutomationTarget::PluginParam { .. } => {}
+            }
+        }
+        (gain, pan)
+    }
+
+    /// Zero the mix buffer: an idle block for a track with no source
+    /// signal, so the effect chain can still run (tails, queued
+    /// plugin param changes).
+    pub fn clear_buffer(&mut self, frames: usize, channels: usize) {
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        for s in self.mix_buffer[..buf_size].iter_mut() {
+            *s = 0.0;
         }
     }
 

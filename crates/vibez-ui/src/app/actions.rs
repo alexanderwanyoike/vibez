@@ -226,13 +226,17 @@ impl App {
             }
 
             if let Some(track) = self.state.find_track_mut(track_id) {
-                let descriptors: &'static [vibez_core::effect::ParamDescriptor] =
-                    Box::leak(Vec::new().into_boxed_slice());
+                // Real plugin parameters (already leaked 'static by the
+                // wrapper): drives the knob strip and automation picker.
+                let descriptors = effect.param_descriptors();
+                let params: Vec<f32> = (0..descriptors.len())
+                    .map(|i| effect.get_param(i))
+                    .collect();
                 let ui_effect = UiEffect {
                     id: effect_id,
                     effect_type: EffectType::Gain,
                     bypass: false,
-                    params: Vec::new(),
+                    params,
                     descriptors,
                     plugin_name: Some(plugin_name.clone()),
                     has_plugin_gui: has_gui,
@@ -284,6 +288,7 @@ impl App {
                 track.has_instrument = true;
                 track.plugin_instrument_name = Some(plugin_name.clone());
                 track.plugin_instrument_ref = Some(result.device_ref.clone());
+                track.plugin_instrument_descriptors = instrument.param_descriptors();
                 track.has_plugin_instrument_gui = has_gui;
             }
             self.send_command(EngineCommand::SetPluginInstrument {

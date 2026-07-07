@@ -49,6 +49,7 @@ macro_rules! typed_id {
 typed_id!(TrackId);
 typed_id!(ClipId);
 typed_id!(EffectId);
+typed_id!(LaneId);
 
 #[cfg(test)]
 mod tests {

@@ -215,7 +215,16 @@ impl App {
             )
         };
 
-        (app, startup_task)
+        // `vibez <project.vibez>` opens a project straight from the
+        // command line (also how file-manager associations launch us).
+        let open_task = std::env::args()
+            .nth(1)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_file())
+            .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
+            .unwrap_or_else(Task::none);
+
+        (app, Task::batch([startup_task, open_task]))
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {

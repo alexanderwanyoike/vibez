@@ -146,6 +146,7 @@ impl App {
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
+            automation: track.automation.clone(),
         }
     }
 
@@ -279,6 +280,7 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
+            track.automation = track_info.automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
             if let Some(dev) = &track_info.plugin_instrument {
@@ -345,6 +347,13 @@ impl App {
                         }
                     }
                 }
+            }
+
+            for lane in &track_info.automation {
+                self.send_command(EngineCommand::SetAutomationLane {
+                    track_id: track_info.id,
+                    lane: lane.clone(),
+                });
             }
 
             for (chain_pos, effect_info) in track_info.effects.iter().enumerate() {
@@ -681,6 +690,13 @@ impl App {
                 }
                 InstrumentKind::SubtractiveSynth => {}
             }
+        }
+
+        for lane in &track.automation {
+            self.send_command(EngineCommand::SetAutomationLane {
+                track_id: track.id,
+                lane: lane.clone(),
+            });
         }
 
         for effect in &track.effects {

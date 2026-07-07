@@ -361,6 +361,9 @@ pub struct AppState {
     /// Minimum BPM-detect confidence required to auto-warp. Mirrored
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
+    // Automation domain slice (lane expansion, point selection).
+    pub automation_ui: crate::domains::automation::AutomationState,
+
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
 
@@ -394,6 +397,7 @@ impl Default for AppState {
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
+            automation_ui: crate::domains::automation::AutomationState::default(),
             browser: BrowserState::default(),
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,

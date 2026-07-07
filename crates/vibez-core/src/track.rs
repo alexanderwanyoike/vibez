@@ -88,6 +88,9 @@ pub struct TrackInfo {
     /// Third-party plugin instrument on this track, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_instrument: Option<crate::effect::PluginDeviceInfo>,
+    /// Automation lanes on this track.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automation: Vec<crate::automation::AutomationLane>,
 }
 
 impl TrackInfo {
@@ -105,6 +108,7 @@ impl TrackInfo {
             instrument: None,
             native_instrument: None,
             plugin_instrument: None,
+            automation: Vec::new(),
         }
     }
 }

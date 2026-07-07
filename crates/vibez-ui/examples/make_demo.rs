@@ -29,6 +29,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         instrument: Some(kind),
         native_instrument: None,
         plugin_instrument: None,
+        automation: Vec::new(),
     }
 }
 

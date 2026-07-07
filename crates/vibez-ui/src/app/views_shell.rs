@@ -388,8 +388,14 @@ impl App {
 
             // Track header (iced widgets)
             let editing = self.state.view.editing_track_name == Some(track.id);
-            let header =
-                view_track_header(track, selected, editing, &self.state.view.edit_name_text);
+            let automation_open = self.state.automation_ui.expanded.contains(&track.id);
+            let header = view_track_header(
+                track,
+                selected,
+                editing,
+                &self.state.view.edit_name_text,
+                automation_open,
+            );
 
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
@@ -425,6 +431,10 @@ impl App {
             let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
 
             track_rows = track_rows.push(track_row);
+
+            if automation_open {
+                track_rows = self.push_automation_lanes(track_rows, track, track_color);
+            }
         }
 
         let content = column![ruler_row, minimap_row, track_rows];
@@ -720,5 +730,368 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    /// Lane strip under an expanded track: one row per lane plus the
+    /// add-lane picker.
+    fn push_automation_lanes<'a>(
+        &'a self,
+        mut rows: iced::widget::Column<'a, Message>,
+        track: &'a crate::state::UiTrack,
+        track_color: iced::Color,
+    ) -> iced::widget::Column<'a, Message> {
+        use crate::domains::automation::{target_label, AutomationMsg};
+        use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
+
+        for lane in &track.automation {
+            let label = target_label(&lane.target, track);
+            let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::TEXT_DIM))
+                .on_press(Message::Automation(AutomationMsg::RemoveLane {
+                    track_id: track.id,
+                    lane_id: lane.id,
+                }))
+                .padding([1, 4])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: None,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                });
+            let lane_header = container(
+                row![
+                    text(label).size(11).color(th::TEXT_DIM),
+                    horizontal_space(),
+                    remove
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding([0, 10])
+            .width(Length::Fixed(
+                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+            ))
+            .height(Length::Fixed(LANE_HEIGHT))
+            .align_y(iced::alignment::Vertical::Center)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                ..Default::default()
+            });
+
+            let selected = match self.state.automation_ui.selected {
+                Some((t, l, i)) if t == track.id && l == lane.id => Some(i),
+                _ => None,
+            };
+            let (reference, min_label, max_label, ref_label) = lane_scale(track, &lane.target);
+            let widget = AutomationLaneWidget {
+                track_id: track.id,
+                lane_id: lane.id,
+                points: lane.points.clone(),
+                color: track_color,
+                zoom_level: self.state.view.zoom_level,
+                scroll_offset_beats: self.state.view.scroll_offset_beats,
+                snap: self.state.view.snap_grid,
+                selected,
+                reference,
+                min_label,
+                max_label,
+                ref_label,
+            };
+            let lane_canvas: Element<'_, Message> = canvas(widget)
+                .width(Length::Fill)
+                .height(Length::Fixed(LANE_HEIGHT))
+                .into();
+            rows = rows.push(row![lane_header, lane_canvas].height(Length::Fixed(LANE_HEIGHT)));
+        }
+
+        // Add-lane entry: a button that opens a searchable picker
+        // panel (plugins can expose hundreds of parameters).
+        let picker_query = match &self.state.automation_ui.picker {
+            Some((tid, q)) if *tid == track.id => Some(q.clone()),
+            _ => None,
+        };
+        let picker_open = picker_query.is_some();
+
+        let panel: Element<'_, Message> = if let Some(query) = picker_query {
+            let mut choices: Vec<LaneChoice> = vec![
+                LaneChoice {
+                    label: "Volume".to_string(),
+                    target: vibez_core::automation::AutomationTarget::TrackGain,
+                },
+                LaneChoice {
+                    label: "Pan".to_string(),
+                    target: vibez_core::automation::AutomationTarget::TrackPan,
+                },
+            ];
+            if !track.plugin_instrument_descriptors.is_empty() {
+                let name = track
+                    .plugin_instrument_name
+                    .clone()
+                    .unwrap_or_else(|| "Plugin".to_string());
+                for (param_index, d) in track.plugin_instrument_descriptors.iter().enumerate() {
+                    choices.push(LaneChoice {
+                        label: format!("{name}: {}", d.name),
+                        target: vibez_core::automation::AutomationTarget::InstrumentParam {
+                            param_index,
+                        },
+                    });
+                }
+            }
+            if let Some(kind) = track.instrument_kind {
+                let instrument_name = match kind {
+                    vibez_core::midi::InstrumentKind::SubtractiveSynth => "Synth",
+                    vibez_core::midi::InstrumentKind::Sampler => "Sampler",
+                    vibez_core::midi::InstrumentKind::DrumRack => "Drum Rack",
+                };
+                for (param_index, d) in vibez_instruments::descriptors_for(kind).iter().enumerate()
+                {
+                    choices.push(LaneChoice {
+                        label: format!("{instrument_name}: {}", d.name),
+                        target: vibez_core::automation::AutomationTarget::InstrumentParam {
+                            param_index,
+                        },
+                    });
+                }
+            }
+            for effect in &track.effects {
+                for (param_index, d) in effect.descriptors.iter().enumerate() {
+                    let effect_name = effect
+                        .plugin_name
+                        .clone()
+                        .unwrap_or_else(|| format!("{:?}", effect.effect_type));
+                    choices.push(LaneChoice {
+                        label: format!("{effect_name}: {}", d.name),
+                        target: vibez_core::automation::AutomationTarget::EffectParam {
+                            effect_id: effect.id,
+                            param_index,
+                        },
+                    });
+                }
+            }
+            choices.retain(|c| !track.automation.iter().any(|l| l.target == c.target));
+
+            let needle = query.to_lowercase();
+            let total_before = choices.len();
+            if !needle.is_empty() {
+                choices.retain(|c| c.label.to_lowercase().contains(&needle));
+            }
+            let shown = choices.len().min(MAX_PICKER_RESULTS);
+            let hidden = choices.len() - shown;
+
+            let search = iced::widget::text_input("Search parameters\u{2026}", &query)
+                .on_input(|q| Message::Automation(AutomationMsg::LanePickerQuery(q)))
+                .size(11)
+                .padding([4, 8])
+                .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
+                    background: th::BG_DARK.into(),
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    icon: th::TEXT_DIM,
+                    placeholder: th::TEXT_DIM,
+                    value: th::TEXT,
+                    selection: th::ACCENT,
+                });
+            let close = button(icons::icon(icons::X).size(10).color(th::TEXT_DIM))
+                .on_press(Message::Automation(AutomationMsg::CloseLanePicker))
+                .padding([3, 6])
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: None,
+                    text_color: th::TEXT_DIM,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                });
+
+            let mut list = column![].spacing(1);
+            for choice in choices.into_iter().take(MAX_PICKER_RESULTS) {
+                let target = choice.target;
+                let track_id = track.id;
+                list = list.push(
+                    button(text(choice.label).size(11).color(th::TEXT))
+                        .on_press(Message::Automation(AutomationMsg::AddLane {
+                            track_id,
+                            target,
+                        }))
+                        .width(Length::Fill)
+                        .padding([3, 10])
+                        .style(|_theme: &Theme, status| {
+                            let bg = match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Some(th::BG_HOVER.into())
+                                }
+                                _ => None,
+                            };
+                            button::Style {
+                                background: bg,
+                                text_color: th::TEXT,
+                                border: iced::Border::default(),
+                                ..Default::default()
+                            }
+                        }),
+                );
+            }
+            if hidden > 0 {
+                list = list.push(
+                    container(
+                        text(format!("{hidden} more \u{2014} refine the search"))
+                            .size(10)
+                            .color(th::TEXT_DIM),
+                    )
+                    .padding([3, 10]),
+                );
+            }
+            if total_before == 0 {
+                list = list.push(
+                    container(
+                        text("Everything is already automated")
+                            .size(10)
+                            .color(th::TEXT_DIM),
+                    )
+                    .padding([3, 10]),
+                );
+            }
+
+            container(
+                column![
+                    row![search, close]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center),
+                    iced::widget::scrollable(list).height(Length::Fixed(150.0)),
+                ]
+                .spacing(6),
+            )
+            .padding(8)
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_SURFACE.into()),
+                border: iced::Border {
+                    color: th::BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+        } else {
+            let track_id = track.id;
+            container(
+                button(text("+ Add automation").size(11).color(th::TEXT_DIM))
+                    .on_press(Message::Automation(AutomationMsg::OpenLanePicker(track_id)))
+                    .width(Length::Fill)
+                    .padding([3, 10])
+                    .style(|_theme: &Theme, status| {
+                        let bg = match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::BG_HOVER.into())
+                            }
+                            _ => Some(th::BG_ELEVATED.into()),
+                        };
+                        button::Style {
+                            background: bg,
+                            text_color: th::TEXT_DIM,
+                            border: iced::Border {
+                                color: th::BORDER,
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        }
+                    }),
+            )
+            .padding([2, 10])
+            .into()
+        };
+
+        // Collapsed: the button sits inside the header column like a
+        // lane header. Open: the search panel widens over the lane
+        // area like a dropdown.
+        let panel_width = if picker_open {
+            crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH + 300.0
+        } else {
+            crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH
+        };
+        let picker_row = row![
+            container(panel)
+                .width(Length::Fixed(panel_width))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::BG_SURFACE.into()),
+                    ..Default::default()
+                }),
+            iced::widget::horizontal_space()
+        ];
+        rows.push(picker_row)
+    }
+}
+
+const MAX_PICKER_RESULTS: usize = 40;
+
+/// Reference value plus scale labels for a lane's target.
+fn lane_scale(
+    track: &crate::state::UiTrack,
+    target: &vibez_core::automation::AutomationTarget,
+) -> (Option<f32>, String, String, String) {
+    use crate::domains::automation::{normalized_target_value, target_descriptor};
+    use vibez_core::automation::AutomationTarget;
+
+    let reference = normalized_target_value(target, track);
+    match target {
+        AutomationTarget::TrackGain => {
+            let r = reference
+                .map(|n| fmt_value(n * 2.0, ""))
+                .unwrap_or_default();
+            (reference, "0".into(), "2.0".into(), r)
+        }
+        AutomationTarget::TrackPan => {
+            let r = match reference {
+                Some(n) if (n - 0.5).abs() < 0.01 => "C".to_string(),
+                Some(n) => fmt_value(n * 2.0 - 1.0, ""),
+                None => String::new(),
+            };
+            (reference, "L".into(), "R".into(), r)
+        }
+        _ => match target_descriptor(target, track) {
+            Some(d) => {
+                let r = reference
+                    .map(|n| fmt_value(d.min + n * (d.max - d.min), d.unit))
+                    .unwrap_or_default();
+                (
+                    reference,
+                    fmt_value(d.min, d.unit),
+                    fmt_value(d.max, d.unit),
+                    r,
+                )
+            }
+            None => (reference, String::new(), String::new(), String::new()),
+        },
+    }
+}
+
+fn fmt_value(v: f32, unit: &str) -> String {
+    let num = if v.abs() >= 1000.0 {
+        format!("{:.0}k", v / 1000.0)
+    } else if v.abs() >= 100.0 {
+        format!("{v:.0}")
+    } else {
+        let s = format!("{v:.2}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    if unit.is_empty() {
+        num
+    } else {
+        format!("{num} {unit}")
+    }
+}
+
+/// One option in the add-lane picker.
+#[derive(Debug, Clone, PartialEq)]
+struct LaneChoice {
+    label: String,
+    target: vibez_core::automation::AutomationTarget,
+}
+
+impl std::fmt::Display for LaneChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
     }
 }

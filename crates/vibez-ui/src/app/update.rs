@@ -98,7 +98,8 @@ impl App {
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
-            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty());
+            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
+            || matches!(&message, Message::Automation(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot();
             self.mark_project_dirty();
@@ -177,6 +178,19 @@ impl App {
                 let action = self.state.browser.update(msg);
                 return self.apply_browser_action(action);
             }
+            Message::Automation(msg) => {
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.automation_ui.update(
+                        msg,
+                        &mut engine,
+                        &mut self.state.arrangement.tracks,
+                    )
+                };
+                if let Some(status) = action.status {
+                    self.state.status_text = status;
+                }
+            }
             Message::View(msg) => {
                 let ctx = crate::domains::view::ViewCtx {
                     total_beats: self.state.total_beats(),
@@ -224,7 +238,13 @@ impl App {
                 {
                     return Task::none();
                 }
-                // Priority 1: selected notes in the open piano roll.
+                // Priority 1: a selected automation point.
+                if self.state.automation_ui.selected.is_some() {
+                    return self.update(Message::Automation(
+                        crate::domains::automation::AutomationMsg::DeleteSelectedPoint,
+                    ));
+                }
+                // Priority 2: selected notes in the open piano roll.
                 if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
                     let has_selection = self
                         .state
@@ -237,7 +257,7 @@ impl App {
                         )));
                     }
                 }
-                // Priority 2: selected arrangement clips.
+                // Priority 3: selected arrangement clips.
                 if !self.state.arrangement.selected_clips.is_empty() {
                     return self.update(Message::Arrangement(ArrangementMsg::DeleteSelectedClip));
                 }
