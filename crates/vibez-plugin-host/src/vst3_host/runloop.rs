@@ -18,19 +18,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // FUnknown IID: {00000000-0000-0000-C000-000000000046}
-const FUNKNOWN_IID: [u8; 16] = [
+const FUNKNOWN_IID: [u8; 16] = crate::vst3_tuid([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
-];
+]);
 
 // IPlugFrame IID: {367FAF01-AFA9-4693-8D4D-A2A0ED0882A3}
-pub(crate) const IPLUGFRAME_IID: [u8; 16] = [
+pub(crate) const IPLUGFRAME_IID: [u8; 16] = crate::vst3_tuid([
     0x36, 0x7F, 0xAF, 0x01, 0xAF, 0xA9, 0x46, 0x93, 0x8D, 0x4D, 0xA2, 0xA0, 0xED, 0x08, 0x82, 0xA3,
-];
+]);
 
 // Linux IRunLoop IID: {18C35366-9776-4F1A-9C5B-83857A871389}
-pub(crate) const IRUNLOOP_IID: [u8; 16] = [
+pub(crate) const IRUNLOOP_IID: [u8; 16] = crate::vst3_tuid([
     0x18, 0xC3, 0x53, 0x66, 0x97, 0x76, 0x4F, 0x1A, 0x9C, 0x5B, 0x83, 0x85, 0x7A, 0x87, 0x13, 0x89,
-];
+]);
 
 const K_RESULT_OK: i32 = 0;
 const K_NO_INTERFACE: i32 = -1;
@@ -101,6 +101,9 @@ impl RunLoopRegistry {
             .collect();
 
         let mut ready_fds: Vec<(*mut c_void, i32)> = Vec::new();
+        // VST3 IRunLoop fd watching is a Linux-only contract; libc::poll
+        // does not exist on Windows, where handlers simply never fire.
+        #[cfg(unix)]
         if !self.event_handlers.is_empty() {
             let mut pollfds: Vec<libc::pollfd> = self
                 .event_handlers
@@ -111,7 +114,7 @@ impl RunLoopRegistry {
                     revents: 0,
                 })
                 .collect();
-            let rc = unsafe { libc::poll(pollfds.as_mut_ptr(), pollfds.len() as u64, 0) };
+            let rc = unsafe { libc::poll(pollfds.as_mut_ptr(), pollfds.len() as libc::nfds_t, 0) };
             if rc > 0 {
                 for (entry, pfd) in self.event_handlers.iter().zip(&pollfds) {
                     if pfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {

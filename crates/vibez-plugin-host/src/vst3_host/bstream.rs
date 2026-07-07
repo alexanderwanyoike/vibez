@@ -11,14 +11,14 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 // FUnknown IID: {00000000-0000-0000-C000-000000000046}
-const FUNKNOWN_IID: [u8; 16] = [
+const FUNKNOWN_IID: [u8; 16] = crate::vst3_tuid([
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
-];
+]);
 
 // IBStream IID: {C3BF6EA2-3099-4752-9B6B-F9901EE33E9B}
-const IBSTREAM_IID: [u8; 16] = [
+const IBSTREAM_IID: [u8; 16] = crate::vst3_tuid([
     0xC3, 0xBF, 0x6E, 0xA2, 0x30, 0x99, 0x47, 0x52, 0x9B, 0x6B, 0xF9, 0x90, 0x1E, 0xE3, 0x3E, 0x9B,
-];
+]);
 
 const K_RESULT_OK: i32 = 0;
 const K_NO_INTERFACE: i32 = -1;
