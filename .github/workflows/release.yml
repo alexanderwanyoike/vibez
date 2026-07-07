@@ -20,16 +20,12 @@ jobs:
         include:
           - os: ubuntu-latest
             label: linux-x86_64
-            archive: tar.gz
           - os: macos-latest
             label: macos-arm64
-            archive: tar.gz
           - os: macos-15-intel
             label: macos-x86_64
-            archive: tar.gz
           - os: windows-latest
             label: windows-x86_64
-            archive: zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,41 +34,121 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
+      - name: Install cargo-deb
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
 
-      - name: Build
-        run: cargo build --release -p vibez --bins
-
-      - name: Package
+      - name: Resolve version
+        id: version
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME}"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then VERSION="dev-${GITHUB_SHA::7}"; fi
-          PKG="vibez-${VERSION}-${{ matrix.label }}"
-          mkdir -p "stage/${PKG}"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/release/vibez.exe target/release/vibez-plugin-scan.exe "stage/${PKG}/"
-          else
-            cp target/release/vibez target/release/vibez-plugin-scan "stage/${PKG}/"
-          fi
-          cp README.md LICENSE assets/demo.vibez "stage/${PKG}/"
-          mkdir -p "stage/${PKG}/icon" && cp assets/icon/vibez.svg assets/icon/vibez-*.png assets/icon/vibez.ico "stage/${PKG}/icon/"
-          if [ "${{ runner.os }}" = "Linux" ]; then cp assets/linux/vibez.desktop "stage/${PKG}/"; fi
-          cd stage
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            7z a "../${PKG}.zip" "${PKG}" > /dev/null
-          else
-            tar czf "../${PKG}.tar.gz" "${PKG}"
-          fi
-          cd ..
-          ls -la vibez-*.*
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "bare=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload build artifact
+      - name: Build
+        run: cargo build --release -p vibez --bins
+
+      # ---------- Linux: tar.gz + .deb + AppImage ----------
+      - name: Package tarball (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          PKG="vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}"
+          mkdir -p "stage/${PKG}/icon"
+          cp target/release/vibez target/release/vibez-plugin-scan "stage/${PKG}/"
+          cp README.md LICENSE assets/demo.vibez assets/linux/vibez.desktop "stage/${PKG}/"
+          cp assets/icon/vibez.svg assets/icon/vibez-*.png assets/icon/vibez.ico "stage/${PKG}/icon/"
+          tar -C stage -czf "${PKG}.tar.gz" "${PKG}"
+
+      - name: Package .deb (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          DEB_VERSION="$(echo "${{ steps.version.outputs.bare }}" | tr '-' '~')"
+          cargo deb -p vibez --no-build --deb-version "${DEB_VERSION}" \
+            -o "vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}.deb"
+
+      - name: Package AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
+          cp target/release/vibez target/release/vibez-plugin-scan AppDir/usr/bin/
+          cp assets/linux/vibez.desktop AppDir/
+          cp assets/linux/vibez.desktop AppDir/usr/share/applications/
+          cp assets/icon/vibez-512.png AppDir/vibez.png
+          cp assets/icon/vibez-512.png AppDir/usr/share/icons/hicolor/512x512/apps/vibez.png
+          ln -s usr/bin/vibez AppDir/AppRun
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir \
+            "vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}.AppImage"
+
+      # ---------- macOS: .app bundle in a .dmg ----------
+      - name: Package .dmg (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP="stage/vibez.app"
+          mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+          cp target/release/vibez target/release/vibez-plugin-scan "${APP}/Contents/MacOS/"
+          cp assets/demo.vibez "${APP}/Contents/Resources/"
+          sed "s/__VERSION__/${{ steps.version.outputs.bare }}/g" packaging/macos/Info.plist \
+            > "${APP}/Contents/Info.plist"
+          # icns from the PNG set
+          mkdir vibez.iconset
+          cp assets/icon/vibez-16.png   vibez.iconset/icon_16x16.png
+          cp assets/icon/vibez-32.png   vibez.iconset/icon_16x16@2x.png
+          cp assets/icon/vibez-32.png   vibez.iconset/icon_32x32.png
+          cp assets/icon/vibez-64.png   vibez.iconset/icon_32x32@2x.png
+          cp assets/icon/vibez-128.png  vibez.iconset/icon_128x128.png
+          cp assets/icon/vibez-256.png  vibez.iconset/icon_128x128@2x.png
+          cp assets/icon/vibez-256.png  vibez.iconset/icon_256x256.png
+          cp assets/icon/vibez-512.png  vibez.iconset/icon_256x256@2x.png
+          cp assets/icon/vibez-512.png  vibez.iconset/icon_512x512.png
+          iconutil -c icns vibez.iconset -o "${APP}/Contents/Resources/vibez.icns"
+          ln -s /Applications stage/Applications
+          hdiutil create -volname "vibez" -srcfolder stage -ov -format UDZO \
+            "vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}.dmg"
+
+      # ---------- Windows: installer + portable zip ----------
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+            //DMyAppVersion="${{ steps.version.outputs.bare }}" \
+            //O"$(pwd -W)" packaging/windows/vibez.iss
+          mv vibez-setup.exe \
+            "vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}-setup.exe"
+
+      - name: Package portable zip (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          PKG="vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}"
+          mkdir -p "stage/${PKG}/icon"
+          cp target/release/vibez.exe target/release/vibez-plugin-scan.exe "stage/${PKG}/"
+          cp README.md LICENSE assets/demo.vibez "stage/${PKG}/"
+          cp assets/icon/vibez.ico assets/icon/vibez-*.png "stage/${PKG}/icon/"
+          cd stage && 7z a "../${PKG}.zip" "${PKG}" > /dev/null
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vibez-${{ matrix.label }}
           path: |
             vibez-*.tar.gz
+            vibez-*.deb
+            vibez-*.AppImage
+            vibez-*.dmg
             vibez-*.zip
+            vibez-*-setup.exe
           if-no-files-found: error
 
       - name: Attach to release
@@ -81,6 +157,10 @@ jobs:
         with:
           files: |
             vibez-*.tar.gz
+            vibez-*.deb
+            vibez-*.AppImage
+            vibez-*.dmg
             vibez-*.zip
+            vibez-*-setup.exe
           draft: false
           generate_release_notes: true
