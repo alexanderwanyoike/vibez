@@ -102,24 +102,34 @@ auto-closes the PRs above the gap when base branches are deleted):
   Undo/Redo with pure stack bookkeeping (router passes
   snapshot_now in ctx, receives apply_snapshot in the action).
 
-Still to do:
-- 3b-3 clip async/warp orchestration: AddClipToTrack,
-  ClipFileSelected/Decoded, warp messages (WarpClipToProject,
-  ClipWarpReady, ClearClipWarp, RewarpAllClips, ClipAutoWarpReady,
-  DetectClipBpm, ClipBpmDetected, SetClipNominalBpm, quantize
-  audio), bounce. These spawn iced Tasks; keep the Task::perform
-  in app.rs and move the state math into domain fns the arm calls.
-- 5b browser async: dialogs, decode/preview, Dropbox HTTP,
-  import/drop dispatch (dispatch_drop_on_arrangement and friends).
-- 6b project async: save/load/export orchestration + the engine
-  replay helpers (replay_track_to_engine, load handling).
-- 7 services: plugin load pipeline (poll_plugin_loads + bg loaders),
-  scanning, plugin window manager glue behind channel interfaces.
-  Hardest and least mechanical; do it last, with the app running
-  for smoke tests after every step (plugin teardown ordering is
-  segfault territory, see apply_snapshot's comment).
+Refactor COMPLETE 2026-07-07 (second session). Additional PRs:
+- #28 fix/ci-green (MERGE FIRST, based on main): CI had never been
+  green on macOS/Windows. Fixes: libdbus-1-dev in Linux CI jobs,
+  macOS nfds_t width, cfg(unix) gates for poll/pipe FFI in both
+  plugin hosts, clippy 1.96 lints (CI stable is newer than you
+  think; run rustup update before trusting local clippy), and
+  vst3_tuid(): all 14 hand-built VST3 IIDs were in canonical GUID
+  byte order, but Windows uses COM little-endian layout, so
+  QueryInterface would have failed against every real plugin on
+  Windows.
+- #29 refactor/clip-warp (on #27): tranche 3b-3 (clip warp/BPM
+  state math into arrangement domain; ArrangementAction.mark_dirty)
+  plus the view domain (ViewState slice + ViewMsg with 18
+  messages: workspace/tabs/zoom/scroll/snap/context menu/renames).
+- #30 refactor/services (on #29): tranche 7. Plugin load pipeline
+  behind services/plugin_loader.rs (phase-1 bg loaders, phase-2
+  finish_effect_init/finish_instrument_init, spawn_device_reloads).
+  Teardown ordering untouched; smoke-tested live.
 
-Final count this session: app.rs ~9,100 lines (from 11,305),
-60 UI unit tests (from zero), six domain modules (transport,
-devices, arrangement, piano_roll, browser, project) plus the
-shared EngineHandle seam in domains/mod.rs.
+Intentionally left in app.rs as orchestration (NOT unextracted
+debt): iced Task spawns (dialogs, decode, save/load/export,
+bounce, Dropbox HTTP), the engine replay routines
+(replay_track_to_engine, project load), subscriptions, and the
+views. Their state mutation already flows through domain methods.
+
+Final count: app.rs 8,492 lines (from 11,305), 68 UI unit tests
+(from zero), seven domain modules (transport, devices,
+arrangement, piano_roll, browser, project, view) plus
+services/plugin_loader.rs and the shared EngineHandle seam in
+domains/mod.rs. Full merge order:
+#28 -> #22 -> #23 -> #24 -> #25 -> #26 -> #27 -> #29 -> #30.
