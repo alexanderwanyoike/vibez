@@ -1,0 +1,93 @@
+//! Global keyboard shortcuts.
+
+//! Split out of app.rs; inherent methods on [`super::App`].
+
+use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::project::ProjectMsg;
+use crate::domains::transport::TransportMsg;
+use crate::domains::view::ViewMsg;
+
+use crate::message::Message;
+
+pub(crate) fn truncate_end(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_string()
+    } else {
+        let head: String = text.chars().take(max_chars.saturating_sub(2)).collect();
+        format!("{head}..")
+    }
+}
+
+pub(crate) fn global_key_handler(
+    key: iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<Message> {
+    use iced::keyboard::key::Named;
+
+    // Space: toggle playback (no modifiers required)
+    if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
+        return Some(Message::Transport(TransportMsg::TogglePlayback));
+    }
+
+    // Escape: cancel editing
+    if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
+        return Some(Message::View(ViewMsg::CancelEditing));
+    }
+
+    // Delete/Backspace: context-resolved in update() (selected notes
+    // first, then selected clips) and ignored while renaming.
+    if !modifiers.control()
+        && matches!(
+            key,
+            iced::keyboard::Key::Named(Named::Delete)
+                | iced::keyboard::Key::Named(Named::Backspace)
+        )
+    {
+        return Some(Message::DeleteKeyPressed);
+    }
+
+    // B: toggle piano roll draw mode (no modifiers)
+    if !modifiers.control()
+        && !modifiers.shift()
+        && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
+    {
+        return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
+    }
+
+    if !modifiers.control() {
+        return None;
+    }
+    match key {
+        iced::keyboard::Key::Named(Named::ArrowUp) => {
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
+        }
+        iced::keyboard::Key::Named(Named::ArrowDown) => {
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
+        }
+        iced::keyboard::Key::Character(ref c) => match c.as_str() {
+            "t" | "T" => {
+                if modifiers.shift() {
+                    Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
+                } else {
+                    Some(Message::Arrangement(ArrangementMsg::AddTrack))
+                }
+            }
+            "m" => Some(Message::create_clip_from_selection()),
+            "e" => Some(Message::split_selected_at_playhead()),
+            "j" => Some(Message::join_selected_clips()),
+            "l" => Some(Message::Transport(TransportMsg::ToggleArrangementLoop)),
+            "0" => Some(Message::View(ViewMsg::ZoomToFit)),
+            "z" | "Z" => {
+                if modifiers.shift() {
+                    Some(Message::Project(ProjectMsg::Redo))
+                } else {
+                    Some(Message::Project(ProjectMsg::Undo))
+                }
+            }
+            "y" | "Y" => Some(Message::Project(ProjectMsg::Redo)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
