@@ -111,7 +111,7 @@ impl RunLoopRegistry {
                     revents: 0,
                 })
                 .collect();
-            let rc = unsafe { libc::poll(pollfds.as_mut_ptr(), pollfds.len() as u64, 0) };
+            let rc = unsafe { libc::poll(pollfds.as_mut_ptr(), pollfds.len() as libc::nfds_t, 0) };
             if rc > 0 {
                 for (entry, pfd) in self.event_handlers.iter().zip(&pollfds) {
                     if pfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
