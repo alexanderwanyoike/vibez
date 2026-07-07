@@ -504,6 +504,14 @@ pub struct ArrangementState {
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    // Time selection (visible brackets; independent from the loop).
+    pub time_selection_active: bool,
+    pub selection_start_beats: f64,
+    pub selection_end_beats: f64,
+    pub time_selection_track: Option<TrackId>,
+    /// An arrangement drag (move/resize) is active; drives edge
+    /// auto-scroll on ticks.
+    pub drag_resize_active: bool,
 }
 
 pub struct AppState {
@@ -532,15 +540,6 @@ pub struct AppState {
     // Detail panel tab
     pub detail_panel_tab: DetailPanelTab,
 
-    // Arrangement loop
-    // Time selection (visible brackets on arrangement — independent from loop)
-    pub time_selection_active: bool,
-    pub selection_start_beats: f64,
-    pub selection_end_beats: f64,
-    /// Track whose lane was dragged to create the current time selection,
-    /// if any. `None` means the selection is arrangement-wide (ruler drag).
-    pub time_selection_track: Option<TrackId>,
-
     // Context menu
     pub context_menu: Option<ContextMenu>,
 
@@ -551,9 +550,6 @@ pub struct AppState {
     // Last known window size, for clamping popup menus on-screen
     pub window_width: f32,
     pub window_height: f32,
-
-    // Arrangement drag auto-scroll: tracks active resize/move for tick-driven edge scrolling
-    pub drag_resize_active: bool,
 
     // Inline renaming
     pub editing_track_name: Option<TrackId>,
@@ -632,16 +628,11 @@ impl Default for AppState {
                 ..ArrangementState::default()
             },
             detail_panel_tab: DetailPanelTab::Clip,
-            time_selection_active: false,
-            selection_start_beats: 0.0,
-            selection_end_beats: 0.0,
-            time_selection_track: None,
             context_menu: None,
             cursor_x: 0.0,
             cursor_y: 0.0,
             window_width: 1400.0,
             window_height: 900.0,
-            drag_resize_active: false,
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
