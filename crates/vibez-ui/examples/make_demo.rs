@@ -146,10 +146,7 @@ fn main() {
         (74, 11.5, 0.5),
         (69, 12.0, 3.5),
     ];
-    let notes = hook
-        .iter()
-        .map(|(p, s, d)| note(*p, 92, *s, *d))
-        .collect();
+    let notes = hook.iter().map(|(p, s, d)| note(*p, 92, *s, *d)).collect();
     note_clips.push(clip(lead.id, "Hook", 32.0, 16.0, notes));
 
     let project = Project {
