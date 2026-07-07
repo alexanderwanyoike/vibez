@@ -16,6 +16,8 @@ DefaultGroupName=vibez
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
 OutputBaseFilename=vibez-setup
+; Emit next to the repo root so CI picks it up without /O quoting games
+OutputDir=..\..
 SetupIconFile=..\..\assets\icon\vibez.ico
 UninstallDisplayIcon={app}\vibez.exe
 Compression=lzma2
