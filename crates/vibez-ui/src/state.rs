@@ -343,6 +343,22 @@ pub enum PianoRollEditMode {
     Draw,
 }
 
+/// Piano roll domain slice: view scroll and the edit-mode toggle.
+#[derive(Debug)]
+pub struct PianoRollState {
+    pub scroll_y: f32,
+    pub edit_mode: PianoRollEditMode,
+}
+
+impl Default for PianoRollState {
+    fn default() -> Self {
+        Self {
+            scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
+            edit_mode: PianoRollEditMode::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsTab {
     #[default]
@@ -532,7 +548,7 @@ pub struct AppState {
 
     // Piano roll
     pub snap_grid: SnapGrid,
-    pub piano_roll_scroll_y: f32,
+    pub piano_roll: PianoRollState,
 
     // Arrangement domain slice (tracks, selection, numbering).
     pub arrangement: ArrangementState,
@@ -560,9 +576,6 @@ pub struct AppState {
     /// clip detail panel; `None` / missing means show the committed
     /// `UiClip::original_bpm` value instead.
     pub clip_bpm_edit: HashMap<ClipId, String>,
-
-    // Piano roll edit mode
-    pub piano_roll_edit_mode: PianoRollEditMode,
 
     // Device context menu
     pub devices: crate::domains::devices::DevicesState,
@@ -622,7 +635,7 @@ impl Default for AppState {
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::Eighth,
-            piano_roll_scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
+            piano_roll: PianoRollState::default(),
             arrangement: ArrangementState {
                 next_track_number: 1,
                 ..ArrangementState::default()
@@ -637,7 +650,6 @@ impl Default for AppState {
             editing_clip_name: None,
             edit_name_text: String::new(),
             clip_bpm_edit: HashMap::new(),
-            piano_roll_edit_mode: PianoRollEditMode::default(),
             devices: crate::domains::devices::DevicesState::default(),
             file_menu_open: false,
             settings_open: false,

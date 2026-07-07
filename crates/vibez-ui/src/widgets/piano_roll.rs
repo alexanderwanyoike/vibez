@@ -5,6 +5,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
+use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
 use crate::state::{PianoRollEditMode, SnapGrid, UiNoteClip};
 use crate::theme;
@@ -909,7 +910,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     let new_scroll = clamp_scroll_y(self.scroll_y + dy, bounds.height);
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::PianoRollScrollY(new_scroll)),
+                        Some(Message::PianoRoll(PianoRollMsg::ScrollY(new_scroll))),
                     );
                 }
             }
@@ -944,11 +945,11 @@ impl canvas::Program<Message> for PianoRollWidget {
                             if let Some((idx, _)) = self.hit_test_note(pos, &bounds) {
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::RemoveNote(
+                                    Some(Message::PianoRoll(PianoRollMsg::RemoveNote(
                                         self.track_id,
                                         clip_data.clip_id,
                                         idx,
-                                    )),
+                                    ))),
                                 );
                             }
 
@@ -977,13 +978,13 @@ impl canvas::Program<Message> for PianoRollWidget {
 
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::AddNote {
+                                Some(Message::PianoRoll(PianoRollMsg::AddNote {
                                     track_id: self.track_id,
                                     clip_id: clip_data.clip_id,
                                     pitch,
                                     start_beat: snapped_beat,
                                     duration_beats: note_duration,
-                                }),
+                                })),
                             );
                         }
 
@@ -1002,12 +1003,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 });
                                 return (
                                     canvas::event::Status::Captured,
-                                    Some(Message::SelectNote(
+                                    Some(Message::PianoRoll(PianoRollMsg::SelectNote(
                                         self.track_id,
                                         clip_data.clip_id,
                                         Some(idx),
                                         false,
-                                    )),
+                                    ))),
                                 );
                             }
 
@@ -1063,12 +1064,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                             let msg = if !shift && clip_data.selected_notes.contains(&idx) {
                                 None
                             } else {
-                                Some(Message::SelectNote(
+                                Some(Message::PianoRoll(PianoRollMsg::SelectNote(
                                     self.track_id,
                                     clip_data.clip_id,
                                     Some(idx),
                                     shift,
-                                ))
+                                )))
                             };
 
                             return (canvas::event::Status::Captured, msg);
@@ -1102,25 +1103,25 @@ impl canvas::Program<Message> for PianoRollWidget {
 
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::AddNote {
+                                Some(Message::PianoRoll(PianoRollMsg::AddNote {
                                     track_id: self.track_id,
                                     clip_id: clip_data.clip_id,
                                     pitch,
                                     start_beat: snapped_beat,
                                     duration_beats: note_duration,
-                                }),
+                                })),
                             );
                         }
 
                         // Single-click: deselect all
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::SelectNote(
+                            Some(Message::PianoRoll(PianoRollMsg::SelectNote(
                                 self.track_id,
                                 clip_data.clip_id,
                                 None,
                                 false,
-                            )),
+                            ))),
                         );
                     }
                 }
@@ -1173,12 +1174,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         note.pitch = new_pitch;
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::EditNote(
+                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
                                                 self.track_id,
                                                 clip_data.clip_id,
                                                 idx,
                                                 note,
-                                            )),
+                                            ))),
                                         );
                                     }
                                 }
@@ -1200,12 +1201,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         note.duration_beats = new_duration;
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::EditNote(
+                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
                                                 self.track_id,
                                                 clip_data.clip_id,
                                                 idx,
                                                 note,
-                                            )),
+                                            ))),
                                         );
                                     }
                                 }
@@ -1232,12 +1233,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         note.duration_beats = new_duration;
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::EditNote(
+                                            Some(Message::PianoRoll(PianoRollMsg::EditNote(
                                                 self.track_id,
                                                 *clip_id,
                                                 idx,
                                                 note,
-                                            )),
+                                            ))),
                                         );
                                     }
                                 }
@@ -1303,11 +1304,13 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     if !moves.is_empty() {
                                         return (
                                             canvas::event::Status::Captured,
-                                            Some(Message::MoveNotesAbsolute {
-                                                track_id: self.track_id,
-                                                clip_id: clip_data.clip_id,
-                                                moves,
-                                            }),
+                                            Some(Message::PianoRoll(
+                                                PianoRollMsg::MoveNotesAbsolute {
+                                                    track_id: self.track_id,
+                                                    clip_id: clip_data.clip_id,
+                                                    moves,
+                                                },
+                                            )),
                                         );
                                     }
                                 }
@@ -1348,12 +1351,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                     if !clip_data.selected_notes.is_empty() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::NudgeSelectedNotes {
+                            Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: -self.snap_grid.beat_size(),
                                 delta_semitones: 0,
-                            }),
+                            })),
                         );
                     }
                 }
@@ -1366,12 +1369,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                     if !clip_data.selected_notes.is_empty() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::NudgeSelectedNotes {
+                            Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: self.snap_grid.beat_size(),
                                 delta_semitones: 0,
-                            }),
+                            })),
                         );
                     }
                 }
@@ -1384,12 +1387,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                     if !clip_data.selected_notes.is_empty() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::NudgeSelectedNotes {
+                            Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
                                 delta_semitones: 1,
-                            }),
+                            })),
                         );
                     }
                 }
@@ -1402,12 +1405,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                     if !clip_data.selected_notes.is_empty() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::NudgeSelectedNotes {
+                            Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
                                 delta_beats: 0.0,
                                 delta_semitones: -1,
-                            }),
+                            })),
                         );
                     }
                 }
@@ -1422,7 +1425,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(ref clip_data) = self.clip {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::SelectAllNotes(self.track_id, clip_data.clip_id)),
+                        Some(Message::PianoRoll(PianoRollMsg::SelectAllNotes(
+                            self.track_id,
+                            clip_data.clip_id,
+                        ))),
                     );
                 }
             }

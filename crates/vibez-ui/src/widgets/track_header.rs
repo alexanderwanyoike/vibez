@@ -3,6 +3,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Theme};
 
+use crate::domains::piano_roll::PianoRollMsg;
 use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
@@ -69,7 +70,9 @@ pub fn view_track_header<'a>(
             .padding([2, 6]),
         TrackKind::Instrument(_) | TrackKind::Midi => {
             button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
-                .on_press(Message::AddNoteClipToTrack(track.id))
+                .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
+                    track.id,
+                )))
                 .padding([2, 6])
         }
     };

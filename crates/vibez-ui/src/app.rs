@@ -9,6 +9,7 @@ use iced::widget::{
 use iced::{Color, Element, Length, Subscription, Task, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
@@ -16,7 +17,7 @@ use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_dropbox::{
     load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry, DropboxSettings,
@@ -1735,6 +1736,28 @@ impl App {
         Task::none()
     }
 
+    /// Route cross-domain effects requested by the piano roll domain.
+    fn apply_piano_roll_action(&mut self, action: crate::domains::piano_roll::PianoRollAction) {
+        if action.close_context_menu {
+            self.state.context_menu = None;
+        }
+        if let Some(sel) = action.select_note_clip {
+            self.state.arrangement.selected_note_clip = Some(sel);
+        }
+        if let Some(track_id) = action.select_track {
+            self.state.arrangement.selected_track = Some(track_id);
+        }
+        if let Some(beat) = action.scroll_to_beat {
+            self.auto_scroll_to_beat(beat);
+        }
+        if action.drag_resize_active {
+            self.state.arrangement.drag_resize_active = true;
+        }
+        if let Some(status) = action.status {
+            self.state.status_text = status;
+        }
+    }
+
     /// Route cross-domain effects requested by the devices domain.
     fn apply_devices_action(&mut self, action: crate::domains::devices::DevicesAction) {
         if let Some(key) = action.close_gui {
@@ -2013,35 +2036,6 @@ impl App {
         self.state.project_dirty = true;
     }
 
-    fn quantize_note_clip(&mut self, track_id: TrackId, clip_id: ClipId) {
-        let grid = self.state.snap_grid;
-        let mut changes: Vec<(usize, MidiNote)> = Vec::new();
-        let Some(track) = self.state.find_track_mut(track_id) else {
-            return;
-        };
-        let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) else {
-            return;
-        };
-        for (idx, note) in clip.notes.iter_mut().enumerate() {
-            let snapped = grid.snap_beat(note.start_beat).max(0.0);
-            if (snapped - note.start_beat).abs() > f64::EPSILON {
-                note.start_beat = snapped;
-                changes.push((idx, *note));
-            }
-        }
-        let count = changes.len();
-        for (idx, note) in changes {
-            self.send_command(EngineCommand::EditNote {
-                track_id,
-                clip_id,
-                note_index: idx,
-                note,
-            });
-        }
-        self.mark_project_dirty();
-        self.state.status_text = format!("Quantized {count} note(s) to {}", grid.label());
-    }
-
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
@@ -2126,21 +2120,9 @@ impl App {
                 | Message::DrumRackPadSampleDecoded(..)
                 | Message::BrowserSampleDecoded(..)
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
-                | Message::ToggleNoteClipLoop(..)
-                | Message::SetNoteClipLoopRegion { .. }
-                | Message::AddNoteClipToTrack(_)
-                | Message::AddNote { .. }
-                | Message::RemoveNote(..)
-                | Message::EditNote(..)
-                | Message::RemoveSelectedNotes(..)
-                | Message::NudgeSelectedNotes { .. }
-                | Message::MoveNotesAbsolute { .. }
-                | Message::DoubleNoteClip(..)
-                | Message::CropNoteClip(..)
                 | Message::Arrangement(ArrangementMsg::MoveAudioClip { .. })
                 | Message::Arrangement(ArrangementMsg::MoveNoteClipPosition { .. })
                 | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
-                | Message::ResizeNoteClipDuration { .. }
                 | Message::Arrangement(ArrangementMsg::MoveClipToTrack { .. })
                 | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
                 | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
@@ -2149,8 +2131,6 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
                 | Message::Arrangement(ArrangementMsg::AddMidiTrack)
-                | Message::HalveNoteClip(..)
-                | Message::QuantizeNoteClip { .. }
                 | Message::AudioQuantizeReady { .. }
                 | Message::SetClipNominalBpm { .. }
                 | Message::SubmitClipBpm { .. }
@@ -2158,7 +2138,8 @@ impl App {
                 | Message::ClearClipWarp { .. }
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
-            || matches!(&message, Message::Arrangement(m) if m.marks_dirty());
+            || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
+            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot();
             self.mark_project_dirty();
@@ -2217,6 +2198,21 @@ impl App {
                     self.state.arrangement.update(msg, &mut engine, ctx)
                 };
                 return self.apply_arrangement_action(action);
+            }
+            Message::PianoRoll(msg) => {
+                let ctx = crate::domains::piano_roll::PianoRollCtx {
+                    snap_grid: self.state.snap_grid,
+                };
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.piano_roll.update(
+                        msg,
+                        &mut engine,
+                        &mut self.state.arrangement.tracks,
+                        ctx,
+                    )
+                };
+                self.apply_piano_roll_action(action);
             }
 
             // -- Workspace --
@@ -2321,7 +2317,9 @@ impl App {
                         .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
                         .is_some_and(|c| !c.selected_notes.is_empty());
                     if has_selection {
-                        return self.update(Message::RemoveSelectedNotes(track_id, clip_id));
+                        return self.update(Message::PianoRoll(PianoRollMsg::RemoveSelectedNotes(
+                            track_id, clip_id,
+                        )));
                     }
                 }
                 // Priority 2: selected arrangement clips.
@@ -2512,480 +2510,14 @@ impl App {
             }
 
             // -- Clip looping --
-            Message::ToggleNoteClipLoop(track_id, clip_id) => {
-                let mut cmd_data = None;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_enabled = !clip.loop_enabled;
-                        // Default the loop region whenever the stored
-                        // one is unusable: never set, inverted, or
-                        // stale from before a resize. Ableton
-                        // semantics: the loop region covers the
-                        // CONTENT (rounded up to whole bars), so a
-                        // 1-bar pattern inside a longer clip repeats
-                        // bar by bar instead of playing once followed
-                        // by silence. Bug #3 in the dogfood log.
-                        let invalid = clip.loop_end_beats <= clip.loop_start_beats
-                            || clip.loop_end_beats > clip.duration_beats;
-                        if clip.loop_enabled && invalid {
-                            clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats =
-                                default_loop_end(&clip.notes, clip.duration_beats);
-                        }
-                        cmd_data = Some((
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        ));
-                    }
-                }
-                if let Some((enabled, loop_start_beats, loop_end_beats)) = cmd_data {
-                    self.send_command(EngineCommand::SetNoteClipLoop {
-                        track_id,
-                        clip_id,
-                        enabled,
-                        loop_start_beats,
-                        loop_end_beats,
-                    });
-                }
-            }
-            Message::SetNoteClipLoopRegion {
-                track_id,
-                clip_id,
-                loop_start_beats,
-                loop_end_beats,
-            } => {
-                let mut enabled = false;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_start_beats = loop_start_beats;
-                        clip.loop_end_beats = loop_end_beats;
-                        enabled = clip.loop_enabled;
-                    }
-                }
-                self.send_command(EngineCommand::SetNoteClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                });
-            }
 
             // -- Piano roll / note clips --
-            Message::AddNoteClipToTrack(track_id) => {
-                let clip_id = ClipId::new();
-                let position_beats = 0.0;
-                let duration_beats = 16.0;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    track.note_clips.push(UiNoteClip {
-                        id: clip_id,
-                        name: format!("Pattern {}", track.note_clips.len() + 1),
-                        position_beats,
-                        duration_beats,
-                        notes: Vec::new(),
-                        selected_notes: HashSet::new(),
-                        loop_enabled: true,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: duration_beats,
-                    });
-                }
-                self.send_command(EngineCommand::AddNoteClip {
-                    track_id,
-                    clip_id,
-                    position_beats,
-                    duration_beats,
-                    loop_enabled: true,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: duration_beats,
-                });
-                // Auto-select the new note clip for piano roll editing
-                self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
-                self.state.status_text = "Added note clip".to_string();
-            }
-            Message::SelectNoteClip(track_id, clip_id) => {
-                self.state.arrangement.selected_note_clip = Some((track_id, clip_id));
-                self.state.arrangement.selected_track = Some(track_id);
-            }
-            Message::AddNote {
-                track_id,
-                clip_id,
-                pitch,
-                start_beat,
-                duration_beats,
-            } => {
-                let note = MidiNote {
-                    pitch,
-                    velocity: 100,
-                    start_beat,
-                    duration_beats,
-                };
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.notes.push(note);
-                    }
-                }
-                self.send_command(EngineCommand::AddNote {
-                    track_id,
-                    clip_id,
-                    note,
-                });
-            }
-            Message::RemoveNote(track_id, clip_id, note_index) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        if note_index < clip.notes.len() {
-                            clip.notes.remove(note_index);
-                            // Re-index: remove deleted index, shift down any higher indices
-                            clip.selected_notes.remove(&note_index);
-                            clip.selected_notes = clip
-                                .selected_notes
-                                .iter()
-                                .map(|&i| if i > note_index { i - 1 } else { i })
-                                .collect();
-                        }
-                    }
-                }
-                self.send_command(EngineCommand::RemoveNote {
-                    track_id,
-                    clip_id,
-                    note_index,
-                });
-            }
-            Message::EditNote(track_id, clip_id, note_index, new_note) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        if note_index < clip.notes.len() {
-                            clip.notes[note_index] = new_note;
-                        }
-                    }
-                }
-                self.send_command(EngineCommand::EditNote {
-                    track_id,
-                    clip_id,
-                    note_index,
-                    note: new_note,
-                });
-            }
-            Message::SelectNote(track_id, clip_id, note_index, shift_held) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        match note_index {
-                            Some(idx) => {
-                                if shift_held {
-                                    // Toggle note in/out of selection
-                                    if !clip.selected_notes.remove(&idx) {
-                                        clip.selected_notes.insert(idx);
-                                    }
-                                } else {
-                                    // Clear all, select only this note
-                                    clip.selected_notes.clear();
-                                    clip.selected_notes.insert(idx);
-                                }
-                            }
-                            None => {
-                                clip.selected_notes.clear();
-                            }
-                        }
-                    }
-                }
-            }
-            Message::SelectAllNotes(track_id, clip_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.selected_notes = (0..clip.notes.len()).collect();
-                    }
-                }
-            }
-            Message::RemoveSelectedNotes(track_id, clip_id) => {
-                // Collect indices to remove in reverse order
-                let indices_to_remove: Vec<usize> =
-                    if let Some(track) = self.state.find_track(track_id) {
-                        if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
-                            let mut indices: Vec<usize> = clip
-                                .selected_notes
-                                .iter()
-                                .copied()
-                                .filter(|&i| i < clip.notes.len())
-                                .collect();
-                            indices.sort_unstable_by(|a, b| b.cmp(a));
-                            indices
-                        } else {
-                            Vec::new()
-                        }
-                    } else {
-                        Vec::new()
-                    };
-
-                // Remove from engine in reverse order (indices stay valid)
-                for &idx in &indices_to_remove {
-                    self.send_command(EngineCommand::RemoveNote {
-                        track_id,
-                        clip_id,
-                        note_index: idx,
-                    });
-                }
-
-                // Remove from UI state
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        for &idx in &indices_to_remove {
-                            if idx < clip.notes.len() {
-                                clip.notes.remove(idx);
-                            }
-                        }
-                        clip.selected_notes.clear();
-                    }
-                }
-            }
-            Message::NudgeSelectedNotes {
-                track_id,
-                clip_id,
-                delta_beats,
-                delta_semitones,
-            } => {
-                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let indices: Vec<usize> = clip
-                            .selected_notes
-                            .iter()
-                            .copied()
-                            .filter(|&i| i < clip.notes.len())
-                            .collect();
-                        for &idx in &indices {
-                            let note = &mut clip.notes[idx];
-                            note.start_beat = (note.start_beat + delta_beats).max(0.0);
-                            note.pitch =
-                                (note.pitch as i16 + delta_semitones as i16).clamp(0, 127) as u8;
-                            updates.push((idx, *note));
-                        }
-                    }
-                }
-                for (idx, note) in updates {
-                    self.send_command(EngineCommand::EditNote {
-                        track_id,
-                        clip_id,
-                        note_index: idx,
-                        note,
-                    });
-                }
-            }
-
-            Message::MoveNotesAbsolute {
-                track_id,
-                clip_id,
-                moves,
-            } => {
-                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        for &(idx, new_beat, new_pitch) in &moves {
-                            if idx < clip.notes.len() {
-                                clip.notes[idx].start_beat = new_beat;
-                                clip.notes[idx].pitch = new_pitch;
-                                updates.push((idx, clip.notes[idx]));
-                            }
-                        }
-                    }
-                }
-                for (idx, note) in updates {
-                    self.send_command(EngineCommand::EditNote {
-                        track_id,
-                        clip_id,
-                        note_index: idx,
-                        note,
-                    });
-                }
-            }
 
             // -- Clip operations --
-            Message::DoubleNoteClip(track_id, clip_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let orig_dur = clip.duration_beats;
-                        let cloned_notes: Vec<MidiNote> = clip
-                            .notes
-                            .iter()
-                            .map(|n| MidiNote {
-                                start_beat: n.start_beat + orig_dur,
-                                ..*n
-                            })
-                            .collect();
-                        clip.notes.extend_from_slice(&cloned_notes);
-                        let was_full_clip_loop = clip.loop_enabled
-                            && clip.loop_start_beats == 0.0
-                            && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
-                        clip.duration_beats *= 2.0;
-                        if was_full_clip_loop {
-                            clip.loop_end_beats = clip.duration_beats;
-                        }
-                        let new_duration = clip.duration_beats;
-                        let loop_sync = (
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        );
-
-                        // Send new notes to engine
-                        for note in &cloned_notes {
-                            self.send_command(EngineCommand::AddNote {
-                                track_id,
-                                clip_id,
-                                note: *note,
-                            });
-                        }
-                        // The engine clip must grow too, or playback
-                        // still ends at the old boundary and the
-                        // duplicated notes never sound.
-                        self.send_command(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_duration,
-                        });
-                        self.send_command(EngineCommand::SetNoteClipLoop {
-                            track_id,
-                            clip_id,
-                            enabled: loop_sync.0,
-                            loop_start_beats: loop_sync.1,
-                            loop_end_beats: loop_sync.2,
-                        });
-                    }
-                }
-                self.state.status_text = "Doubled clip length".to_string();
-            }
-            Message::CropNoteClip(track_id, clip_id) => {
-                let mut sync_data = None;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        if !clip.notes.is_empty() {
-                            let min_beat = clip
-                                .notes
-                                .iter()
-                                .map(|n| n.start_beat)
-                                .fold(f64::INFINITY, f64::min);
-                            let max_beat = clip
-                                .notes
-                                .iter()
-                                .map(|n| n.start_beat + n.duration_beats)
-                                .fold(f64::NEG_INFINITY, f64::max);
-
-                            // Shift notes so first note starts at 0
-                            for note in &mut clip.notes {
-                                note.start_beat -= min_beat;
-                            }
-                            clip.position_beats += min_beat;
-                            clip.duration_beats = max_beat - min_beat;
-
-                            sync_data = Some((
-                                clip.position_beats,
-                                clip.duration_beats,
-                                clip.notes.clone(),
-                            ));
-                        }
-                    }
-                }
-                // Sync to engine outside the mutable borrow
-                if let Some((pos, dur, notes)) = sync_data {
-                    self.send_command(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    self.send_command(EngineCommand::AddNoteClip {
-                        track_id,
-                        clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled: false,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: 0.0,
-                    });
-                    for note in &notes {
-                        self.send_command(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            note: *note,
-                        });
-                    }
-                }
-                self.state.status_text = "Cropped clip to content".to_string();
-            }
 
             // -- Piano roll scroll --
-            Message::PianoRollScrollY(y) => {
-                self.state.piano_roll_scroll_y = y;
-            }
 
             // ── Arrangement clip interaction ──
-            Message::ResizeNoteClipDuration {
-                track_id,
-                clip_id,
-                new_duration_beats,
-            } => {
-                let mut sync_data = None;
-                let mut clip_end_beat = None;
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.duration_beats = new_duration_beats;
-
-                        // Keep the loop region inside the clip when
-                        // shrinking. Extending leaves the region
-                        // untouched so the looped pattern repeats to
-                        // fill the new length (the whole point of
-                        // stretching a looped clip).
-                        if clip.loop_enabled && clip.loop_end_beats > new_duration_beats {
-                            clip.loop_end_beats = new_duration_beats;
-                            if clip.loop_start_beats >= clip.loop_end_beats {
-                                clip.loop_start_beats = 0.0;
-                            }
-                        }
-
-                        // Auto-enable loop when extending past note content
-                        // Only if the clip actually has notes — empty clips don't loop
-                        if !clip.notes.is_empty() && !clip.loop_enabled {
-                            let loop_end = default_loop_end(&clip.notes, new_duration_beats);
-                            if loop_end > 0.0 && new_duration_beats > loop_end {
-                                clip.loop_enabled = true;
-                                clip.loop_start_beats = 0.0;
-                                clip.loop_end_beats = loop_end;
-                            }
-                        }
-
-                        clip_end_beat = Some(clip.position_beats + clip.duration_beats);
-                        sync_data = Some((
-                            clip.position_beats,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        ));
-                    }
-                }
-                // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
-                if let Some((pos, dur, notes, loop_enabled, loop_start_beats, loop_end_beats)) =
-                    sync_data
-                {
-                    self.send_command(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    self.send_command(EngineCommand::AddNoteClip {
-                        track_id,
-                        clip_id,
-                        position_beats: pos,
-                        duration_beats: dur,
-                        loop_enabled,
-                        loop_start_beats,
-                        loop_end_beats,
-                    });
-                    for note in &notes {
-                        self.send_command(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            note: *note,
-                        });
-                    }
-                }
-                if let Some(end_beat) = clip_end_beat {
-                    self.auto_scroll_to_beat(end_beat);
-                }
-                self.state.arrangement.drag_resize_active = true;
-            }
 
             // -- Split (Ctrl+E) --
             // If time selection is active → split all clips at region boundaries.
@@ -3108,34 +2640,8 @@ impl App {
             // -- Instrument attach/detach --
 
             // -- Pattern halve --
-            Message::HalveNoteClip(track_id, clip_id) => {
-                if let Some(track) = self.state.find_track_mut(track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let new_dur = (clip.duration_beats / 2.0).max(0.25);
-                        clip.duration_beats = new_dur;
-                        self.send_command(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_dur,
-                        });
-                    }
-                }
-                self.state.status_text = "Halved clip duration".to_string();
-            }
 
             // -- Edit mode --
-            Message::TogglePianoRollEditMode => {
-                use crate::state::PianoRollEditMode;
-                self.state.piano_roll_edit_mode = match self.state.piano_roll_edit_mode {
-                    PianoRollEditMode::Select => PianoRollEditMode::Draw,
-                    PianoRollEditMode::Draw => PianoRollEditMode::Select,
-                };
-                let mode_name = match self.state.piano_roll_edit_mode {
-                    PianoRollEditMode::Select => "Select",
-                    PianoRollEditMode::Draw => "Draw",
-                };
-                self.state.status_text = format!("Piano roll: {mode_name} mode");
-            }
 
             // -- Device context menu --
 
@@ -3895,10 +3401,6 @@ impl App {
             }
 
             // -- Quantize --
-            Message::QuantizeNoteClip { track_id, clip_id } => {
-                self.state.context_menu = None;
-                self.quantize_note_clip(track_id, clip_id);
-            }
             Message::QuantizeAudioClip { track_id, clip_id } => {
                 self.state.context_menu = None;
                 let grid = self.state.snap_grid;
@@ -5455,7 +4957,7 @@ impl App {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
                         format!("Quantize ({})", self.state.snap_grid.label()),
-                        Message::QuantizeNoteClip { track_id, clip_id },
+                        Message::PianoRoll(PianoRollMsg::QuantizeNoteClip { track_id, clip_id }),
                     ));
                 } else {
                     col = col.push(menu_btn(
@@ -8208,8 +7710,8 @@ impl App {
                         clip.duration_beats,
                         track_color,
                         self.state.snap_grid,
-                        self.state.piano_roll_scroll_y,
-                        self.state.piano_roll_edit_mode,
+                        self.state.piano_roll.scroll_y,
+                        self.state.piano_roll.edit_mode,
                     )
                 } else {
                     PianoRollWidget::empty(track_id, playhead_beats, track_color)
@@ -8241,7 +7743,9 @@ impl App {
             // Loop toggle
             let loop_icon_color = if clip_loop { th::ACCENT } else { th::TEXT_DIM };
             let loop_btn = button(icons::icon(icons::REPEAT).size(10).color(loop_icon_color))
-                .on_press(Message::ToggleNoteClipLoop(tid, cid))
+                .on_press(Message::PianoRoll(PianoRollMsg::ToggleNoteClipLoop(
+                    tid, cid,
+                )))
                 .padding([2, 4])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: if clip_loop {
@@ -8287,12 +7791,12 @@ impl App {
             .style(op_btn_style);
 
             let double_btn = button(text("2x").size(10).color(th::TEXT_DIM))
-                .on_press(Message::DoubleNoteClip(tid, cid))
+                .on_press(Message::PianoRoll(PianoRollMsg::DoubleNoteClip(tid, cid)))
                 .padding([2, 6])
                 .style(op_btn_style);
 
             let halve_btn = button(text("\u{00BD}x").size(10).color(th::TEXT_DIM))
-                .on_press(Message::HalveNoteClip(tid, cid))
+                .on_press(Message::PianoRoll(PianoRollMsg::HalveNoteClip(tid, cid)))
                 .padding([2, 6])
                 .style(op_btn_style);
 
@@ -8304,7 +7808,7 @@ impl App {
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::CropNoteClip(tid, cid))
+            .on_press(Message::PianoRoll(PianoRollMsg::CropNoteClip(tid, cid)))
             .padding([2, 6])
             .style(op_btn_style);
 
@@ -8322,8 +7826,8 @@ impl App {
         let label = text("Piano Roll").size(11).color(th::TEXT_DIM);
 
         // Edit mode toggle: Select / Draw
-        let select_active = self.state.piano_roll_edit_mode == PianoRollEditMode::Select;
-        let draw_active = self.state.piano_roll_edit_mode == PianoRollEditMode::Draw;
+        let select_active = self.state.piano_roll.edit_mode == PianoRollEditMode::Select;
+        let draw_active = self.state.piano_roll.edit_mode == PianoRollEditMode::Draw;
 
         let select_btn = {
             let (bg, tc) = if select_active {
@@ -8332,7 +7836,7 @@ impl App {
                 (th::BG_ELEVATED, th::TEXT_DIM)
             };
             button(icons::icon(icons::MOUSE_POINTER).size(10).color(tc))
-                .on_press(Message::TogglePianoRollEditMode)
+                .on_press(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
                 .padding([2, 5])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(bg.into()),
@@ -8357,7 +7861,7 @@ impl App {
                 (th::BG_ELEVATED, th::TEXT_DIM)
             };
             button(icons::icon(icons::PENCIL).size(10).color(tc))
-                .on_press(Message::TogglePianoRollEditMode)
+                .on_press(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
                 .padding([2, 5])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(bg.into()),
@@ -8854,23 +8358,6 @@ fn truncate_end(text: &str, max_chars: usize) -> String {
     }
 }
 
-/// Default clip loop region end: the note content's span rounded up
-/// to whole bars (4/4), capped at the clip duration. This is the
-/// Ableton behavior: loop the PATTERN, not the whole clip, so a
-/// 1-bar pattern in a longer clip repeats bar by bar.
-fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
-    const BEATS_PER_BAR: f64 = 4.0;
-    let content_end = notes
-        .iter()
-        .map(|n| n.start_beat + n.duration_beats)
-        .fold(0.0_f64, f64::max);
-    if content_end <= 0.0 {
-        return duration_beats;
-    }
-    let bars = (content_end / BEATS_PER_BAR).ceil().max(1.0);
-    (bars * BEATS_PER_BAR).min(duration_beats)
-}
-
 /// Persistent identity for a plugin device, built from scan info.
 fn plugin_device_ref(info: &PluginInfo) -> vibez_core::effect::PluginDeviceInfo {
     vibez_core::effect::PluginDeviceInfo {
@@ -9021,7 +8508,7 @@ fn global_key_handler(
         && !modifiers.shift()
         && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
     {
-        return Some(Message::TogglePianoRollEditMode);
+        return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
     }
 
     if !modifiers.control() {
