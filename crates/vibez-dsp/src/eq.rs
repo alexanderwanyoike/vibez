@@ -3,39 +3,99 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use crate::effect::AudioEffect;
 
 static EQ_PARAMS: &[ParamDescriptor] = &[
+    // ── LF band ──
     ParamDescriptor {
-        name: "Low",
-        min: -18.0,
-        max: 18.0,
+        name: "LF Gain",
+        min: -15.0,
+        max: 15.0,
         default: 0.0,
         unit: "dB",
     },
     ParamDescriptor {
-        name: "Mid Freq",
-        min: 200.0,
-        max: 4000.0,
-        default: 1000.0,
+        name: "LF Freq",
+        min: 30.0,
+        max: 450.0,
+        default: 80.0,
         unit: "Hz",
     },
     ParamDescriptor {
-        name: "Mid",
-        min: -18.0,
-        max: 18.0,
+        name: "LF Bell",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
+    // ── LMF band ──
+    ParamDescriptor {
+        name: "LMF Gain",
+        min: -15.0,
+        max: 15.0,
         default: 0.0,
         unit: "dB",
     },
     ParamDescriptor {
-        name: "High",
-        min: -18.0,
-        max: 18.0,
+        name: "LMF Freq",
+        min: 200.0,
+        max: 2500.0,
+        default: 700.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "LMF Q",
+        min: 0.3,
+        max: 4.0,
+        default: 0.7,
+        unit: "",
+    },
+    // ── HMF band ──
+    ParamDescriptor {
+        name: "HMF Gain",
+        min: -15.0,
+        max: 15.0,
         default: 0.0,
         unit: "dB",
     },
+    ParamDescriptor {
+        name: "HMF Freq",
+        min: 600.0,
+        max: 7000.0,
+        default: 2500.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "HMF Q",
+        min: 0.3,
+        max: 4.0,
+        default: 0.7,
+        unit: "",
+    },
+    // ── HF band ──
+    ParamDescriptor {
+        name: "HF Gain",
+        min: -15.0,
+        max: 15.0,
+        default: 0.0,
+        unit: "dB",
+    },
+    ParamDescriptor {
+        name: "HF Freq",
+        min: 1500.0,
+        max: 16000.0,
+        default: 8000.0,
+        unit: "Hz",
+    },
+    ParamDescriptor {
+        name: "HF Bell",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    },
 ];
 
-const LOW_SHELF_HZ: f32 = 150.0;
-const HIGH_SHELF_HZ: f32 = 4_000.0;
-const MID_Q: f32 = 0.707;
+/// Fixed bell width for the LF/HF bands when switched out of shelf
+/// mode, matching the console's fairly broad bell.
+const SHELF_BELL_Q: f32 = 0.85;
 
 #[derive(Default)]
 struct Biquad {
@@ -144,41 +204,53 @@ impl Biquad {
     }
 }
 
-/// 3-band EQ: low shelf @ 150Hz, peaking mid (sweepable), high shelf @ 4kHz.
+/// SSL E-series style four-band parametric EQ.
+///
+/// LF and HF are shelves with a bell option; LMF and HMF are fully
+/// parametric bells with sweepable Q. Parameter indices follow
+/// [`EQ_PARAMS`].
 pub struct EqEffect {
-    low_db: f32,
-    mid_hz: f32,
-    mid_db: f32,
-    high_db: f32,
+    params: [f32; 12],
     sample_rate: f32,
-    low: Biquad,
-    mid: Biquad,
-    high: Biquad,
+    lf: Biquad,
+    lmf: Biquad,
+    hmf: Biquad,
+    hf: Biquad,
 }
 
 impl EqEffect {
     pub fn new(sample_rate: f32) -> Self {
+        let mut params = [0.0_f32; 12];
+        for (i, d) in EQ_PARAMS.iter().enumerate() {
+            params[i] = d.default;
+        }
         let mut fx = Self {
-            low_db: 0.0,
-            mid_hz: 1000.0,
-            mid_db: 0.0,
-            high_db: 0.0,
+            params,
             sample_rate,
-            low: Biquad::identity(),
-            mid: Biquad::identity(),
-            high: Biquad::identity(),
+            lf: Biquad::identity(),
+            lmf: Biquad::identity(),
+            hmf: Biquad::identity(),
+            hf: Biquad::identity(),
         };
         fx.recompute();
         fx
     }
 
     fn recompute(&mut self) {
-        self.low
-            .set_low_shelf(LOW_SHELF_HZ, self.low_db, self.sample_rate);
-        self.mid
-            .set_peaking(self.mid_hz, MID_Q, self.mid_db, self.sample_rate);
-        self.high
-            .set_high_shelf(HIGH_SHELF_HZ, self.high_db, self.sample_rate);
+        let p = &self.params;
+        let sr = self.sample_rate;
+        if p[2] >= 0.5 {
+            self.lf.set_peaking(p[1], SHELF_BELL_Q, p[0], sr);
+        } else {
+            self.lf.set_low_shelf(p[1], p[0], sr);
+        }
+        self.lmf.set_peaking(p[4], p[5], p[3], sr);
+        self.hmf.set_peaking(p[7], p[8], p[6], sr);
+        if p[11] >= 0.5 {
+            self.hf.set_peaking(p[10], SHELF_BELL_Q, p[9], sr);
+        } else {
+            self.hf.set_high_shelf(p[10], p[9], sr);
+        }
     }
 }
 
@@ -192,39 +264,16 @@ impl AudioEffect for EqEffect {
     }
 
     fn set_param(&mut self, index: usize, value: f32) -> bool {
-        match index {
-            0 => {
-                self.low_db = value.clamp(-18.0, 18.0);
-                self.recompute();
-                true
-            }
-            1 => {
-                self.mid_hz = value.clamp(200.0, 4000.0);
-                self.recompute();
-                true
-            }
-            2 => {
-                self.mid_db = value.clamp(-18.0, 18.0);
-                self.recompute();
-                true
-            }
-            3 => {
-                self.high_db = value.clamp(-18.0, 18.0);
-                self.recompute();
-                true
-            }
-            _ => false,
-        }
+        let Some(d) = EQ_PARAMS.get(index) else {
+            return false;
+        };
+        self.params[index] = value.clamp(d.min, d.max);
+        self.recompute();
+        true
     }
 
     fn get_param(&self, index: usize) -> f32 {
-        match index {
-            0 => self.low_db,
-            1 => self.mid_hz,
-            2 => self.mid_db,
-            3 => self.high_db,
-            _ => 0.0,
-        }
+        self.params.get(index).copied().unwrap_or(0.0)
     }
 
     fn process(&mut self, buffer: &mut [f32], channels: usize) {
@@ -234,24 +283,36 @@ impl AudioEffect for EqEffect {
             for c in 0..ch {
                 let idx = frame * ch + c;
                 let mut s = buffer[idx];
-                s = self.low.process(s, c);
-                s = self.mid.process(s, c);
-                s = self.high.process(s, c);
+                s = self.lf.process(s, c);
+                s = self.lmf.process(s, c);
+                s = self.hmf.process(s, c);
+                s = self.hf.process(s, c);
                 buffer[idx] = s;
             }
         }
     }
 
     fn reset(&mut self) {
-        self.low.reset();
-        self.mid.reset();
-        self.high.reset();
+        self.lf.reset();
+        self.lmf.reset();
+        self.hmf.reset();
+        self.hf.reset();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rms(buf: &[f32]) -> f32 {
+        (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt()
+    }
+
+    fn tone(freq: f32, sr: f32, n: usize) -> Vec<f32> {
+        (0..n)
+            .map(|i| ((i as f32 / sr) * freq * std::f32::consts::TAU).sin() * 0.2)
+            .collect()
+    }
 
     #[test]
     fn flat_eq_approximately_passthrough() {
@@ -269,16 +330,59 @@ mod tests {
     }
 
     #[test]
-    fn low_boost_amplifies_low_frequencies() {
+    fn lf_shelf_boost_amplifies_lows_only() {
         let mut fx = EqEffect::new(44_100.0);
-        fx.set_param(0, 12.0);
-        // 60 Hz tone
-        let mut buf: Vec<f32> = (0..4_410)
-            .map(|i| ((i as f32 / 44_100.0) * 60.0 * std::f32::consts::TAU).sin() * 0.2)
-            .collect();
-        let in_rms: f32 = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
+        fx.set_param(0, 12.0); // LF gain
+        fx.set_param(1, 120.0); // LF freq
+        let mut low = tone(60.0, 44_100.0, 4_410);
+        let in_rms = rms(&low);
+        fx.process(&mut low, 1);
+        assert!(rms(&low) > in_rms * 1.5, "low should boost");
+
+        fx.reset();
+        let mut high = tone(5_000.0, 44_100.0, 4_410);
+        let in_rms = rms(&high);
+        fx.process(&mut high, 1);
+        assert!(
+            (rms(&high) / in_rms - 1.0).abs() < 0.15,
+            "highs should be untouched by an LF shelf"
+        );
+    }
+
+    #[test]
+    fn hmf_bell_cuts_at_its_center() {
+        let mut fx = EqEffect::new(44_100.0);
+        fx.set_param(6, -12.0); // HMF gain
+        fx.set_param(7, 2_000.0); // HMF freq
+        fx.set_param(8, 1.0); // Q
+        let mut buf = tone(2_000.0, 44_100.0, 8_820);
+        let in_rms = rms(&buf);
         fx.process(&mut buf, 1);
-        let out_rms: f32 = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
-        assert!(out_rms > in_rms * 1.5, "in {in_rms} out {out_rms}");
+        assert!(rms(&buf) < in_rms * 0.5, "bell cut should attenuate center");
+    }
+
+    #[test]
+    fn hf_bell_mode_leaves_extreme_highs_alone() {
+        // Shelf boosts everything above the corner; a bell at the same
+        // spot returns to unity well above its center.
+        let sr = 96_000.0;
+        let mut shelf = EqEffect::new(sr);
+        shelf.set_param(9, 12.0); // HF gain
+        shelf.set_param(10, 4_000.0);
+        let mut bell = EqEffect::new(sr);
+        bell.set_param(9, 12.0);
+        bell.set_param(10, 4_000.0);
+        bell.set_param(11, 1.0); // bell mode
+
+        let mut a = tone(30_000.0, sr, 9_600);
+        let mut b = a.clone();
+        shelf.process(&mut a, 1);
+        bell.process(&mut b, 1);
+        assert!(
+            rms(&a) > rms(&b) * 1.3,
+            "shelf should lift extreme highs more than bell: shelf {} bell {}",
+            rms(&a),
+            rms(&b)
+        );
     }
 }
