@@ -101,6 +101,9 @@ impl RunLoopRegistry {
             .collect();
 
         let mut ready_fds: Vec<(*mut c_void, i32)> = Vec::new();
+        // VST3 IRunLoop fd watching is a Linux-only contract; libc::poll
+        // does not exist on Windows, where handlers simply never fire.
+        #[cfg(unix)]
         if !self.event_handlers.is_empty() {
             let mut pollfds: Vec<libc::pollfd> = self
                 .event_handlers

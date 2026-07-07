@@ -10969,7 +10969,7 @@ fn scan_root_into(
     }
 }
 
-fn is_supported_audio_file(path: &PathBuf) -> bool {
+fn is_supported_audio_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {

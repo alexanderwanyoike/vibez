@@ -240,7 +240,6 @@ impl canvas::Program<Message> for EffectKnobWidget {
         frame.stroke(
             &bg_arc,
             round
-                .clone()
                 .with_color(Color {
                     r: 0.22,
                     g: 0.22,
@@ -262,10 +261,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
             } else {
                 self.arc_color
             };
-            frame.stroke(
-                &value_arc,
-                round.clone().with_color(arc_color).with_width(2.5),
-            );
+            frame.stroke(&value_arc, round.with_color(arc_color).with_width(2.5));
         }
 
         // Knob body: filled disc, subtly lighter while engaged.

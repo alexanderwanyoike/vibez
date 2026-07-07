@@ -98,11 +98,7 @@ impl AudioEngine {
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
 
-        let frames = if channels > 0 {
-            output.len() / channels
-        } else {
-            0
-        };
+        let frames = output.len().checked_div(channels).unwrap_or(0);
 
         // ---- 2. Zero output buffer --------------------------------------
         output.iter_mut().for_each(|s| *s = 0.0);
