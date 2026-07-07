@@ -3,6 +3,7 @@ mod domains;
 pub mod icons;
 mod message;
 pub mod plugin_window;
+mod services;
 mod state;
 mod theme;
 mod ui_settings;
