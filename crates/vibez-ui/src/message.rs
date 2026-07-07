@@ -156,6 +156,7 @@ pub enum Message {
     Arrangement(crate::domains::arrangement::ArrangementMsg),
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
+    Project(crate::domains::project::ProjectMsg),
 
     // Workspace
     SwitchWorkspace(Workspace),
@@ -240,8 +241,6 @@ pub enum Message {
     OpenProject,
     SaveProject,
     SaveProjectAs,
-    ToggleFileMenu,
-    DismissFileMenu,
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Result<ProjectLoadResult, String>),
@@ -398,8 +397,6 @@ pub enum Message {
     },
 
     // Undo / redo
-    Undo,
-    Redo,
 
     // Export
     ExportProject,
