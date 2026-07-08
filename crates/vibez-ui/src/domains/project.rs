@@ -98,7 +98,8 @@ pub fn collect_plugin_reload_requests(
     mut capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
 ) -> PluginReloadRequests {
     let mut requests = PluginReloadRequests::default();
-    for track in &mut snapshot.tracks {
+    let (tracks, master) = (&mut snapshot.tracks, &mut snapshot.master);
+    for track in tracks.iter_mut().chain(std::iter::once(master)) {
         let track_id = track.id;
         for (chain_pos, effect) in track.effects.iter().enumerate() {
             if let Some(dev) = &effect.plugin_ref {
@@ -159,6 +160,7 @@ mod tests {
         track.effects = effects;
         ProjectSnapshot {
             tracks: vec![track],
+            master: crate::state::new_master_track(),
             bpm: 120.0,
             bpm_text: "120".to_string(),
             loop_enabled: false,

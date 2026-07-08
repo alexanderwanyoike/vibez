@@ -258,6 +258,32 @@ pub fn track_color(index: u8) -> Color {
     TRACK_COLORS[index as usize % TRACK_COLORS.len()]
 }
 
+// ── Channel EQ band colors (console convention, muted) ──
+pub const EQ_HF: Color = Color {
+    r: 0.76,
+    g: 0.33,
+    b: 0.30,
+    a: 1.0,
+};
+pub const EQ_HMF: Color = Color {
+    r: 0.33,
+    g: 0.62,
+    b: 0.38,
+    a: 1.0,
+};
+pub const EQ_LMF: Color = Color {
+    r: 0.36,
+    g: 0.48,
+    b: 0.72,
+    a: 1.0,
+};
+pub const EQ_LF: Color = Color {
+    r: 0.65,
+    g: 0.46,
+    b: 0.28,
+    a: 1.0,
+};
+
 /// Darken a color by a factor (for borders, etc.)
 pub fn darken(color: Color, factor: f32) -> Color {
     Color {

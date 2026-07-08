@@ -184,6 +184,19 @@ impl Biquad {
         self.a2 = a2 / a0;
     }
 
+    /// Magnitude of the transfer function at normalized angular
+    /// frequency `w` (radians/sample). Used for drawing the response
+    /// curve; never called on the audio thread.
+    fn magnitude_at(&self, w: f64) -> f64 {
+        let (cos_w, sin_w) = (w.cos(), w.sin());
+        let (cos_2w, sin_2w) = ((2.0 * w).cos(), (2.0 * w).sin());
+        let num_re = self.b0 + self.b1 * cos_w + self.b2 * cos_2w;
+        let num_im = -(self.b1 * sin_w + self.b2 * sin_2w);
+        let den_re = 1.0 + self.a1 * cos_w + self.a2 * cos_2w;
+        let den_im = -(self.a1 * sin_w + self.a2 * sin_2w);
+        ((num_re * num_re + num_im * num_im) / (den_re * den_re + den_im * den_im)).sqrt()
+    }
+
     fn process(&mut self, sample: f32, channel: usize) -> f32 {
         let x0 = sample as f64;
         let z = &mut self.z[channel];
@@ -234,6 +247,30 @@ impl EqEffect {
         };
         fx.recompute();
         fx
+    }
+
+    /// Build an EQ from a parameter vector without touching audio
+    /// state; the UI uses this to evaluate the response curve.
+    pub fn from_params(sample_rate: f32, params: &[f32]) -> Self {
+        let mut fx = Self::new(sample_rate);
+        for (i, v) in params.iter().copied().enumerate().take(12) {
+            if let Some(d) = EQ_PARAMS.get(i) {
+                fx.params[i] = v.clamp(d.min, d.max);
+            }
+        }
+        fx.recompute();
+        fx
+    }
+
+    /// Combined magnitude response of all four bands at `freq_hz`,
+    /// in dB. Drawing-time helper; not for the audio thread.
+    pub fn response_db(&self, freq_hz: f32) -> f32 {
+        let w = 2.0 * std::f64::consts::PI * freq_hz as f64 / self.sample_rate as f64;
+        let mag = self.lf.magnitude_at(w)
+            * self.lmf.magnitude_at(w)
+            * self.hmf.magnitude_at(w)
+            * self.hf.magnitude_at(w);
+        (20.0 * mag.max(1e-9).log10()) as f32
     }
 
     fn recompute(&mut self) {
@@ -312,6 +349,46 @@ mod tests {
         (0..n)
             .map(|i| ((i as f32 / sr) * freq * std::f32::consts::TAU).sin() * 0.2)
             .collect()
+    }
+
+    #[test]
+    fn response_curve_matches_the_settings() {
+        // Flat EQ: ~0 dB everywhere.
+        let flat = EqEffect::new(48_000.0);
+        for f in [30.0, 200.0, 1_000.0, 8_000.0, 18_000.0] {
+            assert!(
+                flat.response_db(f).abs() < 0.05,
+                "flat response at {f} Hz should be ~0 dB"
+            );
+        }
+
+        // LF shelf boost: +12 dB below the corner, ~0 dB well above.
+        let mut params: Vec<f32> = EQ_PARAMS.iter().map(|d| d.default).collect();
+        params[0] = 12.0; // LF gain
+        params[1] = 120.0; // LF freq
+        let boosted = EqEffect::from_params(48_000.0, &params);
+        assert!(
+            boosted.response_db(40.0) > 10.0,
+            "lows should read near +12 dB, got {}",
+            boosted.response_db(40.0)
+        );
+        assert!(
+            boosted.response_db(8_000.0).abs() < 0.5,
+            "highs should stay flat under an LF shelf, got {}",
+            boosted.response_db(8_000.0)
+        );
+
+        // HMF bell cut reads back at its center.
+        params[0] = 0.0;
+        params[6] = -9.0; // HMF gain
+        params[7] = 2_000.0; // HMF freq
+        params[8] = 1.5; // Q
+        let cut = EqEffect::from_params(48_000.0, &params);
+        assert!(
+            cut.response_db(2_000.0) < -8.0,
+            "bell center should read near -9 dB, got {}",
+            cut.response_db(2_000.0)
+        );
     }
 
     #[test]

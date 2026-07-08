@@ -2,7 +2,7 @@
 
 use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
 
 /// Helper to create a simple stereo decoded audio with a known pattern.
 fn make_test_audio(frames: usize) -> Arc<DecodedAudio> {
@@ -1214,5 +1214,177 @@ fn effect_tails_ring_out_after_stop() {
     assert!(
         tail > 0.01,
         "delay tail should ring out after stop, got {tail}"
+    );
+}
+
+#[test]
+fn master_gain_scales_the_summed_mix() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(100, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.5))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 16];
+    engine.process(&mut buf, 2);
+
+    let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+    assert!(
+        (buf[0] - expected).abs() < 1e-4,
+        "master gain 0.5 should halve the mix: expected {expected} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn master_effect_chain_processes_the_summed_mix() {
+    use vibez_core::effect::EffectType;
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(4_096, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 4_096,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    // A master EQ with the LF shelf slammed down should attenuate a
+    // constant (DC-heavy) signal relative to the flat default.
+    let eq_id = EffectId::new();
+    cmd_tx
+        .push(EngineCommand::AddEffect {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            effect_type: EffectType::Eq,
+            position: None,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            param_index: 0, // LF gain
+            value: -15.0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            param_index: 1, // LF freq up to make the cut obvious
+            value: 450.0,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 2_048];
+    let mut last_rms = 0.0f32;
+    for _ in 0..3 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        last_rms = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
+    }
+    let flat = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        last_rms < flat * 0.5,
+        "master LF cut should attenuate the constant mix well below {flat}, got {last_rms}"
+    );
+
+    // Bypassing the master EQ restores the flat mix.
+    cmd_tx
+        .push(EngineCommand::SetEffectBypass {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            bypass: true,
+        })
+        .unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2);
+    assert!(
+        (buf[0] - flat).abs() < 1e-3,
+        "bypassed master chain should pass the mix through, got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn spectrum_tap_streams_track_samples() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let mut spectrum_rx = engine.take_spectrum_consumer().unwrap();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "T".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(10_000, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 10_000,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetSpectrumTap(Some(tid)))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 1024];
+    engine.process(&mut buf, 2);
+
+    let mut peak = 0.0f32;
+    let mut count = 0;
+    while let Ok(s) = spectrum_rx.pop() {
+        peak = peak.max(s.abs());
+        count += 1;
+    }
+    assert_eq!(count, 512, "one mono sample per frame");
+    assert!(peak > 0.4, "tap should carry the clip audio, got {peak}");
+
+    // Retarget to master: still streams (the summed mix).
+    cmd_tx
+        .push(EngineCommand::SetSpectrumTap(Some(TrackId::MASTER)))
+        .unwrap();
+    engine.process(&mut buf, 2);
+    let mut master_peak = 0.0f32;
+    while let Ok(s) = spectrum_rx.pop() {
+        master_peak = master_peak.max(s.abs());
+    }
+    assert!(
+        master_peak > 0.3,
+        "master tap should carry the mix, got {master_peak}"
     );
 }

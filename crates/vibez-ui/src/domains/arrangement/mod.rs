@@ -175,8 +175,9 @@ pub struct ArrangementCtx {
 }
 
 /// Every channel carries an SSL-style EQ, console style: create it
-/// flat (passthrough) alongside the track.
-fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTrack) {
+/// flat (passthrough) alongside the track. Also used for the master
+/// bus, which is why it is crate-visible.
+pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTrack) {
     let effect_id = vibez_core::id::EffectId::new();
     let effect_type = vibez_core::effect::EffectType::Eq;
     let descriptors = vibez_dsp::factory::create_effect(effect_type, 48_000.0).param_descriptors();
@@ -201,6 +202,9 @@ fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTrack) {
 
 impl ArrangementState {
     fn find_track(&self, track_id: TrackId) -> Option<&UiTrack> {
+        if track_id.is_master() {
+            return Some(&self.master);
+        }
         self.tracks.iter().find(|t| t.id == track_id)
     }
 
@@ -217,6 +221,9 @@ impl ArrangementState {
     }
 
     fn find_track_mut(&mut self, track_id: TrackId) -> Option<&mut UiTrack> {
+        if track_id.is_master() {
+            return Some(&mut self.master);
+        }
         self.tracks.iter_mut().find(|t| t.id == track_id)
     }
 
@@ -274,6 +281,10 @@ impl ArrangementState {
                 action.status = Some(format!("{} tracks", self.tracks.len()));
             }
             ArrangementMsg::RemoveTrack(track_id) => {
+                if track_id.is_master() {
+                    // The master bus cannot be deleted.
+                    return action;
+                }
                 let removed_name = self
                     .tracks
                     .iter()

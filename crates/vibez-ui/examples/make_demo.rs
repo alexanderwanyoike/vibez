@@ -151,6 +151,7 @@ fn main() {
     note_clips.push(clip(lead.id, "Hook", 32.0, 16.0, notes));
 
     let project = Project {
+        master: None,
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
         sample_rate: 48_000,

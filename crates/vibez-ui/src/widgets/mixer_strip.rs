@@ -13,17 +13,28 @@ use crate::widgets::knob::KnobWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
 use vibez_core::midi::TrackKind;
 
-/// Render a single mixer channel strip for a track.
+/// Render a single mixer channel strip for a track. The master bus
+/// renders through the same strip: EQ, fader, and meter, minus the
+/// controls that make no sense on a sum (pan, mute, solo).
 pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message> {
-    let track_color = th::track_color(track.color_index);
+    let is_master = track.id.is_master();
+    let track_color = if is_master {
+        th::ACCENT
+    } else {
+        th::track_color(track.color_index)
+    };
 
     // Track name + type icon
-    let type_icon = match track.kind {
-        TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
-            .size(10)
-            .color(track_color),
-        TrackKind::Instrument(_) | TrackKind::Midi => {
-            icons::icon(icons::MUSIC).size(10).color(track_color)
+    let type_icon = if is_master {
+        icons::icon(icons::VOLUME_2).size(10).color(track_color)
+    } else {
+        match track.kind {
+            TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
+                .size(10)
+                .color(track_color),
+            TrackKind::Instrument(_) | TrackKind::Midi => {
+                icons::icon(icons::MUSIC).size(10).color(track_color)
+            }
         }
     };
 
@@ -141,15 +152,32 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
 
     let eq_section = view_strip_eq(track);
 
-    let strip = column![
-        name_row,
-        eq_section,
-        knob_canvas,
-        pan_label,
-        fader_meter,
-        gain_label,
-        mute_solo_row,
-    ]
+    let strip = if is_master {
+        // No pan, mute, or solo on the sum: a MASTER tag keeps the
+        // strip's vertical rhythm instead.
+        let badge = container(text("MASTER").size(8).color(th::ACCENT))
+            .padding([3, 8])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        column![name_row, eq_section, badge, fader_meter, gain_label]
+    } else {
+        column![
+            name_row,
+            eq_section,
+            knob_canvas,
+            pan_label,
+            fader_meter,
+            gain_label,
+            mute_solo_row,
+        ]
+    }
     .spacing(4)
     .padding(8)
     .width(Length::Fixed(94.0))
@@ -217,10 +245,10 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
     };
 
     // Console band colors, muted for the theme.
-    const HF: iced::Color = iced::Color::from_rgb(0.76, 0.33, 0.30);
-    const HMF: iced::Color = iced::Color::from_rgb(0.33, 0.62, 0.38);
-    const LMF: iced::Color = iced::Color::from_rgb(0.36, 0.48, 0.72);
-    const LF: iced::Color = iced::Color::from_rgb(0.65, 0.46, 0.28);
+    const HF: iced::Color = th::EQ_HF;
+    const HMF: iced::Color = th::EQ_HMF;
+    const LMF: iced::Color = th::EQ_LMF;
+    const LF: iced::Color = th::EQ_LF;
 
     let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
 
