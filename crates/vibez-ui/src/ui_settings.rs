@@ -23,6 +23,10 @@ pub struct UiSettings {
     /// startup. `None` means auto-pick the first visible port.
     #[serde(default)]
     pub preferred_midi_input: Option<String>,
+    /// Selected theme name (built-in or user `.vzt`); `None` means
+    /// the default Charcoal.
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 impl Default for UiSettings {
@@ -33,6 +37,7 @@ impl Default for UiSettings {
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
+            theme: None,
         }
     }
 }

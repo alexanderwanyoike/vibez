@@ -120,6 +120,7 @@ impl App {
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
+            theme: Some(self.state.current_theme_name.clone()),
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");

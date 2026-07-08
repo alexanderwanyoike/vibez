@@ -159,7 +159,7 @@ impl App {
             ..Default::default()
         };
 
-        let state = AppState {
+        let mut state = AppState {
             transport: crate::state::TransportState {
                 sample_rate,
                 ..Default::default()
@@ -174,6 +174,27 @@ impl App {
             },
             ..Default::default()
         };
+
+        // Themes: scan the user's .vzt collection, then restore the
+        // saved selection (built-in name or user theme name).
+        let (user_themes, theme_warnings) = crate::themes::scan_user_themes();
+        for warning in theme_warnings {
+            eprintln!("vibez: theme scan: {warning}");
+        }
+        state.user_themes = user_themes;
+        if let Some(name) = &ui_settings.theme {
+            let palette = crate::themes::builtin_by_name(name).or_else(|| {
+                state
+                    .user_themes
+                    .iter()
+                    .find(|t| t.palette.name == *name)
+                    .map(|t| t.palette.clone())
+            });
+            if let Some(palette) = palette {
+                th::set_theme(palette);
+                state.current_theme_name = name.clone();
+            }
+        }
 
         let (plugin_effect_tx, plugin_effect_rx) = std::sync::mpsc::channel();
         let (plugin_instrument_tx, plugin_instrument_rx) = std::sync::mpsc::channel();
@@ -228,8 +249,9 @@ impl App {
             )
         };
 
-        // `vibez <project.vibez>` opens a project straight from the
-        // command line (also how file-manager associations launch us).
+        // `vibez <project.vzp>` opens a project straight from the
+        // command line (also how file-manager associations launch
+        // us). Legacy `.vibez` files load the same way.
         let open_task = std::env::args()
             .nth(1)
             .map(std::path::PathBuf::from)
@@ -238,6 +260,18 @@ impl App {
             .unwrap_or_else(Task::none);
 
         (app, Task::batch([startup_task, open_task]))
+    }
+
+    /// Find a theme by name: built-ins first, then the scanned user
+    /// collection.
+    pub(crate) fn resolve_theme(&self, name: &str) -> Option<crate::theme::ThemePalette> {
+        crate::themes::builtin_by_name(name).or_else(|| {
+            self.state
+                .user_themes
+                .iter()
+                .find(|t| t.palette.name == name)
+                .map(|t| t.palette.clone())
+        })
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {
