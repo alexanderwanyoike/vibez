@@ -39,7 +39,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         let h = bounds.height;
 
         // Background
-        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::BG_DARK);
+        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::bg_dark());
 
         // Center line
         let center_y = h / 2.0;
@@ -52,7 +52,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             canvas::Stroke::default()
                 .with_color(Color {
                     a: 0.3,
-                    ..theme::TEXT_DIM
+                    ..theme::text_dim()
                 })
                 .with_width(1.0),
         );
@@ -183,7 +183,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             frame.stroke(
                 &playhead_line,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(2.0),
             );
         }

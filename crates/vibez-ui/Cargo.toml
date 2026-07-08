@@ -22,3 +22,6 @@ rfd = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 x11rb = "0.13"
 dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

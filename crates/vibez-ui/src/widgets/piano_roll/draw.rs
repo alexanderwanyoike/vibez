@@ -36,7 +36,7 @@ impl PianoRollWidget {
         let grid_ppb = grid_width / total as f32;
 
         // Full background
-        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::BG_DARK);
+        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::bg_dark());
 
         // Determine visible row range for culling
         let first_visible = (self.scroll_y / KEY_HEIGHT).floor() as usize;
@@ -54,7 +54,11 @@ impl PianoRollWidget {
             }
 
             let is_black = is_black_key(pitch);
-            let row_bg = if is_black { BLACK_ROW_BG } else { WHITE_ROW_BG };
+            let row_bg = if is_black {
+                theme::piano_black_row()
+            } else {
+                theme::piano_white_row()
+            };
 
             frame.fill_rectangle(
                 iced::Point::new(KEY_WIDTH, y),
@@ -65,9 +69,9 @@ impl PianoRollWidget {
             // Horizontal grid line
             let is_c = pitch.is_multiple_of(12);
             let (line_color, line_width) = if is_c {
-                (OCTAVE_LINE, 1.0)
+                (theme::piano_octave_line(), 1.0)
             } else {
-                (GRID_LINE, 0.5)
+                (theme::piano_grid(), 0.5)
             };
             let hline = canvas::Path::line(
                 iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
@@ -97,10 +101,10 @@ impl PianoRollWidget {
                 } else if hovered_pitch == Some(pitch) {
                     Color {
                         a: 0.75,
-                        ..WHITE_KEY_COLOR
+                        ..theme::piano_white_key()
                     }
                 } else {
-                    WHITE_KEY_COLOR
+                    theme::piano_white_key()
                 };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
@@ -116,7 +120,7 @@ impl PianoRollWidget {
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
-                        .with_color(theme::DIVIDER)
+                        .with_color(theme::divider())
                         .with_width(0.5),
                 );
             }
@@ -137,26 +141,16 @@ impl PianoRollWidget {
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
                     iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
-                    Color {
-                        r: 0.14,
-                        g: 0.14,
-                        b: 0.14,
-                        a: 1.0,
-                    },
+                    theme::piano_white_row(),
                 );
 
                 // Black key itself
                 let fill = if pressed_pitch == Some(pitch) {
                     self.track_color
                 } else if hovered_pitch == Some(pitch) {
-                    Color {
-                        r: 0.35,
-                        g: 0.35,
-                        b: 0.35,
-                        a: 1.0,
-                    }
+                    theme::border_light()
                 } else {
-                    BLACK_KEY_COLOR
+                    theme::piano_black_key()
                 };
                 frame.fill_rectangle(
                     iced::Point::new(0.0, y),
@@ -172,7 +166,7 @@ impl PianoRollWidget {
                 frame.stroke(
                     &border,
                     canvas::Stroke::default()
-                        .with_color(theme::DIVIDER)
+                        .with_color(theme::divider())
                         .with_width(0.5),
                 );
             }
@@ -192,7 +186,7 @@ impl PianoRollWidget {
                 frame.fill_text(canvas::Text {
                     content: label,
                     position: iced::Point::new(black_key_width + 3.0, y + 2.0),
-                    color: KEY_LABEL_COLOR,
+                    color: theme::piano_key_label(),
                     size: iced::Pixels(10.0),
                     ..Default::default()
                 });
@@ -207,7 +201,7 @@ impl PianoRollWidget {
         frame.stroke(
             &sep,
             canvas::Stroke::default()
-                .with_color(theme::BORDER)
+                .with_color(theme::border())
                 .with_width(1.0),
         );
 
@@ -227,35 +221,11 @@ impl PianoRollWidget {
             let is_beat = beat_int % 1000 == 0;
 
             let (line_color, line_width) = if is_bar {
-                (
-                    Color {
-                        r: 0.376,
-                        g: 0.376,
-                        b: 0.376,
-                        a: 1.0,
-                    },
-                    1.5,
-                ) // #606060
+                (theme::grid_bar(), 1.5)
             } else if is_beat {
-                (
-                    Color {
-                        r: 0.251,
-                        g: 0.251,
-                        b: 0.251,
-                        a: 1.0,
-                    },
-                    1.0,
-                ) // #404040
+                (theme::grid_beat(), 1.0)
             } else {
-                (
-                    Color {
-                        r: 0.216,
-                        g: 0.216,
-                        b: 0.216,
-                        a: 1.0,
-                    },
-                    1.0,
-                ) // #373737
+                (theme::grid_sub(), 1.0)
             };
 
             let vline =
@@ -270,7 +240,7 @@ impl PianoRollWidget {
 
         // ── Draw notes ──
         if let Some(ref clip_data) = self.clip {
-            let selected_color = theme::SOLO_ACTIVE;
+            let selected_color = theme::solo_active();
             let looping =
                 clip_data.loop_enabled && clip_data.loop_end_beats > clip_data.loop_start_beats;
             let loop_len = if looping {
@@ -483,7 +453,7 @@ impl PianoRollWidget {
             frame.stroke(
                 &playhead_line,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(1.5),
             );
         }
@@ -493,7 +463,7 @@ impl PianoRollWidget {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, RULER_HEIGHT),
-            theme::BG_SURFACE,
+            theme::bg_surface(),
         );
 
         // Bottom border
@@ -504,7 +474,7 @@ impl PianoRollWidget {
         frame.stroke(
             &ruler_border,
             canvas::Stroke::default()
-                .with_color(theme::BORDER)
+                .with_color(theme::border())
                 .with_width(1.0),
         );
 
@@ -529,13 +499,13 @@ impl PianoRollWidget {
                 frame.stroke(
                     &tick,
                     canvas::Stroke::default()
-                        .with_color(theme::TEXT_MUTED)
+                        .with_color(theme::text_muted())
                         .with_width(1.0),
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{bar_num}"),
                     position: iced::Point::new(x + 3.0, 3.0),
-                    color: theme::TEXT_DIM,
+                    color: theme::text_dim(),
                     size: iced::Pixels(10.0),
                     ..Default::default()
                 });
@@ -550,13 +520,13 @@ impl PianoRollWidget {
                 frame.stroke(
                     &tick,
                     canvas::Stroke::default()
-                        .with_color(theme::TEXT_MUTED)
+                        .with_color(theme::text_muted())
                         .with_width(0.5),
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{}.{}", bar_index + 1, beat_in_bar),
                     position: iced::Point::new(x + 2.0, 5.0),
-                    color: theme::TEXT_MUTED,
+                    color: theme::text_muted(),
                     size: iced::Pixels(8.0),
                     ..Default::default()
                 });
@@ -572,7 +542,7 @@ impl PianoRollWidget {
             frame.stroke(
                 &marker,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(1.5),
             );
         }

@@ -19,7 +19,7 @@ use vibez_core::midi::TrackKind;
 pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message> {
     let is_master = track.id.is_master();
     let track_color = if is_master {
-        th::ACCENT
+        th::accent()
     } else {
         th::track_color(track.color_index)
     };
@@ -40,7 +40,7 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
 
     let name = text(&track.name)
         .size(12)
-        .color(th::TEXT)
+        .color(th::text())
         .width(Length::Fill);
 
     let name_row = row![type_icon, name]
@@ -54,7 +54,7 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
         .height(Length::Fixed(36.0))
         .into();
 
-    let pan_label = text(format_pan(track.pan)).size(10).color(th::TEXT_DIM);
+    let pan_label = text(format_pan(track.pan)).size(10).color(th::text_dim());
 
     // Fader (wider)
     let fader = FaderWidget::new(track.id, track.gain, track_color);
@@ -65,7 +65,7 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
 
     let gain_label = text(format_gain_db(track.gain))
         .size(11)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
 
     // VU meter (wider)
     let meter = VuMeterWidget {
@@ -81,12 +81,12 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     let mute_btn = {
         let label = text("M").size(11);
         if track.mute {
-            button(label.color(th::BG_DARK))
+            button(label.color(th::bg_dark()))
                 .on_press(Message::set_track_mute(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::MUTE_ACTIVE.into()),
-                    text_color: th::BG_DARK,
+                    background: Some(th::mute_active().into()),
+                    text_color: th::bg_dark(),
                     border: iced::Border {
                         radius: 2.0.into(),
                         ..Default::default()
@@ -94,14 +94,14 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
                     ..Default::default()
                 })
         } else {
-            button(label.color(th::TEXT_DIM))
+            button(label.color(th::text_dim()))
                 .on_press(Message::set_track_mute(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 2.0.into(),
                     },
@@ -114,12 +114,12 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     let solo_btn = {
         let label = text("S").size(11);
         if track.solo {
-            button(label.color(th::BG_DARK))
+            button(label.color(th::bg_dark()))
                 .on_press(Message::set_track_solo(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::SOLO_ACTIVE.into()),
-                    text_color: th::BG_DARK,
+                    background: Some(th::solo_active().into()),
+                    text_color: th::bg_dark(),
                     border: iced::Border {
                         radius: 2.0.into(),
                         ..Default::default()
@@ -127,14 +127,14 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
                     ..Default::default()
                 })
         } else {
-            button(label.color(th::TEXT_DIM))
+            button(label.color(th::text_dim()))
                 .on_press(Message::set_track_solo(track.id))
                 .padding([4, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 2.0.into(),
                     },
@@ -155,12 +155,12 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     let strip = if is_master {
         // No pan, mute, or solo on the sum: a MASTER tag keeps the
         // strip's vertical rhythm instead.
-        let badge = container(text("MASTER").size(8).color(th::ACCENT))
+        let badge = container(text("MASTER").size(8).color(th::accent()))
             .padding([3, 8])
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_ELEVATED.into()),
+                background: Some(th::bg_elevated().into()),
                 border: iced::Border {
-                    color: th::ACCENT_DIM,
+                    color: th::accent_dim(),
                     width: 1.0,
                     radius: 2.0.into(),
                 },
@@ -187,9 +187,9 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     let body = container(strip)
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: if selected { th::ACCENT } else { th::BORDER },
+                color: if selected { th::accent() } else { th::border() },
                 width: 1.0,
                 radius: 2.0.into(),
             },
@@ -218,21 +218,21 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
 
     let Some(eq) = eq else {
         return container(
-            button(text("+ EQ").size(10).color(th::TEXT_DIM))
+            button(text("+ EQ").size(10).color(th::text_dim()))
                 .on_press(Message::add_effect(track.id, EffectType::Eq))
                 .padding([2, 10])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT_DIM,
+                        text_color: th::text_dim(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 2.0.into(),
                         },
@@ -244,11 +244,11 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         .into();
     };
 
-    // Console band colors, muted for the theme.
-    const HF: iced::Color = th::EQ_HF;
-    const HMF: iced::Color = th::EQ_HMF;
-    const LMF: iced::Color = th::EQ_LMF;
-    const LF: iced::Color = th::EQ_LF;
+    // Console band colors, from the current theme.
+    let hf = th::eq_hf();
+    let hmf = th::eq_hmf();
+    let lmf = th::eq_lmf();
+    let lf = th::eq_lf();
 
     let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
 
@@ -257,21 +257,25 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         let active = !eq.bypass;
         let label = text("IN").size(8);
         button(if active {
-            label.color(th::BG_DARK)
+            label.color(th::bg_dark())
         } else {
-            label.color(th::TEXT_DIM)
+            label.color(th::text_dim())
         })
         .on_press(Message::toggle_effect_bypass(track.id, eq.id))
         .padding([1, 5])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(if active {
-                th::ACCENT.into()
+                th::accent().into()
             } else {
-                th::BG_ELEVATED.into()
+                th::bg_elevated().into()
             }),
-            text_color: if active { th::BG_DARK } else { th::TEXT_DIM },
+            text_color: if active {
+                th::bg_dark()
+            } else {
+                th::text_dim()
+            },
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 2.0.into(),
             },
@@ -279,17 +283,17 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         })
     };
     bands = bands.push(
-        row![text("EQ").size(9).color(th::TEXT_DIM), in_btn]
+        row![text("EQ").size(9).color(th::text_dim()), in_btn]
             .spacing(6)
             .align_y(iced::Alignment::Center),
     );
 
     // (gain idx, freq idx, q/bell idx, bell?, color, label)
     let rows: [(usize, usize, usize, bool, iced::Color, &str); 4] = [
-        (9, 10, 11, true, HF, "HF"),
-        (6, 7, 8, false, HMF, "HMF"),
-        (3, 4, 5, false, LMF, "LMF"),
-        (0, 1, 2, true, LF, "LF"),
+        (9, 10, 11, true, hf, "HF"),
+        (6, 7, 8, false, hmf, "HMF"),
+        (3, 4, 5, false, lmf, "LMF"),
+        (0, 1, 2, true, lf, "LF"),
     ];
     for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in rows.into_iter().enumerate()
     {
@@ -302,7 +306,7 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
                         background: Some(
                             iced::Color {
                                 a: 0.5,
-                                ..th::BORDER
+                                ..th::border()
                             }
                             .into(),
                         ),
@@ -359,7 +363,7 @@ fn view_eq_band<'a>(
     // tucks under the gain. The eye zig-zags down the strip.
     let dim = iced::Color {
         a: 0.75,
-        ..th::TEXT_DIM
+        ..th::text_dim()
     };
     let gain_col = column![
         row![
@@ -375,11 +379,11 @@ fn view_eq_band<'a>(
 
     let third_el: Element<'a, Message> = if bell_toggle {
         let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
-        button(
-            text("BELL")
-                .size(6)
-                .color(if bell_on { th::BG_DARK } else { th::TEXT_DIM }),
-        )
+        button(text("BELL").size(6).color(if bell_on {
+            th::bg_dark()
+        } else {
+            th::text_dim()
+        }))
         .on_press(Message::set_effect_param(
             track_id,
             eq.id,
@@ -391,11 +395,15 @@ fn view_eq_band<'a>(
             background: Some(if bell_on {
                 color.into()
             } else {
-                th::BG_ELEVATED.into()
+                th::bg_elevated().into()
             }),
-            text_color: if bell_on { th::BG_DARK } else { th::TEXT_DIM },
+            text_color: if bell_on {
+                th::bg_dark()
+            } else {
+                th::text_dim()
+            },
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 2.0.into(),
             },

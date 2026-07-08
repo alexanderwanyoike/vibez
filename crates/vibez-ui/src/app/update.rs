@@ -418,6 +418,54 @@ impl App {
                 self.persist_ui_settings();
                 self.state.status_text = "MIDI input disconnected".to_string();
             }
+            Message::SelectTheme(name) => {
+                if let Some(palette) = self.resolve_theme(&name) {
+                    th::set_theme(palette);
+                    self.state.current_theme_name = name.clone();
+                    self.persist_ui_settings();
+                    self.state.status_text = format!("Theme: {name}");
+                } else {
+                    self.state.status_text = format!("Theme {name:?} not found");
+                }
+            }
+            Message::RescanThemes => {
+                let (themes, warnings) = crate::themes::scan_user_themes();
+                let count = themes.len();
+                self.state.user_themes = themes;
+                self.state.status_text = if warnings.is_empty() {
+                    format!("{count} user theme(s) found")
+                } else {
+                    format!("{count} user theme(s), {} skipped", warnings.len())
+                };
+                for warning in warnings {
+                    eprintln!("vibez: theme scan: {warning}");
+                }
+            }
+            Message::ThemeSaveNameChanged(name) => {
+                self.state.theme_save_name = name;
+            }
+            Message::SaveCurrentTheme => {
+                let name = self.state.theme_save_name.trim().to_string();
+                if name.is_empty() {
+                    self.state.status_text = "Name the theme before saving".to_string();
+                    return Task::none();
+                }
+                let mut palette = th::current();
+                palette.name = name.clone();
+                match crate::themes::save_user_theme(&palette) {
+                    Ok(path) => {
+                        let (themes, _) = crate::themes::scan_user_themes();
+                        self.state.user_themes = themes;
+                        self.state.current_theme_name = name;
+                        self.state.theme_save_name.clear();
+                        self.persist_ui_settings();
+                        self.state.status_text = format!("Theme saved to {}", path.display());
+                    }
+                    Err(err) => {
+                        self.state.status_text = format!("Theme save error: {err}");
+                    }
+                }
+            }
             Message::RewarpAllClips => {
                 return self.handle_rewarp_all_clips();
             }
@@ -544,7 +592,7 @@ impl App {
                     async {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Open Vibez Project")
-                            .add_filter("Vibez Project", &["vibez", "json"])
+                            .add_filter("Vibez Project", &["vzp", "vibez", "json"])
                             .pick_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -566,8 +614,8 @@ impl App {
                     async {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Save Vibez Project")
-                            .set_file_name("Untitled.vibez")
-                            .add_filter("Vibez Project", &["vibez"])
+                            .set_file_name("Untitled.vzp")
+                            .add_filter("Vibez Project", &["vzp", "vibez"])
                             .save_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -590,7 +638,7 @@ impl App {
             Message::ProjectSavePathSelected(path) => {
                 if let Some(mut path) = path {
                     if path.extension().is_none() {
-                        path.set_extension("vibez");
+                        path.set_extension("vzp");
                     }
                     let project = self.project_from_state();
                     return Task::perform(save_project_async(path, project), Message::ProjectSaved);

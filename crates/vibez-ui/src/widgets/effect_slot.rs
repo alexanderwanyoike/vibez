@@ -26,7 +26,7 @@ pub fn view_effect_slot<'a>(
     let is_plugin = effect.plugin_name.is_some();
 
     let dot_color = if is_bypassed {
-        th::TEXT_MUTED
+        th::text_muted()
     } else {
         track_color
     };
@@ -37,7 +37,7 @@ pub fn view_effect_slot<'a>(
         .padding([2, 3])
         .style(move |_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered => Some(th::BG_HOVER.into()),
+                button::Status::Hovered => Some(th::bg_hover().into()),
                 _ => None,
             };
             button::Style {
@@ -55,7 +55,11 @@ pub fn view_effect_slot<'a>(
         .plugin_name
         .as_deref()
         .unwrap_or_else(|| effect.effect_type.name());
-    let name_color = if is_bypassed { th::TEXT_DIM } else { th::TEXT };
+    let name_color = if is_bypassed {
+        th::text_dim()
+    } else {
+        th::text()
+    };
 
     let name_elem = text(display_name).size(11).color(name_color);
 
@@ -73,19 +77,19 @@ pub fn view_effect_slot<'a>(
             effect_id: effect.id,
         };
         Some(
-            button(text("Edit").size(9).color(th::TEXT_DIM))
+            button(text("Edit").size(9).color(th::text_dim()))
                 .on_press(Message::OpenPluginGui(gui_key))
                 .padding([2, 5])
                 .style(|_theme: &Theme, status| {
                     let (bg, tc) = match status {
-                        button::Status::Hovered => (Some(th::BG_HOVER.into()), th::ACCENT),
-                        _ => (None, th::TEXT_DIM),
+                        button::Status::Hovered => (Some(th::bg_hover().into()), th::accent()),
+                        _ => (None, th::text_dim()),
                     };
                     button::Style {
                         background: bg,
                         text_color: tc,
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 3.0.into(),
                         },
@@ -97,9 +101,9 @@ pub fn view_effect_slot<'a>(
 
     let bypass_label = if is_bypassed { "Off" } else { "On" };
     let bypass_color = if is_bypassed {
-        th::TEXT_MUTED
+        th::text_muted()
     } else {
-        th::SUCCESS
+        th::success()
     };
     let make_bypass = move || {
         button(text(bypass_label).size(9).color(bypass_color))
@@ -107,7 +111,7 @@ pub fn view_effect_slot<'a>(
             .padding([2, 5])
             .style(move |_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered => Some(th::bg_hover().into()),
                     _ => None,
                 };
                 button::Style {
@@ -115,9 +119,9 @@ pub fn view_effect_slot<'a>(
                     text_color: bypass_color,
                     border: iced::Border {
                         color: if is_bypassed {
-                            th::BORDER
+                            th::border()
                         } else {
-                            th::darken(th::SUCCESS, 0.5)
+                            th::darken(th::success(), 0.5)
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -130,8 +134,8 @@ pub fn view_effect_slot<'a>(
     let make_move_up = || -> Element<'a, Message> {
         action_btn(
             icons::CHEVRON_UP,
-            th::TEXT_DIM,
-            th::TEXT,
+            th::text_dim(),
+            th::text(),
             Message::move_effect_up(track_id, effect.id),
         )
         .into()
@@ -139,16 +143,16 @@ pub fn view_effect_slot<'a>(
     let make_move_down = || -> Element<'a, Message> {
         action_btn(
             icons::CHEVRON_DOWN,
-            th::TEXT_DIM,
-            th::TEXT,
+            th::text_dim(),
+            th::text(),
             Message::move_effect_down(track_id, effect.id),
         )
         .into()
     };
     let remove: Element<'a, Message> = action_btn(
         icons::X,
-        th::TEXT_DIM,
-        th::DANGER,
+        th::text_dim(),
+        th::danger(),
         Message::remove_effect(track_id, effect.id),
     )
     .into();
@@ -175,7 +179,7 @@ pub fn view_effect_slot<'a>(
         .padding([4, 6])
         .width(Length::Fill)
         .style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             ..Default::default()
         });
 
@@ -188,7 +192,7 @@ pub fn view_effect_slot<'a>(
             .into()
     } else if has_params && !has_gui {
         let knob_color = if is_bypassed {
-            th::TEXT_MUTED
+            th::text_muted()
         } else {
             track_color
         };
@@ -226,12 +230,12 @@ pub fn view_effect_slot<'a>(
             .as_ref()
             .map(|d| d.format.to_uppercase())
             .unwrap_or_else(|| "PLUGIN".to_string());
-        let badge = container(text(format_label).size(8).color(th::ACCENT))
+        let badge = container(text(format_label).size(8).color(th::accent()))
             .padding([2, 8])
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_DARK.into()),
+                background: Some(th::bg_dark().into()),
                 border: iced::Border {
-                    color: th::ACCENT_DIM,
+                    color: th::accent_dim(),
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -279,9 +283,9 @@ pub fn view_effect_slot<'a>(
 
     container(card)
         .style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_ELEVATED.into()),
+            background: Some(th::bg_elevated().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -302,8 +306,8 @@ fn action_btn(
         .padding([3, 4])
         .style(move |_theme: &Theme, status| {
             let (bg, tc) = match status {
-                button::Status::Hovered => (Some(th::BG_HOVER.into()), hover_color),
-                button::Status::Pressed => (Some(th::BG_DARK.into()), hover_color),
+                button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
+                button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
                 _ => (None, color),
             };
             button::Style {

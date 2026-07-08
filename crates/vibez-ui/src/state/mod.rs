@@ -106,6 +106,7 @@ pub enum SettingsTab {
     Plugins,
     Dropbox,
     Warping,
+    Appearance,
 }
 
 /// A point-in-time snapshot of the editable project state, used to
@@ -402,6 +403,11 @@ pub struct AppState {
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
 
+    // Appearance / themes
+    pub current_theme_name: String,
+    pub user_themes: Vec<crate::themes::UserTheme>,
+    pub theme_save_name: String,
+
     // Plugin hosting
     pub plugin_settings: PluginSettings,
     pub plugin_scan_in_progress: bool,
@@ -435,6 +441,9 @@ impl Default for AppState {
             warp_confidence_threshold: 0.6,
             automation_ui: crate::domains::automation::AutomationState::default(),
             browser: BrowserState::default(),
+            current_theme_name: "Charcoal".to_string(),
+            user_themes: Vec::new(),
+            theme_save_name: String::new(),
             plugin_settings: PluginSettings::load(),
             plugin_scan_in_progress: false,
             plugin_scan_status: String::new(),

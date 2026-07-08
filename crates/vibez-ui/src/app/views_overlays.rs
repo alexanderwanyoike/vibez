@@ -39,9 +39,9 @@ impl App {
         if is_midi {
             let inst_active = menu.category == Some(DeviceMenuCategory::Instruments);
             let (bg, tc) = if inst_active {
-                (th::ACCENT_DIM, th::ACCENT)
+                (th::accent_dim(), th::accent())
             } else {
-                (th::BG_ELEVATED, th::TEXT_DIM)
+                (th::bg_elevated(), th::text_dim())
             };
             let inst_tab = button(text("Instruments").size(11).color(tc))
                 .on_press(Message::set_device_menu_category(
@@ -53,9 +53,9 @@ impl App {
                     text_color: tc,
                     border: iced::Border {
                         color: if inst_active {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 4.0.into(),
@@ -66,9 +66,9 @@ impl App {
         }
         let fx_active = menu.category == Some(DeviceMenuCategory::Effects);
         let (bg, tc) = if fx_active {
-            (th::ACCENT_DIM, th::ACCENT)
+            (th::accent_dim(), th::accent())
         } else {
-            (th::BG_ELEVATED, th::TEXT_DIM)
+            (th::bg_elevated(), th::text_dim())
         };
         let fx_tab = button(text("Effects").size(11).color(tc))
             .on_press(Message::set_device_menu_category(
@@ -80,9 +80,9 @@ impl App {
                 text_color: tc,
                 border: iced::Border {
                     color: if fx_active {
-                        th::ACCENT_DIM
+                        th::accent_dim()
                     } else {
-                        th::BORDER
+                        th::border()
                     },
                     width: 1.0,
                     radius: 4.0.into(),
@@ -94,9 +94,9 @@ impl App {
         // Plugins tab
         let plugins_active = menu.category == Some(DeviceMenuCategory::Plugins);
         let (bg, tc) = if plugins_active {
-            (th::ACCENT_DIM, th::ACCENT)
+            (th::accent_dim(), th::accent())
         } else {
-            (th::BG_ELEVATED, th::TEXT_DIM)
+            (th::bg_elevated(), th::text_dim())
         };
         let plugins_tab = button(text("Plugins").size(11).color(tc))
             .on_press(Message::set_device_menu_category(
@@ -108,9 +108,9 @@ impl App {
                 text_color: tc,
                 border: iced::Border {
                     color: if plugins_active {
-                        th::ACCENT_DIM
+                        th::accent_dim()
                     } else {
-                        th::BORDER
+                        th::border()
                     },
                     width: 1.0,
                     radius: 4.0.into(),
@@ -141,20 +141,20 @@ impl App {
                     if !search_lower.is_empty() && !name.to_lowercase().contains(&search_lower) {
                         continue;
                     }
-                    let btn = button(text(name).size(12).color(th::TEXT))
+                    let btn = button(text(name).size(12).color(th::text()))
                         .on_press(Message::set_track_instrument(track_id, kind))
                         .padding([6, 10])
                         .width(Length::Fill)
                         .style(|_theme: &Theme, status| {
                             let bg = match status {
                                 button::Status::Hovered | button::Status::Pressed => {
-                                    Some(th::BG_HOVER.into())
+                                    Some(th::bg_hover().into())
                                 }
                                 _ => None,
                             };
                             button::Style {
                                 background: bg,
-                                text_color: th::TEXT,
+                                text_color: th::text(),
                                 border: iced::Border::default(),
                                 ..Default::default()
                             }
@@ -169,7 +169,7 @@ impl App {
                     items_col = items_col.push(
                         text("No plugins scanned yet.\nUse File → Settings to scan.")
                             .size(11)
-                            .color(th::TEXT_DIM),
+                            .color(th::text_dim()),
                     );
                     est_rows = 2;
                 } else {
@@ -203,10 +203,10 @@ impl App {
                             // cell width: truncated names made the
                             // LSP suite indistinguishable.
                             let cell = column![
-                                text(plugin.name.clone()).size(11).color(th::TEXT),
+                                text(plugin.name.clone()).size(11).color(th::text()),
                                 text(format!("{format_badge} {cat_label}"))
                                     .size(9)
-                                    .color(th::TEXT_DIM),
+                                    .color(th::text_dim()),
                             ]
                             .spacing(1);
                             let btn = button(cell)
@@ -216,13 +216,13 @@ impl App {
                                 .style(|_theme: &Theme, status| {
                                     let bg = match status {
                                         button::Status::Hovered | button::Status::Pressed => {
-                                            Some(th::BG_HOVER.into())
+                                            Some(th::bg_hover().into())
                                         }
                                         _ => None,
                                     };
                                     button::Style {
                                         background: bg,
-                                        text_color: th::TEXT,
+                                        text_color: th::text(),
                                         border: iced::Border::default(),
                                         ..Default::default()
                                     }
@@ -239,20 +239,20 @@ impl App {
                     if !search_lower.is_empty() && !name.to_lowercase().contains(&search_lower) {
                         continue;
                     }
-                    let btn = button(text(name).size(12).color(th::TEXT))
+                    let btn = button(text(name).size(12).color(th::text()))
                         .on_press(Message::add_effect(track_id, et))
                         .padding([6, 10])
                         .width(Length::Fill)
                         .style(|_theme: &Theme, status| {
                             let bg = match status {
                                 button::Status::Hovered | button::Status::Pressed => {
-                                    Some(th::BG_HOVER.into())
+                                    Some(th::bg_hover().into())
                                 }
                                 _ => None,
                             };
                             button::Style {
                                 background: bg,
-                                text_color: th::TEXT,
+                                text_color: th::text(),
                                 border: iced::Border::default(),
                                 ..Default::default()
                             }
@@ -288,9 +288,9 @@ impl App {
             .width(Length::Fixed(menu_w));
 
         let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -320,8 +320,8 @@ impl App {
         let make_menu_btn = |label: &'static str, icon: char, msg: Message| {
             button(
                 row![
-                    icons::icon(icon).size(12).color(th::TEXT),
-                    text(label).size(12).color(th::TEXT)
+                    icons::icon(icon).size(12).color(th::text()),
+                    text(label).size(12).color(th::text())
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
@@ -331,12 +331,14 @@ impl App {
             .width(Length::Fill)
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border::default(),
                     ..Default::default()
                 }
@@ -362,8 +364,8 @@ impl App {
             row![
                 icons::icon(icons::SLIDERS_VERTICAL)
                     .size(12)
-                    .color(th::TEXT),
-                text("Settings...").size(12).color(th::TEXT)
+                    .color(th::text()),
+                text("Settings...").size(12).color(th::text())
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center),
@@ -373,12 +375,12 @@ impl App {
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
                 _ => None,
             };
             button::Style {
                 background: bg,
-                text_color: th::TEXT,
+                text_color: th::text(),
                 border: iced::Border::default(),
                 ..Default::default()
             }
@@ -395,9 +397,9 @@ impl App {
             .width(Length::Fixed(220.0));
 
         let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -422,7 +424,7 @@ impl App {
             .size(14)
             .width(Length::Fixed(250.0));
 
-        let label = text("Rename Clip").size(14).color(th::TEXT);
+        let label = text("Rename Clip").size(14).color(th::text());
 
         let dialog = container(
             column![label, input]
@@ -431,9 +433,9 @@ impl App {
                 .width(Length::Fixed(280.0)),
         )
         .style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -456,8 +458,8 @@ impl App {
             |icon_char: char, label_text: String, msg: Message| -> Element<'_, Message> {
                 button(
                     row![
-                        icons::icon(icon_char).size(13).color(th::TEXT),
-                        text(label_text).size(13).color(th::TEXT)
+                        icons::icon(icon_char).size(13).color(th::text()),
+                        text(label_text).size(13).color(th::text())
                     ]
                     .spacing(8)
                     .align_y(iced::Alignment::Center),
@@ -467,12 +469,12 @@ impl App {
                 .width(Length::Fill)
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => th::BG_HOVER,
-                        _ => th::BG_SURFACE,
+                        button::Status::Hovered | button::Status::Pressed => th::bg_hover(),
+                        _ => th::bg_surface(),
                     };
                     button::Style {
                         background: Some(bg.into()),
-                        text_color: th::TEXT,
+                        text_color: th::text(),
                         border: iced::Border::default(),
                         ..Default::default()
                     }
@@ -620,9 +622,9 @@ impl App {
 
         let menu_container = container(menu_items)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },

@@ -26,11 +26,11 @@ impl TrackClipCanvas {
 
         // Background
         let bg_color = if drop_hover {
-            theme::ACCENT_DIM
+            theme::accent_dim()
         } else if self.selected {
-            theme::TRACK_BG_SELECTED
+            theme::track_bg_selected()
         } else {
-            theme::TRACK_BG
+            theme::track_bg()
         };
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
 
@@ -54,7 +54,7 @@ impl TrackClipCanvas {
                     frame.stroke(
                         &vline,
                         canvas::Stroke::default()
-                            .with_color(theme::BORDER)
+                            .with_color(theme::border())
                             .with_width(1.0),
                     );
                 } else if ppb >= 40.0 {
@@ -64,7 +64,7 @@ impl TrackClipCanvas {
                     frame.stroke(
                         &vline,
                         canvas::Stroke::default()
-                            .with_color(theme::DIVIDER)
+                            .with_color(theme::divider())
                             .with_width(0.5),
                     );
                 }
@@ -82,12 +82,7 @@ impl TrackClipCanvas {
                             frame.stroke(
                                 &sub_line,
                                 canvas::Stroke::default()
-                                    .with_color(Color {
-                                        r: 0.13,
-                                        g: 0.13,
-                                        b: 0.13,
-                                        a: 1.0,
-                                    })
+                                    .with_color(theme::divider())
                                     .with_width(0.3),
                             );
                         }
@@ -180,7 +175,7 @@ impl TrackClipCanvas {
                         frame.fill_text(canvas::Text {
                             content: "L".to_string(),
                             position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                            color: theme::ACCENT,
+                            color: theme::accent(),
                             size: iced::Pixels(9.0),
                             ..Default::default()
                         });
@@ -190,7 +185,7 @@ impl TrackClipCanvas {
                 // Selection highlight
                 let is_selected = self.selected_clips.contains(&clip.clip_id);
                 let border_color = if is_selected {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
                     clip_border_color
                 };
@@ -226,7 +221,7 @@ impl TrackClipCanvas {
                     frame.fill_text(canvas::Text {
                         content: clip.name.clone(),
                         position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::TEXT,
+                        color: theme::text(),
                         size: iced::Pixels(11.0),
                         ..Default::default()
                     });
@@ -237,7 +232,7 @@ impl TrackClipCanvas {
                 // opacity so the waveform and clip colour remain
                 // legible, but strong enough to catch the eye.
                 if clip.warp_stale && clip_w > 4.0 {
-                    let stripe_color = theme::with_alpha(theme::METER_YELLOW, 0.22);
+                    let stripe_color = theme::with_alpha(theme::meter_yellow(), 0.22);
                     let stripe_spacing = 8.0f32;
                     let stripe_stroke = 1.5f32;
                     let mut offset = -clip_h;
@@ -389,7 +384,7 @@ impl TrackClipCanvas {
                         frame.fill_text(canvas::Text {
                             content: "L".to_string(),
                             position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                            color: theme::ACCENT,
+                            color: theme::accent(),
                             size: iced::Pixels(9.0),
                             ..Default::default()
                         });
@@ -399,7 +394,7 @@ impl TrackClipCanvas {
                 // Selection highlight
                 let is_selected = self.selected_clips.contains(&note_clip.clip_id);
                 let border_color = if is_selected {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
                     theme::darken(self.track_color, 0.7)
                 };
@@ -435,7 +430,7 @@ impl TrackClipCanvas {
                     frame.fill_text(canvas::Text {
                         content: note_clip.name.clone(),
                         position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::TEXT,
+                        color: theme::text(),
                         size: iced::Pixels(11.0),
                         ..Default::default()
                     });
@@ -453,7 +448,7 @@ impl TrackClipCanvas {
                 frame.fill_rectangle(
                     iced::Point::new(fill_x, 0.0),
                     iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::ACCENT, 0.06),
+                    theme::with_alpha(theme::accent(), 0.06),
                 );
             }
         }
@@ -476,7 +471,7 @@ impl TrackClipCanvas {
                 frame.fill_rectangle(
                     iced::Point::new(fill_x, 0.0),
                     iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::ACCENT, 0.04),
+                    theme::with_alpha(theme::accent(), 0.04),
                 );
             }
         }
@@ -491,7 +486,7 @@ impl TrackClipCanvas {
             frame.stroke(
                 &playhead_line,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(2.0),
             );
         }
@@ -501,7 +496,7 @@ impl TrackClipCanvas {
         frame.stroke(
             &sep,
             canvas::Stroke::default()
-                .with_color(theme::DIVIDER)
+                .with_color(theme::divider())
                 .with_width(1.0),
         );
 
@@ -516,7 +511,7 @@ impl TrackClipCanvas {
             frame.stroke(
                 &outline,
                 canvas::Stroke::default()
-                    .with_color(theme::ACCENT)
+                    .with_color(theme::accent())
                     .with_width(2.0),
             );
             if let Some(local) = cursor.position_in(bounds) {
@@ -530,7 +525,7 @@ impl TrackClipCanvas {
                     frame.stroke(
                         &drop_line,
                         canvas::Stroke::default()
-                            .with_color(theme::ACCENT)
+                            .with_color(theme::accent())
                             .with_width(2.0),
                     );
                 }
@@ -539,7 +534,7 @@ impl TrackClipCanvas {
             frame.fill_text(canvas::Text {
                 content: format!("Drop on: {}", self.track_name),
                 position: iced::Point::new(8.0, 8.0),
-                color: theme::ACCENT,
+                color: theme::accent(),
                 size: 14.0.into(),
                 ..Default::default()
             });

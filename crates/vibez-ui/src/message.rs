@@ -237,6 +237,14 @@ pub enum Message {
     OpenMidiInput(String),
     /// Settings: close the currently-open MIDI input port.
     CloseMidiInput,
+    /// Appearance: activate a theme by name (built-in or user).
+    SelectTheme(String),
+    /// Appearance: rescan the themes directory for `.vzt` files.
+    RescanThemes,
+    /// Appearance: live edit of the save-as-theme name field.
+    ThemeSaveNameChanged(String),
+    /// Appearance: save the current palette as a user `.vzt`.
+    SaveCurrentTheme,
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RescanSampleLibrary,

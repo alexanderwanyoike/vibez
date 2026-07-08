@@ -173,7 +173,10 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                         offset: 0,
                     },
                     ..canvas::Stroke::default()
-                        .with_color(Color::from_rgba(0.85, 0.83, 0.78, 0.35))
+                        .with_color(Color {
+                            a: 0.35,
+                            ..th::text()
+                        })
                         .with_width(1.0)
                 },
             );
@@ -184,7 +187,10 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         let label = |content: &str, position: Point, bottom: bool| canvas::Text {
             content: content.to_string(),
             position,
-            color: Color::from_rgba(0.75, 0.73, 0.68, 0.55),
+            color: Color {
+                a: 0.55,
+                ..th::text()
+            },
             size: iced::Pixels(9.0),
             vertical_alignment: if bottom {
                 iced::alignment::Vertical::Bottom
@@ -262,9 +268,9 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                     || (state.drag.is_none() && self.selected == Some(i));
                 let handle = canvas::Path::circle(center, HANDLE_RADIUS);
                 if selected {
-                    frame.fill(&handle, th::ACCENT);
+                    frame.fill(&handle, th::accent());
                 } else {
-                    frame.fill(&handle, Color::from_rgba(0.09, 0.09, 0.1, 1.0));
+                    frame.fill(&handle, th::bg_dark());
                     frame.stroke(
                         &handle,
                         canvas::Stroke::default()
@@ -284,7 +290,10 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                 frame.fill_rectangle(
                     Point::new(x0, 0.0),
                     iced::Size::new(x1 - x0, h),
-                    Color::from_rgba(0.9, 0.35, 0.25, 0.18),
+                    Color {
+                        a: 0.18,
+                        ..th::danger()
+                    },
                 );
             }
         }

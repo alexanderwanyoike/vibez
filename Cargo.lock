@@ -5078,6 +5078,7 @@ dependencies = [
  "rtrb",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "vibez-audio-io",
  "vibez-core",

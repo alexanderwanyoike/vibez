@@ -1,288 +1,385 @@
+//! Runtime theme system.
+//!
+//! Every color the UI paints comes from the current [`ThemePalette`],
+//! swapped at runtime by the Appearance settings. Accessors mirror
+//! the old constant names in snake_case (`th::accent()` was
+//! `th::ACCENT`), so call sites read the same and canvases pick up a
+//! theme switch on the next frame. A palette serializes to JSON with
+//! hex colors — that is exactly the `.vzt` theme file format.
+
+use std::sync::{LazyLock, RwLock};
+
 use iced::theme::Palette;
 use iced::{Color, Theme};
+use serde::{Deserialize, Serialize};
 
-// ── Main palette (dark charcoal) ──
+/// A complete vibez color scheme. Serialized as the `.vzt` file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemePalette {
+    pub name: String,
 
-/// Near-black main background: #1a1a1a
-pub const BG_DARK: Color = Color {
-    r: 0.102,
-    g: 0.102,
-    b: 0.102,
-    a: 1.0,
-};
+    // ── Backgrounds ──
+    #[serde(with = "hex")]
+    pub bg_dark: Color,
+    #[serde(with = "hex")]
+    pub bg_surface: Color,
+    #[serde(with = "hex")]
+    pub bg_elevated: Color,
+    #[serde(with = "hex")]
+    pub bg_hover: Color,
 
-/// Panels, headers, strips: #242424
-pub const BG_SURFACE: Color = Color {
-    r: 0.141,
-    g: 0.141,
-    b: 0.141,
-    a: 1.0,
-};
+    // ── Text ──
+    #[serde(with = "hex")]
+    pub text: Color,
+    #[serde(with = "hex")]
+    pub text_dim: Color,
+    #[serde(with = "hex")]
+    pub text_muted: Color,
 
-/// Cards, effect slots, raised elements: #2d2d2d
-pub const BG_ELEVATED: Color = Color {
-    r: 0.176,
-    g: 0.176,
-    b: 0.176,
-    a: 1.0,
-};
+    // ── Accent ──
+    #[serde(with = "hex")]
+    pub accent: Color,
+    #[serde(with = "hex")]
+    pub accent_dim: Color,
 
-/// Hover state for interactive elements: #363636
-#[allow(dead_code)]
-pub const BG_HOVER: Color = Color {
-    r: 0.212,
-    g: 0.212,
-    b: 0.212,
-    a: 1.0,
-};
+    // ── Borders ──
+    #[serde(with = "hex")]
+    pub border: Color,
+    #[serde(with = "hex")]
+    pub border_light: Color,
+    #[serde(with = "hex")]
+    pub divider: Color,
 
-// ── Text ──
+    // ── Semantic ──
+    #[serde(with = "hex")]
+    pub success: Color,
+    #[serde(with = "hex")]
+    pub danger: Color,
+    #[serde(with = "hex")]
+    pub playhead: Color,
 
-/// Primary text: #e0e0e0
-pub const TEXT: Color = Color {
-    r: 0.878,
-    g: 0.878,
-    b: 0.878,
-    a: 1.0,
-};
+    // ── Meters ──
+    #[serde(with = "hex")]
+    pub meter_green: Color,
+    #[serde(with = "hex")]
+    pub meter_yellow: Color,
+    #[serde(with = "hex")]
+    pub meter_red: Color,
 
-/// Secondary text, labels: #808080
-pub const TEXT_DIM: Color = Color {
-    r: 0.502,
-    g: 0.502,
-    b: 0.502,
-    a: 1.0,
-};
+    /// Recessed display wells (mini waveforms, sample views).
+    #[serde(with = "hex")]
+    pub display_bg: Color,
 
-/// Disabled, placeholder: #505050
-pub const TEXT_MUTED: Color = Color {
-    r: 0.314,
-    g: 0.314,
-    b: 0.314,
-    a: 1.0,
-};
+    // ── Knobs / faders ──
+    #[serde(with = "hex")]
+    pub knob_arc: Color,
+    #[serde(with = "hex")]
+    pub knob_body: Color,
+    #[serde(with = "hex")]
+    pub knob_body_engaged: Color,
+    #[serde(with = "hex")]
+    pub knob_track: Color,
+    #[serde(with = "hex")]
+    pub fader_handle: Color,
 
-// ── Accent ──
+    // ── Track palette (auto-assigned per track, index wraps) ──
+    #[serde(with = "hex_array")]
+    pub track_colors: [Color; 8],
 
-/// Orange accent — transport active, selected: #ff8c00
-pub const ACCENT: Color = Color {
-    r: 1.0,
-    g: 0.549,
-    b: 0.0,
-    a: 1.0,
-};
+    // ── Channel EQ bands ──
+    #[serde(with = "hex")]
+    pub eq_lf: Color,
+    #[serde(with = "hex")]
+    pub eq_lmf: Color,
+    #[serde(with = "hex")]
+    pub eq_hmf: Color,
+    #[serde(with = "hex")]
+    pub eq_hf: Color,
 
-/// Accent at lower intensity: #995400
-pub const ACCENT_DIM: Color = Color {
-    r: 0.600,
-    g: 0.329,
-    b: 0.0,
-    a: 1.0,
-};
+    // ── Clips / waveforms ──
+    #[serde(with = "hex")]
+    pub clip_body: Color,
+    #[serde(with = "hex")]
+    pub clip_border: Color,
+    #[serde(with = "hex")]
+    pub waveform: Color,
+    #[serde(with = "hex")]
+    pub ruler_line: Color,
 
-// ── Borders / dividers ──
+    // ── Editor grid lines (bar / beat / subdivision) ──
+    #[serde(with = "hex")]
+    pub grid_bar: Color,
+    #[serde(with = "hex")]
+    pub grid_beat: Color,
+    #[serde(with = "hex")]
+    pub grid_sub: Color,
 
-/// Subtle panel borders: #3a3a3a
-pub const BORDER: Color = Color {
-    r: 0.227,
-    g: 0.227,
-    b: 0.227,
-    a: 1.0,
-};
+    // ── Piano roll ──
+    #[serde(with = "hex")]
+    pub piano_white_row: Color,
+    #[serde(with = "hex")]
+    pub piano_black_row: Color,
+    #[serde(with = "hex")]
+    pub piano_octave_line: Color,
+    #[serde(with = "hex")]
+    pub piano_grid: Color,
+    #[serde(with = "hex")]
+    pub piano_white_key: Color,
+    #[serde(with = "hex")]
+    pub piano_black_key: Color,
+    #[serde(with = "hex")]
+    pub piano_key_label: Color,
+}
 
-/// Stronger borders for cards: #4a4a4a
-#[allow(dead_code)]
-pub const BORDER_LIGHT: Color = Color {
-    r: 0.290,
-    g: 0.290,
-    b: 0.290,
-    a: 1.0,
-};
+/// Hex color (de)serialization: `#rrggbb` or `#rrggbbaa`.
+mod hex {
+    use iced::Color;
+    use serde::{Deserialize, Deserializer, Serializer};
 
-/// Section dividers: #2a2a2a
-pub const DIVIDER: Color = Color {
-    r: 0.165,
-    g: 0.165,
-    b: 0.165,
-    a: 1.0,
-};
+    pub fn to_hex(c: &Color) -> String {
+        let [r, g, b, a] = c.into_rgba8();
+        if a == 255 {
+            format!("#{r:02x}{g:02x}{b:02x}")
+        } else {
+            format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+        }
+    }
 
-// ── Semantic colors ──
+    pub fn parse(s: &str) -> Option<Color> {
+        let s = s.strip_prefix('#')?;
+        let byte = |i: usize| u8::from_str_radix(s.get(i..i + 2)?, 16).ok();
+        match s.len() {
+            6 => Some(Color::from_rgb8(byte(0)?, byte(2)?, byte(4)?)),
+            8 => Some(Color::from_rgba8(
+                byte(0)?,
+                byte(2)?,
+                byte(4)?,
+                byte(6)? as f32 / 255.0,
+            )),
+            _ => None,
+        }
+    }
 
-/// Success/green for play: #4ade80
-pub const SUCCESS: Color = Color {
-    r: 0.290,
-    g: 0.871,
-    b: 0.502,
-    a: 1.0,
-};
+    pub fn serialize<S: Serializer>(c: &Color, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&to_hex(c))
+    }
 
-/// Danger/red: #f87171
-pub const DANGER: Color = Color {
-    r: 0.973,
-    g: 0.443,
-    b: 0.443,
-    a: 1.0,
-};
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
+        let s = String::deserialize(d)?;
+        parse(&s).ok_or_else(|| serde::de::Error::custom(format!("invalid hex color {s:?}")))
+    }
+}
 
-/// Playhead: white at 80% opacity
-pub const PLAYHEAD: Color = Color {
-    r: 1.0,
-    g: 1.0,
-    b: 1.0,
-    a: 0.8,
-};
+mod hex_array {
+    use iced::Color;
+    use serde::{Deserialize, Deserializer, Serializer};
 
-// ── Meter colors ──
+    pub fn serialize<S: Serializer>(colors: &[Color; 8], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(colors.iter().map(super::hex::to_hex))
+    }
 
-/// VU meter green: #4ade80
-pub const METER_GREEN: Color = Color {
-    r: 0.290,
-    g: 0.871,
-    b: 0.502,
-    a: 1.0,
-};
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[Color; 8], D::Error> {
+        let raw = Vec::<String>::deserialize(d)?;
+        if raw.len() != 8 {
+            return Err(serde::de::Error::custom(format!(
+                "track_colors needs exactly 8 entries, got {}",
+                raw.len()
+            )));
+        }
+        let mut out = [Color::BLACK; 8];
+        for (slot, s) in out.iter_mut().zip(&raw) {
+            *slot = super::hex::parse(s)
+                .ok_or_else(|| serde::de::Error::custom(format!("invalid hex color {s:?}")))?;
+        }
+        Ok(out)
+    }
+}
 
-/// VU meter yellow: #ffd700
-pub const METER_YELLOW: Color = Color {
-    r: 1.0,
-    g: 0.843,
-    b: 0.0,
-    a: 1.0,
-};
+const fn rgb(r: f32, g: f32, b: f32) -> Color {
+    Color { r, g, b, a: 1.0 }
+}
 
-/// VU meter red: #f87171
-pub const METER_RED: Color = Color {
-    r: 0.973,
-    g: 0.443,
-    b: 0.443,
-    a: 1.0,
-};
+const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
+    Color { r, g, b, a }
+}
 
-// ── Button state colors ──
+impl ThemePalette {
+    /// The founding vibez look: dark charcoal, orange accent.
+    pub fn charcoal() -> Self {
+        Self {
+            name: "Charcoal".to_string(),
+            bg_dark: rgb(0.102, 0.102, 0.102),
+            bg_surface: rgb(0.141, 0.141, 0.141),
+            bg_elevated: rgb(0.176, 0.176, 0.176),
+            bg_hover: rgb(0.212, 0.212, 0.212),
+            text: rgb(0.878, 0.878, 0.878),
+            text_dim: rgb(0.502, 0.502, 0.502),
+            text_muted: rgb(0.314, 0.314, 0.314),
+            accent: rgb(1.0, 0.549, 0.0),
+            accent_dim: rgb(0.600, 0.329, 0.0),
+            border: rgb(0.227, 0.227, 0.227),
+            border_light: rgb(0.290, 0.290, 0.290),
+            divider: rgb(0.165, 0.165, 0.165),
+            success: rgb(0.290, 0.871, 0.502),
+            danger: rgb(0.973, 0.443, 0.443),
+            playhead: rgba(1.0, 1.0, 1.0, 0.8),
+            meter_green: rgb(0.290, 0.871, 0.502),
+            meter_yellow: rgb(1.0, 0.843, 0.0),
+            meter_red: rgb(0.973, 0.443, 0.443),
+            display_bg: rgb(0.07, 0.07, 0.07),
+            knob_arc: rgb(0.533, 0.533, 0.533),
+            knob_body: rgb(0.12, 0.12, 0.12),
+            knob_body_engaged: rgb(0.16, 0.16, 0.16),
+            knob_track: rgb(0.22, 0.22, 0.22),
+            fader_handle: rgb(0.533, 0.533, 0.533),
+            track_colors: [
+                rgb(0.878, 0.376, 0.376), // red
+                rgb(0.878, 0.565, 0.251), // orange
+                rgb(0.816, 0.753, 0.251), // yellow
+                rgb(0.314, 0.690, 0.376), // green
+                rgb(0.251, 0.627, 0.690), // cyan
+                rgb(0.376, 0.502, 0.816), // blue
+                rgb(0.565, 0.376, 0.753), // purple
+                rgb(0.753, 0.376, 0.627), // pink
+            ],
+            eq_lf: rgb(0.65, 0.46, 0.28),
+            eq_lmf: rgb(0.36, 0.48, 0.72),
+            eq_hmf: rgb(0.33, 0.62, 0.38),
+            eq_hf: rgb(0.76, 0.33, 0.30),
+            clip_body: rgba(0.300, 0.480, 0.900, 0.6),
+            clip_border: rgba(0.380, 0.565, 1.0, 0.9),
+            waveform: rgba(0.380, 0.565, 1.0, 0.6),
+            ruler_line: rgba(0.227, 0.227, 0.227, 0.5),
+            grid_bar: rgb(0.376, 0.376, 0.376),
+            grid_beat: rgb(0.251, 0.251, 0.251),
+            grid_sub: rgb(0.216, 0.216, 0.216),
+            piano_white_row: rgb(0.145, 0.145, 0.145),
+            piano_black_row: rgb(0.110, 0.110, 0.110),
+            piano_octave_line: rgb(0.227, 0.227, 0.227),
+            piano_grid: rgb(0.165, 0.165, 0.165),
+            piano_white_key: rgb(0.784, 0.784, 0.784),
+            piano_black_key: rgb(0.102, 0.102, 0.102),
+            piano_key_label: rgb(0.35, 0.35, 0.35),
+        }
+    }
+}
 
-/// Mute active: #f87171 (red)
-pub const MUTE_ACTIVE: Color = DANGER;
+impl Default for ThemePalette {
+    fn default() -> Self {
+        Self::charcoal()
+    }
+}
 
-/// Solo active: #ffd700 (yellow)
-pub const SOLO_ACTIVE: Color = METER_YELLOW;
+static CURRENT: LazyLock<RwLock<ThemePalette>> =
+    LazyLock::new(|| RwLock::new(ThemePalette::charcoal()));
 
-// ── Knob / fader colors ──
+/// Swap the active theme; the next frame repaints everything.
+#[allow(dead_code)] // wired up by the Appearance settings
+pub fn set_theme(palette: ThemePalette) {
+    *CURRENT.write().unwrap() = palette;
+}
 
-/// Knob background: BG_ELEVATED
-pub const KNOB_BG: Color = BG_ELEVATED;
+/// Snapshot of the whole current palette (theme save, swatches).
+#[allow(dead_code)] // wired up by the Appearance settings
+pub fn current() -> ThemePalette {
+    CURRENT.read().unwrap().clone()
+}
 
-/// Default knob arc color (overridden by track color): #888888
-#[allow(dead_code)]
-pub const KNOB_ARC: Color = Color {
-    r: 0.533,
-    g: 0.533,
-    b: 0.533,
-    a: 1.0,
-};
+macro_rules! accessors {
+    ($($fn_name:ident => $field:ident),* $(,)?) => {
+        $(
+            #[allow(dead_code)]
+            pub fn $fn_name() -> Color {
+                CURRENT.read().unwrap().$field
+            }
+        )*
+    };
+}
 
-/// Fader track color: BG_ELEVATED
-pub const FADER_TRACK: Color = BG_ELEVATED;
+accessors! {
+    bg_dark => bg_dark,
+    bg_surface => bg_surface,
+    bg_elevated => bg_elevated,
+    bg_hover => bg_hover,
+    text => text,
+    text_dim => text_dim,
+    text_muted => text_muted,
+    accent => accent,
+    accent_dim => accent_dim,
+    border => border,
+    border_light => border_light,
+    divider => divider,
+    success => success,
+    danger => danger,
+    playhead => playhead,
+    meter_green => meter_green,
+    meter_yellow => meter_yellow,
+    meter_red => meter_red,
+    display_bg => display_bg,
+    knob_arc => knob_arc,
+    knob_body => knob_body,
+    knob_body_engaged => knob_body_engaged,
+    knob_track => knob_track,
+    fader_handle => fader_handle,
+    eq_lf => eq_lf,
+    eq_lmf => eq_lmf,
+    eq_hmf => eq_hmf,
+    eq_hf => eq_hf,
+    clip_body => clip_body,
+    clip_border => clip_border,
+    waveform => waveform,
+    ruler_line => ruler_line,
+    grid_bar => grid_bar,
+    grid_beat => grid_beat,
+    grid_sub => grid_sub,
+    piano_white_row => piano_white_row,
+    piano_black_row => piano_black_row,
+    piano_octave_line => piano_octave_line,
+    piano_grid => piano_grid,
+    piano_white_key => piano_white_key,
+    piano_black_key => piano_black_key,
+    piano_key_label => piano_key_label,
+}
 
-/// Fader handle color: #888888
-pub const FADER_HANDLE: Color = Color {
-    r: 0.533,
-    g: 0.533,
-    b: 0.533,
-    a: 1.0,
-};
+// ── Derived roles (aliases of palette fields) ──
 
-// ── Track colors (auto-assigned per track) ──
+pub fn mute_active() -> Color {
+    danger()
+}
 
-pub const TRACK_COLORS: [Color; 8] = [
-    // Red: #e06060
-    Color {
-        r: 0.878,
-        g: 0.376,
-        b: 0.376,
-        a: 1.0,
-    },
-    // Orange: #e09040
-    Color {
-        r: 0.878,
-        g: 0.565,
-        b: 0.251,
-        a: 1.0,
-    },
-    // Yellow: #d0c040
-    Color {
-        r: 0.816,
-        g: 0.753,
-        b: 0.251,
-        a: 1.0,
-    },
-    // Green: #50b060
-    Color {
-        r: 0.314,
-        g: 0.690,
-        b: 0.376,
-        a: 1.0,
-    },
-    // Cyan: #40a0b0
-    Color {
-        r: 0.251,
-        g: 0.627,
-        b: 0.690,
-        a: 1.0,
-    },
-    // Blue: #6080d0
-    Color {
-        r: 0.376,
-        g: 0.502,
-        b: 0.816,
-        a: 1.0,
-    },
-    // Purple: #9060c0
-    Color {
-        r: 0.565,
-        g: 0.376,
-        b: 0.753,
-        a: 1.0,
-    },
-    // Pink: #c060a0
-    Color {
-        r: 0.753,
-        g: 0.376,
-        b: 0.627,
-        a: 1.0,
-    },
-];
+pub fn solo_active() -> Color {
+    meter_yellow()
+}
+
+pub fn knob_bg() -> Color {
+    bg_elevated()
+}
+
+pub fn fader_track() -> Color {
+    bg_elevated()
+}
+
+pub fn track_bg() -> Color {
+    bg_dark()
+}
+
+pub fn track_bg_selected() -> Color {
+    bg_elevated()
+}
+
+pub fn ruler_bg() -> Color {
+    bg_surface()
+}
+
+pub fn ruler_text() -> Color {
+    text_dim()
+}
 
 /// Get a track color by index (wraps around).
 pub fn track_color(index: u8) -> Color {
-    TRACK_COLORS[index as usize % TRACK_COLORS.len()]
+    let palette = CURRENT.read().unwrap();
+    palette.track_colors[index as usize % palette.track_colors.len()]
 }
-
-// ── Channel EQ band colors (console convention, muted) ──
-pub const EQ_HF: Color = Color {
-    r: 0.76,
-    g: 0.33,
-    b: 0.30,
-    a: 1.0,
-};
-pub const EQ_HMF: Color = Color {
-    r: 0.33,
-    g: 0.62,
-    b: 0.38,
-    a: 1.0,
-};
-pub const EQ_LMF: Color = Color {
-    r: 0.36,
-    g: 0.48,
-    b: 0.72,
-    a: 1.0,
-};
-pub const EQ_LF: Color = Color {
-    r: 0.65,
-    g: 0.46,
-    b: 0.28,
-    a: 1.0,
-};
 
 /// Darken a color by a factor (for borders, etc.)
 pub fn darken(color: Color, factor: f32) -> Color {
@@ -295,68 +392,23 @@ pub fn darken(color: Color, factor: f32) -> Color {
 }
 
 /// Apply alpha to a color.
+#[allow(dead_code)]
 pub fn with_alpha(color: Color, alpha: f32) -> Color {
     Color { a: alpha, ..color }
 }
 
-// ── Aliases for backward compatibility in widgets ──
-
-/// Track lane background
-pub const TRACK_BG: Color = BG_DARK;
-
-/// Selected track background
-pub const TRACK_BG_SELECTED: Color = BG_ELEVATED;
-
-/// Clip body color (default, overridden by track color)
-#[allow(dead_code)]
-pub const CLIP_BODY: Color = Color {
-    r: 0.300,
-    g: 0.480,
-    b: 0.900,
-    a: 0.6,
-};
-
-/// Clip border color (default, overridden by track color)
-#[allow(dead_code)]
-pub const CLIP_BORDER: Color = Color {
-    r: 0.380,
-    g: 0.565,
-    b: 1.0,
-    a: 0.9,
-};
-
-/// Waveform display color (default, overridden by track color)
-pub const WAVEFORM: Color = Color {
-    r: 0.380,
-    g: 0.565,
-    b: 1.0,
-    a: 0.6,
-};
-
-/// Ruler background
-pub const RULER_BG: Color = BG_SURFACE;
-
-/// Ruler text
-pub const RULER_TEXT: Color = TEXT_DIM;
-
-/// Ruler line
-#[allow(dead_code)]
-pub const RULER_LINE: Color = Color {
-    r: 0.227,
-    g: 0.227,
-    b: 0.227,
-    a: 0.5,
-};
-
+/// iced theme derived from the current palette (built-in widget
+/// chrome: scrollbars, text inputs, pick lists).
 pub fn vibez_theme() -> Theme {
+    let p = CURRENT.read().unwrap();
     Theme::custom(
-        "Vibez".to_string(),
+        p.name.clone(),
         Palette {
-            background: BG_DARK,
-            text: TEXT,
-            primary: ACCENT,
-            success: SUCCESS,
-            danger: DANGER,
+            background: p.bg_dark,
+            text: p.text,
+            primary: p.accent,
+            success: p.success,
+            danger: p.danger,
         },
     )
 }
@@ -364,3 +416,42 @@ pub fn vibez_theme() -> Theme {
 /// Uniform device-card body height across the device chain: the
 /// panel scrolls horizontally, so cards share one rack height.
 pub const DEVICE_BODY_H: f32 = 184.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_roundtrip() {
+        for c in [
+            rgb(0.102, 0.102, 0.102),
+            rgb(1.0, 0.549, 0.0),
+            rgba(1.0, 1.0, 1.0, 0.8),
+        ] {
+            let s = hex::to_hex(&c);
+            let back = hex::parse(&s).unwrap();
+            let [r1, g1, b1, a1] = c.into_rgba8();
+            let [r2, g2, b2, a2] = back.into_rgba8();
+            assert_eq!((r1, g1, b1, a1), (r2, g2, b2, a2), "{s}");
+        }
+        assert!(hex::parse("#12345").is_none());
+        assert!(hex::parse("nope").is_none());
+    }
+
+    #[test]
+    fn palette_serializes_as_vzt_json_and_loads_back() {
+        let p = ThemePalette::charcoal();
+        let json = serde_json::to_string_pretty(&p).unwrap();
+        assert!(json.contains("\"accent\": \"#ff8c00\""));
+        let back: ThemePalette = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "Charcoal");
+        assert_eq!(hex::to_hex(&back.accent), "#ff8c00");
+        assert_eq!(back.track_colors.len(), 8);
+    }
+
+    #[test]
+    fn missing_field_is_a_load_error_not_a_panic() {
+        let result = serde_json::from_str::<ThemePalette>("{\"name\": \"Broken\"}");
+        assert!(result.is_err());
+    }
+}

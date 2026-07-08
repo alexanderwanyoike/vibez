@@ -56,7 +56,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         frame.fill_rectangle(
             iced::Point::new(track_left, track_y),
             iced::Size::new(track_w, track_h),
-            theme::FADER_TRACK,
+            theme::fader_track(),
         );
 
         // Unity gain mark (at 0.5 of the track = gain 1.0)
@@ -68,7 +68,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         frame.stroke(
             &unity_line,
             canvas::Stroke::default()
-                .with_color(theme::TEXT_DIM)
+                .with_color(theme::text_dim())
                 .with_width(1.0),
         );
 
@@ -93,7 +93,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         frame.fill_rectangle(
             iced::Point::new(handle_x - handle_w / 2.0, handle_y),
             iced::Size::new(handle_w, handle_h),
-            theme::FADER_HANDLE,
+            theme::fader_handle(),
         );
 
         vec![frame.into_geometry()]
@@ -205,7 +205,7 @@ impl canvas::Program<Message> for FaderWidget {
         frame.fill_rectangle(
             iced::Point::new(track_x, track_top),
             iced::Size::new(track_w, track_h),
-            theme::FADER_TRACK,
+            theme::fader_track(),
         );
 
         // Unity gain mark (at 0.5 of the track = gain 1.0)
@@ -217,7 +217,7 @@ impl canvas::Program<Message> for FaderWidget {
         frame.stroke(
             &unity_line,
             canvas::Stroke::default()
-                .with_color(theme::TEXT_DIM)
+                .with_color(theme::text_dim())
                 .with_width(1.0),
         );
 
@@ -242,7 +242,7 @@ impl canvas::Program<Message> for FaderWidget {
         frame.fill_rectangle(
             iced::Point::new(handle_x, handle_y - handle_h / 2.0),
             iced::Size::new(handle_w, handle_h),
-            theme::FADER_HANDLE,
+            theme::fader_handle(),
         );
 
         vec![frame.into_geometry()]

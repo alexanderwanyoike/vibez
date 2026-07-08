@@ -7,6 +7,7 @@ mod services;
 mod spectrum;
 mod state;
 mod theme;
+mod themes;
 mod ui_settings;
 mod warp;
 pub mod widgets;

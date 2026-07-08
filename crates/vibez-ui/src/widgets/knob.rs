@@ -82,7 +82,7 @@ impl canvas::Program<Message> for KnobWidget {
 
         // Background circle
         let bg_circle = canvas::Path::circle(center, radius);
-        frame.fill(&bg_circle, theme::KNOB_BG);
+        frame.fill(&bg_circle, theme::knob_bg());
 
         let arc_radius = radius - 2.0;
 
@@ -91,7 +91,7 @@ impl canvas::Program<Message> for KnobWidget {
         frame.stroke(
             &bg_arc,
             canvas::Stroke::default()
-                .with_color(theme::FADER_TRACK)
+                .with_color(theme::fader_track())
                 .with_width(3.0),
         );
 
@@ -123,7 +123,7 @@ impl canvas::Program<Message> for KnobWidget {
         frame.stroke(
             &pointer,
             canvas::Stroke::default()
-                .with_color(theme::TEXT)
+                .with_color(theme::text())
                 .with_width(2.0),
         );
 
@@ -143,7 +143,7 @@ impl canvas::Program<Message> for KnobWidget {
         frame.stroke(
             &tick,
             canvas::Stroke::default()
-                .with_color(theme::TEXT_DIM)
+                .with_color(theme::text_dim())
                 .with_width(1.0),
         );
 

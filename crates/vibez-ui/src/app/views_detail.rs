@@ -38,11 +38,11 @@ impl App {
             let clip_tab = {
                 let active = self.state.view.detail_panel_tab == DetailPanelTab::Clip;
                 let (bg, text_color, border_color) = if active {
-                    (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
+                    (th::bg_elevated(), th::accent(), th::accent_dim())
                 } else {
                     (
                         iced::Color::TRANSPARENT,
-                        th::TEXT_DIM,
+                        th::text_dim(),
                         iced::Color::TRANSPARENT,
                     )
                 };
@@ -65,11 +65,11 @@ impl App {
             let devices_tab = {
                 let active = self.state.view.detail_panel_tab == DetailPanelTab::Devices;
                 let (bg, text_color, border_color) = if active {
-                    (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
+                    (th::bg_elevated(), th::accent(), th::accent_dim())
                 } else {
                     (
                         iced::Color::TRANSPARENT,
-                        th::TEXT_DIM,
+                        th::text_dim(),
                         iced::Color::TRANSPARENT,
                     )
                 };
@@ -139,7 +139,7 @@ impl App {
         } else {
             let label = text("Select a track to view devices")
                 .size(14)
-                .color(th::TEXT_DIM);
+                .color(th::text_dim());
             center(label)
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -160,9 +160,9 @@ impl App {
             .width(Length::Fill)
             .height(panel_height)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_DARK.into()),
+                background: Some(th::bg_dark().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -174,7 +174,7 @@ impl App {
     pub(super) fn view_clip_placeholder(&self) -> Element<'_, Message> {
         let label = text("Select a clip to view details")
             .size(14)
-            .color(th::TEXT_DIM);
+            .color(th::text_dim());
         center(label)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -251,16 +251,20 @@ impl App {
         let mut content_col = column![].spacing(2).padding(4);
 
         if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, tid, cid)) = clip_data {
-            let clip_name = text(clip_name_str.clone()).size(11).color(th::TEXT);
+            let clip_name = text(clip_name_str.clone()).size(11).color(th::text());
             let pos_label = text(format!("Pos: {clip_pos:.1}"))
                 .size(10)
-                .color(th::TEXT_DIM);
+                .color(th::text_dim());
             let dur_label = text(format!("Dur: {clip_dur:.1}"))
                 .size(10)
-                .color(th::TEXT_DIM);
+                .color(th::text_dim());
 
             // Loop toggle
-            let loop_icon_color = if clip_loop { th::ACCENT } else { th::TEXT_DIM };
+            let loop_icon_color = if clip_loop {
+                th::accent()
+            } else {
+                th::text_dim()
+            };
             let loop_btn = button(icons::icon(icons::REPEAT).size(10).color(loop_icon_color))
                 .on_press(Message::PianoRoll(PianoRollMsg::ToggleNoteClipLoop(
                     tid, cid,
@@ -268,16 +272,16 @@ impl App {
                 .padding([2, 4])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: if clip_loop {
-                        Some(th::ACCENT_DIM.into())
+                        Some(th::accent_dim().into())
                     } else {
-                        Some(th::BG_ELEVATED.into())
+                        Some(th::bg_elevated().into())
                     },
                     text_color: loop_icon_color,
                     border: iced::Border {
                         color: if clip_loop {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -287,10 +291,10 @@ impl App {
 
             // Clip operation buttons
             let op_btn_style = |_theme: &Theme, _status| button::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                text_color: th::TEXT_DIM,
+                background: Some(th::bg_elevated().into()),
+                text_color: th::text_dim(),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -299,8 +303,8 @@ impl App {
 
             let dup_btn = button(
                 row![
-                    icons::icon(icons::COPY).size(10).color(th::TEXT_DIM),
-                    text("Dup").size(10).color(th::TEXT_DIM)
+                    icons::icon(icons::COPY).size(10).color(th::text_dim()),
+                    text("Dup").size(10).color(th::text_dim())
                 ]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
@@ -309,20 +313,20 @@ impl App {
             .padding([2, 6])
             .style(op_btn_style);
 
-            let double_btn = button(text("2x").size(10).color(th::TEXT_DIM))
+            let double_btn = button(text("2x").size(10).color(th::text_dim()))
                 .on_press(Message::PianoRoll(PianoRollMsg::DoubleNoteClip(tid, cid)))
                 .padding([2, 6])
                 .style(op_btn_style);
 
-            let halve_btn = button(text("\u{00BD}x").size(10).color(th::TEXT_DIM))
+            let halve_btn = button(text("\u{00BD}x").size(10).color(th::text_dim()))
                 .on_press(Message::PianoRoll(PianoRollMsg::HalveNoteClip(tid, cid)))
                 .padding([2, 6])
                 .style(op_btn_style);
 
             let crop_btn = button(
                 row![
-                    icons::icon(icons::SCISSORS).size(10).color(th::TEXT_DIM),
-                    text("Crop").size(10).color(th::TEXT_DIM)
+                    icons::icon(icons::SCISSORS).size(10).color(th::text_dim()),
+                    text("Crop").size(10).color(th::text_dim())
                 ]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
@@ -342,7 +346,7 @@ impl App {
         }
 
         // ── Header row: label, edit mode toggle, snap grid ──
-        let label = text("Piano Roll").size(11).color(th::TEXT_DIM);
+        let label = text("Piano Roll").size(11).color(th::text_dim());
 
         // Edit mode toggle: Select / Draw
         let select_active = self.state.piano_roll.edit_mode == PianoRollEditMode::Select;
@@ -350,9 +354,9 @@ impl App {
 
         let select_btn = {
             let (bg, tc) = if select_active {
-                (th::ACCENT_DIM, th::ACCENT)
+                (th::accent_dim(), th::accent())
             } else {
-                (th::BG_ELEVATED, th::TEXT_DIM)
+                (th::bg_elevated(), th::text_dim())
             };
             button(icons::icon(icons::MOUSE_POINTER).size(10).color(tc))
                 .on_press(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
@@ -362,9 +366,9 @@ impl App {
                     text_color: tc,
                     border: iced::Border {
                         color: if select_active {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -375,9 +379,9 @@ impl App {
 
         let draw_btn = {
             let (bg, tc) = if draw_active {
-                (th::ACCENT_DIM, th::ACCENT)
+                (th::accent_dim(), th::accent())
             } else {
-                (th::BG_ELEVATED, th::TEXT_DIM)
+                (th::bg_elevated(), th::text_dim())
             };
             button(icons::icon(icons::PENCIL).size(10).color(tc))
                 .on_press(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
@@ -387,9 +391,9 @@ impl App {
                     text_color: tc,
                     border: iced::Border {
                         color: if draw_active {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -406,9 +410,9 @@ impl App {
         for &grid in SnapGrid::all() {
             let is_active = self.state.view.snap_grid == grid;
             let (bg, text_color) = if is_active {
-                (th::ACCENT_DIM, th::ACCENT)
+                (th::accent_dim(), th::accent())
             } else {
-                (th::BG_ELEVATED, th::TEXT_DIM)
+                (th::bg_elevated(), th::text_dim())
             };
             let btn = button(text(grid.label()).size(10).color(text_color))
                 .on_press(Message::View(ViewMsg::SetSnapGrid(grid)))
@@ -418,9 +422,9 @@ impl App {
                     text_color,
                     border: iced::Border {
                         color: if is_active {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -429,7 +433,7 @@ impl App {
                 });
             snap_row = snap_row.push(btn);
         }
-        let snap_label = text("Snap:").size(10).color(th::TEXT_DIM);
+        let snap_label = text("Snap:").size(10).color(th::text_dim());
         let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_row]
             .spacing(4)
             .align_y(iced::Alignment::Center);
@@ -440,9 +444,9 @@ impl App {
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_DARK.into()),
+                background: Some(th::bg_dark().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -485,14 +489,14 @@ impl App {
             .height(Length::Fill)
             .into();
 
-        let label = text("Waveform").size(11).color(th::TEXT_DIM);
+        let label = text("Waveform").size(11).color(th::text_dim());
         let clip_info = text(format!(
             "{}: {:.1}s",
             clip.name,
             clip.duration as f64 / self.state.transport.sample_rate as f64
         ))
         .size(10)
-        .color(th::TEXT_MUTED);
+        .color(th::text_muted());
 
         let header_row = row![label, horizontal_space(), clip_info]
             .spacing(4)
@@ -509,9 +513,9 @@ impl App {
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_DARK.into()),
+                background: Some(th::bg_dark().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -526,7 +530,7 @@ impl App {
         clip: &UiClip,
     ) -> Element<'_, Message> {
         let clip_id = clip.id;
-        let label = text("Warp").size(11).color(th::TEXT_DIM);
+        let label = text("Warp").size(11).color(th::text_dim());
 
         let default_text = clip
             .original_bpm
@@ -557,14 +561,14 @@ impl App {
 
         let button_style = |_theme: &Theme, status: button::Status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                _ => Some(th::BG_ELEVATED.into()),
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+                _ => Some(th::bg_elevated().into()),
             };
             button::Style {
                 background: bg,
-                text_color: th::TEXT,
+                text_color: th::text(),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -572,7 +576,7 @@ impl App {
             }
         };
 
-        let detect_btn = button(text("Detect").size(11).color(th::TEXT))
+        let detect_btn = button(text("Detect").size(11).color(th::text()))
             .on_press(Message::DetectClipBpm { track_id, clip_id })
             .padding([4, 10])
             .style(button_style);
@@ -580,7 +584,7 @@ impl App {
         let warp_btn = button(
             text(format!("Warp → {:.0} BPM", self.state.transport.bpm))
                 .size(11)
-                .color(th::TEXT),
+                .color(th::text()),
         )
         .on_press(Message::WarpClipToProject { track_id, clip_id })
         .padding([4, 10])
@@ -591,7 +595,7 @@ impl App {
             .align_y(iced::Alignment::Center);
 
         if clip.warped {
-            let clear_btn = button(text("Clear warp").size(11).color(th::TEXT_DIM))
+            let clear_btn = button(text("Clear warp").size(11).color(th::text_dim()))
                 .on_press(Message::Arrangement(ArrangementMsg::ClearClipWarp {
                     track_id,
                     clip_id,
@@ -606,7 +610,7 @@ impl App {
                     row_widgets = row_widgets.push(
                         text(format!("(was {:.0})", warped_to))
                             .size(10)
-                            .color(th::METER_YELLOW),
+                            .color(th::meter_yellow()),
                     );
                 }
             }
@@ -622,7 +626,7 @@ impl App {
                         self.state.transport.bpm
                     ))
                     .size(10)
-                    .color(th::METER_YELLOW),
+                    .color(th::meter_yellow()),
                 );
             }
         }
@@ -635,9 +639,9 @@ impl App {
         track_id: TrackId,
         clip_id: ClipId,
     ) -> Element<'_, Message> {
-        let label = text("Quantize").size(11).color(th::TEXT_DIM);
+        let label = text("Quantize").size(11).color(th::text_dim());
         let grid_btn = |grid: crate::state::SnapGrid| -> Element<'_, Message> {
-            button(text(grid.label()).size(11).color(th::TEXT))
+            button(text(grid.label()).size(11).color(th::text()))
                 .on_press(Message::QuantizeAudioClipAt {
                     track_id,
                     clip_id,
@@ -647,15 +651,15 @@ impl App {
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT,
+                        text_color: th::text(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
