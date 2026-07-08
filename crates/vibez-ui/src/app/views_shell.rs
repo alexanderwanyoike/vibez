@@ -18,7 +18,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{AppState, ArrangementSelection, ContextMenuTarget, Workspace};
 use crate::theme as th;
-use crate::widgets::mixer_strip::view_mixer_strip;
+use crate::widgets::mixer_strip::{view_mixer_strip, StripRole};
 use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
 use crate::widgets::track_header::view_track_header;
 use crate::widgets::vu_meter::VuMeterWidget;
@@ -488,14 +488,65 @@ impl App {
                 .into();
         }
 
-        // ── Channel strips + pinned master ──
+        // ── Channel strips, buses, pinned master ──
+        let buses = &self.state.arrangement.buses;
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.arrangement.tracks {
             let selected = self.state.arrangement.selected_track == Some(track.id);
-            let strip = view_mixer_strip(track, selected);
+            let strip = view_mixer_strip(track, selected, StripRole::Track, buses);
             strips = strips.push(strip);
         }
+
+        // Return buses sit between the tracks and the master, with a
+        // thin divider when any exist.
+        if !buses.is_empty() {
+            strips = strips.push(
+                container(column![].width(Length::Fixed(1.0)).height(Length::Fill)).style(
+                    |_theme: &Theme| container::Style {
+                        background: Some(th::border().into()),
+                        ..Default::default()
+                    },
+                ),
+            );
+            for bus in buses {
+                let selected = self.state.arrangement.selected_track == Some(bus.id);
+                strips = strips.push(view_mixer_strip(bus, selected, StripRole::Bus, buses));
+            }
+        }
+
+        // "+ Bus" pillar: always available, after the last strip.
+        let add_bus_btn = button(
+            column![
+                icons::icon(icons::PLUS).size(12).color(th::text_dim()),
+                text("Bus").size(9).color(th::text_dim())
+            ]
+            .spacing(2)
+            .align_x(iced::Alignment::Center),
+        )
+        .on_press(Message::add_bus())
+        .padding([12, 6])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+                _ => Some(th::bg_surface().into()),
+            };
+            button::Style {
+                background: bg,
+                text_color: th::text_dim(),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+        strips = strips.push(
+            container(add_bus_btn)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::Center),
+        );
 
         // Master strip — a real channel, pinned to far right
         let master_selected =
@@ -503,6 +554,8 @@ impl App {
         let master_strip = container(view_mixer_strip(
             &self.state.arrangement.master,
             master_selected,
+            StripRole::Master,
+            buses,
         ))
         .padding(8)
         .height(Length::Fill);

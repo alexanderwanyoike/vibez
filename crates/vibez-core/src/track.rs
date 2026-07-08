@@ -91,6 +91,9 @@ pub struct TrackInfo {
     /// Automation lanes on this track.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation: Vec<crate::automation::AutomationLane>,
+    /// Post-fader send amounts into buses: `(bus id, 0..1)`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sends: Vec<(TrackId, f32)>,
 }
 
 impl TrackInfo {
@@ -109,6 +112,7 @@ impl TrackInfo {
             native_instrument: None,
             plugin_instrument: None,
             automation: Vec::new(),
+            sends: Vec::new(),
         }
     }
 }

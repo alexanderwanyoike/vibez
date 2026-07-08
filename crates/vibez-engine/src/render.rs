@@ -50,6 +50,8 @@ pub struct BounceRequest {
     /// Master bus (gain + effect chain), applied to the summed mix
     /// in [`BounceMode::Master`] renders.
     pub master: Option<TrackInfo>,
+    /// Return buses; fed by track sends in [`BounceMode::Master`].
+    pub buses: Vec<TrackInfo>,
     pub audio_clips: Vec<ClipInfo>,
     pub note_clips: Vec<NoteClipInfo>,
     pub clip_audio: HashMap<ClipId, Arc<DecodedAudio>>,
@@ -87,6 +89,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         let mut engine = EngineTrack::new(track_info.id);
         engine.gain = track_info.gain;
         engine.pan = track_info.pan;
+        engine.sends = track_info.sends.clone();
         match req.mode {
             BounceMode::Master => {
                 engine.mute = track_info.mute;
@@ -199,6 +202,33 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
     let total_frames = end.saturating_sub(start) as usize;
     let has_solo = matches!(req.mode, BounceMode::Master) && any_solo(&tracks);
 
+    // Return buses: rebuilt like live channels, fed from track sends
+    // per block. Only master-mode renders route through them.
+    let mut buses: Vec<EngineTrack> = Vec::new();
+    if matches!(req.mode, BounceMode::Master) {
+        for bus_info in &req.buses {
+            let mut bus = EngineTrack::new(bus_info.id);
+            bus.gain = bus_info.gain;
+            bus.pan = bus_info.pan;
+            bus.mute = bus_info.mute;
+            for info in &bus_info.effects {
+                if info.plugin.is_some() {
+                    warnings.push(format!(
+                        "Bus '{}' plugin effect not rendered offline",
+                        bus_info.name
+                    ));
+                    continue;
+                }
+                bus.effects.push(EffectSlot {
+                    id: info.id,
+                    effect: create_effect_with_params(info.effect_type, sr_f32, &info.params),
+                    bypass: info.bypass,
+                });
+            }
+            buses.push(bus);
+        }
+    }
+
     // Master bus chain + gain, applied to the summed mix so the
     // export matches live playback. Only master-mode renders route
     // through it (single-track/clip bounces are pre-master stems).
@@ -240,6 +270,10 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         let scratch = &mut master_scratch[..block * CHANNELS];
         scratch.iter_mut().for_each(|s| *s = 0.0);
 
+        for bus in buses.iter_mut() {
+            bus.clear_buffer(block, CHANNELS);
+        }
+
         for track in tracks.iter_mut() {
             if matches!(req.mode, BounceMode::Master) {
                 if track.mute {
@@ -269,6 +303,38 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 let idx = frame * CHANNELS;
                 scratch[idx] += track.mix_buffer[idx] * gain * pan_l;
                 scratch[idx + 1] += track.mix_buffer[idx + 1] * gain * pan_r;
+            }
+            for (bus_id, amount) in &track.sends {
+                if *amount <= 0.0005 {
+                    continue;
+                }
+                if let Some(bus) = buses.iter_mut().find(|b| b.id == *bus_id) {
+                    for frame in 0..block {
+                        let idx = frame * CHANNELS;
+                        bus.mix_buffer[idx] += track.mix_buffer[idx] * gain * pan_l * amount;
+                        bus.mix_buffer[idx + 1] +=
+                            track.mix_buffer[idx + 1] * gain * pan_r * amount;
+                    }
+                }
+            }
+        }
+
+        for bus in buses.iter_mut() {
+            let buf = block * CHANNELS;
+            for slot in &mut bus.effects {
+                if !slot.bypass {
+                    slot.effect.process(&mut bus.mix_buffer[..buf], CHANNELS);
+                }
+            }
+            if bus.mute {
+                continue;
+            }
+            let (pan_l, pan_r) = crate::mixer::balance_pan(bus.pan);
+            let gain = bus.gain;
+            for frame in 0..block {
+                let idx = frame * CHANNELS;
+                scratch[idx] += bus.mix_buffer[idx] * gain * pan_l;
+                scratch[idx + 1] += bus.mix_buffer[idx + 1] * gain * pan_r;
             }
         }
 
@@ -348,7 +414,62 @@ mod tests {
             native_instrument: None,
             plugin_instrument: None,
             automation: Vec::new(),
+            sends: Vec::new(),
         }
+    }
+
+    #[test]
+    fn master_bounce_routes_sends_through_buses() {
+        let mut track = bare_track("audio");
+        track.pan = DEFAULT_TRACK_PAN;
+        let bus = bare_track("A Return");
+        let bus_id = bus.id;
+        track.sends.push((bus_id, 1.0));
+        let tid = track.id;
+        let audio = audio_of(200, 0.5);
+        let cid = ClipId::new();
+        let clip = ClipInfo {
+            id: cid,
+            track_id: tid,
+            name: "c".into(),
+            position: 0,
+            source_offset: 0,
+            duration: 200,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        };
+        let mut clip_audio = HashMap::new();
+        clip_audio.insert(cid, audio);
+
+        let req = BounceRequest {
+            master: None,
+            buses: vec![bus],
+            tracks: vec![track],
+            audio_clips: vec![clip],
+            note_clips: Vec::new(),
+            clip_audio,
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 200),
+            bpm: 120.0,
+            sample_rate: 44_100,
+        };
+        let result = render_offline(&req);
+        // Dry + unity send through a flat centered bus doubles the
+        // contribution, exactly like the live engine.
+        let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * 2.0;
+        assert!(
+            (result.audio.channels[0][10] - expected).abs() < 1e-3,
+            "expected {expected}, got {}",
+            result.audio.channels[0][10]
+        );
     }
 
     #[test]
@@ -380,6 +501,7 @@ mod tests {
 
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -429,6 +551,7 @@ mod tests {
 
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -471,6 +594,7 @@ mod tests {
         clip_audio.insert(cid, audio);
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -533,6 +657,7 @@ mod tests {
 
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: vec![clip_a, clip_b],
             note_clips: Vec::new(),
@@ -571,6 +696,7 @@ mod tests {
             native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
             plugin_instrument: None,
             automation: Vec::new(),
+            sends: Vec::new(),
         };
         let note_clip = NoteClipInfo {
             id: cid,
@@ -590,6 +716,7 @@ mod tests {
         };
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: Vec::new(),
             note_clips: vec![note_clip],
@@ -622,9 +749,11 @@ mod tests {
             native_instrument: None,
             plugin_instrument: None,
             automation: Vec::new(),
+            sends: Vec::new(),
         };
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: Vec::new(),
             note_clips: Vec::new(),
@@ -676,6 +805,7 @@ mod tests {
 
         let req = BounceRequest {
             master: None,
+            buses: Vec::new(),
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),

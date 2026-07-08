@@ -497,6 +497,19 @@ impl Message {
     pub fn set_track_solo(t: TrackId) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetTrackSolo(t))
     }
+    pub fn add_bus() -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::AddBus)
+    }
+    pub fn remove_bus(bus: TrackId) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RemoveBus(bus))
+    }
+    pub fn set_send(t: TrackId, bus: TrackId, amount: f32) -> Self {
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SetSend {
+            track_id: t,
+            bus_id: bus,
+            amount,
+        })
+    }
 }
 
 impl Message {

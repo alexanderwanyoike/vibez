@@ -82,6 +82,10 @@ pub struct EngineTrack {
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
+    /// Post-fader send amounts into bus channels: `(bus id, 0..1)`.
+    /// Only regular tracks send; buses and the master never do, so
+    /// the routing graph stays acyclic by construction.
+    pub sends: Vec<(TrackId, f32)>,
     pub note_clips: Vec<EngineNoteClip>,
     /// Automation lanes, evaluated once per render segment.
     pub automation: Vec<vibez_core::automation::AutomationLane>,
@@ -110,6 +114,7 @@ impl EngineTrack {
             solo: false,
             mix_buffer: Vec::new(),
             effects: Vec::new(),
+            sends: Vec::new(),
             note_clips: Vec::new(),
             automation: Vec::new(),
             instrument: None,
@@ -622,6 +627,15 @@ pub fn equal_power_pan(pan: f32) -> (f32, f32) {
     (angle.cos(), angle.sin())
 }
 
+/// Stereo balance law for channels that carry already-panned
+/// material (buses): center passes both channels at unity, off-
+/// center attenuates the far side. Equal-power panning here would
+/// tax every centered return 3 dB.
+pub fn balance_pan(pan: f32) -> (f32, f32) {
+    let pan = pan.clamp(0.0, 1.0);
+    (((1.0 - pan) * 2.0).min(1.0), (pan * 2.0).min(1.0))
+}
+
 /// Returns `true` if any track in the slice has solo enabled.
 pub fn any_solo(tracks: &[EngineTrack]) -> bool {
     tracks.iter().any(|t| t.solo)
@@ -668,6 +682,16 @@ mod tests {
         let expected = std::f32::consts::FRAC_1_SQRT_2; // ~0.707
         assert!((l - expected).abs() < 1e-6);
         assert!((r - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn balance_law_passes_center_at_unity() {
+        assert_eq!(balance_pan(0.5), (1.0, 1.0));
+        assert_eq!(balance_pan(0.0), (1.0, 0.0));
+        assert_eq!(balance_pan(1.0), (0.0, 1.0));
+        let (l, r) = balance_pan(0.25);
+        assert_eq!(l, 1.0);
+        assert!((r - 0.5).abs() < 1e-6);
     }
 
     #[test]

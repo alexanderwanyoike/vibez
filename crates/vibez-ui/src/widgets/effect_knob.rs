@@ -32,6 +32,10 @@ pub enum KnobTarget {
         pad_index: usize,
         param: DrumPadParam,
     },
+    /// Post-fader send amount into a bus.
+    Send {
+        bus_id: TrackId,
+    },
 }
 
 /// Generalized rotary knob widget for device parameters with
@@ -94,6 +98,21 @@ impl EffectKnobWidget {
         }
     }
 
+    /// Knob bound to a track's send amount into a bus (0..1, off by
+    /// default).
+    pub fn for_send(track_id: TrackId, bus_id: TrackId, value: f32, arc_color: Color) -> Self {
+        Self {
+            track_id,
+            target: KnobTarget::Send { bus_id },
+            param_index: 0,
+            value,
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            arc_color,
+        }
+    }
+
     /// Knob bound to a drum rack pad parameter.
     #[allow(clippy::too_many_arguments)]
     pub fn for_drum_pad(
@@ -134,6 +153,7 @@ impl EffectKnobWidget {
                     value,
                 })
             }
+            KnobTarget::Send { bus_id } => Message::set_send(self.track_id, bus_id, value),
         }
     }
 

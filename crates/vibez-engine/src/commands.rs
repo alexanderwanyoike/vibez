@@ -88,6 +88,18 @@ pub enum EngineCommand {
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
 
+    // -- Busses (return channels) --
+    /// Add a bus: a mixer-only channel fed by per-track sends.
+    AddBus(TrackId, String),
+    /// Remove a bus and every send pointing at it.
+    RemoveBus(TrackId),
+    /// Set a track's post-fader send amount into a bus (0.0 = off).
+    SetSend {
+        track_id: TrackId,
+        bus_id: TrackId,
+        amount: f32,
+    },
+
     // -- Infrastructure --
     SetSampleRate(u32),
     /// Select which track streams post-effects samples to the UI
