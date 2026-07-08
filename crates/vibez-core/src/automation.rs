@@ -55,6 +55,10 @@ pub enum AutomationTarget {
         effect_id: Option<EffectId>,
         param_id: u32,
     },
+    /// The track's post-fader send amount into a bus (native 0..1).
+    Send {
+        bus_id: crate::id::TrackId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

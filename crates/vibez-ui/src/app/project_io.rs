@@ -607,6 +607,13 @@ impl App {
                 &mut plugin_effect_requests,
             );
             self.state.arrangement.master.effects = effects;
+            self.state.arrangement.master.automation = master_info.automation.clone();
+            for lane in &master_info.automation {
+                self.send_command(EngineCommand::SetAutomationLane {
+                    track_id: TrackId::MASTER,
+                    lane: lane.clone(),
+                });
+            }
         }
         self.ensure_master_eq();
 
@@ -626,6 +633,13 @@ impl App {
                 bus_info.id,
                 &mut plugin_effect_requests,
             );
+            bus.automation = bus_info.automation.clone();
+            for lane in &bus_info.automation {
+                self.send_command(EngineCommand::SetAutomationLane {
+                    track_id: bus_info.id,
+                    lane: lane.clone(),
+                });
+            }
             self.state.arrangement.buses.push(bus);
             self.ensure_channel_eq(bus_info.id);
         }
@@ -891,6 +905,12 @@ impl App {
             // its gain and effect chain.
             self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
             self.replay_effects_to_engine(track);
+            for lane in &track.automation {
+                self.send_command(EngineCommand::SetAutomationLane {
+                    track_id: track.id,
+                    lane: lane.clone(),
+                });
+            }
             return;
         }
         match track.kind {
@@ -1005,6 +1025,12 @@ impl App {
         self.send_command(EngineCommand::SetTrackPan(bus.id, bus.pan));
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));
         self.replay_effects_to_engine(bus);
+        for lane in &bus.automation {
+            self.send_command(EngineCommand::SetAutomationLane {
+                track_id: bus.id,
+                lane: lane.clone(),
+            });
+        }
     }
 
     /// Replay a channel's built-in effect chain to the engine

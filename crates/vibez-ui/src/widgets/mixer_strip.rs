@@ -57,7 +57,30 @@ pub fn view_mixer_strip<'a>(
         .color(th::text())
         .width(Length::Fill);
 
-    let name_row = row![type_icon, name]
+    // Tracks are deletable straight from the strip; the master is
+    // not, and buses carry their remove control on the RETURN badge.
+    let delete_el: Element<'a, Message> = if role == StripRole::Track {
+        button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
+            .on_press(Message::remove_track(track.id))
+            .padding([1, 3])
+            .style(|_theme: &Theme, status| {
+                let tc = match status {
+                    button::Status::Hovered | button::Status::Pressed => th::danger(),
+                    _ => th::text_dim(),
+                };
+                button::Style {
+                    background: None,
+                    text_color: tc,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            })
+            .into()
+    } else {
+        text("").size(9).into()
+    };
+
+    let name_row = row![type_icon, name, delete_el]
         .spacing(4)
         .align_y(iced::Alignment::Center);
 

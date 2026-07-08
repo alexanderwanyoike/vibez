@@ -187,6 +187,8 @@ impl App {
                         msg,
                         &mut engine,
                         &mut self.state.arrangement.tracks,
+                        &mut self.state.arrangement.master,
+                        &mut self.state.arrangement.buses,
                     )
                 };
                 if let Some(status) = action.status {

@@ -138,7 +138,9 @@ impl EngineTrack {
                 continue;
             };
             match lane.target {
-                AutomationTarget::TrackGain => gain = Some(value),
+                // Lanes are normalized 0..1; gain's native range is
+                // 0..2 (unity at lane 0.5), pan is already 0..1.
+                AutomationTarget::TrackGain => gain = Some(value * 2.0),
                 AutomationTarget::TrackPan => pan = Some(value),
                 AutomationTarget::EffectParam {
                     effect_id,
@@ -164,6 +166,15 @@ impl EngineTrack {
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}
+                AutomationTarget::Send { bus_id } => {
+                    // Send range is native 0..1, so the normalized
+                    // lane value applies directly. Written in place
+                    // like effect params.
+                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                        Some(send) => send.1 = value,
+                        None => self.sends.push((bus_id, value)),
+                    }
+                }
             }
         }
         (gain, pan)

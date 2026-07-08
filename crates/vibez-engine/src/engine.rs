@@ -152,8 +152,22 @@ impl AudioEngine {
         // ---- 4.3 Buses: each return processes its send mix through
         // its chain (always, so queued plugin params deliver and
         // tails ring out) and sums into the mix ahead of the master.
+        let block_beat = if self.transport.is_playing() {
+            let bpm = self.transport.bpm();
+            if bpm > 0.0 {
+                Some(self.transport.position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         for bus_idx in 0..self.buses.len() {
             let bus = &mut self.buses[bus_idx];
+            let (bus_auto_gain, bus_auto_pan) = match block_beat {
+                Some(beat) => bus.apply_automation(beat),
+                None => (None, None),
+            };
             let buf_size = frames * channels;
             if bus.mix_buffer.len() < buf_size {
                 bus.clear_buffer(frames, channels);
@@ -171,10 +185,10 @@ impl AudioEngine {
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
             if !bus.mute {
-                let gain = bus.gain;
+                let gain = bus_auto_gain.unwrap_or(bus.gain);
                 // Balance, not equal-power: the send mix is already
                 // panned stereo, center must pass at unity.
-                let (pan_l, pan_r) = crate::mixer::balance_pan(bus.pan);
+                let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
                 for frame in 0..frames {
                     for ch in 0..channels {
                         let idx = frame * channels + ch;
@@ -211,14 +225,18 @@ impl AudioEngine {
         // Runs whether or not the transport is playing so queued
         // plugin params are delivered and tails ring out, matching
         // the per-track idle behavior.
+        let (master_auto_gain, _) = match block_beat {
+            Some(beat) => self.master.apply_automation(beat),
+            None => (None, None),
+        };
         for slot in &mut self.master.effects {
             if !slot.bypass {
                 slot.effect.process(output, channels);
             }
         }
-        if (self.master.gain - 1.0).abs() > f32::EPSILON {
-            let gain = self.master.gain;
-            output.iter_mut().for_each(|s| *s *= gain);
+        let master_gain = master_auto_gain.unwrap_or(self.master.gain);
+        if (master_gain - 1.0).abs() > f32::EPSILON {
+            output.iter_mut().for_each(|s| *s *= master_gain);
         }
         if self.spectrum_track == Some(self.master.id) {
             push_spectrum(&mut self.spectrum_tx, output, channels);
@@ -692,7 +710,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         match track.automation.iter_mut().find(|l| l.id == lane.id) {
                             Some(existing) => *existing = lane,
                             None => track.automation.push(lane),
@@ -700,7 +718,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         track.automation.retain(|l| l.id != lane_id);
                     }
                 }

@@ -1535,3 +1535,86 @@ fn remove_bus_drops_its_sends() {
     );
     assert!(engine.tracks()[0].sends.is_empty(), "sends cleaned up");
 }
+
+#[test]
+fn bus_gain_automation_rides_the_return() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    // Lane pinned at zero: the return contributes nothing even
+    // though the bus fader sits at unity.
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: bus,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry).abs() < 1e-3,
+        "zeroed bus gain lane should leave only the dry path: expected {dry} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn send_automation_opens_the_send() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    // Send starts closed; a lane at 1.0 opens it.
+    let (mut engine, mut cmd_tx, tid, bus) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: tid,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 2.0).abs() < 1e-3,
+        "send lane at 1.0 should double like a unity send: expected {} got {}",
+        dry * 2.0,
+        buf[0]
+    );
+}
+
+#[test]
+fn master_gain_automation_shapes_the_mix() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut cmd_tx, _tid, _bus) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.25, // normalized: gain range 0..2 -> 0.5x
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: TrackId::MASTER,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 0.5).abs() < 1e-3,
+        "master lane at 0.25 (=0.5x) should halve the mix: expected {} got {}",
+        dry * 0.5,
+        buf[0]
+    );
+}
