@@ -59,7 +59,7 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
             frame.fill_rectangle(
                 iced::Point::ORIGIN,
                 iced::Size::new(w, h),
-                theme::BG_SURFACE,
+                theme::bg_surface(),
             );
 
             // Center line
@@ -73,7 +73,7 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
                 canvas::Stroke::default()
                     .with_color(Color {
                         a: 0.3,
-                        ..theme::TEXT_DIM
+                        ..theme::text_dim()
                     })
                     .with_width(1.0),
             );
@@ -113,7 +113,7 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
                     frame.fill_rectangle(
                         iced::Point::new(x as f32, y_top),
                         iced::Size::new(1.0, height),
-                        theme::WAVEFORM,
+                        theme::waveform(),
                     );
                 }
             }
@@ -131,7 +131,7 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
                 frame.stroke(
                     &playhead_line,
                     canvas::Stroke::default()
-                        .with_color(theme::PLAYHEAD)
+                        .with_color(theme::playhead())
                         .with_width(1.5),
                 );
             }

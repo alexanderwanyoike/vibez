@@ -30,7 +30,6 @@ struct Band {
     gain_i: usize,
     freq_i: usize,
     q_i: Option<usize>,
-    color: Color,
 }
 
 const BANDS: [Band; 4] = [
@@ -38,27 +37,33 @@ const BANDS: [Band; 4] = [
         gain_i: 0,
         freq_i: 1,
         q_i: None,
-        color: th::EQ_LF,
     },
     Band {
         gain_i: 3,
         freq_i: 4,
         q_i: Some(5),
-        color: th::EQ_LMF,
     },
     Band {
         gain_i: 6,
         freq_i: 7,
         q_i: Some(8),
-        color: th::EQ_HMF,
     },
     Band {
         gain_i: 9,
         freq_i: 10,
         q_i: Some(11),
-        color: th::EQ_HF,
     },
 ];
+
+/// Band color from the current theme, by BANDS index (LF..HF).
+fn band_color(idx: usize) -> Color {
+    match idx {
+        0 => th::eq_lf(),
+        1 => th::eq_lmf(),
+        2 => th::eq_hmf(),
+        _ => th::eq_hf(),
+    }
+}
 
 pub struct EqDisplayWidget {
     pub track_id: TrackId,
@@ -156,13 +161,13 @@ impl canvas::Program<Message> for EqDisplayWidget {
         // ── Panel ──
         frame.fill(
             &canvas::Path::rounded_rectangle(Point::ORIGIN, bounds.size(), 3.0.into()),
-            th::BG_DARK,
+            th::bg_dark(),
         );
 
         // ── Grid: decade frequency lines + dB lines ──
         let grid = Color {
             a: 0.35,
-            ..th::BORDER
+            ..th::border()
         };
         let labeled: [(f32, &str); 3] = [(100.0, "100"), (1_000.0, "1k"), (10_000.0, "10k")];
         for f in [
@@ -178,7 +183,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
                 position: Point::new(freq_to_norm(f) * w + 3.0, h - 2.0),
-                color: th::TEXT_MUTED,
+                color: th::text_muted(),
                 size: 8.0.into(),
                 vertical_alignment: iced::alignment::Vertical::Bottom,
                 ..canvas::Text::default()
@@ -198,7 +203,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
             canvas::Stroke::default()
                 .with_color(Color {
                     a: 0.8,
-                    ..th::BORDER
+                    ..th::border()
                 })
                 .with_width(1.0),
         );
@@ -219,7 +224,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 &path,
                 Color {
                     a: 0.13,
-                    ..th::TEXT_DIM
+                    ..th::text_dim()
                 },
             );
             frame.stroke(
@@ -227,7 +232,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 canvas::Stroke::default()
                     .with_color(Color {
                         a: 0.30,
-                        ..th::TEXT_DIM
+                        ..th::text_dim()
                     })
                     .with_width(1.0),
             );
@@ -257,7 +262,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
                 &fill,
                 Color {
                     a: 0.10,
-                    ..th::ACCENT
+                    ..th::accent()
                 },
             );
         }
@@ -269,9 +274,9 @@ impl canvas::Program<Message> for EqDisplayWidget {
             }
         });
         let (curve_color, curve_w) = if self.bypass {
-            (th::TEXT_MUTED, 1.5)
+            (th::text_muted(), 1.5)
         } else {
-            (th::TEXT, 2.0)
+            (th::text(), 2.0)
         };
         frame.stroke(
             &curve,
@@ -288,17 +293,17 @@ impl canvas::Program<Message> for EqDisplayWidget {
             let p = self.handle_pos(band, bounds);
             let engaged = state.drag == Some(i) || (state.drag.is_none() && state.hover == Some(i));
             let color = if self.bypass {
-                th::TEXT_MUTED
+                th::text_muted()
             } else {
-                band.color
+                band_color(i)
             };
             frame.fill(&canvas::Path::circle(p, HANDLE_R), color);
-            frame.fill(&canvas::Path::circle(p, HANDLE_R - 2.5), th::BG_DARK);
+            frame.fill(&canvas::Path::circle(p, HANDLE_R - 2.5), th::bg_dark());
             if engaged {
                 frame.stroke(
                     &canvas::Path::circle(p, HANDLE_R + 2.0),
                     canvas::Stroke::default()
-                        .with_color(th::TEXT)
+                        .with_color(th::text())
                         .with_width(1.0),
                 );
                 // Readout: freq / gain / Q next to the handle.
@@ -318,7 +323,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
                         p.x.clamp(60.0, w - 80.0),
                         if above { p.y - 12.0 } else { p.y + 12.0 },
                     ),
-                    color: th::TEXT,
+                    color: th::text(),
                     size: 9.0.into(),
                     horizontal_alignment: iced::alignment::Horizontal::Center,
                     vertical_alignment: if above {
@@ -335,7 +340,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
         frame.stroke(
             &canvas::Path::rounded_rectangle(Point::ORIGIN, bounds.size(), 3.0.into()),
             canvas::Stroke::default()
-                .with_color(th::BORDER)
+                .with_color(th::border())
                 .with_width(1.0),
         );
 

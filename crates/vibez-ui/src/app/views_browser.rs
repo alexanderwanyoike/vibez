@@ -27,27 +27,27 @@ impl App {
             );
             let dropbox_active = !local_active;
             let tab_btn = |label: &'static str, active: bool, mode| {
-                button(
-                    text(label)
-                        .size(11)
-                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
-                )
+                button(text(label).size(11).color(if active {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                }))
                 .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(mode)))
                 .padding([4, 12])
                 .style(move |_theme: &Theme, status| {
                     let bg = if active {
-                        Some(th::ACCENT_DIM.into())
+                        Some(th::accent_dim().into())
                     } else {
                         match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
+                                Some(th::bg_hover().into())
                             }
                             _ => None,
                         }
                     };
                     button::Style {
                         background: bg,
-                        text_color: if active { th::ACCENT } else { th::TEXT_DIM },
+                        text_color: if active { th::accent() } else { th::text_dim() },
                         border: iced::Border::default(),
                         ..Default::default()
                     }
@@ -82,9 +82,9 @@ impl App {
         .width(Length::Fixed(320.0))
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 0.0.into(),
             },
@@ -94,19 +94,21 @@ impl App {
     }
 
     pub(super) fn view_local_sample_browser(&self) -> Element<'_, Message> {
-        let title = text("Sample Browser").size(14).color(th::ACCENT);
-        let mut add_root_btn = button(text("Add Root").size(11).color(th::TEXT))
+        let title = text("Sample Browser").size(14).color(th::accent());
+        let mut add_root_btn = button(text("Add Root").size(11).color(th::text()))
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_ELEVATED.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_elevated().into()),
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -115,18 +117,20 @@ impl App {
             });
         add_root_btn = add_root_btn.on_press(Message::AddSampleLibraryRoot);
 
-        let mut rescan_btn = button(text("Rescan").size(11).color(th::TEXT))
+        let mut rescan_btn = button(text("Rescan").size(11).color(th::text()))
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_ELEVATED.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_elevated().into()),
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -146,7 +150,7 @@ impl App {
                 header,
                 text("Add a root folder to index your sample library.")
                     .size(12)
-                    .color(th::TEXT_DIM)
+                    .color(th::text_dim())
             ]
             .spacing(10)
             .padding(10);
@@ -154,9 +158,9 @@ impl App {
                 .width(Length::Fixed(320.0))
                 .height(Length::Fill)
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_SURFACE.into()),
+                    background: Some(th::bg_surface().into()),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 0.0.into(),
                     },
@@ -174,25 +178,31 @@ impl App {
         let mut roots_col = column![].spacing(4);
         let all_active = self.state.browser.root_filter.is_none();
         let mut all_btn = button(text("All Roots").size(11).color(if all_active {
-            th::ACCENT
+            th::accent()
         } else {
-            th::TEXT_DIM
+            th::text_dim()
         }))
         .padding([4, 8])
         .style(move |_theme: &Theme, status| {
             let bg = if all_active {
-                Some(th::ACCENT_DIM.into())
+                Some(th::accent_dim().into())
             } else {
                 match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_ELEVATED.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_elevated().into()),
                 }
             };
             button::Style {
                 background: bg,
-                text_color: if all_active { th::ACCENT } else { th::TEXT_DIM },
+                text_color: if all_active {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -210,28 +220,28 @@ impl App {
                 .as_ref()
                 .is_some_and(|selected| selected == root);
             let mut filter_btn = button(text(root_label(root)).size(11).color(if active {
-                th::ACCENT
+                th::accent()
             } else {
-                th::TEXT
+                th::text()
             }))
             .padding([4, 8])
             .width(Length::Fill)
             .style(move |_theme: &Theme, status| {
                 let bg = if active {
-                    Some(th::ACCENT_DIM.into())
+                    Some(th::accent_dim().into())
                 } else {
                     match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     }
                 };
                 button::Style {
                     background: bg,
-                    text_color: if active { th::ACCENT } else { th::TEXT },
+                    text_color: if active { th::accent() } else { th::text() },
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -242,7 +252,7 @@ impl App {
                 BrowserMsg::SelectSampleBrowserRoot(Some(root.clone())),
             ));
 
-            let remove_btn = button(icons::icon(icons::X).size(10).color(th::DANGER))
+            let remove_btn = button(icons::icon(icons::X).size(10).color(th::danger()))
                 .on_press(Message::Browser(BrowserMsg::RemoveSampleLibraryRoot(
                     root.clone(),
                 )))
@@ -250,13 +260,13 @@ impl App {
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::DANGER,
+                        text_color: th::danger(),
                         border: iced::Border::default(),
                         ..Default::default()
                     }
@@ -304,13 +314,13 @@ impl App {
             let entry_body = container(
                 column![
                     text(entry.name.as_str()).size(12).color(if selected {
-                        th::ACCENT
+                        th::accent()
                     } else {
-                        th::TEXT
+                        th::text()
                     }),
                     text(entry.relative_path.display().to_string())
                         .size(10)
-                        .color(th::TEXT_DIM)
+                        .color(th::text_dim())
                 ]
                 .spacing(2)
                 .width(Length::Fill),
@@ -320,14 +330,14 @@ impl App {
             .style(move |_theme: &Theme| container::Style {
                 background: Some(
                     if selected {
-                        th::ACCENT_DIM
+                        th::accent_dim()
                     } else {
-                        th::BG_ELEVATED
+                        th::bg_elevated()
                     }
                     .into(),
                 ),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -340,21 +350,21 @@ impl App {
                 }))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::TEXT_DIM))
+            let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::text_dim()))
                 .on_press(Message::PreviewLocalEntry(entry.source.clone()))
                 .padding([6, 8])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::ACCENT,
+                        text_color: th::accent(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -373,7 +383,7 @@ impl App {
                 container(
                     text("No samples match the current filters")
                         .size(11)
-                        .color(th::TEXT_DIM),
+                        .color(th::text_dim()),
                 )
                 .padding([8, 4]),
             );
@@ -390,7 +400,7 @@ impl App {
             }
         ))
         .size(10)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
 
         let selected_text = selected_entry
             .map(|entry| entry.relative_path.display().to_string())
@@ -412,18 +422,20 @@ impl App {
             _ => "No sampler or drum rack selected".to_string(),
         };
 
-        let mut add_clip_btn = button(text("Add Clip").size(11).color(th::TEXT))
+        let mut add_clip_btn = button(text("Add Clip").size(11).color(th::text()))
             .padding([6, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_ELEVATED.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_elevated().into()),
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -434,18 +446,20 @@ impl App {
             add_clip_btn = add_clip_btn.on_press(Message::ImportSelectedBrowserSampleToArrangement);
         }
 
-        let mut load_device_btn = button(text("Load Device").size(11).color(th::TEXT))
+        let mut load_device_btn = button(text("Load Device").size(11).color(th::text()))
             .padding([6, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_ELEVATED.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_elevated().into()),
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -457,8 +471,8 @@ impl App {
         }
 
         let footer = column![
-            text(selected_text).size(11).color(th::TEXT),
-            text(selected_hint).size(10).color(th::TEXT_DIM),
+            text(selected_text).size(11).color(th::text()),
+            text(selected_hint).size(10).color(th::text_dim()),
             row![add_clip_btn, load_device_btn]
                 .spacing(6)
                 .align_y(iced::Alignment::Center)
@@ -482,7 +496,7 @@ impl App {
     }
 
     pub(super) fn view_dropbox_browser(&self) -> Element<'_, Message> {
-        let title = text("Dropbox").size(14).color(th::ACCENT);
+        let title = text("Dropbox").size(14).color(th::accent());
 
         if !self.state.browser.dropbox.connected {
             let hint = if self.state.browser.dropbox.auth_in_progress {
@@ -490,7 +504,7 @@ impl App {
             } else {
                 "Connect in Settings > Dropbox to browse your library."
             };
-            return column![title, text(hint).size(12).color(th::TEXT_DIM)]
+            return column![title, text(hint).size(12).color(th::text_dim())]
                 .spacing(10)
                 .padding(10)
                 .height(Length::Fill)
@@ -504,7 +518,7 @@ impl App {
             .account_email
             .clone()
             .unwrap_or_default();
-        let header = column![title, text(account).size(11).color(th::TEXT_DIM),].spacing(2);
+        let header = column![title, text(account).size(11).color(th::text_dim()),].spacing(2);
 
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
         self.render_dropbox_tree(String::new(), 0, &mut rows);
@@ -514,7 +528,7 @@ impl App {
             } else {
                 "Empty (or still fetching)."
             };
-            rows.push(text(msg).size(11).color(th::TEXT_DIM).into());
+            rows.push(text(msg).size(11).color(th::text_dim()).into());
         }
         let mut entries_col = column![].spacing(2);
         for row in rows {
@@ -531,20 +545,20 @@ impl App {
         // no dedicated button here.
 
         let add_clip_btn: Element<'_, Message> = {
-            let mut btn = button(text("Add Clip").size(11).color(th::TEXT))
+            let mut btn = button(text("Add Clip").size(11).color(th::text()))
                 .padding([6, 10])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT,
+                        text_color: th::text(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -558,20 +572,20 @@ impl App {
         };
 
         let load_device_btn: Element<'_, Message> = {
-            let mut btn = button(text("Load Device").size(11).color(th::TEXT))
+            let mut btn = button(text("Load Device").size(11).color(th::text()))
                 .padding([6, 10])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
-                        _ => Some(th::BG_ELEVATED.into()),
+                        _ => Some(th::bg_elevated().into()),
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT,
+                        text_color: th::text(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -589,13 +603,13 @@ impl App {
 
         let error_line: Element<'_, Message> =
             if let Some(err) = self.state.browser.dropbox.last_error.clone() {
-                text(err).size(10).color(th::DANGER).into()
+                text(err).size(10).color(th::danger()).into()
             } else {
                 horizontal_space().width(Length::Shrink).into()
             };
 
         let footer = column![
-            text(selected_label).size(11).color(th::TEXT),
+            text(selected_label).size(11).color(th::text()),
             row![add_clip_btn, load_device_btn].spacing(6),
             error_line,
         ]
@@ -663,16 +677,16 @@ impl App {
                 // Audio rows use a container + mouse_area so press events
                 // reach us (iced Button captures ButtonPressed, which would
                 // hide the drag from mouse_area).
-                let text_color = if selected { th::ACCENT } else { th::TEXT };
+                let text_color = if selected { th::accent() } else { th::text() };
                 let row_body = container(text(label).size(11).color(text_color))
                     .padding([3, 6])
                     .width(Length::Fill)
                     .style(move |_theme: &Theme| container::Style {
                         background: Some(
                             if selected {
-                                th::ACCENT_DIM
+                                th::accent_dim()
                             } else {
-                                th::BG_ELEVATED
+                                th::bg_elevated()
                             }
                             .into(),
                         ),
@@ -691,19 +705,19 @@ impl App {
                     }))
                     .on_release(msg)
                     .into();
-                let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::ACCENT))
+                let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::accent()))
                     .on_press(Message::DropboxPreview(entry.clone()))
                     .padding([3, 6])
                     .style(|_theme: &Theme, status| {
                         let bg = match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
+                                Some(th::bg_hover().into())
                             }
                             _ => None,
                         };
                         button::Style {
                             background: bg,
-                            text_color: th::ACCENT,
+                            text_color: th::accent(),
                             border: iced::Border::default(),
                             ..Default::default()
                         }
@@ -718,29 +732,29 @@ impl App {
                 // Folders + non-audio entries keep the button path since they
                 // don't participate in drag.
                 let btn = button(text(label).size(11).color(if selected {
-                    th::ACCENT
+                    th::accent()
                 } else if entry.is_folder {
-                    th::TEXT
+                    th::text()
                 } else {
-                    th::TEXT_DIM
+                    th::text_dim()
                 }))
                 .on_press(msg)
                 .padding([3, 6])
                 .width(Length::Fill)
                 .style(move |_theme: &Theme, status| {
                     let bg = if selected {
-                        Some(th::ACCENT_DIM.into())
+                        Some(th::accent_dim().into())
                     } else {
                         match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
+                                Some(th::bg_hover().into())
                             }
-                            _ => Some(th::BG_ELEVATED.into()),
+                            _ => Some(th::bg_elevated().into()),
                         }
                     };
                     button::Style {
                         background: bg,
-                        text_color: if selected { th::ACCENT } else { th::TEXT },
+                        text_color: if selected { th::accent() } else { th::text() },
                         border: iced::Border::default(),
                         ..Default::default()
                     }

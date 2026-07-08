@@ -73,17 +73,17 @@ impl App {
     }
 
     pub(super) fn view_header(&self) -> Element<'_, Message> {
-        let title = text("vibez").size(22).color(th::ACCENT);
+        let title = text("vibez").size(22).color(th::accent());
 
         // Workspace tabs
         let arrange_tab = {
             let active = self.state.view.workspace == Workspace::Arrange;
             let (bg, text_color, border_color) = if active {
-                (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
+                (th::bg_elevated(), th::accent(), th::accent_dim())
             } else {
                 (
                     iced::Color::TRANSPARENT,
-                    th::TEXT_DIM,
+                    th::text_dim(),
                     iced::Color::TRANSPARENT,
                 )
             };
@@ -112,11 +112,11 @@ impl App {
         let mix_tab = {
             let active = self.state.view.workspace == Workspace::Mix;
             let (bg, text_color, border_color) = if active {
-                (th::BG_ELEVATED, th::ACCENT, th::ACCENT_DIM)
+                (th::bg_elevated(), th::accent(), th::accent_dim())
             } else {
                 (
                     iced::Color::TRANSPARENT,
-                    th::TEXT_DIM,
+                    th::text_dim(),
                     iced::Color::TRANSPARENT,
                 )
             };
@@ -146,17 +146,19 @@ impl App {
 
         let tabs = row![arrange_tab, mix_tab].spacing(4);
 
-        let file_btn = button(text("File").size(13).color(th::TEXT_DIM))
+        let file_btn = button(text("File").size(13).color(th::text_dim()))
             .on_press(Message::Project(ProjectMsg::ToggleFileMenu))
             .padding([6, 14])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     border: iced::Border::default(),
                     ..Default::default()
                 }
@@ -168,14 +170,14 @@ impl App {
                 icons::icon(icons::AUDIO_WAVEFORM)
                     .size(13)
                     .color(if browser_active {
-                        th::ACCENT
+                        th::accent()
                     } else {
-                        th::TEXT_DIM
+                        th::text_dim()
                     }),
                 text("Browser").size(13).color(if browser_active {
-                    th::ACCENT
+                    th::accent()
                 } else {
-                    th::TEXT_DIM
+                    th::text_dim()
                 })
             ]
             .spacing(4)
@@ -185,23 +187,25 @@ impl App {
         .padding([6, 14])
         .style(move |_theme: &Theme, status| {
             let bg = if browser_active {
-                Some(th::BG_ELEVATED.into())
+                Some(th::bg_elevated().into())
             } else {
                 match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 }
             };
             button::Style {
                 background: bg,
                 text_color: if browser_active {
-                    th::ACCENT
+                    th::accent()
                 } else {
-                    th::TEXT_DIM
+                    th::text_dim()
                 },
                 border: iced::Border {
                     color: if browser_active {
-                        th::ACCENT_DIM
+                        th::accent_dim()
                     } else {
                         Color::TRANSPARENT
                     },
@@ -219,9 +223,9 @@ impl App {
         container(header)
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 0.0,
                     radius: 0.0.into(),
                 },
@@ -236,7 +240,7 @@ impl App {
         if self.state.arrangement.tracks.is_empty() {
             let prompt = text("Right-click or Ctrl+T to add a track")
                 .size(16)
-                .color(th::TEXT_DIM);
+                .color(th::text_dim());
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
@@ -245,7 +249,7 @@ impl App {
                     .width(Length::Fill)
                     .height(Length::FillPortion(5))
                     .style(|_theme: &Theme| container::Style {
-                        background: Some(th::BG_DARK.into()),
+                        background: Some(th::bg_dark().into()),
                         ..Default::default()
                     }),
             )
@@ -290,7 +294,7 @@ impl App {
             ))
             .height(Length::Fixed(28.0))
             .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(crate::theme::BG_SURFACE.into()),
+                background: Some(crate::theme::bg_surface().into()),
                 ..Default::default()
             });
 
@@ -338,7 +342,7 @@ impl App {
             ))
             .height(Length::Fixed(40.0))
             .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 ..Default::default()
             });
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
@@ -452,7 +456,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_DARK.into()),
+                    background: Some(th::bg_dark().into()),
                     ..Default::default()
                 }),
         )
@@ -470,7 +474,7 @@ impl App {
         if self.state.arrangement.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
-                .color(th::TEXT_DIM);
+                .color(th::text_dim());
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
@@ -478,7 +482,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_DARK.into()),
+                    background: Some(th::bg_dark().into()),
                     ..Default::default()
                 })
                 .into();
@@ -517,7 +521,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_DARK.into()),
+                    background: Some(th::bg_dark().into()),
                     ..Default::default()
                 }),
         )
@@ -533,14 +537,14 @@ impl App {
 
     pub(super) fn view_transport(&self) -> Element<'_, Message> {
         // Skip back button
-        let skip_back_btn = button(icons::icon(icons::SKIP_BACK).size(16).color(th::TEXT))
+        let skip_back_btn = button(icons::icon(icons::SKIP_BACK).size(16).color(th::text()))
             .on_press(Message::Transport(TransportMsg::Stop))
             .padding([8, 12])
             .style(|_theme: &Theme, _status| button::Style {
-                background: Some(th::BG_ELEVATED.into()),
-                text_color: th::TEXT,
+                background: Some(th::bg_elevated().into()),
+                text_color: th::text(),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -549,28 +553,28 @@ impl App {
 
         // Play/Pause button
         let play_pause_btn = if self.state.transport.playing {
-            button(icons::icon(icons::PAUSE).size(16).color(th::ACCENT))
+            button(icons::icon(icons::PAUSE).size(16).color(th::accent()))
                 .on_press(Message::Transport(TransportMsg::Stop))
                 .padding([8, 14])
                 .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::ACCENT,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::accent(),
                     border: iced::Border {
-                        color: th::ACCENT_DIM,
+                        color: th::accent_dim(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
                     ..Default::default()
                 })
         } else {
-            button(icons::icon(icons::PLAY).size(16).color(th::SUCCESS))
+            button(icons::icon(icons::PLAY).size(16).color(th::success()))
                 .on_press(Message::Transport(TransportMsg::Play))
                 .padding([8, 14])
                 .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::SUCCESS,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::success(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -580,28 +584,28 @@ impl App {
 
         // Loop toggle button
         let loop_btn = if self.state.transport.loop_enabled {
-            button(icons::icon(icons::REPEAT).size(16).color(th::ACCENT))
+            button(icons::icon(icons::REPEAT).size(16).color(th::accent()))
                 .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
                 .padding([8, 12])
                 .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::ACCENT,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::accent(),
                     border: iced::Border {
-                        color: th::ACCENT_DIM,
+                        color: th::accent_dim(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
                     ..Default::default()
                 })
         } else {
-            button(icons::icon(icons::REPEAT).size(16).color(th::TEXT_DIM))
+            button(icons::icon(icons::REPEAT).size(16).color(th::text_dim()))
                 .on_press(Message::Transport(TransportMsg::ToggleArrangementLoop))
                 .padding([8, 12])
                 .style(|_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -618,7 +622,7 @@ impl App {
             AppState::format_time(self.state.duration_seconds()),
         ))
         .size(14)
-        .color(th::TEXT);
+        .color(th::text());
 
         // BPM
         let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
@@ -628,19 +632,19 @@ impl App {
             .size(14);
 
         let bpm_nudge = |icon: char, delta: f64| {
-            button(icons::icon(icon).size(8).color(th::TEXT_DIM))
+            button(icons::icon(icon).size(8).color(th::text_dim()))
                 .on_press(Message::Transport(TransportMsg::NudgeBpm(delta)))
                 .padding([0, 4])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT_DIM,
+                        text_color: th::text_dim(),
                         border: iced::Border {
                             radius: 2.0.into(),
                             ..Default::default()
@@ -655,7 +659,7 @@ impl App {
         ]
         .spacing(1);
 
-        let bpm_label = text("BPM").size(12).color(th::TEXT_DIM);
+        let bpm_label = text("BPM").size(12).color(th::text_dim());
 
         // Master VU meter
         let master_meter = VuMeterWidget {
@@ -667,7 +671,7 @@ impl App {
             .height(Length::Fixed(28.0))
             .into();
 
-        let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::TEXT_DIM);
+        let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::text_dim());
 
         let transport = row![
             transport_buttons,
@@ -688,9 +692,9 @@ impl App {
         container(transport)
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 0.0.into(),
                 },
@@ -700,13 +704,13 @@ impl App {
     }
 
     pub(super) fn view_status(&self) -> Element<'_, Message> {
-        let status = text(&self.state.status_text).size(11).color(th::TEXT_DIM);
+        let status = text(&self.state.status_text).size(11).color(th::text_dim());
 
         container(status)
             .width(Length::Fill)
             .padding([3, 12])
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_DARK.into()),
+                background: Some(th::bg_dark().into()),
                 ..Default::default()
             })
             .into()
@@ -725,7 +729,7 @@ impl App {
 
         for lane in &track.automation {
             let label = target_label(&lane.target, track);
-            let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::TEXT_DIM))
+            let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
                 .on_press(Message::Automation(AutomationMsg::RemoveLane {
                     track_id: track.id,
                     lane_id: lane.id,
@@ -733,13 +737,13 @@ impl App {
                 .padding([1, 4])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: None,
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     border: iced::Border::default(),
                     ..Default::default()
                 });
             let lane_header = container(
                 row![
-                    text(label).size(11).color(th::TEXT_DIM),
+                    text(label).size(11).color(th::text_dim()),
                     horizontal_space(),
                     remove
                 ]
@@ -753,7 +757,7 @@ impl App {
             .height(Length::Fixed(LANE_HEIGHT))
             .align_y(iced::alignment::Vertical::Center)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 ..Default::default()
             });
 
@@ -862,23 +866,23 @@ impl App {
                 .size(11)
                 .padding([4, 8])
                 .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
-                    background: th::BG_DARK.into(),
+                    background: th::bg_dark().into(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 3.0.into(),
                     },
-                    icon: th::TEXT_DIM,
-                    placeholder: th::TEXT_DIM,
-                    value: th::TEXT,
-                    selection: th::ACCENT,
+                    icon: th::text_dim(),
+                    placeholder: th::text_dim(),
+                    value: th::text(),
+                    selection: th::accent(),
                 });
-            let close = button(icons::icon(icons::X).size(10).color(th::TEXT_DIM))
+            let close = button(icons::icon(icons::X).size(10).color(th::text_dim()))
                 .on_press(Message::Automation(AutomationMsg::CloseLanePicker))
                 .padding([3, 6])
                 .style(|_theme: &Theme, _status| button::Style {
                     background: None,
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     border: iced::Border::default(),
                     ..Default::default()
                 });
@@ -888,7 +892,7 @@ impl App {
                 let target = choice.target;
                 let track_id = track.id;
                 list = list.push(
-                    button(text(choice.label).size(11).color(th::TEXT))
+                    button(text(choice.label).size(11).color(th::text()))
                         .on_press(Message::Automation(AutomationMsg::AddLane {
                             track_id,
                             target,
@@ -898,13 +902,13 @@ impl App {
                         .style(|_theme: &Theme, status| {
                             let bg = match status {
                                 button::Status::Hovered | button::Status::Pressed => {
-                                    Some(th::BG_HOVER.into())
+                                    Some(th::bg_hover().into())
                                 }
                                 _ => None,
                             };
                             button::Style {
                                 background: bg,
-                                text_color: th::TEXT,
+                                text_color: th::text(),
                                 border: iced::Border::default(),
                                 ..Default::default()
                             }
@@ -916,7 +920,7 @@ impl App {
                     container(
                         text(format!("{hidden} more \u{2014} refine the search"))
                             .size(10)
-                            .color(th::TEXT_DIM),
+                            .color(th::text_dim()),
                     )
                     .padding([3, 10]),
                 );
@@ -926,7 +930,7 @@ impl App {
                     container(
                         text("Everything is already automated")
                             .size(10)
-                            .color(th::TEXT_DIM),
+                            .color(th::text_dim()),
                     )
                     .padding([3, 10]),
                 );
@@ -944,9 +948,9 @@ impl App {
             .padding(8)
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -956,22 +960,22 @@ impl App {
         } else {
             let track_id = track.id;
             container(
-                button(text("+ Add automation").size(11).color(th::TEXT_DIM))
+                button(text("+ Add automation").size(11).color(th::text_dim()))
                     .on_press(Message::Automation(AutomationMsg::OpenLanePicker(track_id)))
                     .width(Length::Fill)
                     .padding([3, 10])
                     .style(|_theme: &Theme, status| {
                         let bg = match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
+                                Some(th::bg_hover().into())
                             }
-                            _ => Some(th::BG_ELEVATED.into()),
+                            _ => Some(th::bg_elevated().into()),
                         };
                         button::Style {
                             background: bg,
-                            text_color: th::TEXT_DIM,
+                            text_color: th::text_dim(),
                             border: iced::Border {
-                                color: th::BORDER,
+                                color: th::border(),
                                 width: 1.0,
                                 radius: 3.0.into(),
                             },
@@ -995,7 +999,7 @@ impl App {
             container(panel)
                 .width(Length::Fixed(panel_width))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_SURFACE.into()),
+                    background: Some(th::bg_surface().into()),
                     ..Default::default()
                 }),
             iced::widget::horizontal_space()

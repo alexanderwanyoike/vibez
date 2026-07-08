@@ -16,18 +16,20 @@ use super::*;
 
 impl App {
     pub(super) fn view_settings_modal(&self) -> Element<'_, Message> {
-        let title = text("Settings").size(18).color(th::ACCENT);
-        let close_btn = button(icons::icon(icons::X).size(14).color(th::TEXT_DIM))
+        let title = text("Settings").size(18).color(th::accent());
+        let close_btn = button(icons::icon(icons::X).size(14).color(th::text_dim()))
             .on_press(Message::CloseSettings)
             .padding([4, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     border: iced::Border::default(),
                     ..Default::default()
                 }
@@ -37,7 +39,11 @@ impl App {
 
         // -- Tab bar --
         let make_tab_btn = |label: &'static str, tab: SettingsTab, is_active: bool| {
-            let color = if is_active { th::ACCENT } else { th::TEXT_DIM };
+            let color = if is_active {
+                th::accent()
+            } else {
+                th::text_dim()
+            };
             button(text(label).size(13).color(color))
                 .on_press(Message::SelectSettingsTab(tab))
                 .padding([6, 16])
@@ -47,7 +53,7 @@ impl App {
                     } else {
                         match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::BG_HOVER.into())
+                                Some(th::bg_hover().into())
                             }
                             _ => None,
                         }
@@ -57,7 +63,7 @@ impl App {
                         text_color: color,
                         border: iced::Border {
                             color: if is_active {
-                                th::ACCENT
+                                th::accent()
                             } else {
                                 Color::TRANSPARENT
                             },
@@ -102,14 +108,14 @@ impl App {
             header,
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
+                    background: Some(th::border().into()),
                     ..Default::default()
                 }
             ),
             tab_bar,
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
+                    background: Some(th::border().into()),
                     ..Default::default()
                 }
             ),
@@ -120,9 +126,9 @@ impl App {
         .width(Length::Fixed(480.0));
 
         let dialog = container(content).style(|_theme: &Theme| container::Style {
-            background: Some(th::BG_SURFACE.into()),
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: th::border(),
                 width: 1.0,
                 radius: 8.0.into(),
             },
@@ -144,10 +150,10 @@ impl App {
     }
 
     pub(super) fn view_settings_audio_tab(&self) -> Element<'_, Message> {
-        let buf_label = text("Buffer Size").size(14).color(th::TEXT);
+        let buf_label = text("Buffer Size").size(14).color(th::text());
         let buf_hint = text("Lower = less latency, higher = more CPU headroom")
             .size(11)
-            .color(th::TEXT_DIM);
+            .color(th::text_dim());
 
         let sizes: &[u32] = &[64, 128, 256, 512, 1024, 2048, 4096];
         let mut buf_row = row![].spacing(4);
@@ -155,19 +161,19 @@ impl App {
             let is_selected = self.state.settings_buffer_size == size;
             let label = format!("{size}");
             let btn = button(text(label).size(11).color(if is_selected {
-                th::TEXT
+                th::text()
             } else {
-                th::TEXT_DIM
+                th::text_dim()
             }))
             .on_press(Message::SetBufferSize(size))
             .padding([6, 10])
             .style(move |_theme: &Theme, status| {
                 if is_selected {
                     button::Style {
-                        background: Some(th::ACCENT.into()),
-                        text_color: th::TEXT,
+                        background: Some(th::accent().into()),
+                        text_color: th::text(),
                         border: iced::Border {
-                            color: th::ACCENT,
+                            color: th::accent(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -176,15 +182,15 @@ impl App {
                 } else {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT_DIM,
+                        text_color: th::text_dim(),
                         border: iced::Border {
-                            color: th::BORDER,
+                            color: th::border(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -195,41 +201,43 @@ impl App {
             buf_row = buf_row.push(btn);
         }
 
-        let sr_label = text("Sample Rate").size(14).color(th::TEXT);
+        let sr_label = text("Sample Rate").size(14).color(th::text());
         let sr_value = text(format!("{} Hz", self.state.transport.sample_rate))
             .size(13)
-            .color(th::TEXT_DIM);
+            .color(th::text_dim());
 
         // ---- MIDI input picker ----
-        let midi_label = text("MIDI Input").size(14).color(th::TEXT);
+        let midi_label = text("MIDI Input").size(14).color(th::text());
         let midi_hint = text(
             "External MIDI routes to the currently selected instrument track. \
              Plug your keyboard or Push in, hit Rescan, then pick the port.",
         )
         .size(11)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
 
         let current_port_line: Element<'_, Message> = match self.midi_input.as_ref() {
             Some(h) => text(format!("Connected: {}", h.port_name))
                 .size(12)
-                .color(th::ACCENT)
+                .color(th::accent())
                 .into(),
-            None => text("Not connected").size(12).color(th::TEXT_DIM).into(),
+            None => text("Not connected").size(12).color(th::text_dim()).into(),
         };
 
-        let rescan_btn = button(text("Rescan ports").size(11).color(th::TEXT))
+        let rescan_btn = button(text("Rescan ports").size(11).color(th::text()))
             .on_press(Message::RescanMidiInputs)
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -237,19 +245,21 @@ impl App {
                 }
             });
 
-        let disconnect_btn = button(text("Disconnect").size(11).color(th::TEXT_DIM))
+        let disconnect_btn = button(text("Disconnect").size(11).color(th::text_dim()))
             .on_press(Message::CloseMidiInput)
             .padding([4, 10])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -276,30 +286,30 @@ impl App {
                     name.clone()
                 })
                 .size(11)
-                .color(if is_current { th::ACCENT } else { th::TEXT }),
+                .color(if is_current { th::accent() } else { th::text() }),
             )
             .on_press(Message::OpenMidiInput(label))
             .padding([4, 10])
             .width(Length::Fill)
             .style(move |_theme: &Theme, status| {
                 let bg = if is_current {
-                    Some(th::BG_HOVER.into())
+                    Some(th::bg_hover().into())
                 } else {
                     match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     }
                 };
                 button::Style {
                     background: bg,
-                    text_color: if is_current { th::ACCENT } else { th::TEXT },
+                    text_color: if is_current { th::accent() } else { th::text() },
                     border: iced::Border {
                         color: if is_current {
-                            th::ACCENT_DIM
+                            th::accent_dim()
                         } else {
-                            th::BORDER
+                            th::border()
                         },
                         width: 1.0,
                         radius: 4.0.into(),
@@ -318,7 +328,7 @@ impl App {
             sr_value,
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
+                    background: Some(th::border().into()),
                     ..Default::default()
                 }
             ),
@@ -334,18 +344,18 @@ impl App {
 
     pub(super) fn view_settings_plugins_tab(&self) -> Element<'_, Message> {
         // Plugin section header
-        let plugin_title = text("Plugin Library").size(14).color(th::TEXT);
+        let plugin_title = text("Plugin Library").size(14).color(th::text());
 
         // Default paths checkbox
         let default_paths_label = if self.state.plugin_settings.scan_default_paths {
-            icons::icon(icons::CIRCLE_DOT).size(12).color(th::ACCENT)
+            icons::icon(icons::CIRCLE_DOT).size(12).color(th::accent())
         } else {
-            icons::icon(icons::CIRCLE).size(12).color(th::TEXT_DIM)
+            icons::icon(icons::CIRCLE).size(12).color(th::text_dim())
         };
         let default_paths_btn = button(
             row![
                 default_paths_label,
-                text("Scan default system paths").size(12).color(th::TEXT)
+                text("Scan default system paths").size(12).color(th::text())
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center),
@@ -354,7 +364,7 @@ impl App {
         .padding([4, 8])
         .style(|_theme: &Theme, _status| button::Style {
             background: None,
-            text_color: th::TEXT,
+            text_color: th::text(),
             border: iced::Border::default(),
             ..Default::default()
         });
@@ -370,20 +380,20 @@ impl App {
         {
             let path_text = text(path.display().to_string())
                 .size(11)
-                .color(th::TEXT_DIM);
-            let remove_btn = button(icons::icon(icons::X).size(10).color(th::DANGER))
+                .color(th::text_dim());
+            let remove_btn = button(icons::icon(icons::X).size(10).color(th::danger()))
                 .on_press(Message::RemovePluginScanPath(i))
                 .padding([2, 6])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::DANGER,
+                        text_color: th::danger(),
                         border: iced::Border::default(),
                         ..Default::default()
                     }
@@ -397,8 +407,8 @@ impl App {
 
         let add_path_btn = button(
             row![
-                icons::icon(icons::PLUS).size(12).color(th::ACCENT),
-                text("Add Path").size(12).color(th::ACCENT)
+                icons::icon(icons::PLUS).size(12).color(th::accent()),
+                text("Add Path").size(12).color(th::accent())
             ]
             .spacing(4)
             .align_y(iced::Alignment::Center),
@@ -407,14 +417,14 @@ impl App {
         .padding([6, 12])
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
                 _ => None,
             };
             button::Style {
                 background: bg,
-                text_color: th::ACCENT,
+                text_color: th::accent(),
                 border: iced::Border {
-                    color: th::ACCENT_DIM,
+                    color: th::accent_dim(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -428,21 +438,21 @@ impl App {
         } else {
             "Scan Plugins"
         };
-        let scan_btn = button(text(scan_label).size(12).color(th::TEXT))
+        let scan_btn = button(text(scan_label).size(12).color(th::text()))
             .on_press(Message::ScanPlugins)
             .padding([8, 16])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
                     button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::ACCENT_DIM.into())
+                        Some(th::accent_dim().into())
                     }
-                    _ => Some(th::BG_ELEVATED.into()),
+                    _ => Some(th::bg_elevated().into()),
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -455,11 +465,11 @@ impl App {
         let status = if !self.state.plugin_scan_status.is_empty() {
             text(&self.state.plugin_scan_status)
                 .size(11)
-                .color(th::TEXT_DIM)
+                .color(th::text_dim())
         } else {
             text(format!("{cache_count} plugins cached"))
                 .size(11)
-                .color(th::TEXT_DIM)
+                .color(th::text_dim())
         };
 
         column![
@@ -476,32 +486,34 @@ impl App {
     }
 
     pub(super) fn view_settings_dropbox_tab(&self) -> Element<'_, Message> {
-        let title = text("Dropbox").size(14).color(th::TEXT);
+        let title = text("Dropbox").size(14).color(th::text());
         let hint = text(
             "Register an app at https://www.dropbox.com/developers/apps \
             (Scoped access, Full Dropbox). Paste the App key below.",
         )
         .size(11)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
 
         let app_key_input = text_input("App key", &self.state.browser.dropbox.app_key_input)
             .on_input(|s| Message::Browser(BrowserMsg::SetDropboxAppKey(s)))
             .on_submit(Message::SaveDropboxAppKey)
             .size(13)
             .width(Length::Fill);
-        let save_key_btn = button(text("Save").size(12).color(th::TEXT))
+        let save_key_btn = button(text("Save").size(12).color(th::text()))
             .on_press(Message::SaveDropboxAppKey)
             .padding([6, 12])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     border: iced::Border {
-                        color: th::ACCENT_DIM,
+                        color: th::accent_dim(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -523,15 +535,15 @@ impl App {
                 .unwrap_or_else(|| "connected".into());
             text(format!("Connected: {email}"))
                 .size(12)
-                .color(th::ACCENT)
+                .color(th::accent())
                 .into()
         } else if self.state.browser.dropbox.auth_in_progress {
             text("Waiting for browser authorisation...")
                 .size(12)
-                .color(th::TEXT_DIM)
+                .color(th::text_dim())
                 .into()
         } else {
-            text("Not connected").size(12).color(th::TEXT_DIM).into()
+            text("Not connected").size(12).color(th::text_dim()).into()
         };
 
         let can_connect =
@@ -544,20 +556,22 @@ impl App {
             "Connect"
         };
         let connect_btn = {
-            let mut btn = button(text(connect_label).size(12).color(th::ACCENT));
+            let mut btn = button(text(connect_label).size(12).color(th::accent()));
             if can_connect {
                 btn = btn.on_press(Message::ConnectDropbox);
             }
             btn.padding([6, 12]).style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
                     _ => None,
                 };
                 button::Style {
                     background: bg,
-                    text_color: th::ACCENT,
+                    text_color: th::accent(),
                     border: iced::Border {
-                        color: th::ACCENT_DIM,
+                        color: th::accent_dim(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -567,19 +581,19 @@ impl App {
         };
 
         let disconnect_btn: Element<'_, Message> = if self.state.browser.dropbox.connected {
-            button(text("Disconnect").size(12).color(th::TEXT_DIM))
+            button(text("Disconnect").size(12).color(th::text_dim()))
                 .on_press(Message::DisconnectDropbox)
                 .padding([6, 12])
                 .style(|_theme: &Theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::BG_HOVER.into())
+                            Some(th::bg_hover().into())
                         }
                         _ => None,
                     };
                     button::Style {
                         background: bg,
-                        text_color: th::TEXT_DIM,
+                        text_color: th::text_dim(),
                         border: iced::Border::default(),
                         ..Default::default()
                     }
@@ -591,7 +605,7 @@ impl App {
 
         let error_line: Element<'_, Message> =
             if let Some(err) = self.state.browser.dropbox.last_error.clone() {
-                text(err).size(11).color(th::DANGER).into()
+                text(err).size(11).color(th::danger()).into()
             } else {
                 horizontal_space().width(Length::Shrink).into()
             };
@@ -611,24 +625,26 @@ impl App {
     }
 
     pub(super) fn view_settings_warping_tab(&self) -> Element<'_, Message> {
-        let title = text("Sample Warping").size(14).color(th::TEXT);
+        let title = text("Sample Warping").size(14).color(th::text());
         let hint = text(
             "Auto-warp detects BPM of each dropped sample and time-stretches it to \
              the project tempo, preserving pitch. Turn this off to keep samples at their \
              original speed.",
         )
         .size(11)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
 
         let toggle_icon = if self.state.auto_warp_on_import {
-            icons::icon(icons::CIRCLE_DOT).size(12).color(th::ACCENT)
+            icons::icon(icons::CIRCLE_DOT).size(12).color(th::accent())
         } else {
-            icons::icon(icons::CIRCLE).size(12).color(th::TEXT_DIM)
+            icons::icon(icons::CIRCLE).size(12).color(th::text_dim())
         };
         let toggle_btn = button(
             row![
                 toggle_icon,
-                text("Auto-warp samples on import").size(12).color(th::TEXT)
+                text("Auto-warp samples on import")
+                    .size(12)
+                    .color(th::text())
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center),
@@ -637,7 +653,7 @@ impl App {
         .padding([4, 8])
         .style(|_theme: &Theme, _status| button::Style {
             background: None,
-            text_color: th::TEXT,
+            text_color: th::text(),
             border: iced::Border::default(),
             ..Default::default()
         });
@@ -645,33 +661,33 @@ impl App {
         let conf = self.state.warp_confidence_threshold;
         let conf_label = text("Detection confidence threshold")
             .size(12)
-            .color(th::TEXT);
-        let conf_value = text(format!("{:.2}", conf)).size(12).color(th::TEXT_DIM);
+            .color(th::text());
+        let conf_value = text(format!("{:.2}", conf)).size(12).color(th::text_dim());
         let conf_hint = text(
             "Higher = only warp when the detector is very sure. \
              Lower = warp even ambiguous clips.",
         )
         .size(11)
-        .color(th::TEXT_DIM);
+        .color(th::text_dim());
         let conf_slider = slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05);
 
         let rewarp_btn = button(
             text("Re-warp all clips to project tempo")
                 .size(12)
-                .color(th::TEXT),
+                .color(th::text()),
         )
         .on_press(Message::RewarpAllClips)
         .padding([6, 12])
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
                 _ => None,
             };
             button::Style {
                 background: bg,
-                text_color: th::TEXT,
+                text_color: th::text(),
                 border: iced::Border {
-                    color: th::ACCENT_DIM,
+                    color: th::accent_dim(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -685,7 +701,7 @@ impl App {
             toggle_btn,
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
+                    background: Some(th::border().into()),
                     ..Default::default()
                 }
             ),
@@ -696,7 +712,7 @@ impl App {
                 .align_y(iced::Alignment::Center),
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
-                    background: Some(th::BORDER.into()),
+                    background: Some(th::border().into()),
                     ..Default::default()
                 }
             ),

@@ -172,8 +172,8 @@ pub fn param_column<'a>(
         .into();
     column![
         knob_canvas,
-        text(label).size(9).color(theme::TEXT_DIM),
-        text(value_text).size(9).color(theme::TEXT),
+        text(label).size(9).color(theme::text_dim()),
+        text(value_text).size(9).color(theme::text()),
     ]
     .spacing(2)
     .width(Length::Fixed(PARAM_COLUMN_WIDTH))
@@ -239,14 +239,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
         let bg_arc = build_arc(center, arc_radius, ARC_START, ARC_END);
         frame.stroke(
             &bg_arc,
-            round
-                .with_color(Color {
-                    r: 0.22,
-                    g: 0.22,
-                    b: 0.22,
-                    a: 1.0,
-                })
-                .with_width(2.5),
+            round.with_color(theme::knob_track()).with_width(2.5),
         );
 
         if norm > 0.005 {
@@ -269,19 +262,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
         frame.fill(
             &body,
             if engaged {
-                Color {
-                    r: 0.16,
-                    g: 0.16,
-                    b: 0.16,
-                    a: 1.0,
-                }
+                theme::knob_body_engaged()
             } else {
-                Color {
-                    r: 0.12,
-                    g: 0.12,
-                    b: 0.12,
-                    a: 1.0,
-                }
+                theme::knob_body()
             },
         );
 
@@ -303,9 +286,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
             &pointer,
             round
                 .with_color(if engaged {
-                    theme::TEXT
+                    theme::text()
                 } else {
-                    theme::TEXT_DIM
+                    theme::text_dim()
                 })
                 .with_width(2.0),
         );

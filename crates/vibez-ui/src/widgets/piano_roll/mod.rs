@@ -218,64 +218,6 @@ pub struct PianoRollState {
     audition_pitch: Option<u8>,
 }
 
-// ── Grid row colors ──
-
-/// White key row background: #252525
-const WHITE_ROW_BG: Color = Color {
-    r: 0.145,
-    g: 0.145,
-    b: 0.145,
-    a: 1.0,
-};
-
-/// Black key row background: #1c1c1c
-const BLACK_ROW_BG: Color = Color {
-    r: 0.110,
-    g: 0.110,
-    b: 0.110,
-    a: 1.0,
-};
-
-/// Octave boundary line color: #3a3a3a
-const OCTAVE_LINE: Color = Color {
-    r: 0.227,
-    g: 0.227,
-    b: 0.227,
-    a: 1.0,
-};
-
-/// Normal horizontal grid line: #2a2a2a
-const GRID_LINE: Color = Color {
-    r: 0.165,
-    g: 0.165,
-    b: 0.165,
-    a: 1.0,
-};
-
-/// White key fill for piano: #c8c8c8
-const WHITE_KEY_COLOR: Color = Color {
-    r: 0.784,
-    g: 0.784,
-    b: 0.784,
-    a: 1.0,
-};
-
-/// Black key fill for piano: #1a1a1a
-const BLACK_KEY_COLOR: Color = Color {
-    r: 0.102,
-    g: 0.102,
-    b: 0.102,
-    a: 1.0,
-};
-
-/// Piano key label color for C notes
-const KEY_LABEL_COLOR: Color = Color {
-    r: 0.35,
-    g: 0.35,
-    b: 0.35,
-    a: 1.0,
-};
-
 impl canvas::Program<Message> for PianoRollWidget {
     type State = PianoRollState;
 
