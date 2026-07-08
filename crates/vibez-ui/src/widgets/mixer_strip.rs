@@ -13,17 +13,28 @@ use crate::widgets::knob::KnobWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
 use vibez_core::midi::TrackKind;
 
-/// Render a single mixer channel strip for a track.
-pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
-    let track_color = th::track_color(track.color_index);
+/// Render a single mixer channel strip for a track. The master bus
+/// renders through the same strip: EQ, fader, and meter, minus the
+/// controls that make no sense on a sum (pan, mute, solo).
+pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message> {
+    let is_master = track.id.is_master();
+    let track_color = if is_master {
+        th::ACCENT
+    } else {
+        th::track_color(track.color_index)
+    };
 
     // Track name + type icon
-    let type_icon = match track.kind {
-        TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
-            .size(10)
-            .color(track_color),
-        TrackKind::Instrument(_) | TrackKind::Midi => {
-            icons::icon(icons::MUSIC).size(10).color(track_color)
+    let type_icon = if is_master {
+        icons::icon(icons::VOLUME_2).size(10).color(track_color)
+    } else {
+        match track.kind {
+            TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
+                .size(10)
+                .color(track_color),
+            TrackKind::Instrument(_) | TrackKind::Midi => {
+                icons::icon(icons::MUSIC).size(10).color(track_color)
+            }
         }
     };
 
@@ -141,32 +152,56 @@ pub fn view_mixer_strip(track: &UiTrack) -> Element<'_, Message> {
 
     let eq_section = view_strip_eq(track);
 
-    let strip = column![
-        name_row,
-        knob_canvas,
-        pan_label,
-        eq_section,
-        fader_meter,
-        gain_label,
-        mute_solo_row,
-    ]
+    let strip = if is_master {
+        // No pan, mute, or solo on the sum: a MASTER tag keeps the
+        // strip's vertical rhythm instead.
+        let badge = container(text("MASTER").size(8).color(th::ACCENT))
+            .padding([3, 8])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::BG_ELEVATED.into()),
+                border: iced::Border {
+                    color: th::ACCENT_DIM,
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        column![name_row, eq_section, badge, fader_meter, gain_label]
+    } else {
+        column![
+            name_row,
+            eq_section,
+            knob_canvas,
+            pan_label,
+            fader_meter,
+            gain_label,
+            mute_solo_row,
+        ]
+    }
     .spacing(4)
     .padding(8)
-    .width(Length::Fixed(108.0))
+    .width(Length::Fixed(94.0))
     .height(Length::Fill)
     .align_x(iced::Alignment::Center);
 
-    container(strip)
+    let body = container(strip)
         .height(Length::Fill)
         .style(move |_theme: &Theme| container::Style {
             background: Some(th::BG_SURFACE.into()),
             border: iced::Border {
-                color: th::BORDER,
+                color: if selected { th::ACCENT } else { th::BORDER },
                 width: 1.0,
                 radius: 2.0.into(),
             },
             ..Default::default()
-        })
+        });
+
+    // Clicking anywhere on the strip chrome selects the track, so
+    // the detail panel follows the mixer like it follows the
+    // arrangement headers. Knobs, faders, and buttons still win
+    // their own clicks.
+    iced::widget::mouse_area(body)
+        .on_press(Message::select_track(track.id))
         .into()
 }
 
@@ -210,10 +245,10 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
     };
 
     // Console band colors, muted for the theme.
-    const HF: iced::Color = iced::Color::from_rgb(0.76, 0.33, 0.30);
-    const HMF: iced::Color = iced::Color::from_rgb(0.33, 0.62, 0.38);
-    const LMF: iced::Color = iced::Color::from_rgb(0.36, 0.48, 0.72);
-    const LF: iced::Color = iced::Color::from_rgb(0.65, 0.46, 0.28);
+    const HF: iced::Color = th::EQ_HF;
+    const HMF: iced::Color = th::EQ_HMF;
+    const LMF: iced::Color = th::EQ_LMF;
+    const LF: iced::Color = th::EQ_LF;
 
     let mut bands = column![].spacing(2).align_x(iced::Alignment::Center);
 
@@ -256,7 +291,25 @@ fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
         (3, 4, 5, false, LMF, "LMF"),
         (0, 1, 2, true, LF, "LF"),
     ];
-    for (gain_i, freq_i, third_i, is_bell_toggle, color, label) in rows {
+    for (i, (gain_i, freq_i, third_i, is_bell_toggle, color, label)) in rows.into_iter().enumerate()
+    {
+        if i > 0 {
+            bands = bands.push(
+                container(text(""))
+                    .width(Length::Fixed(74.0))
+                    .height(Length::Fixed(1.0))
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(
+                            iced::Color {
+                                a: 0.5,
+                                ..th::BORDER
+                            }
+                            .into(),
+                        ),
+                        ..Default::default()
+                    }),
+            );
+        }
         bands = bands.push(view_eq_band(
             track.id,
             eq,
@@ -283,7 +336,7 @@ fn view_eq_band<'a>(
     color: iced::Color,
     label: &'static str,
 ) -> Element<'a, Message> {
-    let knob = |i: usize| -> Element<'a, Message> {
+    let knob = |i: usize, size: f32| -> Element<'a, Message> {
         let d = &eq.descriptors[i];
         let w = EffectKnobWidget::new(
             track_id,
@@ -296,16 +349,35 @@ fn view_eq_band<'a>(
             color,
         );
         canvas(w)
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(24.0))
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
             .into()
     };
 
-    let third: Element<'a, Message> = if bell_toggle {
+    // Console stagger: the gain knob rides high on the left, the
+    // frequency knob sits low on the right, Q (or the bell switch)
+    // tucks under the gain. The eye zig-zags down the strip.
+    let dim = iced::Color {
+        a: 0.75,
+        ..th::TEXT_DIM
+    };
+    let gain_col = column![
+        row![
+            text(label).size(8).color(color),
+            text("dB").size(7).color(dim)
+        ]
+        .spacing(3)
+        .align_y(iced::Alignment::Center),
+        knob(gain_i, 26.0),
+    ]
+    .spacing(1)
+    .align_x(iced::Alignment::Center);
+
+    let third_el: Element<'a, Message> = if bell_toggle {
         let bell_on = eq.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
         button(
-            text("B")
-                .size(8)
+            text("BELL")
+                .size(6)
                 .color(if bell_on { th::BG_DARK } else { th::TEXT_DIM }),
         )
         .on_press(Message::set_effect_param(
@@ -314,7 +386,7 @@ fn view_eq_band<'a>(
             third_i,
             if bell_on { 0.0 } else { 1.0 },
         ))
-        .padding([2, 4])
+        .padding([3, 6])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(if bell_on {
                 color.into()
@@ -331,17 +403,33 @@ fn view_eq_band<'a>(
         })
         .into()
     } else {
-        knob(third_i)
+        column![text("Q").size(7).color(dim), knob(third_i, 22.0)]
+            .spacing(1)
+            .align_x(iced::Alignment::Center)
+            .into()
     };
 
-    column![
-        text(label).size(8).color(color),
-        row![knob(gain_i), knob(freq_i), third]
-            .spacing(3)
-            .align_y(iced::Alignment::Center),
+    let freq_col = column![
+        text(if freq_i == 10 || freq_i == 7 {
+            "kHz"
+        } else {
+            "Hz"
+        })
+        .size(7)
+        .color(dim),
+        knob(freq_i, 22.0),
     ]
     .spacing(1)
-    .align_x(iced::Alignment::Center)
+    .align_x(iced::Alignment::Center);
+
+    row![
+        column![gain_col, third_el]
+            .spacing(2)
+            .align_x(iced::Alignment::Center),
+        column![text("").size(6), freq_col].align_x(iced::Alignment::Center),
+    ]
+    .spacing(9)
+    .align_y(iced::Alignment::Start)
     .into()
 }
 

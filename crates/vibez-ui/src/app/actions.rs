@@ -375,6 +375,9 @@ impl App {
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
+                        // The master strip meters the same summed mix.
+                        self.state.arrangement.master.peak_l = self.state.peak_l;
+                        self.state.arrangement.master.peak_r = self.state.peak_r;
                     }
                     EngineEvent::PlaybackStopped => {
                         self.state.transport.playing = false;
@@ -397,10 +400,48 @@ impl App {
         }
     }
 
+    /// Keep the engine's spectrum tap on the selected track and pump
+    /// drained samples through the analyser.
+    fn poll_spectrum(&mut self) {
+        let wanted = self.state.arrangement.selected_track;
+        if wanted != self.spectrum_tap {
+            self.send_command(EngineCommand::SetSpectrumTap(wanted));
+            self.spectrum_tap = wanted;
+            self.state.spectrum.reset();
+        }
+        if let Some(ref mut rx) = self.spectrum_rx {
+            // Drain in slices; the ring holds well under a second.
+            let mut chunk = [0.0f32; 512];
+            loop {
+                let mut n = 0;
+                while n < chunk.len() {
+                    match rx.pop() {
+                        Ok(s) => {
+                            chunk[n] = s;
+                            n += 1;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+                self.state.spectrum.ingest(&chunk[..n]);
+                if n < chunk.len() {
+                    break;
+                }
+            }
+        }
+        self.state
+            .spectrum
+            .analyse(self.state.transport.sample_rate as f32);
+    }
+
     /// One frame of the 60fps subscription: drain engine events and
     /// pump every background service.
     pub(super) fn handle_tick(&mut self) -> Task<Message> {
         self.poll_engine_events();
+        self.poll_spectrum();
         self.poll_plugin_loads();
         self.poll_plugin_windows();
         self.poll_midi_input();

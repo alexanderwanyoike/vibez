@@ -68,7 +68,14 @@ impl App {
 
         // Effect cards
         for effect in &track.effects {
-            let slot = view_effect_slot(track_id, effect, track_color);
+            let custom = if effect.effect_type == vibez_core::effect::EffectType::Eq
+                && effect.plugin_ref.is_none()
+            {
+                Some(self.eq_device_body(track_id, effect))
+            } else {
+                None
+            };
+            let slot = view_effect_slot(track_id, effect, track_color, custom);
             devices_row = devices_row.push(slot);
         }
 
@@ -97,6 +104,142 @@ impl App {
                 },
             ))
             .into()
+    }
+
+    /// Channel EQ card body: response display over the live analyser
+    /// on the left, four color-coded band columns on the right. The
+    /// analyser follows the selected track, which is exactly the
+    /// track whose device chain is on screen.
+    fn eq_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+    ) -> (Element<'a, Message>, f32) {
+        use crate::widgets::effect_knob::{format_value, EffectKnobWidget};
+        use crate::widgets::eq_display::EqDisplayWidget;
+
+        const DISPLAY_W: f32 = 380.0;
+        const BAND_COL_W: f32 = 50.0;
+
+        let display = EqDisplayWidget {
+            track_id,
+            effect_id: effect.id,
+            params: effect.params.clone(),
+            descriptors: effect.descriptors,
+            bypass: effect.bypass,
+            sample_rate: self.state.transport.sample_rate as f32,
+            spectrum: self.state.spectrum.bins.clone(),
+            spectrum_active: self.state.spectrum.active,
+        };
+        let display_canvas: Element<'a, Message> = canvas(display)
+            .width(Length::Fixed(DISPLAY_W))
+            .height(Length::Fill)
+            .into();
+
+        // Band columns, left to right along the frequency axis:
+        // (label, gain idx, freq idx, third idx, bell?, color)
+        let bands: [(&str, usize, usize, usize, bool, Color); 4] = [
+            ("LF", 0, 1, 2, true, th::EQ_LF),
+            ("LMF", 3, 4, 5, false, th::EQ_LMF),
+            ("HMF", 6, 7, 8, false, th::EQ_HMF),
+            ("HF", 9, 10, 11, true, th::EQ_HF),
+        ];
+
+        let knob_color = if effect.bypass {
+            th::TEXT_MUTED
+        } else {
+            th::TEXT_DIM
+        };
+        let mut band_row = row![].spacing(4);
+        for (label, gain_i, freq_i, third_i, is_bell, color) in bands {
+            let band_color = if effect.bypass { knob_color } else { color };
+            let knob = |i: usize, size: f32| -> Element<'a, Message> {
+                let d = &effect.descriptors[i];
+                let w = EffectKnobWidget::new(
+                    track_id,
+                    effect.id,
+                    i,
+                    effect.params.get(i).copied().unwrap_or(d.default),
+                    d.min,
+                    d.max,
+                    d.default,
+                    band_color,
+                );
+                canvas(w)
+                    .width(Length::Fixed(size))
+                    .height(Length::Fixed(size))
+                    .into()
+            };
+            let gain_v = effect.params.get(gain_i).copied().unwrap_or(0.0);
+            let freq_v = effect.params.get(freq_i).copied().unwrap_or(0.0);
+
+            let mut col = column![
+                text(label).size(9).color(band_color),
+                knob(gain_i, 28.0),
+                text(format!("{gain_v:+.1}")).size(8).color(th::TEXT_DIM),
+                knob(freq_i, 24.0),
+                text(format_value(freq_v, "Hz")).size(8).color(th::TEXT_DIM),
+            ]
+            .spacing(2)
+            .width(Length::Fixed(BAND_COL_W))
+            .align_x(iced::Alignment::Center);
+
+            if is_bell {
+                let bell_on = effect.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
+                let bell = button(text("BELL").size(6).color(if bell_on {
+                    th::BG_DARK
+                } else {
+                    th::TEXT_DIM
+                }))
+                .on_press(Message::set_effect_param(
+                    track_id,
+                    effect.id,
+                    third_i,
+                    if bell_on { 0.0 } else { 1.0 },
+                ))
+                .padding([3, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(if bell_on {
+                        band_color.into()
+                    } else {
+                        th::BG_ELEVATED.into()
+                    }),
+                    text_color: if bell_on { th::BG_DARK } else { th::TEXT_DIM },
+                    border: iced::Border {
+                        color: th::BORDER,
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                });
+                col = col.push(bell);
+            } else {
+                let q_v = effect.params.get(third_i).copied().unwrap_or(0.7);
+                col = col.push(
+                    row![
+                        text("Q").size(8).color(th::TEXT_DIM),
+                        knob(third_i, 20.0),
+                        text(format!("{q_v:.2}")).size(8).color(th::TEXT_DIM),
+                    ]
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+            band_row = band_row.push(col);
+        }
+
+        let body: Element<'a, Message> = row![
+            display_canvas,
+            Self::device_divider(),
+            container(band_row).padding([0, 2]),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into();
+
+        // padding (20) + display + divider + bands + spacing
+        let card_w = DISPLAY_W + 4.0 * (BAND_COL_W + 4.0) + 48.0;
+        (body, card_w)
     }
 
     // ── Shared device card helpers ──────────────────────────────────

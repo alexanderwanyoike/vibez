@@ -114,6 +114,7 @@ pub enum SettingsTab {
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub tracks: Vec<UiTrack>,
+    pub master: UiTrack,
     pub bpm: f64,
     pub bpm_text: String,
     pub loop_enabled: bool,
@@ -303,11 +304,23 @@ impl Default for TransportState {
     }
 }
 
+/// The master bus as a track-shaped UI channel: gain plus an effect
+/// chain, no clips or instrument. Lives outside `tracks` so the
+/// arrangement never shows it, but `find_track` resolves it, so the
+/// mixer strip, device chain, and effect commands all work on it.
+pub fn new_master_track() -> UiTrack {
+    let mut master = UiTrack::new(TrackId::MASTER, "Master".to_string(), 0);
+    master.pan = 0.5;
+    master
+}
+
 /// Arrangement domain state: the track list (the shared model other
 /// domains receive explicitly), selection, and track numbering.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ArrangementState {
     pub tracks: Vec<UiTrack>,
+    /// The master bus channel (see [`new_master_track`]).
+    pub master: UiTrack,
     pub selected_track: Option<TrackId>,
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
@@ -326,6 +339,25 @@ pub struct ArrangementState {
     pub clip_bpm_edit: HashMap<ClipId, String>,
 }
 
+impl Default for ArrangementState {
+    fn default() -> Self {
+        Self {
+            tracks: Vec::new(),
+            master: new_master_track(),
+            selected_track: None,
+            next_track_number: 0,
+            selected_clips: HashSet::new(),
+            selected_note_clip: None,
+            time_selection_active: false,
+            selection_start_beats: 0.0,
+            selection_end_beats: 0.0,
+            time_selection_track: None,
+            drag_resize_active: false,
+            clip_bpm_edit: HashMap::new(),
+        }
+    }
+}
+
 pub struct AppState {
     // Transport domain slice (playback, tempo, arrangement loop).
     pub transport: TransportState,
@@ -333,6 +365,9 @@ pub struct AppState {
     // Metering (master)
     pub peak_l: f32,
     pub peak_r: f32,
+    /// Spectrum analyser fed by the engine's per-track tap (follows
+    /// the selected track); drawn behind the channel EQ curve.
+    pub spectrum: crate::spectrum::SpectrumState,
 
     // UI
     pub status_text: String,
@@ -383,6 +418,7 @@ impl Default for AppState {
             },
             peak_l: 0.0,
             peak_r: 0.0,
+            spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),
@@ -511,10 +547,16 @@ impl AppState {
     }
 
     pub fn find_track(&self, id: TrackId) -> Option<&UiTrack> {
+        if id.is_master() {
+            return Some(&self.arrangement.master);
+        }
         self.arrangement.tracks.iter().find(|t| t.id == id)
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
+        if id.is_master() {
+            return Some(&mut self.arrangement.master);
+        }
         self.arrangement.tracks.iter_mut().find(|t| t.id == id)
     }
 

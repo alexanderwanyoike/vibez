@@ -47,6 +47,17 @@ macro_rules! typed_id {
 }
 
 typed_id!(TrackId);
+
+impl TrackId {
+    /// Reserved id for the master bus. The global counter starts at 1
+    /// and only moves up, so 0 can never collide with a minted id.
+    pub const MASTER: TrackId = TrackId(0);
+
+    pub fn is_master(self) -> bool {
+        self.0 == 0
+    }
+}
+
 typed_id!(ClipId);
 typed_id!(EffectId);
 typed_id!(LaneId);

@@ -221,7 +221,7 @@ pub enum Message {
     SaveProjectAs,
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
-    ProjectLoaded(Result<ProjectLoadResult, String>),
+    ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
     ProjectSaved(Result<PathBuf, String>),
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
@@ -391,6 +391,11 @@ impl Message {
     pub fn set_effect_param(t: TrackId, e: EffectId, i: usize, v: f32) -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
             t, e, i, v,
+        ))
+    }
+    pub fn set_effect_params(t: TrackId, e: EffectId, updates: Vec<(usize, f32)>) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetEffectParams(
+            t, e, updates,
         ))
     }
     pub fn toggle_effect_bypass(t: TrackId, e: EffectId) -> Self {

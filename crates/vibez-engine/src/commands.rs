@@ -90,6 +90,10 @@ pub enum EngineCommand {
 
     // -- Infrastructure --
     SetSampleRate(u32),
+    /// Select which track streams post-effects samples to the UI
+    /// spectrum analyser ring (`None` disables the tap).
+    /// `TrackId::MASTER` taps the summed master bus.
+    SetSpectrumTap(Option<TrackId>),
 
     // -- Effects --
     AddEffect {

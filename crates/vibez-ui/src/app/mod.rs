@@ -35,6 +35,12 @@ struct App {
     state: AppState,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
+    /// Post-effects mono samples from the engine's spectrum tap,
+    /// feeding the EQ analyser.
+    spectrum_rx: Option<Consumer<f32>>,
+    /// Track the engine tap currently points at, so tick can retarget
+    /// it when the selection moves.
+    spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
     // Channels for receiving loaded plugins from background threads
     plugin_effect_rx: std::sync::mpsc::Receiver<PluginLoadResult>,
@@ -118,7 +124,8 @@ mod views_shell;
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let (engine, cmd_tx, event_rx) = AudioEngine::new();
+        let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
+        let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
 
         let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
@@ -187,6 +194,8 @@ impl App {
             state,
             cmd_tx: Some(cmd_tx),
             event_rx: Some(event_rx),
+            spectrum_rx,
+            spectrum_tap: None,
             _stream: stream,
             plugin_effect_rx,
             plugin_effect_tx,
@@ -204,6 +213,10 @@ impl App {
 
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
+
+        // Console model: the master bus carries its channel EQ from
+        // the first frame.
+        app.ensure_master_eq();
 
         let startup_task = if app.state.browser.roots.is_empty() {
             Task::none()

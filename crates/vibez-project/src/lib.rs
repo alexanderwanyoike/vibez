@@ -14,6 +14,10 @@ pub struct Project {
     pub clips: Vec<ClipInfo>,
     #[serde(default)]
     pub note_clips: Vec<NoteClipInfo>,
+    /// The master bus channel (gain + effect chain). Absent in
+    /// projects saved before the master was a real channel.
+    #[serde(default)]
+    pub master: Option<TrackInfo>,
 }
 
 impl Default for Project {
@@ -25,6 +29,7 @@ impl Default for Project {
             tracks: Vec::new(),
             clips: Vec::new(),
             note_clips: Vec::new(),
+            master: None,
         }
     }
 }
@@ -156,6 +161,7 @@ mod tests {
         let path = dir.path().join("test.vibez");
 
         let project = Project {
+            master: None,
             name: "Test Project".into(),
             bpm: 140.0,
             sample_rate: 48_000,
@@ -261,6 +267,7 @@ mod tests {
 
         let tid = TrackId::new();
         let project = Project {
+            master: None,
             name: "Note Test".into(),
             bpm: 128.0,
             sample_rate: 44_100,
@@ -323,6 +330,7 @@ mod tests {
         });
 
         let project = Project {
+            master: None,
             name: "FX Test".into(),
             bpm: 120.0,
             sample_rate: 44_100,
@@ -368,6 +376,7 @@ mod automation_persistence_tests {
         track.automation.push(lane.clone());
 
         let project = Project {
+            master: None,
             name: "roundtrip".to_string(),
             tracks: vec![track],
             ..Default::default()

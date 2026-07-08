@@ -488,42 +488,22 @@ impl App {
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.arrangement.tracks {
-            let strip = view_mixer_strip(track);
+            let selected = self.state.arrangement.selected_track == Some(track.id);
+            let strip = view_mixer_strip(track, selected);
             strips = strips.push(strip);
         }
 
-        // Master strip — pinned to far right
-        let master_label = text("Master").size(12).color(th::TEXT);
-        let master_meter = VuMeterWidget {
-            peak_l: self.state.peak_l,
-            peak_r: self.state.peak_r,
-        };
-        let master_meter_canvas: Element<'_, Message> = canvas(master_meter)
-            .width(Length::Fixed(32.0))
-            .height(Length::Fill)
-            .into();
+        // Master strip — a real channel, pinned to far right
+        let master_selected =
+            self.state.arrangement.selected_track == Some(vibez_core::id::TrackId::MASTER);
+        let master_strip = container(view_mixer_strip(
+            &self.state.arrangement.master,
+            master_selected,
+        ))
+        .padding(8)
+        .height(Length::Fill);
 
-        let master_col = column![master_label, master_meter_canvas]
-            .spacing(4)
-            .padding(8)
-            .width(Length::Fixed(100.0))
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Center);
-
-        let master_container =
-            container(master_col)
-                .height(Length::Fill)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    border: iced::Border {
-                        color: th::BORDER,
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                });
-
-        let mixer_row = row![strips, horizontal_space(), master_container]
+        let mixer_row = row![strips, horizontal_space(), master_strip]
             .spacing(4)
             .padding([8, 4])
             .height(Length::Fill);

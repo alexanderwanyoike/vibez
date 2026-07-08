@@ -138,6 +138,7 @@ impl App {
                         msg,
                         &mut engine,
                         &mut self.state.arrangement.tracks,
+                        &mut self.state.arrangement.master,
                         sample_rate,
                     )
                 };
@@ -581,10 +582,9 @@ impl App {
                         .dropbox_client
                         .clone()
                         .map(|client| (client, self.dropbox_cache.clone()));
-                    return Task::perform(
-                        load_project_async(path, dropbox),
-                        Message::ProjectLoaded,
-                    );
+                    return Task::perform(load_project_async(path, dropbox), |result| {
+                        Message::ProjectLoaded(Box::new(result))
+                    });
                 }
             }
             Message::ProjectSavePathSelected(path) => {
@@ -596,7 +596,7 @@ impl App {
                     return Task::perform(save_project_async(path, project), Message::ProjectSaved);
                 }
             }
-            Message::ProjectLoaded(result) => match result {
+            Message::ProjectLoaded(result) => match *result {
                 Ok(loaded) => {
                     self.rebuild_from_loaded_project(loaded);
                 }
@@ -680,6 +680,12 @@ impl App {
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
+                    if is_instrument && track_id.is_master() {
+                        // The master bus hosts effects only.
+                        self.state.status_text =
+                            format!("{loading_name} is an instrument; Master takes effects only");
+                        return Task::none();
+                    }
                     if is_instrument {
                         let tx = self.plugin_instrument_tx.clone();
                         std::thread::spawn(move || {

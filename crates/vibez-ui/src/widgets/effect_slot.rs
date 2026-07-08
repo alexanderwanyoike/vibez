@@ -10,10 +10,15 @@ use vibez_core::id::TrackId;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 /// Render an Ableton-style device card for the detail panel.
+///
+/// `custom_body` swaps the generic knob-row body for a purpose-built
+/// one (the channel EQ's display panel) while keeping the shared
+/// title-bar chrome; the second element is the card width.
 pub fn view_effect_slot<'a>(
     track_id: TrackId,
     effect: &'a UiEffect,
     track_color: Color,
+    custom_body: Option<(Element<'a, Message>, f32)>,
 ) -> Element<'a, Message> {
     let is_bypassed = effect.bypass;
     let has_params = !effect.descriptors.is_empty();
@@ -175,7 +180,13 @@ pub fn view_effect_slot<'a>(
         });
 
     // ── Body ─────────────────────────────────────────────────
-    let body: Element<'a, Message> = if has_params && !has_gui {
+    let custom_w = custom_body.as_ref().map(|(_, w)| *w);
+    let body: Element<'a, Message> = if let Some((custom, _)) = custom_body {
+        container(custom)
+            .padding([8, 10])
+            .height(Length::Fixed(th::DEVICE_BODY_H))
+            .into()
+    } else if has_params && !has_gui {
         let knob_color = if is_bypassed {
             th::TEXT_MUTED
         } else {
@@ -257,7 +268,9 @@ pub fn view_effect_slot<'a>(
     } else {
         0
     };
-    let card_w = if is_plugin {
+    let card_w = if let Some(w) = custom_w {
+        w
+    } else if is_plugin {
         190.0
     } else {
         (knob_count as f32 * 62.0 + 24.0).max(150.0)
