@@ -29,6 +29,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         instrument: Some(kind),
         native_instrument: None,
         plugin_instrument: None,
+        automation: Vec::new(),
     }
 }
 
@@ -150,6 +151,7 @@ fn main() {
     note_clips.push(clip(lead.id, "Hook", 32.0, 16.0, notes));
 
     let project = Project {
+        master: None,
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
         sample_rate: 48_000,

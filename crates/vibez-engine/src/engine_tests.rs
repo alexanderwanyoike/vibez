@@ -2,7 +2,7 @@
 
 use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
 
 /// Helper to create a simple stereo decoded audio with a known pattern.
 fn make_test_audio(frames: usize) -> Arc<DecodedAudio> {
@@ -987,5 +987,404 @@ fn note_clip_loop_renders() {
     assert!(
         has_audio_in_loop,
         "Expected synth audio in looped region (beat 2-3)"
+    );
+}
+
+// ---- Automation ----
+
+fn rms(buf: &[f32]) -> f32 {
+    (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt()
+}
+
+fn constant_clip_track(
+    cmd_tx: &mut rtrb::Producer<EngineCommand>,
+    frames: usize,
+) -> (TrackId, ClipId) {
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "Track".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(frames, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: frames as u64,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    (tid, cid)
+}
+
+#[test]
+fn gain_lane_ramps_track_volume_down() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let sr = engine.sample_rate();
+    let frames_total = sr as usize; // one second of audio
+    let (tid, _cid) = constant_clip_track(&mut cmd_tx, frames_total);
+
+    // 120 BPM: one second = 2 beats. Ramp 1.0 -> 0.0 across it.
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    lane.insert_point(AutomationPoint {
+        beat: 2.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: tid,
+            lane,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let block = 512usize;
+    let mut buf = vec![0.0f32; block * 2];
+    let mut first_rms = None;
+    let mut mid_rms = None;
+    let blocks = frames_total / block;
+    for i in 0..blocks {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        if i == 0 {
+            first_rms = Some(rms(&buf));
+        }
+        if i == blocks / 2 {
+            mid_rms = Some(rms(&buf));
+        }
+    }
+    let last_rms = rms(&buf);
+    let (first, mid) = (first_rms.unwrap(), mid_rms.unwrap());
+
+    // 0.5 amplitude through center equal-power pan = ~0.354 RMS.
+    assert!(first > 0.3, "start should be near full volume: {first}");
+    assert!(
+        mid < first * 0.7 && mid > first * 0.3,
+        "midpoint should be roughly half: first {first}, mid {mid}"
+    );
+    assert!(
+        last_rms < first * 0.1,
+        "end should be near silent: first {first}, last {last_rms}"
+    );
+}
+
+#[test]
+fn pan_lane_moves_signal_between_channels() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let sr = engine.sample_rate();
+    let frames_total = sr as usize;
+    let (tid, _cid) = constant_clip_track(&mut cmd_tx, frames_total);
+
+    // Hard left for the first beat, hard right after.
+    let mut lane = AutomationLane::new(AutomationTarget::TrackPan);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    lane.insert_point(AutomationPoint {
+        beat: 1.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    lane.insert_point(AutomationPoint {
+        beat: 1.01,
+        value: 1.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: tid,
+            lane,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let block = 512usize;
+    let mut buf = vec![0.0f32; block * 2];
+    engine.process(&mut buf, 2); // first block: hard left
+    let l: f32 = buf.iter().step_by(2).map(|s| s.abs()).sum();
+    let r: f32 = buf.iter().skip(1).step_by(2).map(|s| s.abs()).sum();
+    assert!(l > 1.0 && r < 0.01, "expected hard left: l {l}, r {r}");
+
+    // Jump past beat 1 and render again.
+    let one_beat_samples = (sr as f64 * 60.0 / 120.0) as u64;
+    cmd_tx
+        .push(EngineCommand::Seek(one_beat_samples + 4096))
+        .unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2);
+    let l: f32 = buf.iter().step_by(2).map(|s| s.abs()).sum();
+    let r: f32 = buf.iter().skip(1).step_by(2).map(|s| s.abs()).sum();
+    assert!(r > 1.0 && l < 0.01, "expected hard right: l {l}, r {r}");
+}
+
+#[test]
+fn removing_a_lane_restores_the_knob_value() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let sr = engine.sample_rate();
+    let (tid, _cid) = constant_clip_track(&mut cmd_tx, sr as usize);
+
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    let lane_id = lane.id;
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: tid,
+            lane,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 1024];
+    engine.process(&mut buf, 2);
+    assert!(rms(&buf) < 1e-6, "lane at zero should silence the track");
+
+    cmd_tx
+        .push(EngineCommand::RemoveAutomationLane {
+            track_id: tid,
+            lane_id,
+        })
+        .unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2);
+    assert!(
+        rms(&buf) > 0.2,
+        "removing the lane should restore the track gain"
+    );
+}
+
+#[test]
+fn effect_tails_ring_out_after_stop() {
+    // A delay tail must keep sounding after the transport stops:
+    // effect chains process while stopped. (This is also what
+    // delivers queued plugin param changes without pressing play.)
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let sr = engine.sample_rate() as usize;
+    let (tid, _cid) = constant_clip_track(&mut cmd_tx, sr);
+
+    let effect_id = vibez_core::id::EffectId::new();
+    cmd_tx
+        .push(EngineCommand::AddEffect {
+            track_id: tid,
+            effect_id,
+            effect_type: vibez_core::effect::EffectType::Delay,
+            position: None,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    // Delay time defaults to 500 ms: play well past it so echoes
+    // exist, then listen for them after stop.
+    let mut buf = vec![0.0f32; 1024];
+    for _ in 0..60 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+    }
+    cmd_tx.push(EngineCommand::Stop).unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2); // drains Stop, first stopped block
+
+    let mut tail = 0.0f32;
+    for _ in 0..40 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        tail += buf.iter().map(|s| s.abs()).sum::<f32>();
+    }
+    assert!(
+        tail > 0.01,
+        "delay tail should ring out after stop, got {tail}"
+    );
+}
+
+#[test]
+fn master_gain_scales_the_summed_mix() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(100, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.5))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 16];
+    engine.process(&mut buf, 2);
+
+    let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+    assert!(
+        (buf[0] - expected).abs() < 1e-4,
+        "master gain 0.5 should halve the mix: expected {expected} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn master_effect_chain_processes_the_summed_mix() {
+    use vibez_core::effect::EffectType;
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "Track 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(4_096, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 4_096,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    // A master EQ with the LF shelf slammed down should attenuate a
+    // constant (DC-heavy) signal relative to the flat default.
+    let eq_id = EffectId::new();
+    cmd_tx
+        .push(EngineCommand::AddEffect {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            effect_type: EffectType::Eq,
+            position: None,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            param_index: 0, // LF gain
+            value: -15.0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            param_index: 1, // LF freq up to make the cut obvious
+            value: 450.0,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 2_048];
+    let mut last_rms = 0.0f32;
+    for _ in 0..3 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        last_rms = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
+    }
+    let flat = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        last_rms < flat * 0.5,
+        "master LF cut should attenuate the constant mix well below {flat}, got {last_rms}"
+    );
+
+    // Bypassing the master EQ restores the flat mix.
+    cmd_tx
+        .push(EngineCommand::SetEffectBypass {
+            track_id: TrackId::MASTER,
+            effect_id: eq_id,
+            bypass: true,
+        })
+        .unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2);
+    assert!(
+        (buf[0] - flat).abs() < 1e-3,
+        "bypassed master chain should pass the mix through, got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn spectrum_tap_streams_track_samples() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let mut spectrum_rx = engine.take_spectrum_consumer().unwrap();
+    let tid = TrackId::new();
+    let cid = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "T".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: cid,
+            audio: make_constant_audio(10_000, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 10_000,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetSpectrumTap(Some(tid)))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut buf = vec![0.0f32; 1024];
+    engine.process(&mut buf, 2);
+
+    let mut peak = 0.0f32;
+    let mut count = 0;
+    while let Ok(s) = spectrum_rx.pop() {
+        peak = peak.max(s.abs());
+        count += 1;
+    }
+    assert_eq!(count, 512, "one mono sample per frame");
+    assert!(peak > 0.4, "tap should carry the clip audio, got {peak}");
+
+    // Retarget to master: still streams (the summed mix).
+    cmd_tx
+        .push(EngineCommand::SetSpectrumTap(Some(TrackId::MASTER)))
+        .unwrap();
+    engine.process(&mut buf, 2);
+    let mut master_peak = 0.0f32;
+    while let Ok(s) = spectrum_rx.pop() {
+        master_peak = master_peak.max(s.abs());
+    }
+    assert!(
+        master_peak > 0.3,
+        "master tap should carry the mix, got {master_peak}"
     );
 }

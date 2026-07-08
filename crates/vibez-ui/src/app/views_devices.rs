@@ -28,9 +28,9 @@ impl App {
         // Header: track name + right-click hint
         let track_label = text(format!("{} — Devices", track.name))
             .size(13)
-            .color(th::TEXT);
+            .color(th::text());
 
-        let hint_label = text("Right-click to add").size(10).color(th::TEXT_MUTED);
+        let hint_label = text("Right-click to add").size(10).color(th::text_muted());
 
         let header = row![track_label, horizontal_space(), hint_label]
             .spacing(8)
@@ -68,7 +68,14 @@ impl App {
 
         // Effect cards
         for effect in &track.effects {
-            let slot = view_effect_slot(track_id, effect, track_color);
+            let custom = if effect.effect_type == vibez_core::effect::EffectType::Eq
+                && effect.plugin_ref.is_none()
+            {
+                Some(self.eq_device_body(track_id, effect))
+            } else {
+                None
+            };
+            let slot = view_effect_slot(track_id, effect, track_color, custom);
             devices_row = devices_row.push(slot);
         }
 
@@ -99,6 +106,148 @@ impl App {
             .into()
     }
 
+    /// Channel EQ card body: response display over the live analyser
+    /// on the left, four color-coded band columns on the right. The
+    /// analyser follows the selected track, which is exactly the
+    /// track whose device chain is on screen.
+    fn eq_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+    ) -> (Element<'a, Message>, f32) {
+        use crate::widgets::effect_knob::{format_value, EffectKnobWidget};
+        use crate::widgets::eq_display::EqDisplayWidget;
+
+        const DISPLAY_W: f32 = 380.0;
+        const BAND_COL_W: f32 = 50.0;
+
+        let display = EqDisplayWidget {
+            track_id,
+            effect_id: effect.id,
+            params: effect.params.clone(),
+            descriptors: effect.descriptors,
+            bypass: effect.bypass,
+            sample_rate: self.state.transport.sample_rate as f32,
+            spectrum: self.state.spectrum.bins.clone(),
+            spectrum_active: self.state.spectrum.active,
+        };
+        let display_canvas: Element<'a, Message> = canvas(display)
+            .width(Length::Fixed(DISPLAY_W))
+            .height(Length::Fill)
+            .into();
+
+        // Band columns, left to right along the frequency axis:
+        // (label, gain idx, freq idx, third idx, bell?, color)
+        let bands: [(&str, usize, usize, usize, bool, Color); 4] = [
+            ("LF", 0, 1, 2, true, th::eq_lf()),
+            ("LMF", 3, 4, 5, false, th::eq_lmf()),
+            ("HMF", 6, 7, 8, false, th::eq_hmf()),
+            ("HF", 9, 10, 11, true, th::eq_hf()),
+        ];
+
+        let knob_color = if effect.bypass {
+            th::text_muted()
+        } else {
+            th::text_dim()
+        };
+        let mut band_row = row![].spacing(4);
+        for (label, gain_i, freq_i, third_i, is_bell, color) in bands {
+            let band_color = if effect.bypass { knob_color } else { color };
+            let knob = |i: usize, size: f32| -> Element<'a, Message> {
+                let d = &effect.descriptors[i];
+                let w = EffectKnobWidget::new(
+                    track_id,
+                    effect.id,
+                    i,
+                    effect.params.get(i).copied().unwrap_or(d.default),
+                    d.min,
+                    d.max,
+                    d.default,
+                    band_color,
+                );
+                canvas(w)
+                    .width(Length::Fixed(size))
+                    .height(Length::Fixed(size))
+                    .into()
+            };
+            let gain_v = effect.params.get(gain_i).copied().unwrap_or(0.0);
+            let freq_v = effect.params.get(freq_i).copied().unwrap_or(0.0);
+
+            let mut col = column![
+                text(label).size(9).color(band_color),
+                knob(gain_i, 28.0),
+                text(format!("{gain_v:+.1}")).size(8).color(th::text_dim()),
+                knob(freq_i, 24.0),
+                text(format_value(freq_v, "Hz"))
+                    .size(8)
+                    .color(th::text_dim()),
+            ]
+            .spacing(2)
+            .width(Length::Fixed(BAND_COL_W))
+            .align_x(iced::Alignment::Center);
+
+            if is_bell {
+                let bell_on = effect.params.get(third_i).copied().unwrap_or(0.0) >= 0.5;
+                let bell = button(text("BELL").size(6).color(if bell_on {
+                    th::bg_dark()
+                } else {
+                    th::text_dim()
+                }))
+                .on_press(Message::set_effect_param(
+                    track_id,
+                    effect.id,
+                    third_i,
+                    if bell_on { 0.0 } else { 1.0 },
+                ))
+                .padding([3, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(if bell_on {
+                        band_color.into()
+                    } else {
+                        th::bg_elevated().into()
+                    }),
+                    text_color: if bell_on {
+                        th::bg_dark()
+                    } else {
+                        th::text_dim()
+                    },
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                });
+                col = col.push(bell);
+            } else {
+                let q_v = effect.params.get(third_i).copied().unwrap_or(0.7);
+                col = col.push(
+                    row![
+                        text("Q").size(8).color(th::text_dim()),
+                        knob(third_i, 20.0),
+                        text(format!("{q_v:.2}")).size(8).color(th::text_dim()),
+                    ]
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+            band_row = band_row.push(col);
+        }
+
+        let body: Element<'a, Message> = row![
+            display_canvas,
+            Self::device_divider(),
+            container(band_row).padding([0, 2]),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into();
+
+        // padding (20) + display + divider + bands + spacing
+        let card_w = DISPLAY_W + 4.0 * (BAND_COL_W + 4.0) + 48.0;
+        (body, card_w)
+    }
+
     // ── Shared device card helpers ──────────────────────────────────
 
     /// Dark title bar used by all device cards.
@@ -109,7 +258,7 @@ impl App {
             .padding([4, 6])
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_SURFACE.into()),
+                background: Some(th::bg_surface().into()),
                 ..Default::default()
             })
     }
@@ -121,11 +270,11 @@ impl App {
         remove: Option<Message>,
     ) -> iced::widget::Row<'_, Message> {
         let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text(name.to_string()).size(11).color(th::TEXT);
+        let name = text(name.to_string()).size(11).color(th::text());
         let mut r = row![dot, name].spacing(5).align_y(iced::Alignment::Center);
         if let Some(msg) = remove {
             let remove_btn: Element<'_, Message> =
-                Self::device_icon_btn(icons::X, th::TEXT_DIM, th::DANGER, msg).into();
+                Self::device_icon_btn(icons::X, th::text_dim(), th::danger(), msg).into();
             r = r.push(horizontal_space().width(Length::Fixed(12.0)));
             r = r.push(remove_btn);
         }
@@ -138,7 +287,7 @@ impl App {
         label: &'static str,
         content: Element<'a, Message>,
     ) -> Element<'a, Message> {
-        column![text(label).size(8).color(th::TEXT_MUTED), content]
+        column![text(label).size(8).color(th::text_muted()), content]
             .spacing(6)
             .align_x(iced::Alignment::Start)
             .into()
@@ -150,7 +299,7 @@ impl App {
             .width(Length::Fixed(1.0))
             .height(Length::Fixed(th::DEVICE_BODY_H - 12.0))
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::DIVIDER.into()),
+                background: Some(th::divider().into()),
                 ..Default::default()
             })
             .into()
@@ -169,9 +318,9 @@ impl App {
     pub(super) fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
         container(content)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::BG_ELEVATED.into()),
+                background: Some(th::bg_elevated().into()),
                 border: iced::Border {
-                    color: th::BORDER,
+                    color: th::border(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -192,8 +341,8 @@ impl App {
             .padding([3, 5])
             .style(move |_theme: &Theme, status| {
                 let (bg, tc) = match status {
-                    button::Status::Hovered => (Some(th::BG_HOVER.into()), hover_color),
-                    button::Status::Pressed => (Some(th::BG_DARK.into()), hover_color),
+                    button::Status::Hovered => (Some(th::bg_hover().into()), hover_color),
+                    button::Status::Pressed => (Some(th::bg_dark().into()), hover_color),
                     _ => (None, color),
                 };
                 button::Style {
@@ -219,26 +368,26 @@ impl App {
         let plugin_name = track.plugin_instrument_name.as_deref().unwrap_or("Plugin");
 
         let name_section =
-            container(text(plugin_name).size(11).color(th::TEXT)).width(Length::Fill);
+            container(text(plugin_name).size(11).color(th::text())).width(Length::Fill);
 
         // Edit button for plugins with a native GUI
         let edit_btn: Option<iced::widget::Button<'_, Message>> = if track.has_plugin_instrument_gui
         {
             let gui_key = PluginGuiKey::Instrument { track_id };
             Some(
-                button(text("Edit").size(9).color(th::TEXT_DIM))
+                button(text("Edit").size(9).color(th::text_dim()))
                     .on_press(Message::OpenPluginGui(gui_key))
                     .padding([2, 5])
                     .style(|_theme: &Theme, status| {
                         let (bg, tc) = match status {
-                            button::Status::Hovered => (Some(th::BG_HOVER.into()), th::ACCENT),
-                            _ => (None, th::TEXT_DIM),
+                            button::Status::Hovered => (Some(th::bg_hover().into()), th::accent()),
+                            _ => (None, th::text_dim()),
                         };
                         button::Style {
                             background: bg,
                             text_color: tc,
                             border: iced::Border {
-                                color: th::BORDER,
+                                color: th::border(),
                                 width: 1.0,
                                 radius: 3.0.into(),
                             },
@@ -252,8 +401,8 @@ impl App {
 
         let remove: Element<'a, Message> = Self::device_icon_btn(
             icons::X,
-            th::TEXT_DIM,
-            th::DANGER,
+            th::text_dim(),
+            th::danger(),
             Message::remove_track_instrument(track_id),
         )
         .into();
@@ -318,15 +467,23 @@ impl App {
                     .size(9)
                     .width(Length::Fixed(30.0))
                     .align_x(iced::Alignment::Center)
-                    .color(if active { th::BG_DARK } else { th::TEXT_DIM }),
+                    .color(if active {
+                        th::bg_dark()
+                    } else {
+                        th::text_dim()
+                    }),
             )
             .on_press(Message::set_instrument_param(track_id, 0, i as f32))
             .padding([3, 4])
             .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(if active { th::ACCENT } else { th::BG_DARK }.into()),
-                text_color: if active { th::BG_DARK } else { th::TEXT_DIM },
+                background: Some(if active { th::accent() } else { th::bg_dark() }.into()),
+                text_color: if active {
+                    th::bg_dark()
+                } else {
+                    th::text_dim()
+                },
                 border: iced::Border {
-                    color: if active { th::ACCENT } else { th::BORDER },
+                    color: if active { th::accent() } else { th::border() },
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -440,26 +597,26 @@ impl App {
                 } else {
                     name.clone()
                 };
-                text(display).size(10).color(th::TEXT)
+                text(display).size(10).color(th::text())
             }
-            None => text("No Sample").size(10).color(th::TEXT_MUTED),
+            None => text("No Sample").size(10).color(th::text_muted()),
         };
-        let load_btn = button(text("Load").size(9).color(th::TEXT))
+        let load_btn = button(text("Load").size(9).color(th::text()))
             .on_press(Message::LoadSamplerSample(track_id))
             .padding([2, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered => th::BG_HOVER,
-                    _ => th::BG_DARK,
+                    button::Status::Hovered => th::bg_hover(),
+                    _ => th::bg_dark(),
                 };
                 button::Style {
                     background: Some(bg.into()),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 3.0.into(),
                     },
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     ..Default::default()
                 }
             });
@@ -573,10 +730,10 @@ impl App {
                     column![
                         text(format!("{:02}  {pad_note}", pad_index + 1))
                             .size(9)
-                            .color(if active { th::ACCENT } else { th::TEXT_DIM }),
+                            .color(if active { th::accent() } else { th::text_dim() }),
                         text(label)
                             .size(8)
-                            .color(if active { th::ACCENT } else { th::TEXT })
+                            .color(if active { th::accent() } else { th::text() })
                     ]
                     .spacing(2)
                     .align_x(iced::Alignment::Center),
@@ -585,10 +742,21 @@ impl App {
                 .width(Length::Fixed(52.0))
                 .height(Length::Fixed(30.0))
                 .style(move |_theme: &Theme| container::Style {
-                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
-                    text_color: Some(if active { th::ACCENT } else { th::TEXT }),
+                    background: Some(
+                        if active {
+                            th::accent_dim()
+                        } else {
+                            th::bg_dark()
+                        }
+                        .into(),
+                    ),
+                    text_color: Some(if active { th::accent() } else { th::text() }),
                     border: iced::Border {
-                        color: if active { th::ACCENT_DIM } else { th::BORDER },
+                        color: if active {
+                            th::accent_dim()
+                        } else {
+                            th::border()
+                        },
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -618,42 +786,44 @@ impl App {
             .unwrap_or_else(|| "Use the browser or Load".to_string());
         let selected_pad_state = &track.drum_rack_pads[selected_pad];
 
-        let load_btn = button(text("Load").size(9).color(th::TEXT))
+        let load_btn = button(text("Load").size(9).color(th::text()))
             .on_press(Message::LoadDrumRackPadSample(track_id, selected_pad))
             .padding([2, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered => th::BG_HOVER,
-                    _ => th::BG_DARK,
+                    button::Status::Hovered => th::bg_hover(),
+                    _ => th::bg_dark(),
                 };
                 button::Style {
                     background: Some(bg.into()),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 3.0.into(),
                     },
-                    text_color: th::TEXT,
+                    text_color: th::text(),
                     ..Default::default()
                 }
             });
 
-        let clear_btn = button(text("Clear").size(9).color(th::TEXT_DIM))
+        let clear_btn = button(text("Clear").size(9).color(th::text_dim()))
             .on_press(Message::clear_drum_rack_pad(track_id, selected_pad))
             .padding([2, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
-                    _ => Some(th::BG_DARK.into()),
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => Some(th::bg_dark().into()),
                 };
                 button::Style {
                     background: bg,
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 3.0.into(),
                     },
-                    text_color: th::TEXT_DIM,
+                    text_color: th::text_dim(),
                     ..Default::default()
                 }
             });
@@ -661,10 +831,10 @@ impl App {
         let footer = column![
             text(truncate_end(&selected_name, 22))
                 .size(10)
-                .color(th::TEXT),
+                .color(th::text()),
             text(truncate_end(&source_hint, 26))
                 .size(9)
-                .color(th::TEXT_DIM),
+                .color(th::text_dim()),
             row![load_btn, clear_btn]
                 .spacing(6)
                 .align_y(iced::Alignment::Center)
@@ -749,9 +919,9 @@ impl App {
 
         let one_shot_active = selected_pad_state.one_shot;
         let one_shot_btn = button(text("One-shot").size(9).color(if one_shot_active {
-            th::ACCENT
+            th::accent()
         } else {
-            th::TEXT_DIM
+            th::text_dim()
         }))
         .on_press(Message::Devices(
             crate::domains::devices::DevicesMsg::SetDrumPadOneShot {
@@ -764,22 +934,22 @@ impl App {
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(
                 if one_shot_active {
-                    th::ACCENT_DIM
+                    th::accent_dim()
                 } else {
-                    th::BG_DARK
+                    th::bg_dark()
                 }
                 .into(),
             ),
             text_color: if one_shot_active {
-                th::ACCENT
+                th::accent()
             } else {
-                th::TEXT_DIM
+                th::text_dim()
             },
             border: iced::Border {
                 color: if one_shot_active {
-                    th::ACCENT_DIM
+                    th::accent_dim()
                 } else {
-                    th::BORDER
+                    th::border()
                 },
                 width: 1.0,
                 radius: 3.0.into(),
@@ -787,7 +957,7 @@ impl App {
             ..Default::default()
         });
 
-        let mut choke_row = row![text("Choke").size(9).color(th::TEXT_DIM)]
+        let mut choke_row = row![text("Choke").size(9).color(th::text_dim())]
             .spacing(2)
             .align_y(iced::Alignment::Center);
         for (group, label) in [
@@ -798,30 +968,40 @@ impl App {
             (Some(4), "4"),
         ] {
             let active = selected_pad_state.choke_group == group;
-            let btn =
-                button(
-                    text(label)
-                        .size(9)
-                        .color(if active { th::ACCENT } else { th::TEXT_DIM }),
-                )
-                .on_press(Message::Devices(
-                    crate::domains::devices::DevicesMsg::SetDrumPadChokeGroup {
-                        track_id,
-                        pad_index: selected_pad,
-                        choke_group: group,
+            let btn = button(text(label).size(9).color(if active {
+                th::accent()
+            } else {
+                th::text_dim()
+            }))
+            .on_press(Message::Devices(
+                crate::domains::devices::DevicesMsg::SetDrumPadChokeGroup {
+                    track_id,
+                    pad_index: selected_pad,
+                    choke_group: group,
+                },
+            ))
+            .padding([2, 6])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(
+                    if active {
+                        th::accent_dim()
+                    } else {
+                        th::bg_dark()
+                    }
+                    .into(),
+                ),
+                text_color: if active { th::accent() } else { th::text_dim() },
+                border: iced::Border {
+                    color: if active {
+                        th::accent_dim()
+                    } else {
+                        th::border()
                     },
-                ))
-                .padding([2, 6])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(if active { th::ACCENT_DIM } else { th::BG_DARK }.into()),
-                    text_color: if active { th::ACCENT } else { th::TEXT_DIM },
-                    border: iced::Border {
-                        color: if active { th::ACCENT_DIM } else { th::BORDER },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                });
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            });
             choke_row = choke_row.push(btn);
         }
 
@@ -877,8 +1057,8 @@ impl App {
 
     /// Placeholder card for MIDI tracks with no instrument attached.
     pub(super) fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
-        let title = Self::device_title_bar(text("No Instrument").size(11).color(th::TEXT_DIM));
-        let body = container(text("Right-click to add").size(9).color(th::TEXT_MUTED))
+        let title = Self::device_title_bar(text("No Instrument").size(11).color(th::text_dim()));
+        let body = container(text("Right-click to add").size(9).color(th::text_muted()))
             .padding([8, 6])
             .width(Length::Fill);
 

@@ -35,6 +35,12 @@ struct App {
     state: AppState,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
+    /// Post-effects mono samples from the engine's spectrum tap,
+    /// feeding the EQ analyser.
+    spectrum_rx: Option<Consumer<f32>>,
+    /// Track the engine tap currently points at, so tick can retarget
+    /// it when the selection moves.
+    spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
     // Channels for receiving loaded plugins from background threads
     plugin_effect_rx: std::sync::mpsc::Receiver<PluginLoadResult>,
@@ -118,7 +124,8 @@ mod views_shell;
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let (engine, cmd_tx, event_rx) = AudioEngine::new();
+        let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
+        let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
 
         let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
@@ -152,7 +159,7 @@ impl App {
             ..Default::default()
         };
 
-        let state = AppState {
+        let mut state = AppState {
             transport: crate::state::TransportState {
                 sample_rate,
                 ..Default::default()
@@ -167,6 +174,27 @@ impl App {
             },
             ..Default::default()
         };
+
+        // Themes: scan the user's .vzt collection, then restore the
+        // saved selection (built-in name or user theme name).
+        let (user_themes, theme_warnings) = crate::themes::scan_user_themes();
+        for warning in theme_warnings {
+            eprintln!("vibez: theme scan: {warning}");
+        }
+        state.user_themes = user_themes;
+        if let Some(name) = &ui_settings.theme {
+            let palette = crate::themes::builtin_by_name(name).or_else(|| {
+                state
+                    .user_themes
+                    .iter()
+                    .find(|t| t.palette.name == *name)
+                    .map(|t| t.palette.clone())
+            });
+            if let Some(palette) = palette {
+                th::set_theme(palette);
+                state.current_theme_name = name.clone();
+            }
+        }
 
         let (plugin_effect_tx, plugin_effect_rx) = std::sync::mpsc::channel();
         let (plugin_instrument_tx, plugin_instrument_rx) = std::sync::mpsc::channel();
@@ -187,6 +215,8 @@ impl App {
             state,
             cmd_tx: Some(cmd_tx),
             event_rx: Some(event_rx),
+            spectrum_rx,
+            spectrum_tap: None,
             _stream: stream,
             plugin_effect_rx,
             plugin_effect_tx,
@@ -205,6 +235,10 @@ impl App {
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
 
+        // Console model: the master bus carries its channel EQ from
+        // the first frame.
+        app.ensure_master_eq();
+
         let startup_task = if app.state.browser.roots.is_empty() {
             Task::none()
         } else {
@@ -215,7 +249,29 @@ impl App {
             )
         };
 
-        (app, startup_task)
+        // `vibez <project.vzp>` opens a project straight from the
+        // command line (also how file-manager associations launch
+        // us). Legacy `.vibez` files load the same way.
+        let open_task = std::env::args()
+            .nth(1)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_file())
+            .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
+            .unwrap_or_else(Task::none);
+
+        (app, Task::batch([startup_task, open_task]))
+    }
+
+    /// Find a theme by name: built-ins first, then the scanned user
+    /// collection.
+    pub(crate) fn resolve_theme(&self, name: &str) -> Option<crate::theme::ThemePalette> {
+        crate::themes::builtin_by_name(name).or_else(|| {
+            self.state
+                .user_themes
+                .iter()
+                .find(|t| t.palette.name == name)
+                .map(|t| t.palette.clone())
+        })
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {

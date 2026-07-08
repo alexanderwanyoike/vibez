@@ -79,15 +79,7 @@ impl canvas::Program<Message> for MiniWaveform {
                 iced::Size::new(w, h),
                 3.0.into(),
             );
-            frame.fill(
-                &bg,
-                Color {
-                    r: 0.07,
-                    g: 0.07,
-                    b: 0.07,
-                    a: 1.0,
-                },
-            );
+            frame.fill(&bg, theme::display_bg());
 
             let Some(audio) = &self.audio else {
                 // Empty state: flat center line.
@@ -98,7 +90,7 @@ impl canvas::Program<Message> for MiniWaveform {
                 frame.stroke(
                     &line,
                     canvas::Stroke::default()
-                        .with_color(theme::BORDER)
+                        .with_color(theme::border())
                         .with_width(1.0),
                 );
                 return;
@@ -163,7 +155,7 @@ impl canvas::Program<Message> for MiniWaveform {
                     frame.stroke(
                         &line,
                         canvas::Stroke::default()
-                            .with_color(theme::TEXT_DIM)
+                            .with_color(theme::text_dim())
                             .with_width(1.0),
                     );
                 }
@@ -197,15 +189,7 @@ impl canvas::Program<Message> for OscScope {
 
         let bg =
             canvas::Path::rounded_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), 3.0.into());
-        frame.fill(
-            &bg,
-            Color {
-                r: 0.07,
-                g: 0.07,
-                b: 0.07,
-                a: 1.0,
-            },
-        );
+        frame.fill(&bg, theme::display_bg());
 
         let mid = h / 2.0;
         let amp = h / 2.0 - 4.0;
@@ -285,15 +269,7 @@ impl canvas::Program<Message> for AdsrScope {
 
         let bg =
             canvas::Path::rounded_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), 3.0.into());
-        frame.fill(
-            &bg,
-            Color {
-                r: 0.07,
-                g: 0.07,
-                b: 0.07,
-                a: 1.0,
-            },
-        );
+        frame.fill(&bg, theme::display_bg());
 
         let pad = 3.0;
         let top = pad;

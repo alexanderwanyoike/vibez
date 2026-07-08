@@ -14,6 +14,10 @@ pub struct Project {
     pub clips: Vec<ClipInfo>,
     #[serde(default)]
     pub note_clips: Vec<NoteClipInfo>,
+    /// The master bus channel (gain + effect chain). Absent in
+    /// projects saved before the master was a real channel.
+    #[serde(default)]
+    pub master: Option<TrackInfo>,
 }
 
 impl Default for Project {
@@ -25,6 +29,7 @@ impl Default for Project {
             tracks: Vec::new(),
             clips: Vec::new(),
             note_clips: Vec::new(),
+            master: None,
         }
     }
 }
@@ -156,6 +161,7 @@ mod tests {
         let path = dir.path().join("test.vibez");
 
         let project = Project {
+            master: None,
             name: "Test Project".into(),
             bpm: 140.0,
             sample_rate: 48_000,
@@ -261,6 +267,7 @@ mod tests {
 
         let tid = TrackId::new();
         let project = Project {
+            master: None,
             name: "Note Test".into(),
             bpm: 128.0,
             sample_rate: 44_100,
@@ -323,6 +330,7 @@ mod tests {
         });
 
         let project = Project {
+            master: None,
             name: "FX Test".into(),
             bpm: 120.0,
             sample_rate: 44_100,
@@ -342,5 +350,55 @@ mod tests {
             loaded.tracks[0].native_instrument,
             Some(InstrumentStateInfo::SubtractiveSynth { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod automation_persistence_tests {
+    use super::*;
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    use vibez_core::track::TrackInfo;
+
+    #[test]
+    fn lanes_survive_a_save_load_roundtrip() {
+        let mut track = TrackInfo::new("T1");
+        let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+        lane.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 1.0,
+            curve: 0.0,
+        });
+        lane.insert_point(AutomationPoint {
+            beat: 8.0,
+            value: 0.25,
+            curve: 0.5,
+        });
+        track.automation.push(lane.clone());
+
+        let project = Project {
+            master: None,
+            name: "roundtrip".to_string(),
+            tracks: vec![track],
+            ..Default::default()
+        };
+
+        let dir = std::env::temp_dir().join("vibez-lane-roundtrip-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.vibez");
+        project.save_to_file(&path).unwrap();
+        let loaded = Project::load_from_file(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(loaded.tracks[0].automation, vec![lane]);
+    }
+
+    #[test]
+    fn projects_without_lanes_still_load() {
+        // Backcompat: pre-automation files have no `automation` key.
+        let json = r#"{"name":"old","bpm":120.0,"sample_rate":48000,
+            "tracks":[{"id":1,"name":"T","gain":1.0,"pan":0.5,
+            "mute":false,"solo":false}],"clips":[]}"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert!(project.tracks[0].automation.is_empty());
     }
 }

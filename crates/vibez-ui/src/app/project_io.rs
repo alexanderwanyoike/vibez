@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use vibez_core::effect::EffectType;
 
 use iced::Task;
 
@@ -34,6 +35,7 @@ impl App {
         }
 
         self.state.arrangement.tracks.clear();
+        self.reset_master_channel();
         // The engine drops all plugin instances with their tracks;
         // their GUI windows and stale raw pointers must go with them
         // (pumping a closed plugin's run-loop timers segfaults).
@@ -61,8 +63,47 @@ impl App {
         self.state.view.edit_name_text.clear();
     }
 
+    /// Tear the master bus back to a bare channel: engine chain
+    /// cleared, gain at unity, fresh UI model. Callers re-attach the
+    /// channel EQ (or load a saved chain) afterwards.
+    pub(super) fn reset_master_channel(&mut self) {
+        let effect_ids: Vec<EffectId> = self
+            .state
+            .arrangement
+            .master
+            .effects
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        for effect_id in effect_ids {
+            self.send_command(EngineCommand::RemoveEffect(TrackId::MASTER, effect_id));
+        }
+        self.state.arrangement.master = crate::state::new_master_track();
+        self.send_command(EngineCommand::SetTrackGain(TrackId::MASTER, 1.0));
+    }
+
+    /// Console model: the master bus always carries its channel EQ.
+    /// Attaches a flat one when missing (fresh session, old project).
+    pub(super) fn ensure_master_eq(&mut self) {
+        let has_eq = self
+            .state
+            .arrangement
+            .master
+            .effects
+            .iter()
+            .any(|e| e.effect_type == EffectType::Eq && e.plugin_ref.is_none());
+        if !has_eq {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            crate::domains::arrangement::attach_channel_eq(
+                &mut engine,
+                &mut self.state.arrangement.master,
+            );
+        }
+    }
+
     pub(super) fn reset_to_new_project(&mut self) {
         self.clear_project_runtime();
+        self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
@@ -79,6 +120,7 @@ impl App {
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
+            theme: Some(self.state.current_theme_name.clone()),
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -146,6 +188,7 @@ impl App {
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
+            automation: track.automation.clone(),
         }
     }
 
@@ -232,6 +275,7 @@ impl App {
             tracks,
             clips,
             note_clips,
+            master: Some(self.track_info_from_ui(&self.state.arrangement.master)),
         }
     }
 
@@ -250,6 +294,13 @@ impl App {
             .flat_map(|t| std::iter::once(t.id.raw()).chain(t.effects.iter().map(|e| e.id.raw())))
             .chain(loaded.project.clips.iter().map(|c| c.id.raw()))
             .chain(loaded.project.note_clips.iter().map(|c| c.id.raw()))
+            .chain(
+                loaded
+                    .project
+                    .master
+                    .iter()
+                    .flat_map(|m| m.effects.iter().map(|e| e.id.raw())),
+            )
             .max()
             .unwrap_or(0);
         vibez_core::id::ensure_ids_above(max_loaded_id);
@@ -279,6 +330,7 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
+            track.automation = track_info.automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
             if let Some(dev) = &track_info.plugin_instrument {
@@ -347,6 +399,13 @@ impl App {
                 }
             }
 
+            for lane in &track_info.automation {
+                self.send_command(EngineCommand::SetAutomationLane {
+                    track_id: track_info.id,
+                    lane: lane.clone(),
+                });
+            }
+
             for (chain_pos, effect_info) in track_info.effects.iter().enumerate() {
                 if let Some(dev) = &effect_info.plugin {
                     plugin_effect_requests.push((
@@ -394,6 +453,37 @@ impl App {
                 });
             }
 
+            // Console model: every channel has its EQ. Backfill for
+            // projects saved before the channel EQ existed.
+            if !track
+                .effects
+                .iter()
+                .any(|e| e.effect_type == EffectType::Eq && e.plugin_ref.is_none())
+            {
+                let effect_id = EffectId::new();
+                let fx = vibez_dsp::factory::create_effect(
+                    EffectType::Eq,
+                    self.state.transport.sample_rate as f32,
+                );
+                let descriptors = fx.param_descriptors();
+                track.effects.push(UiEffect {
+                    id: effect_id,
+                    effect_type: EffectType::Eq,
+                    bypass: false,
+                    params: descriptors.iter().map(|d| d.default).collect(),
+                    descriptors,
+                    plugin_name: None,
+                    has_plugin_gui: false,
+                    plugin_ref: None,
+                });
+                self.send_command(EngineCommand::AddEffect {
+                    track_id: track_info.id,
+                    effect_id,
+                    effect_type: EffectType::Eq,
+                    position: None,
+                });
+            }
+
             self.state.arrangement.next_track_number = self
                 .state
                 .arrangement
@@ -401,6 +491,64 @@ impl App {
                 .max(self.state.arrangement.tracks.len() as u32 + 1);
             self.state.arrangement.tracks.push(track);
         }
+
+        // Master bus: gain + effect chain from the file, then the
+        // channel-EQ backfill for projects saved before the master
+        // was a real channel. clear_project_runtime left it bare.
+        if let Some(master_info) = &loaded.project.master {
+            self.state.arrangement.master.gain = master_info.gain;
+            self.send_command(EngineCommand::SetTrackGain(
+                TrackId::MASTER,
+                master_info.gain,
+            ));
+            for (chain_pos, effect_info) in master_info.effects.iter().enumerate() {
+                if let Some(dev) = &effect_info.plugin {
+                    plugin_effect_requests.push((
+                        TrackId::MASTER,
+                        effect_info.id,
+                        chain_pos,
+                        dev.clone(),
+                    ));
+                    continue;
+                }
+                let fx = vibez_dsp::factory::create_effect_with_params(
+                    effect_info.effect_type,
+                    self.state.transport.sample_rate as f32,
+                    &effect_info.params,
+                );
+                let descriptors = fx.param_descriptors();
+                self.state.arrangement.master.effects.push(UiEffect {
+                    id: effect_info.id,
+                    effect_type: effect_info.effect_type,
+                    bypass: effect_info.bypass,
+                    params: effect_info.params.clone(),
+                    descriptors,
+                    plugin_name: None,
+                    has_plugin_gui: false,
+                    plugin_ref: None,
+                });
+                self.send_command(EngineCommand::AddEffect {
+                    track_id: TrackId::MASTER,
+                    effect_id: effect_info.id,
+                    effect_type: effect_info.effect_type,
+                    position: None,
+                });
+                for (idx, value) in effect_info.params.iter().copied().enumerate() {
+                    self.send_command(EngineCommand::SetEffectParam {
+                        track_id: TrackId::MASTER,
+                        effect_id: effect_info.id,
+                        param_index: idx,
+                        value,
+                    });
+                }
+                self.send_command(EngineCommand::SetEffectBypass {
+                    track_id: TrackId::MASTER,
+                    effect_id: effect_info.id,
+                    bypass: effect_info.bypass,
+                });
+            }
+        }
+        self.ensure_master_eq();
 
         for loaded_clip in loaded.clips {
             self.send_command(EngineCommand::AddClip {
@@ -548,6 +696,7 @@ impl App {
     pub(super) fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
         crate::state::ProjectSnapshot {
             tracks: self.state.arrangement.tracks.clone(),
+            master: self.state.arrangement.master.clone(),
             bpm: self.state.transport.bpm,
             bpm_text: self.state.transport.bpm_text.clone(),
             loop_enabled: self.state.transport.loop_enabled,
@@ -593,7 +742,21 @@ impl App {
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
+        // The master bus survives track teardown; clear its chain
+        // explicitly so the snapshot replay starts from bare.
+        let master_effect_ids: Vec<EffectId> = self
+            .state
+            .arrangement
+            .master
+            .effects
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        for effect_id in master_effect_ids {
+            self.send_command(EngineCommand::RemoveEffect(TrackId::MASTER, effect_id));
+        }
 
+        self.state.arrangement.master = snapshot.master;
         self.state.arrangement.tracks = snapshot.tracks;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;
@@ -623,6 +786,8 @@ impl App {
         for track in &tracks {
             self.replay_track_to_engine(track);
         }
+        let master = self.state.arrangement.master.clone();
+        self.replay_track_to_engine(&master);
 
         // Reload plugin devices through the project-open pipeline;
         // they re-enter the chains at their recorded positions.
@@ -630,6 +795,13 @@ impl App {
     }
 
     pub(super) fn replay_track_to_engine(&mut self, track: &UiTrack) {
+        if track.id.is_master() {
+            // The master bus always exists in the engine: replay only
+            // its gain and effect chain.
+            self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
+            self.replay_effects_to_engine(track);
+            return;
+        }
         match track.kind {
             TrackKind::Audio => {
                 self.send_command(EngineCommand::AddTrack(track.id, track.name.clone()));
@@ -683,27 +855,14 @@ impl App {
             }
         }
 
-        for effect in &track.effects {
-            self.send_command(EngineCommand::AddEffect {
+        for lane in &track.automation {
+            self.send_command(EngineCommand::SetAutomationLane {
                 track_id: track.id,
-                effect_id: effect.id,
-                effect_type: effect.effect_type,
-                position: None,
-            });
-            for (idx, value) in effect.params.iter().copied().enumerate() {
-                self.send_command(EngineCommand::SetEffectParam {
-                    track_id: track.id,
-                    effect_id: effect.id,
-                    param_index: idx,
-                    value,
-                });
-            }
-            self.send_command(EngineCommand::SetEffectBypass {
-                track_id: track.id,
-                effect_id: effect.id,
-                bypass: effect.bypass,
+                lane: lane.clone(),
             });
         }
+
+        self.replay_effects_to_engine(track);
 
         for clip in &track.clips {
             self.send_command(EngineCommand::AddClip {
@@ -739,6 +898,33 @@ impl App {
         }
     }
 
+    /// Replay a channel's built-in effect chain to the engine
+    /// (add, params, bypass). Plugin devices reload through the
+    /// async pipeline instead.
+    fn replay_effects_to_engine(&mut self, track: &UiTrack) {
+        for effect in &track.effects {
+            self.send_command(EngineCommand::AddEffect {
+                track_id: track.id,
+                effect_id: effect.id,
+                effect_type: effect.effect_type,
+                position: None,
+            });
+            for (idx, value) in effect.params.iter().copied().enumerate() {
+                self.send_command(EngineCommand::SetEffectParam {
+                    track_id: track.id,
+                    effect_id: effect.id,
+                    param_index: idx,
+                    value,
+                });
+            }
+            self.send_command(EngineCommand::SetEffectBypass {
+                track_id: track.id,
+                effect_id: effect.id,
+                bypass: effect.bypass,
+            });
+        }
+    }
+
     pub(super) fn handle_export_path_selected(&mut self, path: Option<PathBuf>) -> Task<Message> {
         let Some(mut path) = path else {
             return Task::none();
@@ -757,6 +943,7 @@ impl App {
         let bpm = self.state.transport.bpm;
         let request = vibez_engine::render::BounceRequest {
             tracks: project.tracks,
+            master: project.master,
             audio_clips: project.clips,
             note_clips: project.note_clips,
             clip_audio: assets.clips,

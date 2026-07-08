@@ -47,6 +47,9 @@ pub enum BounceMode {
 /// decoded audio for every asset referenced by the snapshot.
 pub struct BounceRequest {
     pub tracks: Vec<TrackInfo>,
+    /// Master bus (gain + effect chain), applied to the summed mix
+    /// in [`BounceMode::Master`] renders.
+    pub master: Option<TrackInfo>,
     pub audio_clips: Vec<ClipInfo>,
     pub note_clips: Vec<NoteClipInfo>,
     pub clip_audio: HashMap<ClipId, Arc<DecodedAudio>>,
@@ -196,6 +199,35 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
     let total_frames = end.saturating_sub(start) as usize;
     let has_solo = matches!(req.mode, BounceMode::Master) && any_solo(&tracks);
 
+    // Master bus chain + gain, applied to the summed mix so the
+    // export matches live playback. Only master-mode renders route
+    // through it (single-track/clip bounces are pre-master stems).
+    let mut master_fx: Vec<EffectSlot> = Vec::new();
+    let mut master_gain = 1.0f32;
+    if matches!(req.mode, BounceMode::Master) {
+        if let Some(info) = &req.master {
+            master_gain = info.gain;
+            for fx_info in &info.effects {
+                if fx_info.plugin.is_some() {
+                    warnings.push(format!(
+                        "Master plugin effect '{}' not rendered offline",
+                        fx_info
+                            .plugin
+                            .as_ref()
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("?")
+                    ));
+                    continue;
+                }
+                master_fx.push(EffectSlot {
+                    id: fx_info.id,
+                    effect: create_effect_with_params(fx_info.effect_type, sr_f32, &fx_info.params),
+                    bypass: fx_info.bypass,
+                });
+            }
+        }
+    }
+
     let mut out_l = Vec::with_capacity(total_frames);
     let mut out_r = Vec::with_capacity(total_frames);
 
@@ -238,6 +270,15 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 scratch[idx] += track.mix_buffer[idx] * gain * pan_l;
                 scratch[idx + 1] += track.mix_buffer[idx + 1] * gain * pan_r;
             }
+        }
+
+        for slot in &mut master_fx {
+            if !slot.bypass {
+                slot.effect.process(scratch, CHANNELS);
+            }
+        }
+        if (master_gain - 1.0).abs() > f32::EPSILON {
+            scratch.iter_mut().for_each(|s| *s *= master_gain);
         }
 
         for frame in 0..block {
@@ -306,6 +347,7 @@ mod tests {
             instrument: None,
             native_instrument: None,
             plugin_instrument: None,
+            automation: Vec::new(),
         }
     }
 
@@ -337,6 +379,7 @@ mod tests {
         clip_audio.insert(cid, audio);
 
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -385,6 +428,7 @@ mod tests {
         clip_audio.insert(cid, audio);
 
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -426,6 +470,7 @@ mod tests {
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid, audio);
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),
@@ -487,6 +532,7 @@ mod tests {
         clip_audio.insert(cid_b, audio_b);
 
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: vec![clip_a, clip_b],
             note_clips: Vec::new(),
@@ -524,6 +570,7 @@ mod tests {
             instrument: Some(InstrumentKind::SubtractiveSynth),
             native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
             plugin_instrument: None,
+            automation: Vec::new(),
         };
         let note_clip = NoteClipInfo {
             id: cid,
@@ -542,6 +589,7 @@ mod tests {
             }],
         };
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: Vec::new(),
             note_clips: vec![note_clip],
@@ -573,8 +621,10 @@ mod tests {
             instrument: None,
             native_instrument: None,
             plugin_instrument: None,
+            automation: Vec::new(),
         };
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: Vec::new(),
             note_clips: Vec::new(),
@@ -625,6 +675,7 @@ mod tests {
         clip_audio.insert(cid, audio);
 
         let req = BounceRequest {
+            master: None,
             tracks: vec![track],
             audio_clips: vec![clip],
             note_clips: Vec::new(),

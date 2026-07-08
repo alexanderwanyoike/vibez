@@ -3,6 +3,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Theme};
 
+use crate::domains::automation::AutomationMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use crate::icons;
@@ -25,6 +26,7 @@ pub fn view_track_header<'a>(
     selected: bool,
     editing_name: bool,
     edit_text: &'a str,
+    automation_open: bool,
 ) -> Element<'a, Message> {
     let track_color = th::track_color(track.color_index);
 
@@ -47,7 +49,11 @@ pub fn view_track_header<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        let name_color = if track.mute { th::TEXT_DIM } else { th::TEXT };
+        let name_color = if track.mute {
+            th::text_dim()
+        } else {
+            th::text()
+        };
         let msg = if selected {
             Message::View(ViewMsg::StartEditingTrackName(track.id))
         } else {
@@ -58,7 +64,7 @@ pub fn view_track_header<'a>(
             .padding(0)
             .style(|_theme: &Theme, _status| button::Style {
                 background: None,
-                text_color: th::TEXT,
+                text_color: th::text(),
                 border: iced::Border::default(),
                 ..Default::default()
             })
@@ -66,11 +72,11 @@ pub fn view_track_header<'a>(
     };
 
     let add_btn = match track.kind {
-        TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
+        TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::text_dim()))
             .on_press(Message::AddClipToTrack(track.id))
             .padding([2, 6]),
         TrackKind::Instrument(_) | TrackKind::Midi => {
-            button(icons::icon(icons::PLUS).size(11).color(th::TEXT_DIM))
+            button(icons::icon(icons::PLUS).size(11).color(th::text_dim()))
                 .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
                     track.id,
                 )))
@@ -78,26 +84,54 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::TEXT_DIM))
+    let delete_btn = button(icons::icon(icons::TRASH_2).size(10).color(th::text_dim()))
         .on_press(Message::remove_track(track.id))
         .padding([2, 4])
         .style(|_theme: &Theme, status| {
             let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::BG_HOVER.into()),
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
                 _ => None,
             };
             button::Style {
                 background: bg,
-                text_color: th::TEXT_DIM,
+                text_color: th::text_dim(),
                 border: iced::Border::default(),
                 ..Default::default()
             }
         });
 
+    let auto_btn = {
+        let color = if automation_open {
+            th::accent()
+        } else {
+            th::text_dim()
+        };
+        button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(color))
+            .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                track.id,
+            )))
+            .padding([2, 4])
+            .style(|_theme: &Theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: th::text_dim(),
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            })
+    };
+
     let name_row = row![
         type_icon,
         name_widget,
         horizontal_space(),
+        auto_btn,
         add_btn,
         delete_btn
     ]
@@ -108,12 +142,12 @@ pub fn view_track_header<'a>(
     let mute_btn = {
         let label = text("M").size(11);
         if track.mute {
-            button(label.color(th::BG_DARK))
+            button(label.color(th::bg_dark()))
                 .on_press(Message::set_track_mute(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::MUTE_ACTIVE.into()),
-                    text_color: th::BG_DARK,
+                    background: Some(th::mute_active().into()),
+                    text_color: th::bg_dark(),
                     border: iced::Border {
                         radius: 2.0.into(),
                         ..Default::default()
@@ -121,14 +155,14 @@ pub fn view_track_header<'a>(
                     ..Default::default()
                 })
         } else {
-            button(label.color(th::TEXT_DIM))
+            button(label.color(th::text_dim()))
                 .on_press(Message::set_track_mute(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 2.0.into(),
                     },
@@ -140,12 +174,12 @@ pub fn view_track_header<'a>(
     let solo_btn = {
         let label = text("S").size(11);
         if track.solo {
-            button(label.color(th::BG_DARK))
+            button(label.color(th::bg_dark()))
                 .on_press(Message::set_track_solo(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::SOLO_ACTIVE.into()),
-                    text_color: th::BG_DARK,
+                    background: Some(th::solo_active().into()),
+                    text_color: th::bg_dark(),
                     border: iced::Border {
                         radius: 2.0.into(),
                         ..Default::default()
@@ -153,14 +187,14 @@ pub fn view_track_header<'a>(
                     ..Default::default()
                 })
         } else {
-            button(label.color(th::TEXT_DIM))
+            button(label.color(th::text_dim()))
                 .on_press(Message::set_track_solo(track.id))
                 .padding([3, 8])
                 .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(th::BG_ELEVATED.into()),
-                    text_color: th::TEXT_DIM,
+                    background: Some(th::bg_elevated().into()),
+                    text_color: th::text_dim(),
                     border: iced::Border {
-                        color: th::BORDER,
+                        color: th::border(),
                         width: 1.0,
                         radius: 2.0.into(),
                     },
@@ -204,14 +238,18 @@ pub fn view_track_header<'a>(
     let card = container(header_with_bar).style(move |_theme: &Theme| container::Style {
         background: Some(
             if selected {
-                th::TRACK_BG_SELECTED
+                th::track_bg_selected()
             } else {
-                th::BG_SURFACE
+                th::bg_surface()
             }
             .into(),
         ),
         border: iced::Border {
-            color: if selected { th::ACCENT_DIM } else { th::BORDER },
+            color: if selected {
+                th::accent_dim()
+            } else {
+                th::border()
+            },
             width: if selected { 1.0 } else { 0.0 },
             radius: 0.0.into(),
         },

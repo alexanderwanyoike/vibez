@@ -68,7 +68,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, h),
-            theme::BG_ELEVATED,
+            theme::bg_elevated(),
         );
 
         if self.total_beats <= 0.0 || self.tracks.is_empty() {
@@ -107,7 +107,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                 frame.fill_rectangle(
                     iced::Point::new(fill_x, 0.0),
                     iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::ACCENT, 0.15),
+                    theme::with_alpha(theme::accent(), 0.15),
                 );
             }
         }
@@ -124,10 +124,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
                 iced::Point::new(vx, 0.0),
                 iced::Size::new(vw, h),
                 Color {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
                     a: 0.05,
+                    ..theme::text()
                 },
             );
             // Orange border
@@ -141,7 +139,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
             frame.stroke(
                 &rect_path,
                 canvas::Stroke::default()
-                    .with_color(theme::ACCENT)
+                    .with_color(theme::accent())
                     .with_width(1.5),
             );
         }
@@ -154,7 +152,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
             frame.stroke(
                 &playhead,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(1.0),
             );
         }
@@ -165,7 +163,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         frame.stroke(
             &border,
             canvas::Stroke::default()
-                .with_color(theme::BORDER)
+                .with_color(theme::border())
                 .with_width(1.0),
         );
 

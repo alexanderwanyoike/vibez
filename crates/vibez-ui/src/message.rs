@@ -155,6 +155,7 @@ pub enum Message {
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
+    Automation(crate::domains::automation::AutomationMsg),
     View(crate::domains::view::ViewMsg),
 
     // Workspace
@@ -220,7 +221,7 @@ pub enum Message {
     SaveProjectAs,
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
-    ProjectLoaded(Result<ProjectLoadResult, String>),
+    ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
     ProjectSaved(Result<PathBuf, String>),
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
@@ -236,6 +237,14 @@ pub enum Message {
     OpenMidiInput(String),
     /// Settings: close the currently-open MIDI input port.
     CloseMidiInput,
+    /// Appearance: activate a theme by name (built-in or user).
+    SelectTheme(String),
+    /// Appearance: rescan the themes directory for `.vzt` files.
+    RescanThemes,
+    /// Appearance: live edit of the save-as-theme name field.
+    ThemeSaveNameChanged(String),
+    /// Appearance: save the current palette as a user `.vzt`.
+    SaveCurrentTheme,
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RescanSampleLibrary,
@@ -390,6 +399,11 @@ impl Message {
     pub fn set_effect_param(t: TrackId, e: EffectId, i: usize, v: f32) -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(
             t, e, i, v,
+        ))
+    }
+    pub fn set_effect_params(t: TrackId, e: EffectId, updates: Vec<(usize, f32)>) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::SetEffectParams(
+            t, e, updates,
         ))
     }
     pub fn toggle_effect_bypass(t: TrackId, e: EffectId) -> Self {

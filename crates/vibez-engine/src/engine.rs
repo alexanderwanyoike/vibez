@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
+use vibez_core::id::TrackId;
 
 use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
@@ -16,6 +17,10 @@ use crate::mixer::{
     EngineTrack,
 };
 use crate::transport::Transport;
+
+/// Capacity of the UI spectrum-analyser sample ring: roughly a third
+/// of a second of mono audio at 48 kHz, ample for a 60 fps drain.
+const SPECTRUM_RING_CAPACITY: usize = 16_384;
 
 /// The real-time audio engine.
 ///
@@ -39,6 +44,17 @@ pub struct AudioEngine {
     audio: Option<Arc<DecodedAudio>>,
     /// Multi-track state.
     tracks: Vec<EngineTrack>,
+    /// The master bus: a track-shaped channel (gain + effect chain,
+    /// no clips or instrument) applied to the summed mix. Addressed
+    /// by commands via [`TrackId::MASTER`].
+    master: EngineTrack,
+    /// Which track streams samples to the UI spectrum analyser.
+    spectrum_track: Option<TrackId>,
+    /// Producer side of the spectrum ring (mono samples).
+    spectrum_tx: Producer<f32>,
+    /// Consumer side, parked here until the UI takes it before the
+    /// engine moves to the audio thread.
+    spectrum_rx: Option<Consumer<f32>>,
     /// One-shot sample preview, bypasses transport and soloed/muted state.
     preview: Option<PreviewVoice>,
     sample_rate: u32,
@@ -67,11 +83,16 @@ impl AudioEngine {
     pub fn new() -> (Self, Producer<EngineCommand>, Consumer<EngineEvent>) {
         let (cmd_tx, cmd_rx) = RingBuffer::<EngineCommand>::new(RING_BUFFER_CAPACITY);
         let (event_tx, event_rx) = RingBuffer::<EngineEvent>::new(RING_BUFFER_CAPACITY);
+        let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
             transport: Transport::new(),
             audio: None,
             tracks: Vec::new(),
+            master: EngineTrack::new(TrackId::MASTER),
+            spectrum_track: None,
+            spectrum_tx,
+            spectrum_rx: Some(spectrum_rx),
             preview: None,
             sample_rate: 44100,
             cmd_rx,
@@ -80,6 +101,13 @@ impl AudioEngine {
         };
 
         (engine, cmd_tx, event_rx)
+    }
+
+    /// Take the consumer side of the spectrum-analyser ring. Must be
+    /// called on the UI thread before the engine moves to the audio
+    /// thread; returns `None` if already taken.
+    pub fn take_spectrum_consumer(&mut self) -> Option<Consumer<f32>> {
+        self.spectrum_rx.take()
     }
 
     /// Process one audio callback worth of data.
@@ -109,6 +137,23 @@ impl AudioEngine {
         } else {
             // ---- 4. Legacy single-audio path ----------------------------
             self.process_legacy(output, frames, channels);
+        }
+
+        // ---- 4.4 Master bus: effect chain + gain over the summed mix.
+        // Runs whether or not the transport is playing so queued
+        // plugin params are delivered and tails ring out, matching
+        // the per-track idle behavior.
+        for slot in &mut self.master.effects {
+            if !slot.bypass {
+                slot.effect.process(output, channels);
+            }
+        }
+        if (self.master.gain - 1.0).abs() > f32::EPSILON {
+            let gain = self.master.gain;
+            output.iter_mut().for_each(|s| *s *= gain);
+        }
+        if self.spectrum_track == Some(self.master.id) {
+            push_spectrum(&mut self.spectrum_tx, output, channels);
         }
 
         // ---- 4.5 Preview channel (bypasses transport) -------------------
@@ -159,6 +204,10 @@ impl AudioEngine {
     }
 
     /// Read the tracks (for inspection / testing).
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     pub fn tracks(&self) -> &[EngineTrack] {
         &self.tracks
     }
@@ -166,6 +215,17 @@ impl AudioEngine {
     // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
+
+    /// Resolve a command's target channel: the master bus for
+    /// [`TrackId::MASTER`], otherwise the matching track. Only used
+    /// by commands that make sense on both (gain, effect chain).
+    fn channel_mut(&mut self, id: TrackId) -> Option<&mut EngineTrack> {
+        if id.is_master() {
+            Some(&mut self.master)
+        } else {
+            self.tracks.iter_mut().find(|t| t.id == id)
+        }
+    }
 
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
     ///
@@ -246,6 +306,20 @@ impl AudioEngine {
                 continue;
             }
 
+            // Block-rate automation: evaluate every lane at the
+            // segment-start beat. Effect/instrument params apply in
+            // place; gain/pan come back as overrides for the sum
+            // stage below.
+            let beat = {
+                let bpm = self.transport.bpm();
+                if bpm > 0.0 {
+                    pos as f64 * bpm / (self.sample_rate as f64 * 60.0)
+                } else {
+                    0.0
+                }
+            };
+            let (auto_gain, auto_pan) = track.apply_automation(beat);
+
             let loop_region = self.transport.active_loop_region();
             let rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
@@ -256,6 +330,13 @@ impl AudioEngine {
 
             if rendered {
                 track.process_effects(frames, channels);
+                if self.spectrum_track == Some(track.id) {
+                    push_spectrum(
+                        &mut self.spectrum_tx,
+                        &track.mix_buffer[..frames * channels],
+                        channels,
+                    );
+                }
             }
 
             if !rendered {
@@ -267,8 +348,8 @@ impl AudioEngine {
                 continue;
             }
 
-            let gain = track.gain;
-            let (pan_l, pan_r) = equal_power_pan(track.pan);
+            let gain = auto_gain.unwrap_or(track.gain);
+            let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let track_id = track.id;
             let buf_size = frames * channels;
 
@@ -503,8 +584,21 @@ impl AudioEngine {
                     self.recalculate_audio_length();
                 }
                 EngineCommand::SetTrackGain(id, gain) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
+                    if let Some(track) = self.channel_mut(id) {
                         track.gain = gain;
+                    }
+                }
+                EngineCommand::SetAutomationLane { track_id, lane } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        match track.automation.iter_mut().find(|l| l.id == lane.id) {
+                            Some(existing) => *existing = lane,
+                            None => track.automation.push(lane),
+                        }
+                    }
+                }
+                EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track.automation.retain(|l| l.id != lane_id);
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
@@ -527,6 +621,9 @@ impl AudioEngine {
                 EngineCommand::SetSampleRate(sr) => {
                     self.sample_rate = sr;
                 }
+                EngineCommand::SetSpectrumTap(target) => {
+                    self.spectrum_track = target;
+                }
 
                 // -- Effects --
                 EngineCommand::AddEffect {
@@ -535,8 +632,8 @@ impl AudioEngine {
                     effect_type,
                     position,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        let effect = create_effect(effect_type, self.sample_rate as f32);
+                    let effect = create_effect(effect_type, self.sample_rate as f32);
+                    if let Some(track) = self.channel_mut(track_id) {
                         let slot = EffectSlot {
                             id: effect_id,
                             effect,
@@ -551,11 +648,15 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::RemoveEffect(track_id, effect_id) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(pos) = track.effects.iter().position(|e| e.id == effect_id) {
-                            let slot = track.effects.remove(pos);
-                            self.dispose_effect(slot.effect);
-                        }
+                    let removed = self.channel_mut(track_id).and_then(|track| {
+                        track
+                            .effects
+                            .iter()
+                            .position(|e| e.id == effect_id)
+                            .map(|pos| track.effects.remove(pos))
+                    });
+                    if let Some(slot) = removed {
+                        self.dispose_effect(slot.effect);
                     }
                 }
                 EngineCommand::SetEffectParam {
@@ -564,7 +665,7 @@ impl AudioEngine {
                     param_index,
                     value,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                             slot.effect.set_param(param_index, value);
                         }
@@ -575,7 +676,7 @@ impl AudioEngine {
                     effect_id,
                     bypass,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                             slot.bypass = bypass;
                         }
@@ -586,7 +687,7 @@ impl AudioEngine {
                     effect_id,
                     new_index,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         if let Some(old_idx) = track.effects.iter().position(|e| e.id == effect_id)
                         {
                             let slot = track.effects.remove(old_idx);
@@ -847,7 +948,7 @@ impl AudioEngine {
                     effect,
                     position,
                 } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         let slot = EffectSlot {
                             id: effect_id,
                             effect,
@@ -897,13 +998,33 @@ impl AudioEngine {
     fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
         let has_solo = any_solo(&self.tracks);
         for track in &mut self.tracks {
-            if track.instrument.is_none() || track.mute || (has_solo && !track.solo) {
+            if track.mute || (has_solo && !track.solo) {
                 continue;
             }
-            if !track.render_instrument_idle(frames, channels) {
+            // Instruments render so auditioned notes sound; every
+            // effect chain keeps processing while stopped so delay
+            // and reverb tails ring out and queued plugin parameter
+            // changes (knob edits, automation) actually reach the
+            // plugin instead of waiting for play.
+            let has_signal = if track.instrument.is_some() {
+                track.render_instrument_idle(frames, channels)
+            } else {
+                false
+            };
+            if !has_signal && track.effects.is_empty() {
                 continue;
+            }
+            if !has_signal && track.instrument.is_none() {
+                track.clear_buffer(frames, channels);
             }
             track.process_effects(frames, channels);
+            if self.spectrum_track == Some(track.id) {
+                push_spectrum(
+                    &mut self.spectrum_tx,
+                    &track.mix_buffer[..frames * channels],
+                    channels,
+                );
+            }
             let gain = track.gain;
             let (pan_l, pan_r) = equal_power_pan(track.pan);
             let buf_size = frames * channels;
@@ -963,6 +1084,22 @@ impl AudioEngine {
         } else if self.audio.is_none() {
             // Only clear audio length if no legacy audio is loaded
             self.transport.set_audio_length(None);
+        }
+    }
+}
+
+/// Stream a block to the UI spectrum analyser as mono samples.
+/// Lock-free and allocation-free; drops samples when the ring is
+/// full (the UI drains at 60 fps, so sustained overflow just means
+/// the analyser skips audio it would have averaged away anyway).
+fn push_spectrum(tx: &mut Producer<f32>, buffer: &[f32], channels: usize) {
+    if channels >= 2 {
+        for frame in buffer.chunks_exact(channels) {
+            let _ = tx.push((frame[0] + frame[1]) * 0.5);
+        }
+    } else {
+        for &s in buffer {
+            let _ = tx.push(s);
         }
     }
 }

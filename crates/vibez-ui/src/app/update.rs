@@ -98,7 +98,8 @@ impl App {
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
-            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty());
+            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
+            || matches!(&message, Message::Automation(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot();
             self.mark_project_dirty();
@@ -137,6 +138,7 @@ impl App {
                         msg,
                         &mut engine,
                         &mut self.state.arrangement.tracks,
+                        &mut self.state.arrangement.master,
                         sample_rate,
                     )
                 };
@@ -176,6 +178,19 @@ impl App {
             Message::Browser(msg) => {
                 let action = self.state.browser.update(msg);
                 return self.apply_browser_action(action);
+            }
+            Message::Automation(msg) => {
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.automation_ui.update(
+                        msg,
+                        &mut engine,
+                        &mut self.state.arrangement.tracks,
+                    )
+                };
+                if let Some(status) = action.status {
+                    self.state.status_text = status;
+                }
             }
             Message::View(msg) => {
                 let ctx = crate::domains::view::ViewCtx {
@@ -224,7 +239,13 @@ impl App {
                 {
                     return Task::none();
                 }
-                // Priority 1: selected notes in the open piano roll.
+                // Priority 1: a selected automation point.
+                if self.state.automation_ui.selected.is_some() {
+                    return self.update(Message::Automation(
+                        crate::domains::automation::AutomationMsg::DeleteSelectedPoint,
+                    ));
+                }
+                // Priority 2: selected notes in the open piano roll.
                 if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
                     let has_selection = self
                         .state
@@ -237,7 +258,7 @@ impl App {
                         )));
                     }
                 }
-                // Priority 2: selected arrangement clips.
+                // Priority 3: selected arrangement clips.
                 if !self.state.arrangement.selected_clips.is_empty() {
                     return self.update(Message::Arrangement(ArrangementMsg::DeleteSelectedClip));
                 }
@@ -397,6 +418,54 @@ impl App {
                 self.persist_ui_settings();
                 self.state.status_text = "MIDI input disconnected".to_string();
             }
+            Message::SelectTheme(name) => {
+                if let Some(palette) = self.resolve_theme(&name) {
+                    th::set_theme(palette);
+                    self.state.current_theme_name = name.clone();
+                    self.persist_ui_settings();
+                    self.state.status_text = format!("Theme: {name}");
+                } else {
+                    self.state.status_text = format!("Theme {name:?} not found");
+                }
+            }
+            Message::RescanThemes => {
+                let (themes, warnings) = crate::themes::scan_user_themes();
+                let count = themes.len();
+                self.state.user_themes = themes;
+                self.state.status_text = if warnings.is_empty() {
+                    format!("{count} user theme(s) found")
+                } else {
+                    format!("{count} user theme(s), {} skipped", warnings.len())
+                };
+                for warning in warnings {
+                    eprintln!("vibez: theme scan: {warning}");
+                }
+            }
+            Message::ThemeSaveNameChanged(name) => {
+                self.state.theme_save_name = name;
+            }
+            Message::SaveCurrentTheme => {
+                let name = self.state.theme_save_name.trim().to_string();
+                if name.is_empty() {
+                    self.state.status_text = "Name the theme before saving".to_string();
+                    return Task::none();
+                }
+                let mut palette = th::current();
+                palette.name = name.clone();
+                match crate::themes::save_user_theme(&palette) {
+                    Ok(path) => {
+                        let (themes, _) = crate::themes::scan_user_themes();
+                        self.state.user_themes = themes;
+                        self.state.current_theme_name = name;
+                        self.state.theme_save_name.clear();
+                        self.persist_ui_settings();
+                        self.state.status_text = format!("Theme saved to {}", path.display());
+                    }
+                    Err(err) => {
+                        self.state.status_text = format!("Theme save error: {err}");
+                    }
+                }
+            }
             Message::RewarpAllClips => {
                 return self.handle_rewarp_all_clips();
             }
@@ -523,7 +592,7 @@ impl App {
                     async {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Open Vibez Project")
-                            .add_filter("Vibez Project", &["vibez", "json"])
+                            .add_filter("Vibez Project", &["vzp", "vibez", "json"])
                             .pick_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -545,8 +614,8 @@ impl App {
                     async {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Save Vibez Project")
-                            .set_file_name("Untitled.vibez")
-                            .add_filter("Vibez Project", &["vibez"])
+                            .set_file_name("Untitled.vzp")
+                            .add_filter("Vibez Project", &["vzp", "vibez"])
                             .save_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -561,22 +630,21 @@ impl App {
                         .dropbox_client
                         .clone()
                         .map(|client| (client, self.dropbox_cache.clone()));
-                    return Task::perform(
-                        load_project_async(path, dropbox),
-                        Message::ProjectLoaded,
-                    );
+                    return Task::perform(load_project_async(path, dropbox), |result| {
+                        Message::ProjectLoaded(Box::new(result))
+                    });
                 }
             }
             Message::ProjectSavePathSelected(path) => {
                 if let Some(mut path) = path {
                     if path.extension().is_none() {
-                        path.set_extension("vibez");
+                        path.set_extension("vzp");
                     }
                     let project = self.project_from_state();
                     return Task::perform(save_project_async(path, project), Message::ProjectSaved);
                 }
             }
-            Message::ProjectLoaded(result) => match result {
+            Message::ProjectLoaded(result) => match *result {
                 Ok(loaded) => {
                     self.rebuild_from_loaded_project(loaded);
                 }
@@ -660,6 +728,12 @@ impl App {
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
+                    if is_instrument && track_id.is_master() {
+                        // The master bus hosts effects only.
+                        self.state.status_text =
+                            format!("{loading_name} is an instrument; Master takes effects only");
+                        return Task::none();
+                    }
                     if is_instrument {
                         let tx = self.plugin_instrument_tx.clone();
                         std::thread::spawn(move || {

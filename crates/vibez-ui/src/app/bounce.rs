@@ -96,6 +96,7 @@ impl App {
 
         let request = vibez_engine::render::BounceRequest {
             tracks: project.tracks,
+            master: project.master,
             audio_clips: project.clips,
             note_clips: project.note_clips,
             clip_audio: assets.clips,

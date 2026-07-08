@@ -7,6 +7,7 @@
 //! Redux slices; `EngineHandle` is an injected service interface.
 
 pub mod arrangement;
+pub mod automation;
 pub mod browser;
 pub mod devices;
 pub mod piano_roll;

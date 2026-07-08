@@ -70,7 +70,11 @@ impl canvas::Program<Message> for RulerWidget {
         let h = bounds.height;
 
         // Background
-        frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::RULER_BG);
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            iced::Size::new(w, h),
+            theme::ruler_bg(),
+        );
 
         if self.bpm > 0.0 {
             let beats_per_bar = 4.0_f64;
@@ -122,7 +126,7 @@ impl canvas::Program<Message> for RulerWidget {
                         frame.stroke(
                             &tick,
                             canvas::Stroke::default()
-                                .with_color(theme::BORDER)
+                                .with_color(theme::border())
                                 .with_width(1.5),
                         );
                     }
@@ -135,7 +139,7 @@ impl canvas::Program<Message> for RulerWidget {
                             frame.fill_text(canvas::Text {
                                 content: label,
                                 position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::RULER_TEXT,
+                                color: theme::ruler_text(),
                                 size: iced::Pixels(12.0),
                                 ..Default::default()
                             });
@@ -145,7 +149,7 @@ impl canvas::Program<Message> for RulerWidget {
                             frame.fill_text(canvas::Text {
                                 content: label,
                                 position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::RULER_TEXT,
+                                color: theme::ruler_text(),
                                 size: iced::Pixels(12.0),
                                 ..Default::default()
                             });
@@ -158,7 +162,7 @@ impl canvas::Program<Message> for RulerWidget {
                     frame.stroke(
                         &tick,
                         canvas::Stroke::default()
-                            .with_color(theme::DIVIDER)
+                            .with_color(theme::divider())
                             .with_width(0.5),
                     );
 
@@ -168,7 +172,7 @@ impl canvas::Program<Message> for RulerWidget {
                         frame.fill_text(canvas::Text {
                             content: label,
                             position: iced::Point::new(x + 2.0, 6.0),
-                            color: theme::TEXT_MUTED,
+                            color: theme::text_muted(),
                             size: iced::Pixels(9.0),
                             ..Default::default()
                         });
@@ -188,7 +192,7 @@ impl canvas::Program<Message> for RulerWidget {
                             frame.stroke(
                                 &sub_tick,
                                 canvas::Stroke::default()
-                                    .with_color(theme::DIVIDER)
+                                    .with_color(theme::divider())
                                     .with_width(0.3),
                             );
                         }
@@ -202,7 +206,7 @@ impl canvas::Program<Message> for RulerWidget {
             frame.stroke(
                 &bottom_border,
                 canvas::Stroke::default()
-                    .with_color(theme::BORDER)
+                    .with_color(theme::border())
                     .with_width(1.0),
             );
         }
@@ -218,7 +222,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.fill_rectangle(
                     iced::Point::new(fill_x, 0.0),
                     iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::ACCENT, 0.15),
+                    theme::with_alpha(theme::accent(), 0.15),
                 );
 
                 // REPEAT icon centered in the loop region
@@ -226,7 +230,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.fill_text(canvas::Text {
                     content: crate::icons::REPEAT.to_string(),
                     position: iced::Point::new(center_x - 6.0, (h - 12.0) / 2.0),
-                    color: theme::with_alpha(theme::ACCENT, 0.7),
+                    color: theme::with_alpha(theme::accent(), 0.7),
                     size: iced::Pixels(12.0),
                     font: crate::icons::ICON_FONT,
                     ..Default::default()
@@ -242,7 +246,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.stroke(
                     &bracket,
                     canvas::Stroke::default()
-                        .with_color(theme::ACCENT)
+                        .with_color(theme::accent())
                         .with_width(2.0),
                 );
             }
@@ -254,7 +258,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.stroke(
                     &bracket,
                     canvas::Stroke::default()
-                        .with_color(theme::ACCENT)
+                        .with_color(theme::accent())
                         .with_width(2.0),
                 );
             }
@@ -271,7 +275,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.fill_rectangle(
                     iced::Point::new(fill_x, 0.0),
                     iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::ACCENT, 0.10),
+                    theme::with_alpha(theme::accent(), 0.10),
                 );
             }
 
@@ -282,7 +286,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.stroke(
                     &bracket,
                     canvas::Stroke::default()
-                        .with_color(theme::ACCENT)
+                        .with_color(theme::accent())
                         .with_width(1.0),
                 );
             }
@@ -292,7 +296,7 @@ impl canvas::Program<Message> for RulerWidget {
                 frame.stroke(
                     &bracket,
                     canvas::Stroke::default()
-                        .with_color(theme::ACCENT)
+                        .with_color(theme::accent())
                         .with_width(1.0),
                 );
             }
@@ -308,7 +312,7 @@ impl canvas::Program<Message> for RulerWidget {
             frame.stroke(
                 &playhead_line,
                 canvas::Stroke::default()
-                    .with_color(theme::PLAYHEAD)
+                    .with_color(theme::playhead())
                     .with_width(2.0),
             );
         }

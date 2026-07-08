@@ -44,7 +44,7 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, h),
-            theme::BG_ELEVATED,
+            theme::bg_elevated(),
         );
 
         let bar_width = (w / 2.0 - 3.0).max(4.0);
@@ -62,7 +62,7 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
                 frame.fill_rectangle(
                     iced::Point::new(x, h - padding - green_h),
                     iced::Size::new(bar_width, green_h),
-                    theme::METER_GREEN,
+                    theme::meter_green(),
                 );
 
                 // Yellow portion (0.6..0.85)
@@ -73,7 +73,7 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
                     frame.fill_rectangle(
                         iced::Point::new(x, yellow_y),
                         iced::Size::new(bar_width, yellow_h),
-                        theme::METER_YELLOW,
+                        theme::meter_yellow(),
                     );
                 }
 
@@ -84,7 +84,7 @@ impl canvas::Program<crate::message::Message> for VuMeterWidget {
                     frame.fill_rectangle(
                         iced::Point::new(x, red_y),
                         iced::Size::new(bar_width, red_h),
-                        theme::METER_RED,
+                        theme::meter_red(),
                     );
                 }
             }
@@ -138,7 +138,7 @@ impl canvas::Program<crate::message::Message> for HorizontalVuMeterWidget {
         frame.fill_rectangle(
             iced::Point::ORIGIN,
             iced::Size::new(w, h),
-            theme::BG_ELEVATED,
+            theme::bg_elevated(),
         );
 
         let padding = 1.0;
@@ -152,9 +152,9 @@ impl canvas::Program<crate::message::Message> for HorizontalVuMeterWidget {
                 let bar_w = (level * max_width).clamp(0.0, max_width);
                 // Use track color with brightness modulated by level
                 let color = if level > 0.85 {
-                    theme::METER_RED
+                    theme::meter_red()
                 } else if level > 0.6 {
-                    theme::METER_YELLOW
+                    theme::meter_yellow()
                 } else {
                     track_color
                 };
