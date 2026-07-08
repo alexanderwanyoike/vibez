@@ -498,24 +498,15 @@ impl App {
             strips = strips.push(strip);
         }
 
-        // Return buses sit between the tracks and the master, with a
-        // thin divider when any exist.
-        if !buses.is_empty() {
-            strips = strips.push(
-                container(column![].width(Length::Fixed(1.0)).height(Length::Fill)).style(
-                    |_theme: &Theme| container::Style {
-                        background: Some(th::border().into()),
-                        ..Default::default()
-                    },
-                ),
-            );
-            for bus in buses {
-                let selected = self.state.arrangement.selected_track == Some(bus.id);
-                strips = strips.push(view_mixer_strip(bus, selected, StripRole::Bus, buses));
-            }
+        // Returns live on the right, next to the master: new buses
+        // appear where the "+ Bus" pillar sits, growing toward it.
+        let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
+        for bus in buses {
+            let selected = self.state.arrangement.selected_track == Some(bus.id);
+            right_group = right_group.push(view_mixer_strip(bus, selected, StripRole::Bus, buses));
         }
 
-        // "+ Bus" pillar: always available, after the last strip.
+        // "+ Bus" pillar: between the last return and the master.
         let add_bus_btn = button(
             column![
                 icons::icon(icons::PLUS).size(12).color(th::text_dim()),
@@ -542,7 +533,7 @@ impl App {
                 ..Default::default()
             }
         });
-        strips = strips.push(
+        right_group = right_group.push(
             container(add_bus_btn)
                 .height(Length::Fill)
                 .align_y(iced::Alignment::Center),
@@ -560,7 +551,7 @@ impl App {
         .padding(8)
         .height(Length::Fill);
 
-        let mixer_row = row![strips, horizontal_space(), master_strip]
+        let mixer_row = row![strips, horizontal_space(), right_group, master_strip]
             .spacing(4)
             .padding([8, 4])
             .height(Length::Fill);
