@@ -118,15 +118,17 @@ const TRACKS_WARM: [Color; 8] = [
     rgb8(186, 118, 132),
 ];
 
-const TRACKS_MONO: [Color; 8] = [
-    rgb8(220, 220, 220),
-    rgb8(190, 190, 190),
-    rgb8(160, 160, 160),
-    rgb8(200, 200, 200),
-    rgb8(150, 150, 150),
-    rgb8(210, 210, 210),
-    rgb8(170, 170, 170),
-    rgb8(140, 140, 140),
+/// Desaturated club palette: distinct hues, no neon. Tracks stay
+/// tellable apart without breaking a monochrome-leaning theme.
+const TRACKS_MUTED: [Color; 8] = [
+    rgb8(178, 96, 96),
+    rgb8(178, 130, 88),
+    rgb8(168, 154, 96),
+    rgb8(106, 146, 110),
+    rgb8(96, 138, 146),
+    rgb8(106, 122, 162),
+    rgb8(138, 108, 154),
+    rgb8(162, 106, 130),
 ];
 
 struct Seed {
@@ -259,7 +261,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             bg: rgb8(6, 6, 6),
             accent: rgb8(192, 57, 43),
             text: rgb8(200, 200, 200),
-            tracks: TRACKS_MONO,
+            tracks: TRACKS_MUTED,
             eq: EQ_CONSOLE,
         }),
         dark(Seed {
