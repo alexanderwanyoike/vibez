@@ -61,6 +61,8 @@ impl App {
             stack![base_layout, self.view_settings_modal()].into()
         } else if self.state.project.file_menu_open {
             stack![base_layout, self.view_file_menu_overlay()].into()
+        } else if self.state.view.edit_menu_open {
+            stack![base_layout, self.view_edit_menu_overlay()].into()
         } else if self.state.view.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
         } else if self.state.view.editing_clip_name.is_some() {
@@ -164,6 +166,24 @@ impl App {
                 }
             });
 
+        let edit_btn = button(text("Edit").size(13).color(th::text_dim()))
+            .on_press(Message::View(ViewMsg::ToggleEditMenu))
+            .padding([6, 14])
+            .style(|_theme: &Theme, status| {
+                let background = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => None,
+                };
+                button::Style {
+                    background,
+                    text_color: th::text_dim(),
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            });
+
         let browser_active = self.state.browser.open;
         let browser_btn = button(
             row![
@@ -216,7 +236,15 @@ impl App {
             }
         });
 
-        let header_row = row![title, file_btn, browser_btn, tabs, horizontal_space()].spacing(8);
+        let header_row = row![
+            title,
+            file_btn,
+            edit_btn,
+            browser_btn,
+            tabs,
+            horizontal_space()
+        ]
+        .spacing(8);
 
         let header = header_row.padding(10).align_y(iced::Alignment::Center);
 

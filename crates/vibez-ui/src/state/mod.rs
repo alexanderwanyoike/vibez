@@ -20,6 +20,7 @@ pub struct ViewState {
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
     pub context_menu: Option<ContextMenu>,
+    pub edit_menu_open: bool,
     /// Cursor tracking (for right-click positioning from mouse_area).
     pub cursor_x: f32,
     pub cursor_y: f32,
@@ -41,6 +42,7 @@ impl Default for ViewState {
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::Eighth,
             context_menu: None,
+            edit_menu_open: false,
             cursor_x: 0.0,
             cursor_y: 0.0,
             window_width: 1400.0,
@@ -326,6 +328,7 @@ pub struct ArrangementState {
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    pub clipboard: ClipClipboard,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -349,6 +352,7 @@ impl Default for ArrangementState {
             next_track_number: 0,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
+            clipboard: ClipClipboard::default(),
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domains::test_support::RecordingEngine;
+use vibez_core::midi::MidiNote;
 
 fn arrangement_with_tracks(n: usize) -> ArrangementState {
     let mut a = ArrangementState {
@@ -366,4 +367,147 @@ fn submit_clip_bpm_parses_and_rejects_garbage() {
     );
     assert!(!action.mark_dirty);
     assert_eq!(a.tracks[0].clips[0].original_bpm, Some(140.5));
+}
+
+#[test]
+fn copy_and_paste_multiple_clips_at_playhead_preserves_layout_and_loops() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, first) = add_audio_clip(&mut a, 0, 0, 100);
+    let (_, second) = add_audio_clip(&mut a, 0, 200, 100);
+    a.tracks[0].clips[0].loop_enabled = true;
+    a.tracks[0].clips[0].loop_end = 100;
+    for clip_id in [first, second] {
+        a.selected_clips.insert(ArrangementSelection::AudioClip {
+            track_id: tid,
+            clip_id,
+        });
+    }
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_samples: 1_000,
+        playhead_beats: 10.0,
+    };
+
+    a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
+    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
+
+    assert_eq!(a.tracks[0].clips.len(), 4);
+    let mut pasted: Vec<_> = a.tracks[0].clips[2..].iter().collect();
+    pasted.sort_by_key(|clip| clip.position);
+    assert_eq!(pasted[0].position, 1_000);
+    assert_eq!(pasted[1].position, 1_200);
+    assert!(pasted[0].loop_enabled);
+    assert_eq!(a.selected_clips.len(), 2);
+}
+
+#[test]
+fn partial_time_selection_copies_audio_and_trimmed_midi() {
+    let mut a = arrangement_with_tracks(1);
+    let (audio_tid, _) = add_audio_clip(&mut a, 0, 100, 600);
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let midi_tid = a.tracks[1].id;
+    let note_id = ClipId::new();
+    a.tracks[1].note_clips.push(UiNoteClip {
+        id: note_id,
+        name: "Notes".to_string(),
+        position_beats: 1.0,
+        duration_beats: 6.0,
+        notes: vec![MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_beat: 0.0,
+            duration_beats: 3.0,
+        }],
+        selected_notes: HashSet::new(),
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 0.0,
+    });
+    a.time_selection_active = true;
+    a.selection_start_beats = 2.0;
+    a.selection_end_beats = 5.0;
+    a.time_selection_track = None;
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_samples: 1_000,
+        playhead_beats: 10.0,
+    };
+
+    a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
+    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
+
+    let audio = a.find_track(audio_tid).unwrap().clips.last().unwrap();
+    assert_eq!(audio.position, 1_000);
+    assert_eq!(audio.duration, 300);
+    assert_eq!(audio.source_offset, 100);
+    let notes = a.find_track(midi_tid).unwrap().note_clips.last().unwrap();
+    assert_eq!(notes.position_beats, 10.0);
+    assert_eq!(notes.duration_beats, 3.0);
+    assert_eq!(notes.notes[0].start_beat, 0.0);
+    assert_eq!(notes.notes[0].duration_beats, 2.0);
+}
+
+#[test]
+fn cut_time_selection_preserves_material_outside_the_range() {
+    let mut a = arrangement_with_tracks(1);
+    add_audio_clip(&mut a, 0, 0, 800);
+    a.time_selection_active = true;
+    a.selection_start_beats = 2.0;
+    a.selection_end_beats = 5.0;
+    a.time_selection_track = Some(a.tracks[0].id);
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        ..Default::default()
+    };
+
+    a.update(ArrangementMsg::CutSelectedClips, &mut engine, ctx);
+
+    let mut remaining: Vec<_> = a.tracks[0].clips.iter().collect();
+    remaining.sort_by_key(|clip| clip.position);
+    assert_eq!(remaining.len(), 2);
+    assert_eq!((remaining[0].position, remaining[0].duration), (0, 200));
+    assert_eq!((remaining[1].position, remaining[1].duration), (500, 300));
+    assert_eq!(a.clipboard.clips.len(), 1);
+}
+
+#[test]
+fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, first) = add_audio_clip(&mut a, 0, 0, 200);
+    let (_, second) = add_audio_clip(&mut a, 0, 300, 300);
+    for clip_id in [first, second] {
+        a.selected_clips.insert(ArrangementSelection::AudioClip {
+            track_id: tid,
+            clip_id,
+        });
+    }
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        ..Default::default()
+    };
+
+    a.update(ArrangementMsg::ToggleSelectedClipLoop, &mut engine, ctx);
+    assert!(a.tracks[0].clips.iter().all(|clip| clip.loop_enabled));
+    a.update(
+        ArrangementMsg::ResizeSelectedClips {
+            anchor: ArrangementSelection::AudioClip {
+                track_id: tid,
+                clip_id: first,
+            },
+            new_duration_beats: 4.0,
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert_eq!(a.tracks[0].clips[0].duration, 400);
+    assert_eq!(a.tracks[0].clips[1].duration, 500);
 }

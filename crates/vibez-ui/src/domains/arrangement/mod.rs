@@ -82,6 +82,14 @@ pub enum ArrangementMsg {
     SetSelectionAsLoop,
     DeleteSelectedClip,
     DuplicateSelectedClip,
+    CopySelectedClips,
+    CutSelectedClips,
+    PasteClipsAtPlayhead,
+    ToggleSelectedClipLoop,
+    ResizeSelectedClips {
+        anchor: ArrangementSelection,
+        new_duration_beats: f64,
+    },
     DuplicateNoteClip(TrackId, ClipId),
     SplitAudioClip {
         track_id: TrackId,
@@ -138,6 +146,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::SetTimeSelection { .. }
                 | ArrangementMsg::SetTimeSelectionActive(_)
                 | ArrangementMsg::SetSelectionAsLoop
+                | ArrangementMsg::CopySelectedClips
                 | ArrangementMsg::ClipBpmInputChanged { .. }
         )
     }
@@ -817,6 +826,38 @@ impl ArrangementState {
                         format!("Duplicated {count} clips")
                     });
                 }
+            }
+            ArrangementMsg::CopySelectedClips => {
+                return self.op_copy_selected_clips(ctx);
+            }
+            ArrangementMsg::CutSelectedClips => {
+                let start = self.selection_start_beats;
+                let end = self.selection_end_beats;
+                let track_id = self.time_selection_track;
+                let ranged = self.time_selection_active && end > start;
+                let copy = self.op_copy_selected_clips(ctx);
+                if copy.status.as_deref() == Some("Nothing to copy") {
+                    return copy;
+                }
+                let mut result = if ranged {
+                    self.op_delete_clips_in_region(engine, ctx, start, end, track_id)
+                } else {
+                    self.update(ArrangementMsg::DeleteSelectedClip, engine, ctx)
+                };
+                result.status = Some("Cut to clipboard".to_string());
+                return result;
+            }
+            ArrangementMsg::PasteClipsAtPlayhead => {
+                return self.op_paste_clips_at_playhead(engine, ctx);
+            }
+            ArrangementMsg::ToggleSelectedClipLoop => {
+                return self.op_toggle_selected_clip_loop(engine);
+            }
+            ArrangementMsg::ResizeSelectedClips {
+                anchor,
+                new_duration_beats,
+            } => {
+                return self.op_resize_selected_clips(engine, ctx, anchor, new_duration_beats);
             }
             ArrangementMsg::SetTimeSelection {
                 start_beats,

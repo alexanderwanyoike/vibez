@@ -9,7 +9,6 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
-use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
@@ -592,24 +591,26 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 if *is_note_clip {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::PianoRoll(
-                                            PianoRollMsg::ResizeNoteClipDuration {
-                                                track_id,
-                                                clip_id: *clip_id,
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::ResizeSelectedClips {
+                                                anchor: ArrangementSelection::NoteClip {
+                                                    track_id,
+                                                    clip_id: *clip_id,
+                                                },
                                                 new_duration_beats: snapped,
                                             },
                                         )),
                                     );
                                 } else {
-                                    let spb = self.spb();
-                                    let new_dur_samples = (snapped * spb) as u64;
                                     return (
                                         canvas::event::Status::Captured,
                                         Some(Message::Arrangement(
-                                            ArrangementMsg::ResizeAudioClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                                new_duration: new_dur_samples.max(1),
+                                            ArrangementMsg::ResizeSelectedClips {
+                                                anchor: ArrangementSelection::AudioClip {
+                                                    track_id,
+                                                    clip_id: *clip_id,
+                                                },
+                                                new_duration_beats: snapped,
                                             },
                                         )),
                                     );

@@ -151,6 +151,25 @@ pub struct UiNoteClip {
     pub loop_end_beats: f64,
 }
 
+#[derive(Debug, Clone)]
+pub enum ClipboardClip {
+    Audio {
+        track_id: TrackId,
+        offset_beats: f64,
+        clip: UiClip,
+    },
+    Note {
+        track_id: TrackId,
+        offset_beats: f64,
+        clip: UiNoteClip,
+    },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClipClipboard {
+    pub clips: Vec<ClipboardClip>,
+}
+
 /// A track as represented in the UI.
 #[derive(Debug, Clone)]
 pub struct UiTrack {
