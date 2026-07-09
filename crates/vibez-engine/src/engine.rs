@@ -483,6 +483,7 @@ impl AudioEngine {
                 }
                 EngineCommand::SetBpm(bpm) => {
                     self.transport.set_bpm(bpm);
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
@@ -620,6 +621,7 @@ impl AudioEngine {
                 // -- Infrastructure --
                 EngineCommand::SetSampleRate(sr) => {
                     self.sample_rate = sr;
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::SetSpectrumTap(target) => {
                     self.spectrum_track = target;
@@ -736,6 +738,7 @@ impl AudioEngine {
                         }
                         track.flush_notes();
                     }
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::AddNoteClip {
                     track_id,
@@ -757,6 +760,7 @@ impl AudioEngine {
                             loop_end_beats,
                         });
                     }
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::RemoveNoteClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
@@ -766,6 +770,7 @@ impl AudioEngine {
                         // forever.
                         track.flush_notes();
                     }
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::MoveNoteClip {
                     track_id,
@@ -777,6 +782,7 @@ impl AudioEngine {
                             clip.position_beats = new_position_beats;
                         }
                     }
+                    self.recalculate_audio_length();
                 }
                 EngineCommand::AddNote {
                     track_id,
@@ -1078,7 +1084,12 @@ impl AudioEngine {
     }
 
     fn recalculate_audio_length(&mut self) {
-        let total = calculate_total_length(&self.tracks);
+        let samples_per_beat = if self.transport.bpm() > 0.0 {
+            self.sample_rate as f64 * 60.0 / self.transport.bpm()
+        } else {
+            0.0
+        };
+        let total = calculate_total_length(&self.tracks, samples_per_beat);
         if total > 0 {
             self.transport.set_audio_length(Some(total));
         } else if self.audio.is_none() {
