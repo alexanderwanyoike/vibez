@@ -301,6 +301,7 @@ pub enum DetailPanelTab {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GridDivision {
+    EightBars,
     FourBars,
     TwoBars,
     Bar,
@@ -318,6 +319,7 @@ pub struct SnapGrid {
 }
 
 impl SnapGrid {
+    pub const EIGHT_BARS: Self = Self::straight(GridDivision::EightBars);
     pub const FOUR_BARS: Self = Self::straight(GridDivision::FourBars);
     pub const TWO_BARS: Self = Self::straight(GridDivision::TwoBars);
     pub const BAR: Self = Self::straight(GridDivision::Bar);
@@ -325,7 +327,8 @@ impl SnapGrid {
     pub const EIGHTH: Self = Self::straight(GridDivision::Eighth);
     pub const SIXTEENTH: Self = Self::straight(GridDivision::Sixteenth);
     pub const THIRTY_SECOND: Self = Self::straight(GridDivision::ThirtySecond);
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
+        Self::EIGHT_BARS,
         Self::FOUR_BARS,
         Self::TWO_BARS,
         Self::BAR,
@@ -349,6 +352,7 @@ impl SnapGrid {
     /// Duration of one grid unit in beats.
     pub fn beat_size(self) -> f64 {
         let straight = match self.division {
+            GridDivision::EightBars => 32.0,
             GridDivision::FourBars => 16.0,
             GridDivision::TwoBars => 8.0,
             GridDivision::Bar => 4.0,
@@ -366,6 +370,7 @@ impl SnapGrid {
 
     pub fn label(self) -> &'static str {
         match (self.division, self.triplet) {
+            (GridDivision::EightBars, false) => "8 Bars",
             (GridDivision::FourBars, false) => "4 Bars",
             (GridDivision::TwoBars, false) => "2 Bars",
             (GridDivision::Bar, false) => "1 Bar",
@@ -373,6 +378,7 @@ impl SnapGrid {
             (GridDivision::Eighth, false) => "1/8",
             (GridDivision::Sixteenth, false) => "1/16",
             (GridDivision::ThirtySecond, false) => "1/32",
+            (GridDivision::EightBars, true) => "8 Bars T",
             (GridDivision::FourBars, true) => "4 Bars T",
             (GridDivision::TwoBars, true) => "2 Bars T",
             (GridDivision::Bar, true) => "1 Bar T",
@@ -408,6 +414,7 @@ impl SnapGrid {
     pub fn narrower(self) -> Self {
         Self {
             division: match self.division {
+                GridDivision::EightBars => GridDivision::FourBars,
                 GridDivision::FourBars => GridDivision::TwoBars,
                 GridDivision::TwoBars => GridDivision::Bar,
                 GridDivision::Bar => GridDivision::Quarter,
@@ -422,7 +429,8 @@ impl SnapGrid {
     pub fn wider(self) -> Self {
         Self {
             division: match self.division {
-                GridDivision::FourBars | GridDivision::TwoBars => GridDivision::FourBars,
+                GridDivision::EightBars | GridDivision::FourBars => GridDivision::EightBars,
+                GridDivision::TwoBars => GridDivision::FourBars,
                 GridDivision::Bar => GridDivision::TwoBars,
                 GridDivision::Quarter => GridDivision::Bar,
                 GridDivision::Eighth => GridDivision::Quarter,
@@ -435,6 +443,7 @@ impl SnapGrid {
 
     pub fn adaptive(pixels_per_beat: f32, bias: i8, triplet: bool) -> Self {
         let divisions = [
+            Self::EIGHT_BARS,
             Self::FOUR_BARS,
             Self::TWO_BARS,
             Self::BAR,
@@ -520,6 +529,7 @@ mod snap_grid_tests {
 
     #[test]
     fn supports_bars_subdivisions_and_triplets() {
+        assert_eq!(SnapGrid::EIGHT_BARS.beat_size(), 32.0);
         assert_eq!(SnapGrid::FOUR_BARS.beat_size(), 16.0);
         assert_eq!(SnapGrid::BAR.beat_size(), 4.0);
         assert_eq!(SnapGrid::EIGHTH.beat_size(), 0.5);
@@ -529,6 +539,8 @@ mod snap_grid_tests {
 
     #[test]
     fn narrower_and_wider_preserve_triplet_mode() {
+        assert_eq!(SnapGrid::EIGHT_BARS.narrower(), SnapGrid::FOUR_BARS);
+        assert_eq!(SnapGrid::FOUR_BARS.wider(), SnapGrid::EIGHT_BARS);
         assert_eq!(SnapGrid::BAR.narrower(), SnapGrid::QUARTER);
         assert_eq!(SnapGrid::QUARTER.wider(), SnapGrid::BAR);
         assert_eq!(
@@ -536,11 +548,12 @@ mod snap_grid_tests {
             SnapGrid::SIXTEENTH.triplet()
         );
         assert_eq!(SnapGrid::THIRTY_SECOND.narrower(), SnapGrid::THIRTY_SECOND);
-        assert_eq!(SnapGrid::FOUR_BARS.wider(), SnapGrid::FOUR_BARS);
+        assert_eq!(SnapGrid::EIGHT_BARS.wider(), SnapGrid::EIGHT_BARS);
     }
 
     #[test]
     fn adaptive_grid_gets_narrower_as_pixels_per_beat_increase() {
+        assert_eq!(SnapGrid::adaptive(0.25, 0, false), SnapGrid::EIGHT_BARS);
         assert_eq!(SnapGrid::adaptive(5.0, 0, false), SnapGrid::BAR);
         assert_eq!(SnapGrid::adaptive(20.0, 0, false), SnapGrid::QUARTER);
         assert_eq!(SnapGrid::adaptive(80.0, 0, false), SnapGrid::SIXTEENTH);

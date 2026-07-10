@@ -889,7 +889,45 @@ impl App {
             ),
             |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
         )
-        .width(Length::Fixed(82.0));
+        .width(Length::Fixed(86.0))
+        .padding([3, 8])
+        .text_size(11)
+        .style(|_theme: &Theme, status| {
+            let highlighted = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: th::text(),
+                placeholder_color: th::text_dim(),
+                handle_color: if highlighted {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::bg_surface().into(),
+                border: iced::Border {
+                    color: if highlighted {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        });
         let grid_toggle = |label: &'static str, active: bool, message: ViewMsg| {
             let color = if active { th::accent() } else { th::text_dim() };
             button(text(label).size(9).color(color))
