@@ -706,7 +706,7 @@ impl ArrangementState {
                                     track.clips.iter().find(|c| c.id == *clip_id).map(|clip| {
                                         let mut duplicate = clip.clone();
                                         duplicate.id = ClipId::new();
-                                        duplicate.name = format!("{} (copy)", clip.name);
+                                        duplicate.name = clip.name.clone();
                                         duplicate.position =
                                             clip.position.saturating_add(clip.duration);
                                         duplicate
@@ -741,7 +741,7 @@ impl ArrangementState {
                                             |clip| {
                                                 let mut duplicate = clip.clone();
                                                 duplicate.id = ClipId::new();
-                                                duplicate.name = format!("{} (copy)", clip.name);
+                                                duplicate.name = clip.name.clone();
                                                 duplicate.position_beats =
                                                     clip.position_beats + clip.duration_beats;
                                                 duplicate.selected_notes.clear();
@@ -858,7 +858,7 @@ impl ArrangementState {
                         new_clip_data = Some((
                             UiNoteClip {
                                 id: new_clip_id,
-                                name: format!("{} (copy)", clip.name),
+                                name: clip.name.clone(),
                                 position_beats: new_pos,
                                 duration_beats: clip.duration_beats,
                                 notes: clip.notes.clone(),

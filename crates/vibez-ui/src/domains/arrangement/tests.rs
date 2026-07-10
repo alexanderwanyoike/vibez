@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::domains::test_support::RecordingEngine;
+use crate::state::UiClip;
 use vibez_core::midi::MidiNote;
 
 fn arrangement_with_tracks(n: usize) -> ArrangementState {
@@ -398,6 +399,7 @@ fn copy_and_paste_multiple_clips_at_playhead_preserves_layout_and_loops() {
     assert_eq!(pasted[0].position, 1_000);
     assert_eq!(pasted[1].position, 1_200);
     assert!(pasted[0].loop_enabled);
+    assert!(pasted.iter().all(|clip| clip.name == "Clip"));
     assert_eq!(a.selected_clips.len(), 2);
 }
 
@@ -590,6 +592,66 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
             ..
         }
     )));
+}
+
+#[test]
+fn repeated_duplicate_keeps_the_source_clip_name_readable() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 100);
+    a.tracks[0].clips[0].name = "OTH_128_Hub_Full.wav".to_string();
+    a.selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    let mut engine = RecordingEngine::default();
+
+    for _ in 0..4 {
+        a.update(
+            ArrangementMsg::DuplicateSelectedClip,
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+    }
+
+    assert!(a.tracks[0]
+        .clips
+        .iter()
+        .all(|clip| clip.name == "OTH_128_Hub_Full.wav"));
+}
+
+#[test]
+fn midi_duplicate_keeps_the_source_clip_name_readable() {
+    let mut a = arrangement_with_tracks(1);
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let track_id = a.tracks[1].id;
+    let clip_id = ClipId::new();
+    a.tracks[1].note_clips.push(UiNoteClip {
+        id: clip_id,
+        name: "Pattern 1".to_string(),
+        position_beats: 0.0,
+        duration_beats: 4.0,
+        notes: Vec::new(),
+        selected_notes: HashSet::new(),
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 0.0,
+    });
+    a.selected_clips
+        .insert(ArrangementSelection::NoteClip { track_id, clip_id });
+
+    a.update(
+        ArrangementMsg::DuplicateSelectedClip,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(a.tracks[1]
+        .note_clips
+        .iter()
+        .all(|clip| clip.name == "Pattern 1"));
 }
 
 #[test]

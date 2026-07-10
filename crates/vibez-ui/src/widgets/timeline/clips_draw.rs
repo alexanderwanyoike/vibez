@@ -8,6 +8,48 @@ use crate::theme;
 
 use super::*;
 
+fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
+    if clip_width <= 40.0 {
+        return None;
+    }
+    const HORIZONTAL_PADDING: f32 = 8.0;
+    const LOOP_ICON_WIDTH: f32 = 18.0;
+    const APPROX_GLYPH_WIDTH: f32 = 6.5;
+    let reserved = HORIZONTAL_PADDING
+        + if loop_icon_visible {
+            LOOP_ICON_WIDTH
+        } else {
+            0.0
+        };
+    let max_chars = ((clip_width - reserved).max(0.0) / APPROX_GLYPH_WIDTH).floor() as usize;
+    if max_chars < 4 {
+        return None;
+    }
+    if name.chars().count() <= max_chars {
+        Some(name.to_string())
+    } else {
+        let prefix: String = name.chars().take(max_chars - 2).collect();
+        Some(format!("{prefix}.."))
+    }
+}
+
+fn visible_pixel_columns(
+    clip_x: f32,
+    clip_width: f32,
+    viewport_width: f32,
+) -> std::ops::Range<usize> {
+    let pixels = clip_width.max(0.0) as usize;
+    let start = (-clip_x).ceil().max(0.0) as usize;
+    let end = (viewport_width - clip_x).ceil().max(0.0) as usize;
+    let start = start.min(pixels);
+    let end = end.min(pixels);
+    if start < end {
+        start..end
+    } else {
+        0..0
+    }
+}
+
 impl TrackClipCanvas {
     pub(super) fn draw_impl(
         &self,
@@ -127,11 +169,8 @@ impl TrackClipCanvas {
                     let center_y = body_top + body_h / 2.0;
                     let half_h = body_h / 2.0 - 2.0;
                     let pixels = clip_w as usize;
-                    for px in 0..pixels {
+                    for px in visible_pixel_columns(clip_x, clip_w, w) {
                         let screen_x = clip_x + px as f32;
-                        if screen_x < 0.0 || screen_x > w {
-                            continue;
-                        }
                         let peak_idx = px * clip.peaks.len() / pixels.max(1);
                         if peak_idx >= clip.peaks.len() {
                             break;
@@ -217,14 +256,26 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if clip_w > 40.0 {
-                    frame.fill_text(canvas::Text {
-                        content: clip.name.clone(),
-                        position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::text(),
-                        size: iced::Pixels(11.0),
-                        ..Default::default()
-                    });
+                if let Some(title) = fit_clip_title(clip.name.as_str(), clip_w, clip.loop_enabled) {
+                    let title_width =
+                        (clip_w - if clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                    frame.with_clip(
+                        Rectangle {
+                            x: clip_x,
+                            y: clip_y,
+                            width: title_width,
+                            height: CLIP_TITLE_HEIGHT,
+                        },
+                        |title_frame| {
+                            title_frame.fill_text(canvas::Text {
+                                content: title,
+                                position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
+                                color: theme::text(),
+                                size: iced::Pixels(11.0),
+                                ..Default::default()
+                            });
+                        },
+                    );
                 }
 
                 // Diagonal stripe overlay when the clip's warp is
@@ -426,14 +477,28 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if clip_w > 40.0 {
-                    frame.fill_text(canvas::Text {
-                        content: note_clip.name.clone(),
-                        position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::text(),
-                        size: iced::Pixels(11.0),
-                        ..Default::default()
-                    });
+                if let Some(title) =
+                    fit_clip_title(note_clip.name.as_str(), clip_w, note_clip.loop_enabled)
+                {
+                    let title_width =
+                        (clip_w - if note_clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                    frame.with_clip(
+                        Rectangle {
+                            x: clip_x,
+                            y: clip_y,
+                            width: title_width,
+                            height: CLIP_TITLE_HEIGHT,
+                        },
+                        |title_frame| {
+                            title_frame.fill_text(canvas::Text {
+                                content: title,
+                                position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
+                                color: theme::text(),
+                                size: iced::Pixels(11.0),
+                                ..Default::default()
+                            });
+                        },
+                    );
                 }
             }
         }
@@ -541,5 +606,41 @@ impl TrackClipCanvas {
         }
 
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fit_clip_title, visible_pixel_columns};
+
+    #[test]
+    fn clip_title_is_constrained_to_its_visible_width() {
+        assert_eq!(
+            fit_clip_title("Kick.wav", 100.0, false),
+            Some("Kick.wav".into())
+        );
+        assert_eq!(
+            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, false),
+            Some("OTH_128_H..".into())
+        );
+        assert_eq!(fit_clip_title("Kick.wav", 40.0, false), None);
+    }
+
+    #[test]
+    fn loop_icon_reserves_title_space() {
+        assert_eq!(
+            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, true),
+            Some("OTH_12..".into())
+        );
+    }
+
+    #[test]
+    fn waveform_iteration_is_limited_to_visible_clip_columns() {
+        assert_eq!(
+            visible_pixel_columns(-10_000.0, 20_000.0, 1_000.0),
+            10_000..11_000
+        );
+        assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
+        assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
     }
 }

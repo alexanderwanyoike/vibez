@@ -1121,7 +1121,6 @@ impl ArrangementState {
                         continue;
                     }
                     clip.id = ClipId::new();
-                    clip.name = format!("{} (copy)", clip.name);
                     clip.position = ctx.playhead_samples.saturating_add(
                         (offset_beats * ctx.samples_per_beat).round().max(0.0) as u64,
                     );
@@ -1151,7 +1150,6 @@ impl ArrangementState {
                         continue;
                     }
                     clip.id = ClipId::new();
-                    clip.name = format!("{} (copy)", clip.name);
                     clip.position_beats = ctx.playhead_beats + offset_beats;
                     engine.send(EngineCommand::AddNoteClip {
                         track_id,
