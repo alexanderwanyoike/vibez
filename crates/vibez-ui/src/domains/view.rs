@@ -27,6 +27,8 @@ pub enum ViewMsg {
         target: ContextMenuTarget,
     },
     DismissContextMenu,
+    ToggleEditMenu,
+    DismissEditMenu,
     StartEditingTrackName(TrackId),
     StartEditingClipName(TrackId, ClipId),
     EditNameText(String),
@@ -140,6 +142,12 @@ impl ViewState {
             }
             ViewMsg::DismissContextMenu => {
                 self.context_menu = None;
+            }
+            ViewMsg::ToggleEditMenu => {
+                self.edit_menu_open = !self.edit_menu_open;
+            }
+            ViewMsg::DismissEditMenu => {
+                self.edit_menu_open = false;
             }
             ViewMsg::StartEditingTrackName(track_id) => {
                 if let Some(track) = find_track(tracks, track_id) {

@@ -339,6 +339,19 @@ fn arrangement_loop_wrap_kills_sounding_notes() {
 }
 
 #[test]
+fn midi_only_arrangement_loop_retriggers_at_loop_start() {
+    let events = run_scenario((false, 0.0, 0.0), Some((0, 2048)), 8.0, 12);
+    let note_ons = events
+        .iter()
+        .filter(|(on, pitch)| *on && *pitch == 60)
+        .count();
+    assert!(
+        note_ons >= 2,
+        "MIDI-only arrangement loop must retrigger its first note: {events:?}"
+    );
+}
+
+#[test]
 fn stop_kills_sounding_notes() {
     let (mut engine, mut cmd_tx, events, _tid) = engine_with_held_note();
     cmd_tx.push(EngineCommand::Stop).unwrap();
