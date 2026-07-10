@@ -125,6 +125,11 @@ mod tests {
     fn command_number_shortcuts_control_the_shared_grid() {
         use iced::keyboard::{Key, Modifiers};
 
+        #[cfg(target_os = "macos")]
+        let command = Modifiers::LOGO;
+        #[cfg(not(target_os = "macos"))]
+        let command = Modifiers::CTRL;
+
         let expected = [
             ViewMsg::NarrowGrid,
             ViewMsg::WidenGrid,
@@ -133,7 +138,7 @@ mod tests {
             ViewMsg::ToggleAdaptiveGrid,
         ];
         for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
-            let message = global_key_handler(Key::Character(number.into()), Modifiers::CTRL);
+            let message = global_key_handler(Key::Character(number.into()), command);
             assert!(matches!(
                 (message, expected),
                 (
