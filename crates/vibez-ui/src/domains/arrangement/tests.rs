@@ -154,6 +154,31 @@ fn renames_audio_midi_and_bus_channels() {
 }
 
 #[test]
+fn bus_solo_toggles_state_and_sends_the_engine_command() {
+    let mut a = arrangement_with_tracks(1);
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddBus,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let bus_id = a.buses[0].id;
+    engine.0.clear();
+
+    a.update(
+        ArrangementMsg::SetTrackSolo(bus_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(a.buses[0].solo);
+    assert!(matches!(
+        engine.0.as_slice(),
+        [EngineCommand::SetTrackSolo(id, true)] if *id == bus_id
+    ));
+}
+
+#[test]
 fn meter_decays_instead_of_snapping() {
     let mut a = arrangement_with_tracks(1);
     let id = a.tracks[0].id;

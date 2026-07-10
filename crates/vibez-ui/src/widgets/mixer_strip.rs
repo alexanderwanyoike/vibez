@@ -213,7 +213,7 @@ pub fn view_mixer_strip<'a>(
         column![name_row, eq_section, badge, fader_meter, gain_label]
     } else if role == StripRole::Bus {
         // Return channel: RETURN badge + remove control in place of
-        // sends/solo; balance pan and mute still apply.
+        // sends; balance pan, mute, and solo still apply.
         let badge = container(text("RETURN").size(8).color(track_color))
             .padding([3, 6])
             .style(move |_theme: &Theme| container::Style {
@@ -256,7 +256,7 @@ pub fn view_mixer_strip<'a>(
             pan_label,
             fader_meter,
             gain_label,
-            mute_btn,
+            row![mute_btn, solo_btn].spacing(4),
         ]
     } else {
         let mut col = column![name_row, eq_section];

@@ -162,6 +162,7 @@ impl AudioEngine {
         } else {
             None
         };
+        let has_bus_solo = any_solo(&self.buses);
         for bus_idx in 0..self.buses.len() {
             let bus = &mut self.buses[bus_idx];
             let (bus_auto_gain, bus_auto_pan) = match block_beat {
@@ -184,7 +185,7 @@ impl AudioEngine {
 
             let mut peak_l = 0.0f32;
             let mut peak_r = 0.0f32;
-            if !bus.mute {
+            if !bus.mute && (!has_bus_solo || bus.solo) {
                 let gain = bus_auto_gain.unwrap_or(bus.gain);
                 // Balance, not equal-power: the send mix is already
                 // panned stereo, center must pass at unity.
@@ -370,7 +371,8 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
     ) {
-        let has_solo = any_solo(&self.tracks);
+        let has_track_solo = any_solo(&self.tracks);
+        let has_bus_solo = any_solo(&self.buses);
 
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
@@ -385,8 +387,10 @@ impl AudioEngine {
                 continue;
             }
 
-            // If any track is soloed, skip non-soloed tracks
-            if has_solo && !track.solo {
+            // A soloed return still needs every source to render its
+            // sends. Without a return solo, preserve normal track
+            // solo filtering.
+            if has_track_solo && !track.solo && !has_bus_solo {
                 let _ = self.event_tx.push(EngineEvent::TrackMeter {
                     track_id: track.id,
                     peak_l: 0.0,
@@ -441,6 +445,7 @@ impl AudioEngine {
             let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let track_id = track.id;
             let buf_size = frames * channels;
+            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
 
             // Apply gain and pan, sum into output
             let mut track_peak_l: f32 = 0.0;
@@ -465,7 +470,9 @@ impl AudioEngine {
                         sample
                     };
 
-                    output[idx] += panned;
+                    if dry_audible {
+                        output[idx] += panned;
+                    }
 
                     // Track per-channel peaks
                     if ch == 0 {
@@ -767,8 +774,8 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackSolo(id, solo) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
-                        track.solo = solo;
+                    if let Some(channel) = self.channel_mut(id) {
+                        channel.solo = solo;
                     }
                 }
 
@@ -1156,9 +1163,10 @@ impl AudioEngine {
     /// Render instruments with no clip scheduling (transport stopped)
     /// so auditioned notes sound. Effects and gain/pan still apply.
     fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let has_solo = any_solo(&self.tracks);
+        let has_track_solo = any_solo(&self.tracks);
+        let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {
-            if track.mute || (has_solo && !track.solo) {
+            if track.mute || (has_track_solo && !track.solo && !has_bus_solo) {
                 continue;
             }
             // Instruments render so auditioned notes sound; every
@@ -1188,6 +1196,7 @@ impl AudioEngine {
             let gain = track.gain;
             let (pan_l, pan_r) = equal_power_pan(track.pan);
             let buf_size = frames * channels;
+            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
             for frame in 0..frames {
                 for ch in 0..channels {
                     let idx = frame * channels + ch;
@@ -1204,7 +1213,9 @@ impl AudioEngine {
                     } else {
                         sample
                     };
-                    output[idx] += panned;
+                    if dry_audible {
+                        output[idx] += panned;
+                    }
                 }
             }
             // Sends feed buses while stopped too, so auditioned

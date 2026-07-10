@@ -1518,6 +1518,28 @@ fn bus_gain_and_mute_shape_the_return() {
 }
 
 #[test]
+fn soloed_bus_keeps_its_send_input_and_suppresses_the_dry_path() {
+    let (mut engine, mut cmd_tx, _track_id, bus_id) = engine_with_send(1.0);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(bus_id, 0.5))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackSolo(bus_id, true))
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 0.5).abs() < 1e-3,
+        "bus solo should output only the wet return: expected {} got {}",
+        dry * 0.5,
+        buf[0]
+    );
+}
+
+#[test]
 fn bus_effect_chain_processes_the_send_mix() {
     let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
     // Slam the bus EQ's LF shelf: the return should stop doubling

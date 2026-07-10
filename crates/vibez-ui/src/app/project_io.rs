@@ -625,9 +625,11 @@ impl App {
             bus.gain = bus_info.gain;
             bus.pan = bus_info.pan;
             bus.mute = bus_info.mute;
+            bus.solo = bus_info.solo;
             self.send_command(EngineCommand::SetTrackGain(bus_info.id, bus_info.gain));
             self.send_command(EngineCommand::SetTrackPan(bus_info.id, bus_info.pan));
             self.send_command(EngineCommand::SetTrackMute(bus_info.id, bus_info.mute));
+            self.send_command(EngineCommand::SetTrackSolo(bus_info.id, bus_info.solo));
             bus.effects = self.load_saved_effects(
                 &bus_info.effects,
                 bus_info.id,
@@ -1024,6 +1026,7 @@ impl App {
         self.send_command(EngineCommand::SetTrackGain(bus.id, bus.gain));
         self.send_command(EngineCommand::SetTrackPan(bus.id, bus.pan));
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));
+        self.send_command(EngineCommand::SetTrackSolo(bus.id, bus.solo));
         self.replay_effects_to_engine(bus);
         for lane in &bus.automation {
             self.send_command(EngineCommand::SetAutomationLane {

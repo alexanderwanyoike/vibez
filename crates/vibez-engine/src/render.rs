@@ -200,7 +200,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
 
     let (start, end) = req.range_samples;
     let total_frames = end.saturating_sub(start) as usize;
-    let has_solo = matches!(req.mode, BounceMode::Master) && any_solo(&tracks);
+    let has_track_solo = matches!(req.mode, BounceMode::Master) && any_solo(&tracks);
 
     // Return buses: rebuilt like live channels, fed from track sends
     // per block. Only master-mode renders route through them.
@@ -211,6 +211,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             bus.gain = bus_info.gain;
             bus.pan = bus_info.pan;
             bus.mute = bus_info.mute;
+            bus.solo = bus_info.solo;
             for info in &bus_info.effects {
                 if info.plugin.is_some() {
                     warnings.push(format!(
@@ -228,6 +229,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             buses.push(bus);
         }
     }
+    let has_bus_solo = any_solo(&buses);
 
     // Master bus chain + gain, applied to the summed mix so the
     // export matches live playback. Only master-mode renders route
@@ -279,7 +281,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 if track.mute {
                     continue;
                 }
-                if has_solo && !track.solo {
+                if has_track_solo && !track.solo && !has_bus_solo {
                     continue;
                 }
             }
@@ -299,10 +301,13 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
 
             let (pan_l, pan_r) = equal_power_pan(track.pan);
             let gain = track.gain;
+            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
             for frame in 0..block {
                 let idx = frame * CHANNELS;
-                scratch[idx] += track.mix_buffer[idx] * gain * pan_l;
-                scratch[idx + 1] += track.mix_buffer[idx + 1] * gain * pan_r;
+                if dry_audible {
+                    scratch[idx] += track.mix_buffer[idx] * gain * pan_l;
+                    scratch[idx + 1] += track.mix_buffer[idx + 1] * gain * pan_r;
+                }
             }
             for (bus_id, amount) in &track.sends {
                 if *amount <= 0.0005 {
@@ -326,7 +331,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                     slot.effect.process(&mut bus.mix_buffer[..buf], CHANNELS);
                 }
             }
-            if bus.mute {
+            if bus.mute || (has_bus_solo && !bus.solo) {
                 continue;
             }
             let (pan_l, pan_r) = crate::mixer::balance_pan(bus.pan);
@@ -447,7 +452,7 @@ mod tests {
         let mut clip_audio = HashMap::new();
         clip_audio.insert(cid, audio);
 
-        let req = BounceRequest {
+        let mut req = BounceRequest {
             master: None,
             buses: vec![bus],
             tracks: vec![track],
@@ -469,6 +474,16 @@ mod tests {
             (result.audio.channels[0][10] - expected).abs() < 1e-3,
             "expected {expected}, got {}",
             result.audio.channels[0][10]
+        );
+
+        req.buses[0].solo = true;
+        req.buses[0].gain = 0.5;
+        let soloed = render_offline(&req);
+        let wet_only = 0.5 * std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+        assert!(
+            (soloed.audio.channels[0][10] - wet_only).abs() < 1e-3,
+            "soloed return should suppress dry audio: expected {wet_only}, got {}",
+            soloed.audio.channels[0][10]
         );
     }
 
