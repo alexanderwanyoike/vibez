@@ -18,6 +18,9 @@ pub struct Project {
     /// projects saved before the master was a real channel.
     #[serde(default)]
     pub master: Option<TrackInfo>,
+    /// Return buses (mixer-only channels fed by track sends).
+    #[serde(default)]
+    pub buses: Vec<TrackInfo>,
 }
 
 impl Default for Project {
@@ -30,6 +33,7 @@ impl Default for Project {
             clips: Vec::new(),
             note_clips: Vec::new(),
             master: None,
+            buses: Vec::new(),
         }
     }
 }
@@ -156,12 +160,49 @@ mod tests {
     }
 
     #[test]
+    fn buses_and_sends_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("buses.vzp");
+
+        let bus = TrackInfo::new("A Return");
+        let mut track = TrackInfo::new("Drums");
+        track.sends.push((bus.id, 0.65));
+
+        let mut project = Project::default();
+        let bus_id = bus.id;
+        project.tracks.push(track);
+        project.buses.push(bus);
+        project.save_to_file(&path).unwrap();
+
+        let loaded = Project::load_from_file(&path).unwrap();
+        assert_eq!(loaded.buses.len(), 1);
+        assert_eq!(loaded.buses[0].name, "A Return");
+        assert_eq!(loaded.tracks[0].sends, vec![(bus_id, 0.65)]);
+    }
+
+    #[test]
+    fn pre_bus_schema_still_loads() {
+        // Files saved before buses existed must load with empty
+        // buses and sends.
+        let json = r#"{
+            "name": "Old", "bpm": 120.0, "sample_rate": 44100,
+            "tracks": [{ "id": 1, "name": "T", "gain": 1.0,
+                         "pan": 0.5, "mute": false, "solo": false }],
+            "clips": []
+        }"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert!(project.buses.is_empty());
+        assert!(project.tracks[0].sends.is_empty());
+    }
+
+    #[test]
     fn project_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.vibez");
 
         let project = Project {
             master: None,
+            buses: Vec::new(),
             name: "Test Project".into(),
             bpm: 140.0,
             sample_rate: 48_000,
@@ -268,6 +309,7 @@ mod tests {
         let tid = TrackId::new();
         let project = Project {
             master: None,
+            buses: Vec::new(),
             name: "Note Test".into(),
             bpm: 128.0,
             sample_rate: 44_100,
@@ -331,6 +373,7 @@ mod tests {
 
         let project = Project {
             master: None,
+            buses: Vec::new(),
             name: "FX Test".into(),
             bpm: 120.0,
             sample_rate: 44_100,
@@ -377,6 +420,7 @@ mod automation_persistence_tests {
 
         let project = Project {
             master: None,
+            buses: Vec::new(),
             name: "roundtrip".to_string(),
             tracks: vec![track],
             ..Default::default()

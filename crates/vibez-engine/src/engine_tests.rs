@@ -1429,3 +1429,280 @@ fn spectrum_tap_streams_track_samples() {
         "master tap should carry the mix, got {master_peak}"
     );
 }
+
+// ── Busses (return channels) ────────────────────────────────────────
+
+/// One track sending to one bus; block of constant audio.
+fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, TrackId, TrackId) {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let tid = TrackId::new();
+    let bus = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(tid, "T".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: tid,
+            clip_id: ClipId::new(),
+            audio: make_constant_audio(50_000, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 50_000,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::AddBus(bus, "A".into())).unwrap();
+    cmd_tx
+        .push(EngineCommand::SetSend {
+            track_id: tid,
+            bus_id: bus,
+            amount: send,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    // Drain the setup commands with one silent-prep block.
+    let mut buf = vec![0.0f32; 16];
+    engine.process(&mut buf, 2);
+    (engine, cmd_tx, tid, bus)
+}
+
+#[test]
+fn send_routes_post_fader_signal_into_the_bus() {
+    // Full send on a flat bus doubles the track's contribution
+    // (dry path + bus path), zero send leaves it dry.
+    let (mut engine, _cmd, _tid, _bus) = engine_with_send(1.0);
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 2.0).abs() < 1e-3,
+        "dry + unity send should double: expected {} got {}",
+        dry * 2.0,
+        buf[0]
+    );
+
+    let (mut engine, _cmd, _tid, _bus) = engine_with_send(0.0);
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    assert!(
+        (buf[0] - dry).abs() < 1e-3,
+        "zero send stays dry: expected {dry} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn bus_gain_and_mute_shape_the_return() {
+    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    cmd_tx.push(EngineCommand::SetTrackGain(bus, 0.5)).unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 1.5).abs() < 1e-3,
+        "half-gain bus adds half a contribution: expected {} got {}",
+        dry * 1.5,
+        buf[0]
+    );
+
+    cmd_tx.push(EngineCommand::SetTrackMute(bus, true)).unwrap();
+    buf.fill(0.0);
+    engine.process(&mut buf, 2);
+    assert!(
+        (buf[0] - dry).abs() < 1e-3,
+        "muted bus contributes nothing: expected {dry} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn soloed_bus_keeps_its_send_input_and_suppresses_the_dry_path() {
+    let (mut engine, mut cmd_tx, _track_id, bus_id) = engine_with_send(1.0);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(bus_id, 0.5))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackSolo(bus_id, true))
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 0.5).abs() < 1e-3,
+        "bus solo should output only the wet return: expected {} got {}",
+        dry * 0.5,
+        buf[0]
+    );
+}
+
+#[test]
+fn bus_effect_chain_processes_the_send_mix() {
+    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    // Slam the bus EQ's LF shelf: the return should stop doubling
+    // the constant (DC-heavy) signal.
+    let eq_id = EffectId::new();
+    cmd_tx
+        .push(EngineCommand::AddEffect {
+            track_id: bus,
+            effect_id: eq_id,
+            effect_type: vibez_core::effect::EffectType::Eq,
+            position: None,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: bus,
+            effect_id: eq_id,
+            param_index: 0,
+            value: -15.0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetEffectParam {
+            track_id: bus,
+            effect_id: eq_id,
+            param_index: 1,
+            value: 450.0,
+        })
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 2_048];
+    let mut rms = 0.0f32;
+    for _ in 0..3 {
+        buf.fill(0.0);
+        engine.process(&mut buf, 2);
+        rms = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
+    }
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        rms > dry * 0.8 && rms < dry * 1.6,
+        "cut return should sit near the dry level, got {rms} (dry {dry})"
+    );
+}
+
+#[test]
+fn remove_bus_drops_its_sends() {
+    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    cmd_tx.push(EngineCommand::RemoveBus(bus)).unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry).abs() < 1e-3,
+        "after RemoveBus only the dry path remains: expected {dry} got {}",
+        buf[0]
+    );
+    assert!(engine.tracks()[0].sends.is_empty(), "sends cleaned up");
+}
+
+#[test]
+fn remove_bus_drops_its_send_automation() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, track_id, bus_id) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id });
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .unwrap();
+    cmd_tx.push(EngineCommand::RemoveBus(bus_id)).unwrap();
+
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+
+    assert!(
+        engine.tracks()[0].sends.is_empty(),
+        "removed bus automation must not recreate a stale send"
+    );
+}
+
+#[test]
+fn bus_gain_automation_rides_the_return() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
+    // Lane pinned at zero: the return contributes nothing even
+    // though the bus fader sits at unity.
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: bus,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry).abs() < 1e-3,
+        "zeroed bus gain lane should leave only the dry path: expected {dry} got {}",
+        buf[0]
+    );
+}
+
+#[test]
+fn send_automation_opens_the_send() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    // Send starts closed; a lane at 1.0 opens it.
+    let (mut engine, mut cmd_tx, tid, bus) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: tid,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 2.0).abs() < 1e-3,
+        "send lane at 1.0 should double like a unity send: expected {} got {}",
+        dry * 2.0,
+        buf[0]
+    );
+}
+
+#[test]
+fn master_gain_automation_shapes_the_mix() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut cmd_tx, _tid, _bus) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackGain);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.25, // normalized: gain range 0..2 -> 0.5x
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane {
+            track_id: TrackId::MASTER,
+            lane,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    let dry = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (buf[0] - dry * 0.5).abs() < 1e-3,
+        "master lane at 0.25 (=0.5x) should halve the mix: expected {} got {}",
+        dry * 0.5,
+        buf[0]
+    );
+}

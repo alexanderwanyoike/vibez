@@ -29,7 +29,10 @@ pub enum ViewMsg {
     DismissContextMenu,
     ToggleEditMenu,
     DismissEditMenu,
-    StartEditingTrackName(TrackId),
+    StartEditingTrackName {
+        track_id: TrackId,
+        name: String,
+    },
     StartEditingClipName(TrackId, ClipId),
     EditNameText(String),
     FinishEditing,
@@ -149,12 +152,10 @@ impl ViewState {
             ViewMsg::DismissEditMenu => {
                 self.edit_menu_open = false;
             }
-            ViewMsg::StartEditingTrackName(track_id) => {
-                if let Some(track) = find_track(tracks, track_id) {
-                    self.edit_name_text = track.name.clone();
-                    self.editing_track_name = Some(track_id);
-                    self.editing_clip_name = None;
-                }
+            ViewMsg::StartEditingTrackName { track_id, name } => {
+                self.edit_name_text = name;
+                self.editing_track_name = Some(track_id);
+                self.editing_clip_name = None;
             }
             ViewMsg::StartEditingClipName(track_id, clip_id) => {
                 self.context_menu = None;
@@ -258,7 +259,10 @@ mod tests {
         track.name = "Old".to_string();
         let tracks = vec![track];
         v.update(
-            ViewMsg::StartEditingTrackName(tid),
+            ViewMsg::StartEditingTrackName {
+                track_id: tid,
+                name: tracks[0].name.clone(),
+            },
             &tracks,
             ViewCtx::default(),
         );
@@ -274,6 +278,24 @@ mod tests {
             Some(RenameRequest::Track(tid, "New".to_string()))
         );
         assert_eq!(v.editing_track_name, None);
+    }
+
+    #[test]
+    fn starts_editing_a_channel_name_without_a_regular_track_lookup() {
+        let mut v = ViewState::default();
+        let bus_id = TrackId::new();
+
+        v.update(
+            ViewMsg::StartEditingTrackName {
+                track_id: bus_id,
+                name: "A Return".to_string(),
+            },
+            &[],
+            ViewCtx::default(),
+        );
+
+        assert_eq!(v.editing_track_name, Some(bus_id));
+        assert_eq!(v.edit_name_text, "A Return");
     }
 
     #[test]

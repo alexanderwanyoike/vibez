@@ -118,6 +118,7 @@ pub enum SettingsTab {
 pub struct ProjectSnapshot {
     pub tracks: Vec<UiTrack>,
     pub master: UiTrack,
+    pub buses: Vec<UiTrack>,
     pub bpm: f64,
     pub bpm_text: String,
     pub loop_enabled: bool,
@@ -324,6 +325,8 @@ pub struct ArrangementState {
     pub tracks: Vec<UiTrack>,
     /// The master bus channel (see [`new_master_track`]).
     pub master: UiTrack,
+    /// Return channels: mixer-only tracks fed by per-track sends.
+    pub buses: Vec<UiTrack>,
     pub selected_track: Option<TrackId>,
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
@@ -348,6 +351,7 @@ impl Default for ArrangementState {
         Self {
             tracks: Vec::new(),
             master: new_master_track(),
+            buses: Vec::new(),
             selected_track: None,
             next_track_number: 0,
             selected_clips: HashSet::new(),
@@ -563,14 +567,22 @@ impl AppState {
         if id.is_master() {
             return Some(&self.arrangement.master);
         }
-        self.arrangement.tracks.iter().find(|t| t.id == id)
+        self.arrangement
+            .tracks
+            .iter()
+            .chain(self.arrangement.buses.iter())
+            .find(|t| t.id == id)
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
         if id.is_master() {
             return Some(&mut self.arrangement.master);
         }
-        self.arrangement.tracks.iter_mut().find(|t| t.id == id)
+        self.arrangement
+            .tracks
+            .iter_mut()
+            .chain(self.arrangement.buses.iter_mut())
+            .find(|t| t.id == id)
     }
 
     /// Total duration in samples across all tracks (max clip end position).

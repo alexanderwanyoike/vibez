@@ -156,6 +156,7 @@ impl App {
                         &mut engine,
                         &mut self.state.arrangement.tracks,
                         &mut self.state.arrangement.master,
+                        &mut self.state.arrangement.buses,
                         sample_rate,
                     )
                 };
@@ -203,6 +204,8 @@ impl App {
                         msg,
                         &mut engine,
                         &mut self.state.arrangement.tracks,
+                        &mut self.state.arrangement.master,
+                        &mut self.state.arrangement.buses,
                     )
                 };
                 if let Some(status) = action.status {
@@ -751,10 +754,17 @@ impl App {
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
-                    if is_instrument && track_id.is_master() {
-                        // The master bus hosts effects only.
-                        self.state.status_text =
-                            format!("{loading_name} is an instrument; Master takes effects only");
+                    let is_bus = self
+                        .state
+                        .arrangement
+                        .buses
+                        .iter()
+                        .any(|b| b.id == track_id);
+                    if is_instrument && (track_id.is_master() || is_bus) {
+                        // Master and buses host effects only.
+                        self.state.status_text = format!(
+                            "{loading_name} is an instrument; this channel takes effects only"
+                        );
                         return Task::none();
                     }
                     if is_instrument {

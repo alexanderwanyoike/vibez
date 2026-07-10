@@ -34,6 +34,16 @@ pub enum ArrangementMsg {
     SetTrackPan(TrackId, f32),
     SetTrackMute(TrackId),
     SetTrackSolo(TrackId),
+    /// Add a return bus (mixer-only channel).
+    AddBus,
+    /// Remove a bus and every send pointing at it.
+    RemoveBus(TrackId),
+    /// Set a track's post-fader send amount into a bus.
+    SetSend {
+        track_id: TrackId,
+        bus_id: TrackId,
+        amount: f32,
+    },
     EngineTrackMeter {
         track_id: TrackId,
         peak_l: f32,
@@ -214,7 +224,10 @@ impl ArrangementState {
         if track_id.is_master() {
             return Some(&self.master);
         }
-        self.tracks.iter().find(|t| t.id == track_id)
+        self.tracks
+            .iter()
+            .chain(self.buses.iter())
+            .find(|t| t.id == track_id)
     }
 
     /// First track number with no name clash for the given prefix.
@@ -233,7 +246,10 @@ impl ArrangementState {
         if track_id.is_master() {
             return Some(&mut self.master);
         }
-        self.tracks.iter_mut().find(|t| t.id == track_id)
+        self.tracks
+            .iter_mut()
+            .chain(self.buses.iter_mut())
+            .find(|t| t.id == track_id)
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
@@ -380,6 +396,54 @@ impl ArrangementState {
                     track.solo = !track.solo;
                     let solo = track.solo;
                     engine.send(EngineCommand::SetTrackSolo(track_id, solo));
+                }
+            }
+            ArrangementMsg::AddBus => {
+                let letter = (b'A' + (self.buses.len() % 26) as u8) as char;
+                let id = TrackId::new();
+                let name = format!("{letter} Return");
+                engine.send(EngineCommand::AddBus(id, name.clone()));
+                // Offset into the palette so the first buses don't
+                // mirror the first tracks' colors.
+                let color_index = ((self.buses.len() + 4) % 8) as u8;
+                let mut bus = UiTrack::new(id, name.clone(), color_index);
+                attach_channel_eq(engine, &mut bus);
+                self.buses.push(bus);
+                self.selected_track = Some(id);
+                action.status = Some(format!("Added {name}"));
+            }
+            ArrangementMsg::RemoveBus(bus_id) => {
+                engine.send(EngineCommand::RemoveBus(bus_id));
+                self.buses.retain(|b| b.id != bus_id);
+                for track in &mut self.tracks {
+                    track.sends.retain(|(b, _)| *b != bus_id);
+                    track.automation.retain(|lane| {
+                        lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
+                    });
+                }
+                if self.selected_track == Some(bus_id) {
+                    self.selected_track = self.tracks.first().map(|t| t.id);
+                }
+                // Plugin GUIs on the bus die with its devices.
+                action.close_track_guis = Some(bus_id);
+                action.status = Some("Removed bus".to_string());
+            }
+            ArrangementMsg::SetSend {
+                track_id,
+                bus_id,
+                amount,
+            } => {
+                let amount = amount.clamp(0.0, 1.0);
+                if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                        Some(send) => send.1 = amount,
+                        None => track.sends.push((bus_id, amount)),
+                    }
+                    engine.send(EngineCommand::SetSend {
+                        track_id,
+                        bus_id,
+                        amount,
+                    });
                 }
             }
             ArrangementMsg::EngineTrackMeter {

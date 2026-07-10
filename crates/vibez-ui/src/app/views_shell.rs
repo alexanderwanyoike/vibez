@@ -18,9 +18,9 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{AppState, ArrangementSelection, ContextMenuTarget, Workspace};
 use crate::theme as th;
-use crate::widgets::mixer_strip::view_mixer_strip;
+use crate::widgets::mixer_strip::{view_mixer_strip, StripRole};
 use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
-use crate::widgets::track_header::view_track_header;
+use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
@@ -469,6 +469,130 @@ impl App {
             }
         }
 
+        // ── Returns + master: automation-only channels ──
+        // Clipless lanes at the bottom, Ableton-style: a slim header
+        // (select, expand, delete for returns) and their automation
+        // lanes when expanded.
+        let master_ref = &self.state.arrangement.master;
+        let channel_refs: Vec<&crate::state::UiTrack> = self
+            .state
+            .arrangement
+            .buses
+            .iter()
+            .chain(std::iter::once(master_ref))
+            .collect();
+        for channel in channel_refs {
+            let is_master = channel.id.is_master();
+            let chan_color = if is_master {
+                th::accent()
+            } else {
+                th::track_color(channel.color_index)
+            };
+            let selected = self.state.arrangement.selected_track == Some(channel.id);
+            let expanded = self.state.automation_ui.expanded.contains(&channel.id);
+
+            let toggle = button(
+                icons::icon(icons::SLIDERS_VERTICAL)
+                    .size(10)
+                    .color(if expanded {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    }),
+            )
+            .on_press(Message::Automation(
+                crate::domains::automation::AutomationMsg::ToggleTrackLanes(channel.id),
+            ))
+            .padding([2, 4])
+            .style(|_theme: &Theme, _status| button::Style {
+                background: None,
+                text_color: th::text_dim(),
+                border: iced::Border::default(),
+                ..Default::default()
+            });
+
+            let dot = text("\u{25CF}").size(9).color(chan_color);
+            let name_color = if selected { th::text() } else { th::text_dim() };
+            let name: Element<'_, Message> = if is_master {
+                text(&channel.name).size(11).color(name_color).into()
+            } else {
+                view_editable_channel_name(
+                    channel,
+                    self.state.view.editing_track_name == Some(channel.id),
+                    &self.state.view.edit_name_text,
+                    11,
+                    name_color,
+                )
+            };
+
+            let remove_el: Element<'_, Message> = if is_master {
+                text("").size(9).into()
+            } else {
+                button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
+                    .on_press(Message::remove_bus(channel.id))
+                    .padding([1, 4])
+                    .style(|_theme: &Theme, status| {
+                        let tc = match status {
+                            button::Status::Hovered | button::Status::Pressed => th::danger(),
+                            _ => th::text_dim(),
+                        };
+                        button::Style {
+                            background: None,
+                            text_color: tc,
+                            border: iced::Border::default(),
+                            ..Default::default()
+                        }
+                    })
+                    .into()
+            };
+            let header_row = row![toggle, dot, name, horizontal_space(), remove_el]
+                .spacing(6)
+                .align_y(iced::Alignment::Center);
+
+            let header: Element<'_, Message> = mouse_area(
+                container(header_row)
+                    .padding([0, 8])
+                    .width(Length::Fixed(
+                        crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+                    ))
+                    .height(Length::Fixed(26.0))
+                    .align_y(iced::alignment::Vertical::Center)
+                    .style(move |_theme: &Theme| container::Style {
+                        background: Some(if selected {
+                            th::track_bg_selected().into()
+                        } else {
+                            th::bg_surface().into()
+                        }),
+                        border: iced::Border {
+                            color: if selected { chan_color } else { th::border() },
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+            )
+            .on_press(Message::select_track(channel.id))
+            .into();
+
+            let filler = container(column![])
+                .width(Length::Fill)
+                .height(Length::Fixed(26.0))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::divider(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                });
+
+            track_rows = track_rows.push(row![header, filler].height(Length::Fixed(26.0)));
+            if expanded {
+                track_rows = self.push_automation_lanes(track_rows, channel, chan_color);
+            }
+        }
+
         let content = column![ruler_row, minimap_row, track_rows];
 
         let scrollable_content = scrollable(content).direction(scrollable::Direction::Vertical(
@@ -516,14 +640,73 @@ impl App {
                 .into();
         }
 
-        // ── Channel strips + pinned master ──
+        // ── Channel strips, buses, pinned master ──
+        let playhead_beat = self.state.position_beats();
+        let buses = &self.state.arrangement.buses;
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
         for track in &self.state.arrangement.tracks {
             let selected = self.state.arrangement.selected_track == Some(track.id);
-            let strip = view_mixer_strip(track, selected);
+            let strip = view_mixer_strip(
+                track,
+                selected,
+                StripRole::Track,
+                buses,
+                self.state.view.editing_track_name == Some(track.id),
+                &self.state.view.edit_name_text,
+                playhead_beat,
+            );
             strips = strips.push(strip);
         }
+
+        // Returns live on the right, next to the master: new buses
+        // appear where the "+ Bus" pillar sits, growing toward it.
+        let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
+        for bus in buses {
+            let selected = self.state.arrangement.selected_track == Some(bus.id);
+            right_group = right_group.push(view_mixer_strip(
+                bus,
+                selected,
+                StripRole::Bus,
+                buses,
+                self.state.view.editing_track_name == Some(bus.id),
+                &self.state.view.edit_name_text,
+                playhead_beat,
+            ));
+        }
+
+        // "+ Bus" pillar: between the last return and the master.
+        let add_bus_btn = button(
+            column![
+                icons::icon(icons::PLUS).size(12).color(th::text_dim()),
+                text("Bus").size(9).color(th::text_dim())
+            ]
+            .spacing(2)
+            .align_x(iced::Alignment::Center),
+        )
+        .on_press(Message::add_bus())
+        .padding([12, 6])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+                _ => Some(th::bg_surface().into()),
+            };
+            button::Style {
+                background: bg,
+                text_color: th::text_dim(),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+        right_group = right_group.push(
+            container(add_bus_btn)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::Center),
+        );
 
         // Master strip — a real channel, pinned to far right
         let master_selected =
@@ -531,11 +714,16 @@ impl App {
         let master_strip = container(view_mixer_strip(
             &self.state.arrangement.master,
             master_selected,
+            StripRole::Master,
+            buses,
+            false,
+            &self.state.view.edit_name_text,
+            playhead_beat,
         ))
         .padding(8)
         .height(Length::Fill);
 
-        let mixer_row = row![strips, horizontal_space(), master_strip]
+        let mixer_row = row![strips, horizontal_space(), right_group, master_strip]
             .spacing(4)
             .padding([8, 4])
             .height(Length::Fill);
@@ -752,11 +940,11 @@ impl App {
         track: &'a crate::state::UiTrack,
         track_color: iced::Color,
     ) -> iced::widget::Column<'a, Message> {
-        use crate::domains::automation::{target_label, AutomationMsg};
+        use crate::domains::automation::{target_label_with_buses, AutomationMsg};
         use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
 
         for lane in &track.automation {
-            let label = target_label(&lane.target, track);
+            let label = target_label_with_buses(&lane.target, track, &self.state.arrangement.buses);
             let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
                 .on_press(Message::Automation(AutomationMsg::RemoveLane {
                     track_id: track.id,
@@ -876,6 +1064,23 @@ impl App {
                             effect_id: effect.id,
                             param_index,
                         },
+                    });
+                }
+            }
+            // Send lanes: regular tracks only (buses and the master
+            // have no sends).
+            let is_channel = track.id.is_master()
+                || self
+                    .state
+                    .arrangement
+                    .buses
+                    .iter()
+                    .any(|b| b.id == track.id);
+            if !is_channel {
+                for bus in &self.state.arrangement.buses {
+                    choices.push(LaneChoice {
+                        label: format!("Send: {}", bus.name),
+                        target: vibez_core::automation::AutomationTarget::Send { bus_id: bus.id },
                     });
                 }
             }

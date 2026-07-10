@@ -48,6 +48,9 @@ pub struct AudioEngine {
     /// no clips or instrument) applied to the summed mix. Addressed
     /// by commands via [`TrackId::MASTER`].
     master: EngineTrack,
+    /// Return channels: track-shaped, fed by per-track post-fader
+    /// sends, summed into the mix before the master chain.
+    buses: Vec<EngineTrack>,
     /// Which track streams samples to the UI spectrum analyser.
     spectrum_track: Option<TrackId>,
     /// Producer side of the spectrum ring (mono samples).
@@ -90,6 +93,7 @@ impl AudioEngine {
             audio: None,
             tracks: Vec::new(),
             master: EngineTrack::new(TrackId::MASTER),
+            buses: Vec::new(),
             spectrum_track: None,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
@@ -131,6 +135,12 @@ impl AudioEngine {
         // ---- 2. Zero output buffer --------------------------------------
         output.iter_mut().for_each(|s| *s = 0.0);
 
+        // Bus mixes accumulate from track sends during rendering;
+        // start each block from silence.
+        for bus in &mut self.buses {
+            bus.clear_buffer(frames, channels);
+        }
+
         if !self.tracks.is_empty() {
             // ---- 3. Multi-track rendering path --------------------------
             self.process_multitrack(output, frames, channels);
@@ -139,18 +149,95 @@ impl AudioEngine {
             self.process_legacy(output, frames, channels);
         }
 
+        // ---- 4.3 Buses: each return processes its send mix through
+        // its chain (always, so queued plugin params deliver and
+        // tails ring out) and sums into the mix ahead of the master.
+        let block_beat = if self.transport.is_playing() {
+            let bpm = self.transport.bpm();
+            if bpm > 0.0 {
+                Some(self.transport.position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let has_bus_solo = any_solo(&self.buses);
+        for bus_idx in 0..self.buses.len() {
+            let bus = &mut self.buses[bus_idx];
+            let (bus_auto_gain, bus_auto_pan) = match block_beat {
+                Some(beat) => bus.apply_automation(beat),
+                None => (None, None),
+            };
+            let buf_size = frames * channels;
+            if bus.mix_buffer.len() < buf_size {
+                bus.clear_buffer(frames, channels);
+            }
+            for slot in &mut bus.effects {
+                if !slot.bypass {
+                    slot.effect
+                        .process(&mut bus.mix_buffer[..buf_size], channels);
+                }
+            }
+            if self.spectrum_track == Some(bus.id) {
+                push_spectrum(&mut self.spectrum_tx, &bus.mix_buffer[..buf_size], channels);
+            }
+
+            let mut peak_l = 0.0f32;
+            let mut peak_r = 0.0f32;
+            if !bus.mute && (!has_bus_solo || bus.solo) {
+                let gain = bus_auto_gain.unwrap_or(bus.gain);
+                // Balance, not equal-power: the send mix is already
+                // panned stereo, center must pass at unity.
+                let (pan_l, pan_r) = crate::mixer::balance_pan(bus_auto_pan.unwrap_or(bus.pan));
+                for frame in 0..frames {
+                    for ch in 0..channels {
+                        let idx = frame * channels + ch;
+                        let sample = bus.mix_buffer[idx] * gain;
+                        let panned = if channels >= 2 {
+                            if ch == 0 {
+                                sample * pan_l
+                            } else if ch == 1 {
+                                sample * pan_r
+                            } else {
+                                sample
+                            }
+                        } else {
+                            sample
+                        };
+                        output[idx] += panned;
+                        if ch == 0 {
+                            peak_l = peak_l.max(panned.abs());
+                        } else if ch == 1 {
+                            peak_r = peak_r.max(panned.abs());
+                        }
+                    }
+                }
+            }
+            let bus_id = bus.id;
+            let _ = self.event_tx.push(EngineEvent::TrackMeter {
+                track_id: bus_id,
+                peak_l,
+                peak_r,
+            });
+        }
+
         // ---- 4.4 Master bus: effect chain + gain over the summed mix.
         // Runs whether or not the transport is playing so queued
         // plugin params are delivered and tails ring out, matching
         // the per-track idle behavior.
+        let (master_auto_gain, _) = match block_beat {
+            Some(beat) => self.master.apply_automation(beat),
+            None => (None, None),
+        };
         for slot in &mut self.master.effects {
             if !slot.bypass {
                 slot.effect.process(output, channels);
             }
         }
-        if (self.master.gain - 1.0).abs() > f32::EPSILON {
-            let gain = self.master.gain;
-            output.iter_mut().for_each(|s| *s *= gain);
+        let master_gain = master_auto_gain.unwrap_or(self.master.gain);
+        if (master_gain - 1.0).abs() > f32::EPSILON {
+            output.iter_mut().for_each(|s| *s *= master_gain);
         }
         if self.spectrum_track == Some(self.master.id) {
             push_spectrum(&mut self.spectrum_tx, output, channels);
@@ -216,15 +303,18 @@ impl AudioEngine {
     // Private helpers
     // ------------------------------------------------------------------
 
-    /// Resolve a command's target channel: the master bus for
-    /// [`TrackId::MASTER`], otherwise the matching track. Only used
-    /// by commands that make sense on both (gain, effect chain).
+    /// Resolve a command's target channel: the master for
+    /// [`TrackId::MASTER`], otherwise a track or a bus. Only used by
+    /// commands that make sense on all of them (gain, pan, mute,
+    /// effect chain).
     fn channel_mut(&mut self, id: TrackId) -> Option<&mut EngineTrack> {
         if id.is_master() {
-            Some(&mut self.master)
-        } else {
-            self.tracks.iter_mut().find(|t| t.id == id)
+            return Some(&mut self.master);
         }
+        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
+            return Some(track);
+        }
+        self.buses.iter_mut().find(|b| b.id == id)
     }
 
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
@@ -281,7 +371,8 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
     ) {
-        let has_solo = any_solo(&self.tracks);
+        let has_track_solo = any_solo(&self.tracks);
+        let has_bus_solo = any_solo(&self.buses);
 
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
@@ -296,8 +387,10 @@ impl AudioEngine {
                 continue;
             }
 
-            // If any track is soloed, skip non-soloed tracks
-            if has_solo && !track.solo {
+            // A soloed return still needs every source to render its
+            // sends. Without a return solo, preserve normal track
+            // solo filtering.
+            if has_track_solo && !track.solo && !has_bus_solo {
                 let _ = self.event_tx.push(EngineEvent::TrackMeter {
                     track_id: track.id,
                     peak_l: 0.0,
@@ -352,6 +445,7 @@ impl AudioEngine {
             let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let track_id = track.id;
             let buf_size = frames * channels;
+            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
 
             // Apply gain and pan, sum into output
             let mut track_peak_l: f32 = 0.0;
@@ -376,13 +470,47 @@ impl AudioEngine {
                         sample
                     };
 
-                    output[idx] += panned;
+                    if dry_audible {
+                        output[idx] += panned;
+                    }
 
                     // Track per-channel peaks
                     if ch == 0 {
                         track_peak_l = track_peak_l.max(panned.abs());
                     } else if ch == 1 {
                         track_peak_r = track_peak_r.max(panned.abs());
+                    }
+                }
+            }
+
+            // Post-fader sends: the same gained/panned signal feeds
+            // each bus at its send amount.
+            for send_idx in 0..track.sends.len() {
+                let (bus_id, amount) = track.sends[send_idx];
+                if amount <= 0.0005 {
+                    continue;
+                }
+                if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
+                    for frame in 0..frames {
+                        for ch in 0..channels {
+                            let idx = frame * channels + ch;
+                            if idx >= buf_size || idx >= bus.mix_buffer.len() {
+                                break;
+                            }
+                            let sample = track.mix_buffer[idx] * gain;
+                            let panned = if channels >= 2 {
+                                if ch == 0 {
+                                    sample * pan_l
+                                } else if ch == 1 {
+                                    sample * pan_r
+                                } else {
+                                    sample
+                                }
+                            } else {
+                                sample
+                            };
+                            bus.mix_buffer[idx] += panned * amount;
+                        }
                     }
                 }
             }
@@ -590,7 +718,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         match track.automation.iter_mut().find(|l| l.id == lane.id) {
                             Some(existing) => *existing = lane,
                             None => track.automation.push(lane),
@@ -598,23 +726,56 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    if let Some(track) = self.channel_mut(track_id) {
                         track.automation.retain(|l| l.id != lane_id);
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
+                    if let Some(track) = self.channel_mut(id) {
                         track.pan = pan.clamp(0.0, 1.0);
                     }
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
+                    if let Some(track) = self.channel_mut(id) {
                         track.mute = mute;
                     }
                 }
+
+                // -- Busses --
+                EngineCommand::AddBus(id, _name) => {
+                    self.buses.push(EngineTrack::new(id));
+                }
+                EngineCommand::RemoveBus(id) => {
+                    if let Some(pos) = self.buses.iter().position(|b| b.id == id) {
+                        let mut bus = self.buses.remove(pos);
+                        for slot in bus.effects.drain(..) {
+                            self.dispose_effect(slot.effect);
+                        }
+                    }
+                    for track in &mut self.tracks {
+                        track.sends.retain(|(bus_id, _)| *bus_id != id);
+                        track.automation.retain(|lane| {
+                            lane.target
+                                != vibez_core::automation::AutomationTarget::Send { bus_id: id }
+                        });
+                    }
+                }
+                EngineCommand::SetSend {
+                    track_id,
+                    bus_id,
+                    amount,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        let amount = amount.clamp(0.0, 1.0);
+                        match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                            Some(send) => send.1 = amount,
+                            None => track.sends.push((bus_id, amount)),
+                        }
+                    }
+                }
                 EngineCommand::SetTrackSolo(id, solo) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == id) {
-                        track.solo = solo;
+                    if let Some(channel) = self.channel_mut(id) {
+                        channel.solo = solo;
                     }
                 }
 
@@ -1002,9 +1163,10 @@ impl AudioEngine {
     /// Render instruments with no clip scheduling (transport stopped)
     /// so auditioned notes sound. Effects and gain/pan still apply.
     fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let has_solo = any_solo(&self.tracks);
+        let has_track_solo = any_solo(&self.tracks);
+        let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {
-            if track.mute || (has_solo && !track.solo) {
+            if track.mute || (has_track_solo && !track.solo && !has_bus_solo) {
                 continue;
             }
             // Instruments render so auditioned notes sound; every
@@ -1034,6 +1196,7 @@ impl AudioEngine {
             let gain = track.gain;
             let (pan_l, pan_r) = equal_power_pan(track.pan);
             let buf_size = frames * channels;
+            let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
             for frame in 0..frames {
                 for ch in 0..channels {
                     let idx = frame * channels + ch;
@@ -1050,7 +1213,38 @@ impl AudioEngine {
                     } else {
                         sample
                     };
-                    output[idx] += panned;
+                    if dry_audible {
+                        output[idx] += panned;
+                    }
+                }
+            }
+            // Sends feed buses while stopped too, so auditioned
+            // notes reach the returns like in any DAW.
+            for send_idx in 0..track.sends.len() {
+                let (bus_id, amount) = track.sends[send_idx];
+                if amount <= 0.0005 {
+                    continue;
+                }
+                if let Some(bus) = self.buses.iter_mut().find(|b| b.id == bus_id) {
+                    for frame in 0..frames {
+                        for ch in 0..channels {
+                            let idx = frame * channels + ch;
+                            if idx >= buf_size || idx >= bus.mix_buffer.len() {
+                                break;
+                            }
+                            let sample = track.mix_buffer[idx] * gain;
+                            let panned = if channels == 2 {
+                                if ch == 0 {
+                                    sample * pan_l
+                                } else {
+                                    sample * pan_r
+                                }
+                            } else {
+                                sample
+                            };
+                            bus.mix_buffer[idx] += panned * amount;
+                        }
+                    }
                 }
             }
         }
