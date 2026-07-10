@@ -747,6 +747,10 @@ impl AudioEngine {
                     }
                     for track in &mut self.tracks {
                         track.sends.retain(|(bus_id, _)| *bus_id != id);
+                        track.automation.retain(|lane| {
+                            lane.target
+                                != vibez_core::automation::AutomationTarget::Send { bus_id: id }
+                        });
                     }
                 }
                 EngineCommand::SetSend {

@@ -10,6 +10,7 @@ use crate::theme as th;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::fader::FaderWidget;
 use crate::widgets::knob::KnobWidget;
+use crate::widgets::track_header::view_editable_channel_name;
 use crate::widgets::vu_meter::VuMeterWidget;
 use vibez_core::midi::TrackKind;
 
@@ -30,6 +31,8 @@ pub fn view_mixer_strip<'a>(
     selected: bool,
     role: StripRole,
     buses: &'a [UiTrack],
+    editing_name: bool,
+    edit_text: &'a str,
 ) -> Element<'a, Message> {
     let is_master = role == StripRole::Master;
     let track_color = if is_master {
@@ -52,10 +55,15 @@ pub fn view_mixer_strip<'a>(
         },
     };
 
-    let name = text(&track.name)
-        .size(12)
-        .color(th::text())
-        .width(Length::Fill);
+    let name: Element<'a, Message> = if is_master {
+        text(&track.name)
+            .size(12)
+            .color(th::text())
+            .width(Length::Fill)
+            .into()
+    } else {
+        view_editable_channel_name(track, editing_name, edit_text, 12, th::text())
+    };
 
     // Tracks are deletable straight from the strip; the master is
     // not, and buses carry their remove control on the RETURN badge.

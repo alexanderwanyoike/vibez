@@ -20,7 +20,7 @@ use crate::state::{AppState, ArrangementSelection, ContextMenuTarget, Workspace}
 use crate::theme as th;
 use crate::widgets::mixer_strip::{view_mixer_strip, StripRole};
 use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
-use crate::widgets::track_header::view_track_header;
+use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
@@ -512,11 +512,18 @@ impl App {
             });
 
             let dot = text("\u{25CF}").size(9).color(chan_color);
-            let name = text(&channel.name).size(11).color(if selected {
-                th::text()
+            let name_color = if selected { th::text() } else { th::text_dim() };
+            let name: Element<'_, Message> = if is_master {
+                text(&channel.name).size(11).color(name_color).into()
             } else {
-                th::text_dim()
-            });
+                view_editable_channel_name(
+                    channel,
+                    self.state.view.editing_track_name == Some(channel.id),
+                    &self.state.view.edit_name_text,
+                    11,
+                    name_color,
+                )
+            };
 
             let remove_el: Element<'_, Message> = if is_master {
                 text("").size(9).into()
@@ -639,7 +646,14 @@ impl App {
 
         for track in &self.state.arrangement.tracks {
             let selected = self.state.arrangement.selected_track == Some(track.id);
-            let strip = view_mixer_strip(track, selected, StripRole::Track, buses);
+            let strip = view_mixer_strip(
+                track,
+                selected,
+                StripRole::Track,
+                buses,
+                self.state.view.editing_track_name == Some(track.id),
+                &self.state.view.edit_name_text,
+            );
             strips = strips.push(strip);
         }
 
@@ -648,7 +662,14 @@ impl App {
         let mut right_group = row![].spacing(4).padding(8).height(Length::Fill);
         for bus in buses {
             let selected = self.state.arrangement.selected_track == Some(bus.id);
-            right_group = right_group.push(view_mixer_strip(bus, selected, StripRole::Bus, buses));
+            right_group = right_group.push(view_mixer_strip(
+                bus,
+                selected,
+                StripRole::Bus,
+                buses,
+                self.state.view.editing_track_name == Some(bus.id),
+                &self.state.view.edit_name_text,
+            ));
         }
 
         // "+ Bus" pillar: between the last return and the master.
@@ -692,6 +713,8 @@ impl App {
             master_selected,
             StripRole::Master,
             buses,
+            false,
+            &self.state.view.edit_name_text,
         ))
         .padding(8)
         .height(Length::Fill);

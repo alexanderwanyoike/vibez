@@ -417,6 +417,9 @@ impl ArrangementState {
                 self.buses.retain(|b| b.id != bus_id);
                 for track in &mut self.tracks {
                     track.sends.retain(|(b, _)| *b != bus_id);
+                    track.automation.retain(|lane| {
+                        lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
+                    });
                 }
                 if self.selected_track == Some(bus_id) {
                     self.selected_track = self.tracks.first().map(|t| t.id);

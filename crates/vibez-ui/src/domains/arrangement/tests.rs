@@ -3,6 +3,7 @@
 use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::UiClip;
+use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::midi::MidiNote;
 
 fn arrangement_with_tracks(n: usize) -> ArrangementState {
@@ -48,6 +49,36 @@ fn remove_track_clears_its_selections_and_requests_gui_teardown() {
 }
 
 #[test]
+fn remove_bus_clears_sends_and_their_automation_lanes() {
+    let mut a = arrangement_with_tracks(1);
+    let track_id = a.tracks[0].id;
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddBus,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let bus_id = a.buses[0].id;
+    a.tracks[0].sends.push((bus_id, 0.5));
+    a.tracks[0]
+        .automation
+        .push(AutomationLane::new(AutomationTarget::Send { bus_id }));
+
+    a.update(
+        ArrangementMsg::RemoveBus(bus_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let track = a.tracks.iter().find(|track| track.id == track_id).unwrap();
+    assert!(track.sends.iter().all(|(id, _)| *id != bus_id));
+    assert!(track
+        .automation
+        .iter()
+        .all(|lane| lane.target != AutomationTarget::Send { bus_id }));
+}
+
+#[test]
 fn reorder_sends_full_order_and_respects_bounds() {
     let mut a = arrangement_with_tracks(2);
     let first = a.tracks[0].id;
@@ -85,6 +116,41 @@ fn gain_and_pan_clamp() {
     );
     assert_eq!(a.tracks[0].gain, 2.0);
     assert_eq!(a.tracks[0].pan, 0.0);
+}
+
+#[test]
+fn renames_audio_midi_and_bus_channels() {
+    let mut a = arrangement_with_tracks(1);
+    let audio_id = a.tracks[0].id;
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.update(
+        ArrangementMsg::AddBus,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let midi_id = a.tracks[1].id;
+    let bus_id = a.buses[0].id;
+
+    for (id, name) in [
+        (audio_id, "Vocals"),
+        (midi_id, "Keys"),
+        (bus_id, "Long Reverb"),
+    ] {
+        a.update(
+            ArrangementMsg::RenameTrack(id, name.to_string()),
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+    }
+
+    assert_eq!(a.find_track(audio_id).unwrap().name, "Vocals");
+    assert_eq!(a.find_track(midi_id).unwrap().name, "Keys");
+    assert_eq!(a.find_track(bus_id).unwrap().name, "Long Reverb");
 }
 
 #[test]

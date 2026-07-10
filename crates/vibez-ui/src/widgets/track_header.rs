@@ -20,6 +20,39 @@ pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 /// Total width including the 3px color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
 
+/// Inline-editable channel name shared by arrangement headers and
+/// mixer strips. The caller decides which channel roles expose it.
+pub fn view_editable_channel_name<'a>(
+    track: &'a UiTrack,
+    editing_name: bool,
+    edit_text: &'a str,
+    size: u16,
+    color: iced::Color,
+) -> Element<'a, Message> {
+    if editing_name {
+        text_input("Name", edit_text)
+            .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
+            .on_submit(Message::View(ViewMsg::FinishEditing))
+            .size(size)
+            .width(Length::Fill)
+            .into()
+    } else {
+        button(text(&track.name).size(size).color(color))
+            .on_press(Message::View(ViewMsg::StartEditingTrackName {
+                track_id: track.id,
+                name: track.name.clone(),
+            }))
+            .padding(0)
+            .style(|_theme: &Theme, _status| button::Style {
+                background: None,
+                text_color: th::text(),
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .into()
+    }
+}
+
 /// Render the track header for the arrangement view.
 pub fn view_track_header<'a>(
     track: &'a UiTrack,
@@ -40,36 +73,12 @@ pub fn view_track_header<'a>(
         }
     };
 
-    // Name: if editing, show text_input; if selected, click starts rename; else click selects
-    let name_widget: Element<'_, Message> = if editing_name {
-        text_input("Name", edit_text)
-            .on_input(|t| Message::View(ViewMsg::EditNameText(t)))
-            .on_submit(Message::View(ViewMsg::FinishEditing))
-            .size(13)
-            .width(Length::Fill)
-            .into()
+    let name_color = if track.mute {
+        th::text_dim()
     } else {
-        let name_color = if track.mute {
-            th::text_dim()
-        } else {
-            th::text()
-        };
-        let msg = if selected {
-            Message::View(ViewMsg::StartEditingTrackName(track.id))
-        } else {
-            Message::select_track(track.id)
-        };
-        button(text(&track.name).size(13).color(name_color))
-            .on_press(msg)
-            .padding(0)
-            .style(|_theme: &Theme, _status| button::Style {
-                background: None,
-                text_color: th::text(),
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .into()
+        th::text()
     };
+    let name_widget = view_editable_channel_name(track, editing_name, edit_text, 13, name_color);
 
     let add_btn = match track.kind {
         TrackKind::Audio => button(icons::icon(icons::PLUS).size(11).color(th::text_dim()))

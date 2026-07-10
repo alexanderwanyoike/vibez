@@ -1578,6 +1578,31 @@ fn remove_bus_drops_its_sends() {
 }
 
 #[test]
+fn remove_bus_drops_its_send_automation() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, track_id, bus_id) = engine_with_send(0.0);
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id });
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    cmd_tx
+        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .unwrap();
+    cmd_tx.push(EngineCommand::RemoveBus(bus_id)).unwrap();
+
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+
+    assert!(
+        engine.tracks()[0].sends.is_empty(),
+        "removed bus automation must not recreate a stale send"
+    );
+}
+
+#[test]
 fn bus_gain_automation_rides_the_return() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
     let (mut engine, mut cmd_tx, _tid, bus) = engine_with_send(1.0);
