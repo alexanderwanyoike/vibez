@@ -180,7 +180,11 @@ impl App {
             }
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self.state.view.snap_grid,
+                    snap_grid: self
+                        .state
+                        .view
+                        .grid_config()
+                        .effective_grid(self.active_editor_pixels_per_beat()),
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -893,7 +897,11 @@ impl App {
             // -- Quantize --
             Message::QuantizeAudioClip { track_id, clip_id } => {
                 self.state.view.context_menu = None;
-                let grid = self.state.view.snap_grid;
+                let grid = self
+                    .state
+                    .view
+                    .grid_config()
+                    .effective_grid(self.active_editor_pixels_per_beat());
                 return self.dispatch_audio_quantize(track_id, clip_id, grid);
             }
             Message::QuantizeAudioClipAt {

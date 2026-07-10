@@ -55,6 +55,22 @@ pub(crate) fn global_key_handler(
         return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
     }
 
+    if modifiers.command() {
+        if let iced::keyboard::Key::Character(ref c) = key {
+            let grid_message = match c.as_str() {
+                "1" => Some(ViewMsg::NarrowGrid),
+                "2" => Some(ViewMsg::WidenGrid),
+                "3" => Some(ViewMsg::ToggleTripletGrid),
+                "4" => Some(ViewMsg::ToggleSnapToGrid),
+                "5" => Some(ViewMsg::ToggleAdaptiveGrid),
+                _ => None,
+            };
+            if let Some(message) = grid_message {
+                return Some(Message::View(message));
+            }
+        }
+    }
+
     if !modifiers.control() {
         return None;
     }
@@ -98,5 +114,45 @@ pub(crate) fn global_key_handler(
             _ => None,
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_number_shortcuts_control_the_shared_grid() {
+        use iced::keyboard::{Key, Modifiers};
+
+        let expected = [
+            ViewMsg::NarrowGrid,
+            ViewMsg::WidenGrid,
+            ViewMsg::ToggleTripletGrid,
+            ViewMsg::ToggleSnapToGrid,
+            ViewMsg::ToggleAdaptiveGrid,
+        ];
+        for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
+            let message = global_key_handler(Key::Character(number.into()), Modifiers::CTRL);
+            assert!(matches!(
+                (message, expected),
+                (
+                    Some(Message::View(ViewMsg::NarrowGrid)),
+                    ViewMsg::NarrowGrid
+                ) | (Some(Message::View(ViewMsg::WidenGrid)), ViewMsg::WidenGrid)
+                    | (
+                        Some(Message::View(ViewMsg::ToggleTripletGrid)),
+                        ViewMsg::ToggleTripletGrid
+                    )
+                    | (
+                        Some(Message::View(ViewMsg::ToggleSnapToGrid)),
+                        ViewMsg::ToggleSnapToGrid
+                    )
+                    | (
+                        Some(Message::View(ViewMsg::ToggleAdaptiveGrid)),
+                        ViewMsg::ToggleAdaptiveGrid
+                    )
+            ));
+        }
     }
 }

@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
-    stack, text, text_input,
+    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row,
+    scrollable, stack, text, text_input,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -301,6 +301,7 @@ impl App {
             playhead_beats,
             bpm,
             zoom_level,
+            grid: self.state.view.grid_config(),
             scroll_offset_beats: scroll_offset,
             total_beats,
             loop_enabled: self.state.transport.loop_enabled,
@@ -434,6 +435,7 @@ impl App {
                 track,
                 playhead_beats,
                 zoom_level,
+                self.state.view.grid_config(),
                 scroll_offset,
                 total_beats,
                 sample_rate,
@@ -877,6 +879,65 @@ impl App {
 
         let bpm_label = text("BPM").size(12).color(th::text_dim());
 
+        let grid_picker = pick_list(
+            crate::state::SnapGrid::all(),
+            Some(
+                self.state
+                    .view
+                    .grid_config()
+                    .effective_grid(self.active_editor_pixels_per_beat()),
+            ),
+            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
+        )
+        .width(Length::Fixed(82.0));
+        let grid_toggle = |label: &'static str, active: bool, message: ViewMsg| {
+            let color = if active { th::accent() } else { th::text_dim() };
+            button(text(label).size(9).color(color))
+                .on_press(Message::View(message))
+                .padding([4, 6])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(
+                        if active {
+                            th::bg_elevated()
+                        } else {
+                            th::bg_surface()
+                        }
+                        .into(),
+                    ),
+                    text_color: color,
+                    border: iced::Border {
+                        color: if active {
+                            th::accent_dim()
+                        } else {
+                            th::border()
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                })
+        };
+        let grid_controls = row![
+            grid_picker,
+            grid_toggle(
+                "SNAP",
+                self.state.view.snap_enabled,
+                ViewMsg::ToggleSnapToGrid,
+            ),
+            grid_toggle(
+                "T",
+                self.state.view.snap_grid.is_triplet(),
+                ViewMsg::ToggleTripletGrid,
+            ),
+            grid_toggle(
+                "AUTO",
+                self.state.view.adaptive_grid,
+                ViewMsg::ToggleAdaptiveGrid,
+            ),
+        ]
+        .spacing(3)
+        .align_y(iced::Alignment::Center);
+
         // Master VU meter
         let master_meter = VuMeterWidget {
             peak_l: self.state.peak_l,
@@ -900,6 +961,7 @@ impl App {
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             bpm_label,
+            grid_controls,
         ]
         .spacing(12)
         .padding(10)
@@ -989,7 +1051,7 @@ impl App {
                 color: track_color,
                 zoom_level: self.state.view.zoom_level,
                 scroll_offset_beats: self.state.view.scroll_offset_beats,
-                snap: self.state.view.snap_grid,
+                grid: self.state.view.grid_config(),
                 selected,
                 reference,
                 min_label,

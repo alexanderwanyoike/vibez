@@ -86,60 +86,36 @@ impl TrackClipCanvas {
         };
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
 
-        // Grid lines — adaptive density matching ruler
+        // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
             let visible = w as f64 / ppb as f64;
-            let start = self.scroll_offset_beats.floor().max(0.0) as i64;
-            let end = (self.scroll_offset_beats + visible).ceil() as i64 + 1;
+            let grid = self.grid.effective_grid(ppb);
+            let step = grid.beat_size();
+            let start = (self.scroll_offset_beats / step).floor().max(0.0) as i64;
+            let end = ((self.scroll_offset_beats + visible) / step).ceil() as i64 + 1;
 
-            for beat_i in start..end {
-                let x = self.beat_to_x(beat_i as f64);
+            for grid_i in start..end {
+                let beat = grid_i as f64 * step;
+                let x = self.beat_to_x(beat);
                 if x < -1.0 || x > w + 1.0 {
                     continue;
                 }
-                let is_bar = beat_i % 4 == 0;
-
-                if is_bar {
-                    // Bar lines always visible
-                    let vline =
-                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                    frame.stroke(
-                        &vline,
-                        canvas::Stroke::default()
-                            .with_color(theme::border())
-                            .with_width(1.0),
-                    );
-                } else if ppb >= 40.0 {
-                    // Beat lines only at medium+ zoom
-                    let vline =
-                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                    frame.stroke(
-                        &vline,
-                        canvas::Stroke::default()
-                            .with_color(theme::divider())
-                            .with_width(0.5),
-                    );
-                }
-
-                // Sub-beat lines at high zoom (≥80 ppb)
-                if ppb >= 80.0 {
-                    for sub in 1..4 {
-                        let sub_beat = beat_i as f64 + sub as f64 * 0.25;
-                        let sub_x = self.beat_to_x(sub_beat);
-                        if sub_x > 0.0 && sub_x < w {
-                            let sub_line = canvas::Path::line(
-                                iced::Point::new(sub_x, 0.0),
-                                iced::Point::new(sub_x, h),
-                            );
-                            frame.stroke(
-                                &sub_line,
-                                canvas::Stroke::default()
-                                    .with_color(theme::divider())
-                                    .with_width(0.3),
-                            );
-                        }
-                    }
-                }
+                let on_bar = (beat / 4.0 - (beat / 4.0).round()).abs() < 1e-6;
+                let on_beat = (beat - beat.round()).abs() < 1e-6;
+                let (color, width) = if on_bar {
+                    (theme::grid_bar(), 1.0)
+                } else if on_beat {
+                    (theme::grid_beat(), 0.75)
+                } else {
+                    (theme::grid_sub(), 0.5)
+                };
+                let line = canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
+                frame.stroke(
+                    &line,
+                    canvas::Stroke::default()
+                        .with_color(color)
+                        .with_width(width),
+                );
             }
         }
 

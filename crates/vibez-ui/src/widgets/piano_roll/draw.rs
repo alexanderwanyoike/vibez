@@ -205,8 +205,8 @@ impl PianoRollWidget {
                 .with_width(1.0),
         );
 
-        // ── Vertical beat grid lines (always 16th-note resolution) ──
-        let grid_step = 0.25_f64; // always show 16th-note grid
+        // ── Vertical musical grid lines ──
+        let grid_step = self.grid.effective_grid(grid_ppb).beat_size();
         let num_steps = (total / grid_step).ceil() as usize;
 
         for step in 0..=num_steps {

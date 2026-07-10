@@ -7,7 +7,7 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
-use crate::state::{PianoRollEditMode, SnapGrid, UiNoteClip};
+use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 
@@ -41,7 +41,7 @@ pub struct PianoRollWidget {
     pub playhead_beats: f64,
     pub total_beats: f64,
     pub track_color: Color,
-    pub snap_grid: SnapGrid,
+    pub grid: GridConfig,
     pub scroll_y: f32,
     pub edit_mode: PianoRollEditMode,
 }
@@ -65,7 +65,7 @@ impl PianoRollWidget {
         playhead_beats: f64,
         total_beats: f64,
         track_color: Color,
-        snap_grid: SnapGrid,
+        grid: GridConfig,
         scroll_y: f32,
         edit_mode: PianoRollEditMode,
     ) -> Self {
@@ -82,7 +82,7 @@ impl PianoRollWidget {
             playhead_beats,
             total_beats,
             track_color,
-            snap_grid,
+            grid,
             scroll_y,
             edit_mode,
         }
@@ -95,7 +95,7 @@ impl PianoRollWidget {
             playhead_beats,
             total_beats: 16.0,
             track_color,
-            snap_grid: SnapGrid::Eighth,
+            grid: GridConfig::new(SnapGrid::EIGHTH, true, false, 0),
             scroll_y: default_scroll_y(200.0),
             edit_mode: PianoRollEditMode::default(),
         }
@@ -111,6 +111,18 @@ impl PianoRollWidget {
         let grid_width = bounds.width - KEY_WIDTH;
         let total = self.total_beats.max(1.0);
         ((x - KEY_WIDTH) / grid_width) as f64 * total
+    }
+
+    fn pixels_per_beat(&self, bounds: &Rectangle) -> f32 {
+        (bounds.width - KEY_WIDTH) / self.total_beats.max(1.0) as f32
+    }
+
+    fn effective_grid(&self, bounds: &Rectangle) -> SnapGrid {
+        self.grid.effective_grid(self.pixels_per_beat(bounds))
+    }
+
+    fn snapped_beat(&self, beat: f64, bounds: &Rectangle) -> f64 {
+        self.grid.snap_beat(beat, self.pixels_per_beat(bounds))
     }
 
     fn pitch_to_y(&self, pitch: u8) -> f32 {
@@ -340,8 +352,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 return (canvas::event::Status::Ignored, None);
                             }
 
-                            let note_duration = self.snap_grid.beat_size();
-                            let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
+                            let note_duration = self.effective_grid(&bounds).beat_size();
+                            let snapped_beat = self.snapped_beat(beat, &bounds).max(0.0);
 
                             let max_start = self.total_beats - note_duration;
                             if max_start < 0.0 || snapped_beat > max_start {
@@ -472,8 +484,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 return (canvas::event::Status::Ignored, None);
                             }
 
-                            let note_duration = self.snap_grid.beat_size();
-                            let snapped_beat = self.snap_grid.snap_beat(beat).max(0.0);
+                            let note_duration = self.effective_grid(&bounds).beat_size();
+                            let snapped_beat = self.snapped_beat(beat, &bounds).max(0.0);
 
                             let max_start = self.total_beats - note_duration;
                             if max_start < 0.0 || snapped_beat > max_start {
@@ -531,8 +543,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
-                                    let anchor_new_beat =
-                                        self.snap_grid.snap_beat(original_start_beat + beat_delta);
+                                    let anchor_new_beat = self
+                                        .snapped_beat(original_start_beat + beat_delta, &bounds);
                                     let snapped_beat_delta = anchor_new_beat - original_start_beat;
 
                                     // Move anchor note for visual feedback (works for both
@@ -569,10 +581,17 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 } => {
                                     let dx = local.x - start_x;
                                     let beat_delta = dx as f64 * beats_per_pixel;
-                                    let min_duration = self.snap_grid.beat_size();
-                                    let new_duration = self.snap_grid.snap_beat(
-                                        (original_duration + beat_delta).max(min_duration),
-                                    );
+                                    let min_duration = if self.grid.snap_enabled {
+                                        self.effective_grid(&bounds).beat_size()
+                                    } else {
+                                        0.01
+                                    };
+                                    let new_duration = self
+                                        .snapped_beat(
+                                            (original_duration + beat_delta).max(min_duration),
+                                            &bounds,
+                                        )
+                                        .max(min_duration);
 
                                     let idx = *note_index;
                                     if idx < clip_data.notes.len() {
@@ -598,10 +617,17 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     // Extend note duration while dragging
                                     let dx = local.x - start_x;
                                     let beat_delta = dx as f64 * beats_per_pixel;
-                                    let min_duration = self.snap_grid.beat_size();
-                                    let new_duration = self.snap_grid.snap_beat(
-                                        (min_duration + beat_delta.max(0.0)).max(min_duration),
-                                    );
+                                    let min_duration = self.effective_grid(&bounds).beat_size();
+                                    let new_duration = self
+                                        .snapped_beat(
+                                            (min_duration + beat_delta.max(0.0)).max(min_duration),
+                                            &bounds,
+                                        )
+                                        .max(if self.grid.snap_enabled {
+                                            min_duration
+                                        } else {
+                                            0.01
+                                        });
 
                                     // Find the note we just added (last note at this pitch/beat)
                                     if let Some(idx) = clip_data.notes.iter().rposition(|n| {
@@ -659,8 +685,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     let beat_delta = dx as f64 * beats_per_pixel;
                                     let pitch_delta = -(dy / KEY_HEIGHT).round() as i16;
 
-                                    let anchor_new_beat =
-                                        self.snap_grid.snap_beat(original_start_beat + beat_delta);
+                                    let anchor_new_beat = self
+                                        .snapped_beat(original_start_beat + beat_delta, &bounds);
                                     let snapped_beat_delta = anchor_new_beat - original_start_beat;
 
                                     // Compute absolute positions for all selected notes
@@ -733,7 +759,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                             Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
-                                delta_beats: -self.snap_grid.beat_size(),
+                                delta_beats: -self.effective_grid(&bounds).beat_size(),
                                 delta_semitones: 0,
                             })),
                         );
@@ -751,7 +777,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                             Some(Message::PianoRoll(PianoRollMsg::NudgeSelectedNotes {
                                 track_id: self.track_id,
                                 clip_id: clip_data.clip_id,
-                                delta_beats: self.snap_grid.beat_size(),
+                                delta_beats: self.effective_grid(&bounds).beat_size(),
                                 delta_semitones: 0,
                             })),
                         );
@@ -822,6 +848,22 @@ impl canvas::Program<Message> for PianoRollWidget {
 /// Returns true if the given MIDI pitch is a black key.
 fn is_black_key(pitch: u8) -> bool {
     matches!(pitch % 12, 1 | 3 | 6 | 8 | 10)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn piano_roll_uses_triplet_grid_and_preserves_free_positions_when_snap_is_off() {
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
+        widget.grid = GridConfig::new(SnapGrid::EIGHTH.triplet(), true, false, 0);
+        assert!((widget.snapped_beat(0.31, &bounds) - 1.0 / 3.0).abs() < 1e-9);
+
+        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
+        assert_eq!(widget.snapped_beat(0.31, &bounds), 0.31);
+    }
 }
 
 mod draw;

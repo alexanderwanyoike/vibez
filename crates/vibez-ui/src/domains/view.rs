@@ -18,6 +18,11 @@ pub enum ViewMsg {
     ZoomToFit,
     ScrollArrangement(f64),
     SetSnapGrid(SnapGrid),
+    NarrowGrid,
+    WidenGrid,
+    ToggleTripletGrid,
+    ToggleSnapToGrid,
+    ToggleAdaptiveGrid,
     CursorMoved(f32, f32),
     WindowResized(f32, f32),
     MouseReleased,
@@ -107,6 +112,31 @@ impl ViewState {
             }
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
+                self.adaptive_grid = false;
+                self.adaptive_grid_bias = 0;
+            }
+            ViewMsg::NarrowGrid => {
+                if self.adaptive_grid {
+                    self.adaptive_grid_bias = (self.adaptive_grid_bias + 1).min(6);
+                } else {
+                    self.snap_grid = self.snap_grid.narrower();
+                }
+            }
+            ViewMsg::WidenGrid => {
+                if self.adaptive_grid {
+                    self.adaptive_grid_bias = (self.adaptive_grid_bias - 1).max(-6);
+                } else {
+                    self.snap_grid = self.snap_grid.wider();
+                }
+            }
+            ViewMsg::ToggleTripletGrid => {
+                self.snap_grid = self.snap_grid.toggle_triplet();
+            }
+            ViewMsg::ToggleSnapToGrid => {
+                self.snap_enabled = !self.snap_enabled;
+            }
+            ViewMsg::ToggleAdaptiveGrid => {
+                self.adaptive_grid = !self.adaptive_grid;
             }
             ViewMsg::CursorMoved(x, y) => {
                 self.cursor_x = x;
@@ -296,6 +326,39 @@ mod tests {
 
         assert_eq!(v.editing_track_name, Some(bus_id));
         assert_eq!(v.edit_name_text, "A Return");
+    }
+
+    #[test]
+    fn grid_commands_update_the_shared_editor_grid() {
+        let mut v = ViewState::default();
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
+        assert!(v.snap_enabled);
+        assert!(!v.adaptive_grid);
+
+        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::SIXTEENTH);
+        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
+        v.update(ViewMsg::ToggleTripletGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH.triplet());
+        v.update(ViewMsg::ToggleSnapToGrid, &[], ViewCtx::default());
+        assert!(!v.snap_enabled);
+        v.update(ViewMsg::ToggleAdaptiveGrid, &[], ViewCtx::default());
+        assert!(v.adaptive_grid);
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::QUARTER.triplet()
+        );
+        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::EIGHTH.triplet()
+        );
+        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::QUARTER.triplet()
+        );
     }
 
     #[test]
