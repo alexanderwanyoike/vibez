@@ -641,6 +641,7 @@ impl App {
         }
 
         // ── Channel strips, buses, pinned master ──
+        let playhead_beat = self.state.position_beats();
         let buses = &self.state.arrangement.buses;
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
@@ -653,6 +654,7 @@ impl App {
                 buses,
                 self.state.view.editing_track_name == Some(track.id),
                 &self.state.view.edit_name_text,
+                playhead_beat,
             );
             strips = strips.push(strip);
         }
@@ -669,6 +671,7 @@ impl App {
                 buses,
                 self.state.view.editing_track_name == Some(bus.id),
                 &self.state.view.edit_name_text,
+                playhead_beat,
             ));
         }
 
@@ -715,6 +718,7 @@ impl App {
             buses,
             false,
             &self.state.view.edit_name_text,
+            playhead_beat,
         ))
         .padding(8)
         .height(Length::Fill);
