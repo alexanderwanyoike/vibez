@@ -24,6 +24,104 @@ use crate::theme as th;
 use super::*;
 
 impl App {
+    pub(super) fn view_edit_menu_overlay(&self) -> Element<'_, Message> {
+        let item = |icon: char, label: &'static str, shortcut: &'static str, message: Message| {
+            button(
+                row![
+                    icons::icon(icon).size(12).color(th::text()),
+                    text(label).size(12).color(th::text()),
+                    horizontal_space(),
+                    text(shortcut).size(10).color(th::text_dim()),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(message)
+            .padding([7, 12])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => None,
+                },
+                text_color: th::text(),
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+        };
+
+        let menu = column![
+            item(
+                icons::COPY,
+                "Copy",
+                "Ctrl+C",
+                Message::Arrangement(ArrangementMsg::CopySelectedClips),
+            ),
+            item(
+                icons::SCISSORS,
+                "Cut",
+                "Ctrl+X",
+                Message::Arrangement(ArrangementMsg::CutSelectedClips),
+            ),
+            item(
+                icons::COPY,
+                "Paste at Playhead",
+                "Ctrl+V",
+                Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead),
+            ),
+            item(
+                icons::COPY,
+                "Duplicate",
+                "",
+                Message::Arrangement(ArrangementMsg::DuplicateSelectedClip),
+            ),
+            item(
+                icons::REPEAT,
+                "Toggle Clip Loop",
+                "Ctrl+Shift+L",
+                Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop),
+            ),
+            item(
+                icons::SCISSORS,
+                "Split Selection",
+                "Ctrl+E",
+                Message::split_selected_at_playhead(),
+            ),
+            item(
+                icons::COPY,
+                "Join Clips",
+                "Ctrl+J",
+                Message::join_selected_clips(),
+            ),
+        ]
+        .spacing(1)
+        .padding(4)
+        .width(Length::Fixed(260.0));
+
+        let card = container(menu).style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+        let positioned = column![
+            vertical_space().height(Length::Fixed(42.0)),
+            row![horizontal_space().width(Length::Fixed(112.0)), card]
+        ];
+        mouse_area(
+            container(positioned)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .on_press(Message::View(ViewMsg::DismissEditMenu))
+        .into()
+    }
+
     pub(super) fn view_device_context_menu_overlay(&self) -> Element<'_, Message> {
         use crate::state::DeviceMenuCategory;
 
@@ -492,7 +590,7 @@ impl App {
                 let clip_id = *clip_id;
                 let is_note_clip = *is_note_clip;
 
-                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+                let mut col = column![].spacing(0).width(Length::Fixed(220.0));
 
                 col = col.push(menu_btn(
                     icons::TRASH_2,
@@ -501,26 +599,34 @@ impl App {
                 ));
                 col = col.push(menu_btn(
                     icons::COPY,
+                    "Copy".into(),
+                    Message::Arrangement(ArrangementMsg::CopySelectedClips),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Cut".into(),
+                    Message::Arrangement(ArrangementMsg::CutSelectedClips),
+                ));
+                col = col.push(menu_btn(
+                    icons::COPY,
                     "Duplicate".into(),
                     Message::Arrangement(ArrangementMsg::DuplicateSelectedClip),
                 ));
-
-                // Split at playhead
-                let playhead_beats = self.state.position_beats();
-                if is_note_clip {
-                    col = col.push(menu_btn(
-                        icons::SCISSORS,
-                        "Split at Playhead".into(),
-                        Message::split_note_clip(track_id, clip_id, playhead_beats),
-                    ));
-                } else {
-                    let split_sample = self.state.transport.position_samples;
-                    col = col.push(menu_btn(
-                        icons::SCISSORS,
-                        "Split at Playhead".into(),
-                        Message::split_audio_clip(track_id, clip_id, split_sample),
-                    ));
-                }
+                col = col.push(menu_btn(
+                    icons::REPEAT,
+                    "Toggle Loop".into(),
+                    Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Split Selection (Ctrl+E)".into(),
+                    Message::split_selected_at_playhead(),
+                ));
+                col = col.push(menu_btn(
+                    icons::COPY,
+                    "Join Clips (Ctrl+J)".into(),
+                    Message::join_selected_clips(),
+                ));
 
                 // Rename clip
                 col = col.push(menu_btn(

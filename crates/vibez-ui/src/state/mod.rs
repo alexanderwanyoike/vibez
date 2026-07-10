@@ -19,7 +19,11 @@ pub struct ViewState {
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
+    pub snap_enabled: bool,
+    pub adaptive_grid: bool,
+    pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
+    pub edit_menu_open: bool,
     /// Cursor tracking (for right-click positioning from mouse_area).
     pub cursor_x: f32,
     pub cursor_y: f32,
@@ -39,8 +43,12 @@ impl Default for ViewState {
             detail_panel_tab: DetailPanelTab::Clip,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
-            snap_grid: SnapGrid::Eighth,
+            snap_grid: SnapGrid::EIGHTH,
+            snap_enabled: true,
+            adaptive_grid: false,
+            adaptive_grid_bias: 0,
             context_menu: None,
+            edit_menu_open: false,
             cursor_x: 0.0,
             cursor_y: 0.0,
             window_width: 1400.0,
@@ -49,6 +57,17 @@ impl Default for ViewState {
             editing_clip_name: None,
             edit_name_text: String::new(),
         }
+    }
+}
+
+impl ViewState {
+    pub fn grid_config(&self) -> GridConfig {
+        GridConfig::new(
+            self.snap_grid,
+            self.snap_enabled,
+            self.adaptive_grid,
+            self.adaptive_grid_bias,
+        )
     }
 }
 
@@ -116,6 +135,7 @@ pub enum SettingsTab {
 pub struct ProjectSnapshot {
     pub tracks: Vec<UiTrack>,
     pub master: UiTrack,
+    pub buses: Vec<UiTrack>,
     pub bpm: f64,
     pub bpm_text: String,
     pub loop_enabled: bool,
@@ -322,10 +342,13 @@ pub struct ArrangementState {
     pub tracks: Vec<UiTrack>,
     /// The master bus channel (see [`new_master_track`]).
     pub master: UiTrack,
+    /// Return channels: mixer-only tracks fed by per-track sends.
+    pub buses: Vec<UiTrack>,
     pub selected_track: Option<TrackId>,
     pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    pub clipboard: ClipClipboard,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -345,10 +368,12 @@ impl Default for ArrangementState {
         Self {
             tracks: Vec::new(),
             master: new_master_track(),
+            buses: Vec::new(),
             selected_track: None,
             next_track_number: 0,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
+            clipboard: ClipClipboard::default(),
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
@@ -559,14 +584,22 @@ impl AppState {
         if id.is_master() {
             return Some(&self.arrangement.master);
         }
-        self.arrangement.tracks.iter().find(|t| t.id == id)
+        self.arrangement
+            .tracks
+            .iter()
+            .chain(self.arrangement.buses.iter())
+            .find(|t| t.id == id)
     }
 
     pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
         if id.is_master() {
             return Some(&mut self.arrangement.master);
         }
-        self.arrangement.tracks.iter_mut().find(|t| t.id == id)
+        self.arrangement
+            .tracks
+            .iter_mut()
+            .chain(self.arrangement.buses.iter_mut())
+            .find(|t| t.id == id)
     }
 
     /// Total duration in samples across all tracks (max clip end position).

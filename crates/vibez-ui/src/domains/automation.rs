@@ -108,19 +108,6 @@ pub struct AutomationState {
     pub picker: Option<(TrackId, String)>,
 }
 
-fn find_lane_mut(
-    tracks: &mut [UiTrack],
-    track_id: TrackId,
-    lane_id: LaneId,
-) -> Option<&mut AutomationLane> {
-    tracks
-        .iter_mut()
-        .find(|t| t.id == track_id)?
-        .automation
-        .iter_mut()
-        .find(|l| l.id == lane_id)
-}
-
 fn sync_lane(engine: &mut impl EngineHandle, track_id: TrackId, lane: &AutomationLane) {
     engine.send(EngineCommand::SetAutomationLane {
         track_id,
@@ -165,8 +152,27 @@ pub fn normalized_target_value(target: &AutomationTarget, track: &UiTrack) -> Op
             }
         }
         AutomationTarget::PluginParam { .. } => None,
+        AutomationTarget::Send { bus_id } => Some(
+            track
+                .sends
+                .iter()
+                .find(|(b, _)| b == bus_id)
+                .map(|(_, amount)| *amount)
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0),
+        ),
     }
 }
+
+/// Descriptor for send lanes: native 0..1, off by default.
+pub static SEND_DESCRIPTOR: vibez_core::effect::ParamDescriptor =
+    vibez_core::effect::ParamDescriptor {
+        name: "Send",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+    };
 
 /// The static descriptor behind a target, when one exists (effect
 /// and instrument params). Gain/pan have implicit ranges.
@@ -191,6 +197,7 @@ pub fn target_descriptor(
                 vibez_instruments::descriptors_for(track.instrument_kind?).get(*param_index)
             }
         }
+        AutomationTarget::Send { .. } => Some(&SEND_DESCRIPTOR),
         _ => None,
     }
 }
@@ -238,7 +245,25 @@ pub fn target_label(target: &AutomationTarget, track: &UiTrack) -> String {
             }
         }
         AutomationTarget::PluginParam { .. } => "Plugin param".to_string(),
+        // The bus name isn't reachable from the owning track; the
+        // caller-facing label fn below adds it when buses are known.
+        AutomationTarget::Send { .. } => "Send".to_string(),
     }
+}
+
+/// [`target_label`], with bus names resolved for send lanes.
+pub fn target_label_with_buses(
+    target: &AutomationTarget,
+    track: &UiTrack,
+    buses: &[UiTrack],
+) -> String {
+    if let AutomationTarget::Send { bus_id } = target {
+        if let Some(bus) = buses.iter().find(|b| b.id == *bus_id) {
+            return format!("Send: {}", bus.name);
+        }
+        return "Send: (removed bus)".to_string();
+    }
+    target_label(target, track)
 }
 
 impl AutomationState {
@@ -247,7 +272,24 @@ impl AutomationState {
         msg: AutomationMsg,
         engine: &mut impl EngineHandle,
         tracks: &mut [UiTrack],
+        master: &mut UiTrack,
+        buses: &mut [UiTrack],
     ) -> AutomationAction {
+        // One mutable view over every automatable channel.
+        fn chan_mut<'a>(
+            tracks: &'a mut [UiTrack],
+            master: &'a mut UiTrack,
+            buses: &'a mut [UiTrack],
+            id: TrackId,
+        ) -> Option<&'a mut UiTrack> {
+            if id.is_master() {
+                return Some(master);
+            }
+            tracks
+                .iter_mut()
+                .chain(buses.iter_mut())
+                .find(|t| t.id == id)
+        }
         let mut action = AutomationAction::default();
         match msg {
             AutomationMsg::ToggleTrackLanes(track_id) => {
@@ -256,9 +298,25 @@ impl AutomationState {
                 }
             }
             AutomationMsg::AddLane { track_id, target } => {
-                let Some(track) = tracks.iter_mut().find(|t| t.id == track_id) else {
+                let Some(track) = chan_mut(tracks, master, buses, track_id) else {
                     return action;
                 };
+                // A send lane needs its engine-side send entry to
+                // exist before evaluation (the render path must not
+                // allocate); mirror the current amount down.
+                if let AutomationTarget::Send { bus_id } = target {
+                    let amount = track
+                        .sends
+                        .iter()
+                        .find(|(b, _)| *b == bus_id)
+                        .map(|(_, a)| *a)
+                        .unwrap_or(0.0);
+                    engine.send(EngineCommand::SetSend {
+                        track_id,
+                        bus_id,
+                        amount,
+                    });
+                }
                 if track.automation.iter().any(|l| l.target == target) {
                     action.status = Some("That parameter already has a lane".to_string());
                     return action;
@@ -280,7 +338,7 @@ impl AutomationState {
                 action.status = Some(format!("Added automation lane: {label}"));
             }
             AutomationMsg::RemoveLane { track_id, lane_id } => {
-                if let Some(track) = tracks.iter_mut().find(|t| t.id == track_id) {
+                if let Some(track) = chan_mut(tracks, master, buses, track_id) {
                     track.automation.retain(|l| l.id != lane_id);
                 }
                 engine.send(EngineCommand::RemoveAutomationLane { track_id, lane_id });
@@ -295,7 +353,9 @@ impl AutomationState {
                 beat,
                 value,
             } => {
-                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                let Some(lane) = chan_mut(tracks, master, buses, track_id)
+                    .and_then(|t| t.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
                     return action;
                 };
                 let point = AutomationPoint {
@@ -320,7 +380,9 @@ impl AutomationState {
                 beat,
                 value,
             } => {
-                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                let Some(lane) = chan_mut(tracks, master, buses, track_id)
+                    .and_then(|t| t.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
                     return action;
                 };
                 if index >= lane.points.len() {
@@ -348,7 +410,9 @@ impl AutomationState {
                 lane_id,
                 index,
             } => {
-                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                let Some(lane) = chan_mut(tracks, master, buses, track_id)
+                    .and_then(|t| t.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
                     return action;
                 };
                 if index >= lane.points.len() {
@@ -375,7 +439,9 @@ impl AutomationState {
                 index,
                 curve,
             } => {
-                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                let Some(lane) = chan_mut(tracks, master, buses, track_id)
+                    .and_then(|t| t.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
                     return action;
                 };
                 if index >= lane.points.len() {
@@ -396,7 +462,9 @@ impl AutomationState {
                 } else {
                     (end_beat, start_beat)
                 };
-                let Some(lane) = find_lane_mut(tracks, track_id, lane_id) else {
+                let Some(lane) = chan_mut(tracks, master, buses, track_id)
+                    .and_then(|t| t.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
                     return action;
                 };
                 let before = lane.points.len();
@@ -431,6 +499,8 @@ impl AutomationState {
                         },
                         engine,
                         tracks,
+                        master,
+                        buses,
                     );
                 }
             }
@@ -461,6 +531,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         assert_eq!(tracks[0].automation.len(), 1);
         assert!(a.expanded.contains(&tid));
@@ -477,6 +549,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         assert_eq!(tracks[0].automation.len(), 1);
         assert!(action.status.unwrap().contains("already"));
@@ -495,6 +569,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let lane_id = tracks[0].automation[0].id;
 
@@ -507,6 +583,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         a.update(
             AutomationMsg::AddPoint {
@@ -517,6 +595,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let beats: Vec<f64> = tracks[0].automation[0]
             .points
@@ -537,6 +617,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let beats: Vec<f64> = tracks[0].automation[0]
             .points
@@ -547,7 +629,13 @@ mod tests {
         assert_eq!(a.selected, Some((tid, lane_id, 1)));
 
         // Delete key removes the selected point.
-        a.update(AutomationMsg::DeleteSelectedPoint, &mut engine, &mut tracks);
+        a.update(
+            AutomationMsg::DeleteSelectedPoint,
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+        );
         assert_eq!(tracks[0].automation[0].points.len(), 1);
         assert_eq!(a.selected, None);
     }
@@ -565,6 +653,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let lane_id = tracks[0].automation[0].id;
         a.selected = Some((tid, lane_id, 0));
@@ -575,6 +665,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         assert!(tracks[0].automation.is_empty());
         assert_eq!(a.selected, None);
@@ -597,6 +689,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let lane_id = tracks[0].automation[0].id;
         a.update(
@@ -608,6 +702,8 @@ mod tests {
             },
             &mut engine,
             &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
         );
         let p = tracks[0].automation[0].points[0];
         assert_eq!(p.beat, 0.0);

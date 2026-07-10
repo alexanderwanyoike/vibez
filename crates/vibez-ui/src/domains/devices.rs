@@ -121,12 +121,16 @@ pub fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<
 fn find_track_mut<'a>(
     tracks: &'a mut [UiTrack],
     master: &'a mut UiTrack,
+    buses: &'a mut [UiTrack],
     track_id: TrackId,
 ) -> Option<&'a mut UiTrack> {
     if track_id.is_master() {
         return Some(master);
     }
-    tracks.iter_mut().find(|t| t.id == track_id)
+    tracks
+        .iter_mut()
+        .chain(buses.iter_mut())
+        .find(|t| t.id == track_id)
 }
 
 /// Send the engine a pad's full state (single source of truth for
@@ -158,6 +162,7 @@ impl DevicesState {
         engine: &mut impl EngineHandle,
         tracks: &mut [UiTrack],
         master: &mut UiTrack,
+        buses: &mut [UiTrack],
         sample_rate: u32,
     ) -> DevicesAction {
         let mut action = DevicesAction::default();
@@ -168,7 +173,7 @@ impl DevicesState {
                 let descriptors = fx.param_descriptors();
                 let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
 
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
                         id: effect_id,
                         effect_type,
@@ -190,7 +195,7 @@ impl DevicesState {
                 action.status = Some(format!("Added {} effect", effect_type.name()));
             }
             DevicesMsg::RemoveEffect(track_id, effect_id) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.retain(|e| e.id != effect_id);
                 }
                 engine.send(EngineCommand::RemoveEffect(track_id, effect_id));
@@ -201,7 +206,7 @@ impl DevicesState {
                 action.status = Some("Removed effect".to_string());
             }
             DevicesMsg::SetEffectParam(track_id, effect_id, param_index, value) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                         if param_index < effect.params.len() {
                             let desc = &effect.descriptors[param_index];
@@ -218,7 +223,7 @@ impl DevicesState {
                 }
             }
             DevicesMsg::SetEffectParams(track_id, effect_id, updates) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                         for (param_index, value) in updates {
                             if param_index < effect.params.len() {
@@ -237,7 +242,7 @@ impl DevicesState {
                 }
             }
             DevicesMsg::ToggleEffectBypass(track_id, effect_id) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(effect) = track.effects.iter_mut().find(|e| e.id == effect_id) {
                         effect.bypass = !effect.bypass;
                         engine.send(EngineCommand::SetEffectBypass {
@@ -249,7 +254,7 @@ impl DevicesState {
                 }
             }
             DevicesMsg::MoveEffectUp(track_id, effect_id) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
                         if idx > 0 {
                             track.effects.swap(idx, idx - 1);
@@ -263,7 +268,7 @@ impl DevicesState {
                 }
             }
             DevicesMsg::MoveEffectDown(track_id, effect_id) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(idx) = track.effects.iter().position(|e| e.id == effect_id) {
                         if idx + 1 < track.effects.len() {
                             track.effects.swap(idx, idx + 1);
@@ -277,13 +282,13 @@ impl DevicesState {
                 }
             }
             DevicesMsg::SetTrackInstrument(track_id, instrument_kind) => {
-                if track_id.is_master() {
-                    // The master bus hosts effects only.
+                if track_id.is_master() || buses.iter().any(|b| b.id == track_id) {
+                    // The master and buses host effects only.
                     return action;
                 }
                 let instrument_params =
                     default_instrument_params(instrument_kind, sample_rate as f32);
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.has_instrument = true;
                     track.instrument_kind = Some(instrument_kind);
                     track.sample_name = None;
@@ -305,7 +310,7 @@ impl DevicesState {
                 action.status = Some(format!("Added {}", instrument_kind.name()));
             }
             DevicesMsg::RemoveTrackInstrument(track_id) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.has_instrument = false;
                     track.instrument_kind = None;
                     track.sample_name = None;
@@ -321,7 +326,7 @@ impl DevicesState {
                 action.status = Some("Removed instrument".to_string());
             }
             DevicesMsg::SetInstrumentParam(track_id, param_index, value) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if param_index < track.instrument_params.len() {
                         track.instrument_params[param_index] = value;
                     }
@@ -348,14 +353,14 @@ impl DevicesState {
                     velocity: 100,
                     on: false,
                 });
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     let max_index = track.drum_rack_pads.len().saturating_sub(1);
                     track.selected_drum_pad = pad_index.min(max_index);
                 }
                 action.select_track = Some(track_id);
             }
             DevicesMsg::ClearDrumRackPad(track_id, pad_index) => {
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
                         *pad = UiDrumPad::default();
                     }
@@ -374,7 +379,7 @@ impl DevicesState {
                 value,
             } => {
                 let mut changed = false;
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
                         match param {
                             DrumPadParam::Gain => pad.gain = value.clamp(0.0, 2.0),
@@ -402,7 +407,7 @@ impl DevicesState {
                 one_shot,
             } => {
                 let mut changed = false;
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
                         pad.one_shot = one_shot;
                         changed = true;
@@ -419,7 +424,7 @@ impl DevicesState {
                 choke_group,
             } => {
                 let mut changed = false;
-                if let Some(track) = find_track_mut(tracks, master, track_id) {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     if let Some(pad) = track.drum_rack_pads.get_mut(pad_index) {
                         pad.choke_group = choke_group;
                         changed = true;
@@ -515,6 +520,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         assert!(tracks[0].effects.is_empty());
@@ -538,6 +544,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         let max = tracks[0].effects[0].descriptors[0].max;
@@ -554,6 +561,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         assert!(engine.0.is_empty());
@@ -570,6 +578,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         assert_eq!(tracks[0].selected_drum_pad, 3);
@@ -600,6 +609,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         assert_eq!(tracks[0].drum_rack_pads[0].gain, 2.0); // clamped
@@ -623,6 +633,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         // MIDI track opens on the Instruments tab.
@@ -635,6 +646,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             &mut crate::state::new_master_track(),
+            &mut [],
             44_100,
         );
         assert!(devices.context_menu.is_none());

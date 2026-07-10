@@ -24,6 +24,23 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        if self.state.view.edit_menu_open {
+            let keep_menu = matches!(
+                &message,
+                Message::Tick
+                    | Message::Transport(TransportMsg::EnginePosition(_))
+                    | Message::EngineMetering { .. }
+                    | Message::Transport(TransportMsg::EngineStopped)
+                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
+                    | Message::View(ViewMsg::ToggleEditMenu)
+                    | Message::View(ViewMsg::CursorMoved(_, _))
+                    | Message::View(ViewMsg::WindowResized(_, _))
+                    | Message::View(ViewMsg::MouseReleased)
+            );
+            if !keep_menu {
+                self.state.view.edit_menu_open = false;
+            }
+        }
         // Auto-dismiss context menu on any action except tick/engine/menu events
         if self.state.view.context_menu.is_some() {
             let keep_menu = matches!(
@@ -139,6 +156,7 @@ impl App {
                         &mut engine,
                         &mut self.state.arrangement.tracks,
                         &mut self.state.arrangement.master,
+                        &mut self.state.arrangement.buses,
                         sample_rate,
                     )
                 };
@@ -162,7 +180,11 @@ impl App {
             }
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self.state.view.snap_grid,
+                    snap_grid: self
+                        .state
+                        .view
+                        .grid_config()
+                        .effective_grid(self.active_editor_pixels_per_beat()),
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -186,6 +208,8 @@ impl App {
                         msg,
                         &mut engine,
                         &mut self.state.arrangement.tracks,
+                        &mut self.state.arrangement.master,
+                        &mut self.state.arrangement.buses,
                     )
                 };
                 if let Some(status) = action.status {
@@ -193,6 +217,9 @@ impl App {
                 }
             }
             Message::View(msg) => {
+                if matches!(&msg, ViewMsg::ToggleEditMenu) {
+                    self.state.project.file_menu_open = false;
+                }
                 let ctx = crate::domains::view::ViewCtx {
                     total_beats: self.state.total_beats(),
                 };
@@ -203,6 +230,9 @@ impl App {
                 return self.apply_view_action(action);
             }
             Message::Project(msg) => {
+                if matches!(&msg, ProjectMsg::ToggleFileMenu) {
+                    self.state.view.edit_menu_open = false;
+                }
                 let ctx = crate::domains::project::ProjectCtx {
                     snapshot_now: self.take_snapshot(),
                 };
@@ -728,10 +758,17 @@ impl App {
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
-                    if is_instrument && track_id.is_master() {
-                        // The master bus hosts effects only.
-                        self.state.status_text =
-                            format!("{loading_name} is an instrument; Master takes effects only");
+                    let is_bus = self
+                        .state
+                        .arrangement
+                        .buses
+                        .iter()
+                        .any(|b| b.id == track_id);
+                    if is_instrument && (track_id.is_master() || is_bus) {
+                        // Master and buses host effects only.
+                        self.state.status_text = format!(
+                            "{loading_name} is an instrument; this channel takes effects only"
+                        );
                         return Task::none();
                     }
                     if is_instrument {
@@ -860,7 +897,11 @@ impl App {
             // -- Quantize --
             Message::QuantizeAudioClip { track_id, clip_id } => {
                 self.state.view.context_menu = None;
-                let grid = self.state.view.snap_grid;
+                let grid = self
+                    .state
+                    .view
+                    .grid_config()
+                    .effective_grid(self.active_editor_pixels_per_beat());
                 return self.dispatch_audio_quantize(track_id, clip_id, grid);
             }
             Message::QuantizeAudioClipAt {

@@ -92,7 +92,7 @@ pub struct PianoRollCtx {
 impl Default for PianoRollCtx {
     fn default() -> Self {
         Self {
-            snap_grid: SnapGrid::Eighth,
+            snap_grid: SnapGrid::EIGHTH,
         }
     }
 }
@@ -783,7 +783,7 @@ mod tests {
             &mut engine,
             &mut tracks,
             PianoRollCtx {
-                snap_grid: SnapGrid::Quarter,
+                snap_grid: SnapGrid::QUARTER,
             },
         );
         let clip = &tracks[0].note_clips[0];

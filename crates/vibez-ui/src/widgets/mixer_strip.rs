@@ -10,14 +10,32 @@ use crate::theme as th;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::fader::FaderWidget;
 use crate::widgets::knob::KnobWidget;
+use crate::widgets::track_header::view_editable_channel_name;
 use crate::widgets::vu_meter::VuMeterWidget;
 use vibez_core::midi::TrackKind;
 
-/// Render a single mixer channel strip for a track. The master bus
-/// renders through the same strip: EQ, fader, and meter, minus the
-/// controls that make no sense on a sum (pan, mute, solo).
-pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message> {
-    let is_master = track.id.is_master();
+/// What kind of channel a mixer strip renders. Tracks get the full
+/// set plus send knobs; buses trade sends/solo for a RETURN badge;
+/// the master drops everything that makes no sense on a sum.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StripRole {
+    Track,
+    Bus,
+    Master,
+}
+
+/// Render a single mixer channel strip. `buses` drives the send
+/// knob section on regular track strips.
+pub fn view_mixer_strip<'a>(
+    track: &'a UiTrack,
+    selected: bool,
+    role: StripRole,
+    buses: &'a [UiTrack],
+    editing_name: bool,
+    edit_text: &'a str,
+    playhead_beat: f64,
+) -> Element<'a, Message> {
+    let is_master = role == StripRole::Master;
     let track_color = if is_master {
         th::accent()
     } else {
@@ -25,25 +43,53 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     };
 
     // Track name + type icon
-    let type_icon = if is_master {
-        icons::icon(icons::VOLUME_2).size(10).color(track_color)
-    } else {
-        match track.kind {
+    let type_icon = match role {
+        StripRole::Master => icons::icon(icons::VOLUME_2).size(10).color(track_color),
+        StripRole::Bus => icons::icon(icons::VOLUME_2).size(10).color(track_color),
+        StripRole::Track => match track.kind {
             TrackKind::Audio => icons::icon(icons::AUDIO_WAVEFORM)
                 .size(10)
                 .color(track_color),
             TrackKind::Instrument(_) | TrackKind::Midi => {
                 icons::icon(icons::MUSIC).size(10).color(track_color)
             }
-        }
+        },
     };
 
-    let name = text(&track.name)
-        .size(12)
-        .color(th::text())
-        .width(Length::Fill);
+    let name: Element<'a, Message> = if is_master {
+        text(&track.name)
+            .size(12)
+            .color(th::text())
+            .width(Length::Fill)
+            .into()
+    } else {
+        view_editable_channel_name(track, editing_name, edit_text, 12, th::text())
+    };
 
-    let name_row = row![type_icon, name]
+    // Tracks are deletable straight from the strip; the master is
+    // not, and buses carry their remove control on the RETURN badge.
+    let delete_el: Element<'a, Message> = if role == StripRole::Track {
+        button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
+            .on_press(Message::remove_track(track.id))
+            .padding([1, 3])
+            .style(|_theme: &Theme, status| {
+                let tc = match status {
+                    button::Status::Hovered | button::Status::Pressed => th::danger(),
+                    _ => th::text_dim(),
+                };
+                button::Style {
+                    background: None,
+                    text_color: tc,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            })
+            .into()
+    } else {
+        text("").size(9).into()
+    };
+
+    let name_row = row![type_icon, name, delete_el]
         .spacing(4)
         .align_y(iced::Alignment::Center);
 
@@ -143,8 +189,6 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
         }
     };
 
-    let mute_solo_row = row![mute_btn, solo_btn].spacing(4);
-
     // Fader + meter side by side
     let fader_meter = row![fader_canvas, meter_canvas]
         .spacing(2)
@@ -167,16 +211,63 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
                 ..Default::default()
             });
         column![name_row, eq_section, badge, fader_meter, gain_label]
-    } else {
+    } else if role == StripRole::Bus {
+        // Return channel: RETURN badge + remove control in place of
+        // sends; balance pan, mute, and solo still apply.
+        let badge = container(text("RETURN").size(8).color(track_color))
+            .padding([3, 6])
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(th::bg_elevated().into()),
+                border: iced::Border {
+                    color: th::darken(track_color, 0.5),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        let remove_btn = button(icons::icon(icons::X).size(9).color(th::text_dim()))
+            .on_press(Message::remove_bus(track.id))
+            .padding([2, 5])
+            .style(|_theme: &Theme, status| {
+                let (bg, tc) = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        (Some(th::bg_hover().into()), th::danger())
+                    }
+                    _ => (None, th::text_dim()),
+                };
+                button::Style {
+                    background: bg,
+                    text_color: tc,
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+        let badge_row = row![badge, remove_btn]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
         column![
             name_row,
             eq_section,
+            badge_row,
             knob_canvas,
             pan_label,
             fader_meter,
             gain_label,
-            mute_solo_row,
+            row![mute_btn, solo_btn].spacing(4),
         ]
+    } else {
+        let mut col = column![name_row, eq_section];
+        if !buses.is_empty() {
+            col = col.push(view_sends(track, buses, playhead_beat));
+        }
+        col.push(knob_canvas)
+            .push(pan_label)
+            .push(fader_meter)
+            .push(gain_label)
+            .push(row![mute_btn, solo_btn].spacing(4))
     }
     .spacing(4)
     .padding(8)
@@ -203,6 +294,72 @@ pub fn view_mixer_strip(track: &UiTrack, selected: bool) -> Element<'_, Message>
     iced::widget::mouse_area(body)
         .on_press(Message::select_track(track.id))
         .into()
+}
+
+/// Send section on a track strip: one knob per bus, bus-colored,
+/// wrapped three to a row under a SENDS header.
+fn view_sends<'a>(
+    track: &'a UiTrack,
+    buses: &'a [UiTrack],
+    playhead_beat: f64,
+) -> Element<'a, Message> {
+    let mut section = column![text("SENDS").size(7).color(th::text_muted())]
+        .spacing(2)
+        .align_x(iced::Alignment::Center);
+    for chunk in buses.chunks(3) {
+        let mut knobs = row![].spacing(4).align_y(iced::Alignment::Center);
+        for bus in chunk {
+            let amount = effective_send_amount(track, bus.id, playhead_beat);
+            let letter = bus.name.chars().next().unwrap_or('?');
+            let knob = EffectKnobWidget::for_send(
+                track.id,
+                bus.id,
+                amount,
+                th::track_color(bus.color_index),
+            );
+            let knob_canvas: Element<'a, Message> = canvas(knob)
+                .width(Length::Fixed(20.0))
+                .height(Length::Fixed(20.0))
+                .into();
+            knobs = knobs.push(
+                column![
+                    knob_canvas,
+                    text(letter.to_string()).size(7).color(th::text_dim())
+                ]
+                .spacing(0)
+                .align_x(iced::Alignment::Center),
+            );
+        }
+        section = section.push(knobs);
+    }
+    container(section).padding([2, 0]).into()
+}
+
+fn effective_send_amount(
+    track: &UiTrack,
+    bus_id: vibez_core::id::TrackId,
+    playhead_beat: f64,
+) -> f32 {
+    track
+        .automation
+        .iter()
+        .find_map(|lane| match lane.target {
+            vibez_core::automation::AutomationTarget::Send { bus_id: target }
+                if target == bus_id =>
+            {
+                lane.value_at(playhead_beat)
+            }
+            _ => None,
+        })
+        .or_else(|| {
+            track
+                .sends
+                .iter()
+                .find(|(target, _)| *target == bus_id)
+                .map(|(_, amount)| *amount)
+        })
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0)
 }
 
 /// SSL-style channel EQ: the strip renders the track's first
@@ -457,5 +614,36 @@ fn format_gain_db(gain: f32) -> String {
     } else {
         let db = 20.0 * gain.log10();
         format!("{db:+.1}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn automated_send_value_overrides_the_manual_mixer_value() {
+        let track_id = TrackId::new();
+        let bus_id = TrackId::new();
+        let mut track = UiTrack::new(track_id, "Audio".to_string(), 0);
+        track.sends.push((bus_id, 0.25));
+        let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id });
+        lane.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: 0.1,
+            curve: 0.0,
+        });
+        lane.insert_point(AutomationPoint {
+            beat: 4.0,
+            value: 0.9,
+            curve: 0.0,
+        });
+        track.automation.push(lane);
+
+        let displayed = effective_send_amount(&track, bus_id, 2.0);
+
+        assert!((displayed - 0.5).abs() < 1e-6);
     }
 }

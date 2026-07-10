@@ -55,6 +55,22 @@ pub(crate) fn global_key_handler(
         return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
     }
 
+    if modifiers.command() {
+        if let iced::keyboard::Key::Character(ref c) = key {
+            let grid_message = match c.as_str() {
+                "1" => Some(ViewMsg::NarrowGrid),
+                "2" => Some(ViewMsg::WidenGrid),
+                "3" => Some(ViewMsg::ToggleTripletGrid),
+                "4" => Some(ViewMsg::ToggleSnapToGrid),
+                "5" => Some(ViewMsg::ToggleAdaptiveGrid),
+                _ => None,
+            };
+            if let Some(message) = grid_message {
+                return Some(Message::View(message));
+            }
+        }
+    }
+
     if !modifiers.control() {
         return None;
     }
@@ -66,6 +82,9 @@ pub(crate) fn global_key_handler(
             Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
         }
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
+            "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
+            "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
+            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead)),
             "t" | "T" => {
                 if modifiers.shift() {
                     Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
@@ -76,7 +95,13 @@ pub(crate) fn global_key_handler(
             "m" => Some(Message::create_clip_from_selection()),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
-            "l" => Some(Message::Transport(TransportMsg::ToggleArrangementLoop)),
+            "l" | "L" => {
+                if modifiers.shift() {
+                    Some(Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop))
+                } else {
+                    Some(Message::Transport(TransportMsg::ToggleArrangementLoop))
+                }
+            }
             "0" => Some(Message::View(ViewMsg::ZoomToFit)),
             "z" | "Z" => {
                 if modifiers.shift() {
@@ -89,5 +114,50 @@ pub(crate) fn global_key_handler(
             _ => None,
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_number_shortcuts_control_the_shared_grid() {
+        use iced::keyboard::{Key, Modifiers};
+
+        #[cfg(target_os = "macos")]
+        let command = Modifiers::LOGO;
+        #[cfg(not(target_os = "macos"))]
+        let command = Modifiers::CTRL;
+
+        let expected = [
+            ViewMsg::NarrowGrid,
+            ViewMsg::WidenGrid,
+            ViewMsg::ToggleTripletGrid,
+            ViewMsg::ToggleSnapToGrid,
+            ViewMsg::ToggleAdaptiveGrid,
+        ];
+        for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
+            let message = global_key_handler(Key::Character(number.into()), command);
+            assert!(matches!(
+                (message, expected),
+                (
+                    Some(Message::View(ViewMsg::NarrowGrid)),
+                    ViewMsg::NarrowGrid
+                ) | (Some(Message::View(ViewMsg::WidenGrid)), ViewMsg::WidenGrid)
+                    | (
+                        Some(Message::View(ViewMsg::ToggleTripletGrid)),
+                        ViewMsg::ToggleTripletGrid
+                    )
+                    | (
+                        Some(Message::View(ViewMsg::ToggleSnapToGrid)),
+                        ViewMsg::ToggleSnapToGrid
+                    )
+                    | (
+                        Some(Message::View(ViewMsg::ToggleAdaptiveGrid)),
+                        ViewMsg::ToggleAdaptiveGrid
+                    )
+            ));
+        }
     }
 }

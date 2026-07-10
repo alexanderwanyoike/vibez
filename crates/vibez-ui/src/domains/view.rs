@@ -18,6 +18,11 @@ pub enum ViewMsg {
     ZoomToFit,
     ScrollArrangement(f64),
     SetSnapGrid(SnapGrid),
+    NarrowGrid,
+    WidenGrid,
+    ToggleTripletGrid,
+    ToggleSnapToGrid,
+    ToggleAdaptiveGrid,
     CursorMoved(f32, f32),
     WindowResized(f32, f32),
     MouseReleased,
@@ -27,7 +32,12 @@ pub enum ViewMsg {
         target: ContextMenuTarget,
     },
     DismissContextMenu,
-    StartEditingTrackName(TrackId),
+    ToggleEditMenu,
+    DismissEditMenu,
+    StartEditingTrackName {
+        track_id: TrackId,
+        name: String,
+    },
     StartEditingClipName(TrackId, ClipId),
     EditNameText(String),
     FinishEditing,
@@ -102,6 +112,31 @@ impl ViewState {
             }
             ViewMsg::SetSnapGrid(grid) => {
                 self.snap_grid = grid;
+                self.adaptive_grid = false;
+                self.adaptive_grid_bias = 0;
+            }
+            ViewMsg::NarrowGrid => {
+                if self.adaptive_grid {
+                    self.adaptive_grid_bias = (self.adaptive_grid_bias + 1).min(6);
+                } else {
+                    self.snap_grid = self.snap_grid.narrower();
+                }
+            }
+            ViewMsg::WidenGrid => {
+                if self.adaptive_grid {
+                    self.adaptive_grid_bias = (self.adaptive_grid_bias - 1).max(-6);
+                } else {
+                    self.snap_grid = self.snap_grid.wider();
+                }
+            }
+            ViewMsg::ToggleTripletGrid => {
+                self.snap_grid = self.snap_grid.toggle_triplet();
+            }
+            ViewMsg::ToggleSnapToGrid => {
+                self.snap_enabled = !self.snap_enabled;
+            }
+            ViewMsg::ToggleAdaptiveGrid => {
+                self.adaptive_grid = !self.adaptive_grid;
             }
             ViewMsg::CursorMoved(x, y) => {
                 self.cursor_x = x;
@@ -141,12 +176,16 @@ impl ViewState {
             ViewMsg::DismissContextMenu => {
                 self.context_menu = None;
             }
-            ViewMsg::StartEditingTrackName(track_id) => {
-                if let Some(track) = find_track(tracks, track_id) {
-                    self.edit_name_text = track.name.clone();
-                    self.editing_track_name = Some(track_id);
-                    self.editing_clip_name = None;
-                }
+            ViewMsg::ToggleEditMenu => {
+                self.edit_menu_open = !self.edit_menu_open;
+            }
+            ViewMsg::DismissEditMenu => {
+                self.edit_menu_open = false;
+            }
+            ViewMsg::StartEditingTrackName { track_id, name } => {
+                self.edit_name_text = name;
+                self.editing_track_name = Some(track_id);
+                self.editing_clip_name = None;
             }
             ViewMsg::StartEditingClipName(track_id, clip_id) => {
                 self.context_menu = None;
@@ -250,7 +289,10 @@ mod tests {
         track.name = "Old".to_string();
         let tracks = vec![track];
         v.update(
-            ViewMsg::StartEditingTrackName(tid),
+            ViewMsg::StartEditingTrackName {
+                track_id: tid,
+                name: tracks[0].name.clone(),
+            },
             &tracks,
             ViewCtx::default(),
         );
@@ -266,6 +308,57 @@ mod tests {
             Some(RenameRequest::Track(tid, "New".to_string()))
         );
         assert_eq!(v.editing_track_name, None);
+    }
+
+    #[test]
+    fn starts_editing_a_channel_name_without_a_regular_track_lookup() {
+        let mut v = ViewState::default();
+        let bus_id = TrackId::new();
+
+        v.update(
+            ViewMsg::StartEditingTrackName {
+                track_id: bus_id,
+                name: "A Return".to_string(),
+            },
+            &[],
+            ViewCtx::default(),
+        );
+
+        assert_eq!(v.editing_track_name, Some(bus_id));
+        assert_eq!(v.edit_name_text, "A Return");
+    }
+
+    #[test]
+    fn grid_commands_update_the_shared_editor_grid() {
+        let mut v = ViewState::default();
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
+        assert!(v.snap_enabled);
+        assert!(!v.adaptive_grid);
+
+        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::SIXTEENTH);
+        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
+        v.update(ViewMsg::ToggleTripletGrid, &[], ViewCtx::default());
+        assert_eq!(v.snap_grid, SnapGrid::EIGHTH.triplet());
+        v.update(ViewMsg::ToggleSnapToGrid, &[], ViewCtx::default());
+        assert!(!v.snap_enabled);
+        v.update(ViewMsg::ToggleAdaptiveGrid, &[], ViewCtx::default());
+        assert!(v.adaptive_grid);
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::QUARTER.triplet()
+        );
+        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::EIGHTH.triplet()
+        );
+        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        assert_eq!(
+            v.grid_config().effective_grid(20.0),
+            SnapGrid::QUARTER.triplet()
+        );
     }
 
     #[test]

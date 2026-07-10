@@ -82,6 +82,10 @@ pub struct EngineTrack {
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
+    /// Post-fader send amounts into bus channels: `(bus id, 0..1)`.
+    /// Only regular tracks send; buses and the master never do, so
+    /// the routing graph stays acyclic by construction.
+    pub sends: Vec<(TrackId, f32)>,
     pub note_clips: Vec<EngineNoteClip>,
     /// Automation lanes, evaluated once per render segment.
     pub automation: Vec<vibez_core::automation::AutomationLane>,
@@ -110,6 +114,7 @@ impl EngineTrack {
             solo: false,
             mix_buffer: Vec::new(),
             effects: Vec::new(),
+            sends: Vec::new(),
             note_clips: Vec::new(),
             automation: Vec::new(),
             instrument: None,
@@ -133,7 +138,9 @@ impl EngineTrack {
                 continue;
             };
             match lane.target {
-                AutomationTarget::TrackGain => gain = Some(value),
+                // Lanes are normalized 0..1; gain's native range is
+                // 0..2 (unity at lane 0.5), pan is already 0..1.
+                AutomationTarget::TrackGain => gain = Some(value * 2.0),
                 AutomationTarget::TrackPan => pan = Some(value),
                 AutomationTarget::EffectParam {
                     effect_id,
@@ -159,6 +166,15 @@ impl EngineTrack {
                     }
                 }
                 AutomationTarget::PluginParam { .. } => {}
+                AutomationTarget::Send { bus_id } => {
+                    // Send range is native 0..1, so the normalized
+                    // lane value applies directly. Written in place
+                    // like effect params.
+                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                        Some(send) => send.1 = value,
+                        None => self.sends.push((bus_id, value)),
+                    }
+                }
             }
         }
         (gain, pan)
@@ -622,19 +638,39 @@ pub fn equal_power_pan(pan: f32) -> (f32, f32) {
     (angle.cos(), angle.sin())
 }
 
+/// Stereo balance law for channels that carry already-panned
+/// material (buses): center passes both channels at unity, off-
+/// center attenuates the far side. Equal-power panning here would
+/// tax every centered return 3 dB.
+pub fn balance_pan(pan: f32) -> (f32, f32) {
+    let pan = pan.clamp(0.0, 1.0);
+    (((1.0 - pan) * 2.0).min(1.0), (pan * 2.0).min(1.0))
+}
+
 /// Returns `true` if any track in the slice has solo enabled.
 pub fn any_solo(tracks: &[EngineTrack]) -> bool {
     tracks.iter().any(|t| t.solo)
 }
 
-/// Calculate the total length of audio across all tracks (max clip end position).
-pub fn calculate_total_length(tracks: &[EngineTrack]) -> u64 {
-    tracks
+/// Calculate the total arrangement length across audio and note clips.
+pub fn calculate_total_length(tracks: &[EngineTrack], samples_per_beat: f64) -> u64 {
+    let audio_end = tracks
         .iter()
         .flat_map(|t| t.clips.iter())
         .map(|c| c.end_position())
         .max()
-        .unwrap_or(0)
+        .unwrap_or(0);
+    let note_end = if samples_per_beat.is_finite() && samples_per_beat > 0.0 {
+        tracks
+            .iter()
+            .flat_map(|t| t.note_clips.iter())
+            .map(|c| ((c.position_beats + c.duration_beats) * samples_per_beat).round() as u64)
+            .max()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    audio_end.max(note_end)
 }
 
 #[cfg(test)]
@@ -668,6 +704,16 @@ mod tests {
         let expected = std::f32::consts::FRAC_1_SQRT_2; // ~0.707
         assert!((l - expected).abs() < 1e-6);
         assert!((r - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn balance_law_passes_center_at_unity() {
+        assert_eq!(balance_pan(0.5), (1.0, 1.0));
+        assert_eq!(balance_pan(0.0), (1.0, 0.0));
+        assert_eq!(balance_pan(1.0), (0.0, 1.0));
+        let (l, r) = balance_pan(0.25);
+        assert_eq!(l, 1.0);
+        assert!((r - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -757,13 +803,29 @@ mod tests {
             loop_end: 0,
         });
 
-        assert_eq!(calculate_total_length(&tracks), 150);
+        assert_eq!(calculate_total_length(&tracks, 22_050.0), 150);
     }
 
     #[test]
     fn total_length_empty_tracks() {
         let tracks: Vec<EngineTrack> = vec![];
-        assert_eq!(calculate_total_length(&tracks), 0);
+        assert_eq!(calculate_total_length(&tracks, 22_050.0), 0);
+    }
+
+    #[test]
+    fn total_length_includes_note_clips() {
+        let mut tracks = vec![EngineTrack::new(TrackId::new())];
+        tracks[0].note_clips.push(EngineNoteClip {
+            id: ClipId::new(),
+            position_beats: 2.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        });
+
+        assert_eq!(calculate_total_length(&tracks, 22_050.0), 132_300);
     }
 
     #[test]

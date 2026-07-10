@@ -8,6 +8,58 @@ use crate::theme;
 
 use super::*;
 
+fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
+    if clip_width <= 40.0 {
+        return None;
+    }
+    const HORIZONTAL_PADDING: f32 = 8.0;
+    const LOOP_ICON_WIDTH: f32 = 18.0;
+    const APPROX_GLYPH_WIDTH: f32 = 6.5;
+    let reserved = HORIZONTAL_PADDING
+        + if loop_icon_visible {
+            LOOP_ICON_WIDTH
+        } else {
+            0.0
+        };
+    let max_chars = ((clip_width - reserved).max(0.0) / APPROX_GLYPH_WIDTH).floor() as usize;
+    if max_chars < 4 {
+        return None;
+    }
+    if name.chars().count() <= max_chars {
+        Some(name.to_string())
+    } else {
+        let prefix: String = name.chars().take(max_chars - 2).collect();
+        Some(format!("{prefix}.."))
+    }
+}
+
+fn visible_pixel_columns(
+    clip_x: f32,
+    clip_width: f32,
+    viewport_width: f32,
+) -> std::ops::Range<usize> {
+    let pixels = clip_width.max(0.0) as usize;
+    let start = (-clip_x).ceil().max(0.0) as usize;
+    let end = (viewport_width - clip_x).ceil().max(0.0) as usize;
+    let start = start.min(pixels);
+    let end = end.min(pixels);
+    if start < end {
+        start..end
+    } else {
+        0..0
+    }
+}
+
+fn visible_title_bounds(
+    clip_x: f32,
+    title_width: f32,
+    viewport_width: f32,
+) -> Option<(f32, f32, f32)> {
+    let left = clip_x.max(0.0);
+    let right = (clip_x + title_width).min(viewport_width);
+    (right > left).then(|| (left, right - left, (clip_x + 4.0).max(left + 4.0)))
+}
+
 impl TrackClipCanvas {
     pub(super) fn draw_impl(
         &self,
@@ -34,60 +86,36 @@ impl TrackClipCanvas {
         };
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), bg_color);
 
-        // Grid lines — adaptive density matching ruler
+        // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
             let visible = w as f64 / ppb as f64;
-            let start = self.scroll_offset_beats.floor().max(0.0) as i64;
-            let end = (self.scroll_offset_beats + visible).ceil() as i64 + 1;
+            let grid = self.grid.effective_grid(ppb);
+            let step = grid.beat_size();
+            let start = (self.scroll_offset_beats / step).floor().max(0.0) as i64;
+            let end = ((self.scroll_offset_beats + visible) / step).ceil() as i64 + 1;
 
-            for beat_i in start..end {
-                let x = self.beat_to_x(beat_i as f64);
+            for grid_i in start..end {
+                let beat = grid_i as f64 * step;
+                let x = self.beat_to_x(beat);
                 if x < -1.0 || x > w + 1.0 {
                     continue;
                 }
-                let is_bar = beat_i % 4 == 0;
-
-                if is_bar {
-                    // Bar lines always visible
-                    let vline =
-                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                    frame.stroke(
-                        &vline,
-                        canvas::Stroke::default()
-                            .with_color(theme::border())
-                            .with_width(1.0),
-                    );
-                } else if ppb >= 40.0 {
-                    // Beat lines only at medium+ zoom
-                    let vline =
-                        canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
-                    frame.stroke(
-                        &vline,
-                        canvas::Stroke::default()
-                            .with_color(theme::divider())
-                            .with_width(0.5),
-                    );
-                }
-
-                // Sub-beat lines at high zoom (≥80 ppb)
-                if ppb >= 80.0 {
-                    for sub in 1..4 {
-                        let sub_beat = beat_i as f64 + sub as f64 * 0.25;
-                        let sub_x = self.beat_to_x(sub_beat);
-                        if sub_x > 0.0 && sub_x < w {
-                            let sub_line = canvas::Path::line(
-                                iced::Point::new(sub_x, 0.0),
-                                iced::Point::new(sub_x, h),
-                            );
-                            frame.stroke(
-                                &sub_line,
-                                canvas::Stroke::default()
-                                    .with_color(theme::divider())
-                                    .with_width(0.3),
-                            );
-                        }
-                    }
-                }
+                let on_bar = (beat / 4.0 - (beat / 4.0).round()).abs() < 1e-6;
+                let on_beat = (beat - beat.round()).abs() < 1e-6;
+                let (color, width) = if on_bar {
+                    (theme::grid_bar(), 1.0)
+                } else if on_beat {
+                    (theme::grid_beat(), 0.75)
+                } else {
+                    (theme::grid_sub(), 0.5)
+                };
+                let line = canvas::Path::line(iced::Point::new(x, 0.0), iced::Point::new(x, h));
+                frame.stroke(
+                    &line,
+                    canvas::Stroke::default()
+                        .with_color(color)
+                        .with_width(width),
+                );
             }
         }
 
@@ -127,11 +155,8 @@ impl TrackClipCanvas {
                     let center_y = body_top + body_h / 2.0;
                     let half_h = body_h / 2.0 - 2.0;
                     let pixels = clip_w as usize;
-                    for px in 0..pixels {
+                    for px in visible_pixel_columns(clip_x, clip_w, w) {
                         let screen_x = clip_x + px as f32;
-                        if screen_x < 0.0 || screen_x > w {
-                            continue;
-                        }
                         let peak_idx = px * clip.peaks.len() / pixels.max(1);
                         if peak_idx >= clip.peaks.len() {
                             break;
@@ -217,14 +242,31 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if clip_w > 40.0 {
-                    frame.fill_text(canvas::Text {
-                        content: clip.name.clone(),
-                        position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::text(),
-                        size: iced::Pixels(11.0),
-                        ..Default::default()
-                    });
+                let title_width = (clip_w - if clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                if let Some((title_x, visible_title_width, text_x)) =
+                    visible_title_bounds(clip_x, title_width, w)
+                {
+                    if let Some(title) =
+                        fit_clip_title(clip.name.as_str(), visible_title_width, clip.loop_enabled)
+                    {
+                        frame.with_clip(
+                            Rectangle {
+                                x: title_x,
+                                y: clip_y,
+                                width: visible_title_width,
+                                height: CLIP_TITLE_HEIGHT,
+                            },
+                            |title_frame| {
+                                title_frame.fill_text(canvas::Text {
+                                    content: title,
+                                    position: iced::Point::new(text_x, clip_y + 3.0),
+                                    color: theme::text(),
+                                    size: iced::Pixels(11.0),
+                                    ..Default::default()
+                                });
+                            },
+                        );
+                    }
                 }
 
                 // Diagonal stripe overlay when the clip's warp is
@@ -426,14 +468,34 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if clip_w > 40.0 {
-                    frame.fill_text(canvas::Text {
-                        content: note_clip.name.clone(),
-                        position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                        color: theme::text(),
-                        size: iced::Pixels(11.0),
-                        ..Default::default()
-                    });
+                let title_width =
+                    (clip_w - if note_clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                if let Some((title_x, visible_title_width, text_x)) =
+                    visible_title_bounds(clip_x, title_width, w)
+                {
+                    if let Some(title) = fit_clip_title(
+                        note_clip.name.as_str(),
+                        visible_title_width,
+                        note_clip.loop_enabled,
+                    ) {
+                        frame.with_clip(
+                            Rectangle {
+                                x: title_x,
+                                y: clip_y,
+                                width: visible_title_width,
+                                height: CLIP_TITLE_HEIGHT,
+                            },
+                            |title_frame| {
+                                title_frame.fill_text(canvas::Text {
+                                    content: title,
+                                    position: iced::Point::new(text_x, clip_y + 3.0),
+                                    color: theme::text(),
+                                    size: iced::Pixels(11.0),
+                                    ..Default::default()
+                                });
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -541,5 +603,54 @@ impl TrackClipCanvas {
         }
 
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fit_clip_title, visible_pixel_columns, visible_title_bounds};
+
+    #[test]
+    fn clip_title_is_constrained_to_its_visible_width() {
+        assert_eq!(
+            fit_clip_title("Kick.wav", 100.0, false),
+            Some("Kick.wav".into())
+        );
+        assert_eq!(
+            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, false),
+            Some("OTH_128_H..".into())
+        );
+        assert_eq!(fit_clip_title("Kick.wav", 40.0, false), None);
+    }
+
+    #[test]
+    fn loop_icon_reserves_title_space() {
+        assert_eq!(
+            fit_clip_title("OTH_128_Hub_Full.wav", 80.0, true),
+            Some("OTH_12..".into())
+        );
+    }
+
+    #[test]
+    fn waveform_iteration_is_limited_to_visible_clip_columns() {
+        assert_eq!(
+            visible_pixel_columns(-10_000.0, 20_000.0, 1_000.0),
+            10_000..11_000
+        );
+        assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
+        assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
+    }
+
+    #[test]
+    fn clip_title_bounds_never_escape_the_arrangement_viewport() {
+        assert_eq!(
+            visible_title_bounds(-200.0, 400.0, 800.0),
+            Some((0.0, 200.0, 4.0))
+        );
+        assert_eq!(
+            visible_title_bounds(100.0, 200.0, 800.0),
+            Some((100.0, 200.0, 104.0))
+        );
+        assert_eq!(visible_title_bounds(900.0, 200.0, 800.0), None);
     }
 }

@@ -14,7 +14,7 @@ use vibez_core::midi::TrackKind;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, ArrangementState, UiClip, UiNoteClip, UiTrack};
+use crate::state::{ArrangementSelection, ArrangementState, UiNoteClip, UiTrack};
 
 /// Messages the arrangement domain handles (track tranche).
 #[derive(Debug, Clone)]
@@ -34,6 +34,16 @@ pub enum ArrangementMsg {
     SetTrackPan(TrackId, f32),
     SetTrackMute(TrackId),
     SetTrackSolo(TrackId),
+    /// Add a return bus (mixer-only channel).
+    AddBus,
+    /// Remove a bus and every send pointing at it.
+    RemoveBus(TrackId),
+    /// Set a track's post-fader send amount into a bus.
+    SetSend {
+        track_id: TrackId,
+        bus_id: TrackId,
+        amount: f32,
+    },
     EngineTrackMeter {
         track_id: TrackId,
         peak_l: f32,
@@ -82,6 +92,14 @@ pub enum ArrangementMsg {
     SetSelectionAsLoop,
     DeleteSelectedClip,
     DuplicateSelectedClip,
+    CopySelectedClips,
+    CutSelectedClips,
+    PasteClipsAtPlayhead,
+    ToggleSelectedClipLoop,
+    ResizeSelectedClips {
+        anchor: ArrangementSelection,
+        new_duration_beats: f64,
+    },
     DuplicateNoteClip(TrackId, ClipId),
     SplitAudioClip {
         track_id: TrackId,
@@ -138,6 +156,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::SetTimeSelection { .. }
                 | ArrangementMsg::SetTimeSelectionActive(_)
                 | ArrangementMsg::SetSelectionAsLoop
+                | ArrangementMsg::CopySelectedClips
                 | ArrangementMsg::ClipBpmInputChanged { .. }
         )
     }
@@ -205,7 +224,10 @@ impl ArrangementState {
         if track_id.is_master() {
             return Some(&self.master);
         }
-        self.tracks.iter().find(|t| t.id == track_id)
+        self.tracks
+            .iter()
+            .chain(self.buses.iter())
+            .find(|t| t.id == track_id)
     }
 
     /// First track number with no name clash for the given prefix.
@@ -224,7 +246,10 @@ impl ArrangementState {
         if track_id.is_master() {
             return Some(&mut self.master);
         }
-        self.tracks.iter_mut().find(|t| t.id == track_id)
+        self.tracks
+            .iter_mut()
+            .chain(self.buses.iter_mut())
+            .find(|t| t.id == track_id)
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
@@ -371,6 +396,54 @@ impl ArrangementState {
                     track.solo = !track.solo;
                     let solo = track.solo;
                     engine.send(EngineCommand::SetTrackSolo(track_id, solo));
+                }
+            }
+            ArrangementMsg::AddBus => {
+                let letter = (b'A' + (self.buses.len() % 26) as u8) as char;
+                let id = TrackId::new();
+                let name = format!("{letter} Return");
+                engine.send(EngineCommand::AddBus(id, name.clone()));
+                // Offset into the palette so the first buses don't
+                // mirror the first tracks' colors.
+                let color_index = ((self.buses.len() + 4) % 8) as u8;
+                let mut bus = UiTrack::new(id, name.clone(), color_index);
+                attach_channel_eq(engine, &mut bus);
+                self.buses.push(bus);
+                self.selected_track = Some(id);
+                action.status = Some(format!("Added {name}"));
+            }
+            ArrangementMsg::RemoveBus(bus_id) => {
+                engine.send(EngineCommand::RemoveBus(bus_id));
+                self.buses.retain(|b| b.id != bus_id);
+                for track in &mut self.tracks {
+                    track.sends.retain(|(b, _)| *b != bus_id);
+                    track.automation.retain(|lane| {
+                        lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
+                    });
+                }
+                if self.selected_track == Some(bus_id) {
+                    self.selected_track = self.tracks.first().map(|t| t.id);
+                }
+                // Plugin GUIs on the bus die with its devices.
+                action.close_track_guis = Some(bus_id);
+                action.status = Some("Removed bus".to_string());
+            }
+            ArrangementMsg::SetSend {
+                track_id,
+                bus_id,
+                amount,
+            } => {
+                let amount = amount.clamp(0.0, 1.0);
+                if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                    match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                        Some(send) => send.1 = amount,
+                        None => track.sends.push((bus_id, amount)),
+                    }
+                    engine.send(EngineCommand::SetSend {
+                        track_id,
+                        bus_id,
+                        amount,
+                    });
                 }
             }
             ArrangementMsg::EngineTrackMeter {
@@ -693,60 +766,31 @@ impl ArrangementState {
                     for selection in &selections {
                         match selection {
                             ArrangementSelection::AudioClip { track_id, clip_id } => {
-                                let mut dup_data = None;
-                                if let Some(track) = self.find_track(*track_id) {
-                                    if let Some(clip) =
-                                        track.clips.iter().find(|c| c.id == *clip_id)
-                                    {
-                                        let new_pos = clip.position + clip.duration;
-                                        dup_data = Some((
-                                            Arc::clone(&clip.audio),
-                                            clip.name.clone(),
-                                            clip.source.clone(),
-                                            new_pos,
-                                            clip.source_offset,
-                                            clip.duration,
-                                        ));
-                                    }
-                                }
-                                if let Some((
-                                    audio,
-                                    name,
-                                    source,
-                                    position,
-                                    source_offset,
-                                    duration,
-                                )) = dup_data
-                                {
-                                    let new_id = ClipId::new();
+                                let duplicate = self.find_track(*track_id).and_then(|track| {
+                                    track.clips.iter().find(|c| c.id == *clip_id).map(|clip| {
+                                        let mut duplicate = clip.clone();
+                                        duplicate.id = ClipId::new();
+                                        duplicate.name = clip.name.clone();
+                                        duplicate.position =
+                                            clip.position.saturating_add(clip.duration);
+                                        duplicate
+                                    })
+                                });
+                                if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddClip {
                                         track_id: *track_id,
-                                        clip_id: new_id,
-                                        audio: Arc::clone(&audio),
-                                        position,
-                                        source_offset,
-                                        duration,
-                                        loop_enabled: false,
-                                        loop_start: 0,
-                                        loop_end: 0,
+                                        clip_id: duplicate.id,
+                                        audio: Arc::clone(&duplicate.audio),
+                                        position: duplicate.position,
+                                        source_offset: duplicate.source_offset,
+                                        duration: duplicate.duration,
+                                        loop_enabled: duplicate.loop_enabled,
+                                        loop_start: duplicate.loop_start,
+                                        loop_end: duplicate.loop_end,
                                     });
+                                    let new_id = duplicate.id;
                                     if let Some(track) = self.find_track_mut(*track_id) {
-                                        track.clips.push(UiClip {
-                                            id: new_id,
-                                            name: format!("{name} (copy)"),
-                                            audio,
-                                            source,
-                                            position,
-                                            source_offset,
-                                            duration,
-                                            loop_enabled: false,
-                                            loop_start: 0,
-                                            loop_end: 0,
-                                            original_bpm: None,
-                                            warped: false,
-                                            warped_to_bpm: None,
-                                            original_audio: None,
-                                        });
+                                        track.clips.push(duplicate);
                                     }
                                     new_selections.insert(ArrangementSelection::AudioClip {
                                         track_id: *track_id,
@@ -755,50 +799,40 @@ impl ArrangementState {
                                 }
                             }
                             ArrangementSelection::NoteClip { track_id, clip_id } => {
-                                // Duplicate note clip inline
-                                let mut dup_data = None;
-                                if let Some(track) = self.find_track(*track_id) {
-                                    if let Some(clip) =
-                                        track.note_clips.iter().find(|c| c.id == *clip_id)
-                                    {
-                                        dup_data = Some((
-                                            clip.name.clone(),
-                                            clip.position_beats + clip.duration_beats,
-                                            clip.duration_beats,
-                                            clip.notes.clone(),
-                                        ));
-                                    }
-                                }
-                                if let Some((name, new_pos, dur, notes)) = dup_data {
-                                    let new_id = ClipId::new();
+                                let duplicate =
+                                    self.find_track(*track_id).and_then(|track| {
+                                        track.note_clips.iter().find(|c| c.id == *clip_id).map(
+                                            |clip| {
+                                                let mut duplicate = clip.clone();
+                                                duplicate.id = ClipId::new();
+                                                duplicate.name = clip.name.clone();
+                                                duplicate.position_beats =
+                                                    clip.position_beats + clip.duration_beats;
+                                                duplicate.selected_notes.clear();
+                                                duplicate
+                                            },
+                                        )
+                                    });
+                                if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddNoteClip {
                                         track_id: *track_id,
-                                        clip_id: new_id,
-                                        position_beats: new_pos,
-                                        duration_beats: dur,
-                                        loop_enabled: false,
-                                        loop_start_beats: 0.0,
-                                        loop_end_beats: 0.0,
+                                        clip_id: duplicate.id,
+                                        position_beats: duplicate.position_beats,
+                                        duration_beats: duplicate.duration_beats,
+                                        loop_enabled: duplicate.loop_enabled,
+                                        loop_start_beats: duplicate.loop_start_beats,
+                                        loop_end_beats: duplicate.loop_end_beats,
                                     });
-                                    for note in &notes {
+                                    for note in &duplicate.notes {
                                         engine.send(EngineCommand::AddNote {
                                             track_id: *track_id,
-                                            clip_id: new_id,
+                                            clip_id: duplicate.id,
                                             note: *note,
                                         });
                                     }
+                                    let new_id = duplicate.id;
                                     if let Some(track) = self.find_track_mut(*track_id) {
-                                        track.note_clips.push(UiNoteClip {
-                                            id: new_id,
-                                            name: format!("{name} (copy)"),
-                                            position_beats: new_pos,
-                                            duration_beats: dur,
-                                            notes,
-                                            selected_notes: HashSet::new(),
-                                            loop_enabled: false,
-                                            loop_start_beats: 0.0,
-                                            loop_end_beats: 0.0,
-                                        });
+                                        track.note_clips.push(duplicate);
                                     }
                                     new_selections.insert(ArrangementSelection::NoteClip {
                                         track_id: *track_id,
@@ -817,6 +851,38 @@ impl ArrangementState {
                         format!("Duplicated {count} clips")
                     });
                 }
+            }
+            ArrangementMsg::CopySelectedClips => {
+                return self.op_copy_selected_clips(ctx);
+            }
+            ArrangementMsg::CutSelectedClips => {
+                let start = self.selection_start_beats;
+                let end = self.selection_end_beats;
+                let track_id = self.time_selection_track;
+                let ranged = self.time_selection_active && end > start;
+                let copy = self.op_copy_selected_clips(ctx);
+                if copy.status.as_deref() == Some("Nothing to copy") {
+                    return copy;
+                }
+                let mut result = if ranged {
+                    self.op_delete_clips_in_region(engine, ctx, start, end, track_id)
+                } else {
+                    self.update(ArrangementMsg::DeleteSelectedClip, engine, ctx)
+                };
+                result.status = Some("Cut to clipboard".to_string());
+                return result;
+            }
+            ArrangementMsg::PasteClipsAtPlayhead => {
+                return self.op_paste_clips_at_playhead(engine, ctx);
+            }
+            ArrangementMsg::ToggleSelectedClipLoop => {
+                return self.op_toggle_selected_clip_loop(engine);
+            }
+            ArrangementMsg::ResizeSelectedClips {
+                anchor,
+                new_duration_beats,
+            } => {
+                return self.op_resize_selected_clips(engine, ctx, anchor, new_duration_beats);
             }
             ArrangementMsg::SetTimeSelection {
                 start_beats,
@@ -856,7 +922,7 @@ impl ArrangementState {
                         new_clip_data = Some((
                             UiNoteClip {
                                 id: new_clip_id,
-                                name: format!("{} (copy)", clip.name),
+                                name: clip.name.clone(),
                                 position_beats: new_pos,
                                 duration_beats: clip.duration_beats,
                                 notes: clip.notes.clone(),
@@ -868,11 +934,16 @@ impl ArrangementState {
                             new_pos,
                             clip.duration_beats,
                             clip.notes.clone(),
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
                         ));
                     }
                 }
 
-                if let Some((new_clip, pos, dur, notes)) = new_clip_data {
+                if let Some((new_clip, pos, dur, notes, loop_enabled, loop_start, loop_end)) =
+                    new_clip_data
+                {
                     if let Some(track) = self.find_track_mut(track_id) {
                         track.note_clips.push(new_clip);
                     }
@@ -881,9 +952,9 @@ impl ArrangementState {
                         clip_id: new_clip_id,
                         position_beats: pos,
                         duration_beats: dur,
-                        loop_enabled: false,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: 0.0,
+                        loop_enabled,
+                        loop_start_beats: loop_start,
+                        loop_end_beats: loop_end,
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {

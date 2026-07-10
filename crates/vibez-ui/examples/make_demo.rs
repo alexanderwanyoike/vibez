@@ -30,6 +30,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         native_instrument: None,
         plugin_instrument: None,
         automation: Vec::new(),
+        sends: Vec::new(),
     }
 }
 
@@ -152,6 +153,7 @@ fn main() {
 
     let project = Project {
         master: None,
+        buses: Vec::new(),
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
         sample_rate: 48_000,
