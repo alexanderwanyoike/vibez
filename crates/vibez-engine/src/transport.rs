@@ -63,13 +63,11 @@ impl Transport {
         self.bpm
     }
 
-    /// Seek to an absolute sample position.  If `audio_length` is set the
-    /// position is clamped to `[0, audio_length]`.
+    /// Seek to an absolute sample position. Arrangement editing may place
+    /// the playhead beyond the current content end; `audio_length` only
+    /// controls automatic stopping during playback.
     pub fn seek(&mut self, pos: u64) {
-        self.position = match self.audio_length {
-            Some(len) => pos.min(len),
-            None => pos,
-        };
+        self.position = pos;
     }
 
     /// Set the tempo, clamped to `[MIN_BPM, MAX_BPM]`.
@@ -77,14 +75,10 @@ impl Transport {
         self.bpm = bpm.clamp(MIN_BPM, MAX_BPM);
     }
 
-    /// Set the total audio length.  Passing `None` removes the length
-    /// constraint.  If the current position exceeds the new length it is
-    /// clamped.
+    /// Set the total audio length used for automatic stopping. Passing
+    /// `None` removes that playback boundary without moving the playhead.
     pub fn set_audio_length(&mut self, length: Option<u64>) {
         self.audio_length = length;
-        if let Some(len) = length {
-            self.position = self.position.min(len);
-        }
     }
 
     /// The total audio length, if set.
@@ -199,11 +193,11 @@ mod tests {
     }
 
     #[test]
-    fn seek_with_audio_length_clamps() {
+    fn seek_with_audio_length_allows_empty_arrangement_space() {
         let mut t = Transport::new();
         t.set_audio_length(Some(44_100));
         t.seek(50_000);
-        assert_eq!(t.position(), 44_100);
+        assert_eq!(t.position(), 50_000);
         t.seek(22_050);
         assert_eq!(t.position(), 22_050);
     }
@@ -266,11 +260,11 @@ mod tests {
     }
 
     #[test]
-    fn set_audio_length_clamps_position() {
+    fn set_audio_length_does_not_move_playhead() {
         let mut t = Transport::new();
         t.seek(5000);
         t.set_audio_length(Some(2000));
-        assert_eq!(t.position(), 2000);
+        assert_eq!(t.position(), 5000);
     }
 
     #[test]
