@@ -50,6 +50,16 @@ fn visible_pixel_columns(
     }
 }
 
+fn visible_title_bounds(
+    clip_x: f32,
+    title_width: f32,
+    viewport_width: f32,
+) -> Option<(f32, f32, f32)> {
+    let left = clip_x.max(0.0);
+    let right = (clip_x + title_width).min(viewport_width);
+    (right > left).then(|| (left, right - left, (clip_x + 4.0).max(left + 4.0)))
+}
+
 impl TrackClipCanvas {
     pub(super) fn draw_impl(
         &self,
@@ -256,26 +266,31 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if let Some(title) = fit_clip_title(clip.name.as_str(), clip_w, clip.loop_enabled) {
-                    let title_width =
-                        (clip_w - if clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-                    frame.with_clip(
-                        Rectangle {
-                            x: clip_x,
-                            y: clip_y,
-                            width: title_width,
-                            height: CLIP_TITLE_HEIGHT,
-                        },
-                        |title_frame| {
-                            title_frame.fill_text(canvas::Text {
-                                content: title,
-                                position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                                color: theme::text(),
-                                size: iced::Pixels(11.0),
-                                ..Default::default()
-                            });
-                        },
-                    );
+                let title_width = (clip_w - if clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                if let Some((title_x, visible_title_width, text_x)) =
+                    visible_title_bounds(clip_x, title_width, w)
+                {
+                    if let Some(title) =
+                        fit_clip_title(clip.name.as_str(), visible_title_width, clip.loop_enabled)
+                    {
+                        frame.with_clip(
+                            Rectangle {
+                                x: title_x,
+                                y: clip_y,
+                                width: visible_title_width,
+                                height: CLIP_TITLE_HEIGHT,
+                            },
+                            |title_frame| {
+                                title_frame.fill_text(canvas::Text {
+                                    content: title,
+                                    position: iced::Point::new(text_x, clip_y + 3.0),
+                                    color: theme::text(),
+                                    size: iced::Pixels(11.0),
+                                    ..Default::default()
+                                });
+                            },
+                        );
+                    }
                 }
 
                 // Diagonal stripe overlay when the clip's warp is
@@ -477,28 +492,34 @@ impl TrackClipCanvas {
                 );
 
                 // Clip name label
-                if let Some(title) =
-                    fit_clip_title(note_clip.name.as_str(), clip_w, note_clip.loop_enabled)
+                let title_width =
+                    (clip_w - if note_clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
+                if let Some((title_x, visible_title_width, text_x)) =
+                    visible_title_bounds(clip_x, title_width, w)
                 {
-                    let title_width =
-                        (clip_w - if note_clip.loop_enabled { 18.0 } else { 0.0 }).max(0.0);
-                    frame.with_clip(
-                        Rectangle {
-                            x: clip_x,
-                            y: clip_y,
-                            width: title_width,
-                            height: CLIP_TITLE_HEIGHT,
-                        },
-                        |title_frame| {
-                            title_frame.fill_text(canvas::Text {
-                                content: title,
-                                position: iced::Point::new(clip_x + 4.0, clip_y + 3.0),
-                                color: theme::text(),
-                                size: iced::Pixels(11.0),
-                                ..Default::default()
-                            });
-                        },
-                    );
+                    if let Some(title) = fit_clip_title(
+                        note_clip.name.as_str(),
+                        visible_title_width,
+                        note_clip.loop_enabled,
+                    ) {
+                        frame.with_clip(
+                            Rectangle {
+                                x: title_x,
+                                y: clip_y,
+                                width: visible_title_width,
+                                height: CLIP_TITLE_HEIGHT,
+                            },
+                            |title_frame| {
+                                title_frame.fill_text(canvas::Text {
+                                    content: title,
+                                    position: iced::Point::new(text_x, clip_y + 3.0),
+                                    color: theme::text(),
+                                    size: iced::Pixels(11.0),
+                                    ..Default::default()
+                                });
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -611,7 +632,7 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_clip_title, visible_pixel_columns};
+    use super::{fit_clip_title, visible_pixel_columns, visible_title_bounds};
 
     #[test]
     fn clip_title_is_constrained_to_its_visible_width() {
@@ -642,5 +663,18 @@ mod tests {
         );
         assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
         assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
+    }
+
+    #[test]
+    fn clip_title_bounds_never_escape_the_arrangement_viewport() {
+        assert_eq!(
+            visible_title_bounds(-200.0, 400.0, 800.0),
+            Some((0.0, 200.0, 4.0))
+        );
+        assert_eq!(
+            visible_title_bounds(100.0, 200.0, 800.0),
+            Some((100.0, 200.0, 104.0))
+        );
+        assert_eq!(visible_title_bounds(900.0, 200.0, 800.0), None);
     }
 }
