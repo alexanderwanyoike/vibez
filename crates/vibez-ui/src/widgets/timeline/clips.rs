@@ -347,12 +347,20 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::Arrangement(
-                                ArrangementMsg::SelectArrangementClip {
-                                    selection,
-                                    shift_held: state.shift_held,
-                                },
-                            )),
+                            if near_right
+                                && in_title_bar
+                                && self.selected_clips.contains(&clip_id)
+                                && !state.shift_held
+                            {
+                                None
+                            } else {
+                                Some(Message::Arrangement(
+                                    ArrangementMsg::SelectArrangementClip {
+                                        selection,
+                                        shift_held: state.shift_held,
+                                    },
+                                ))
+                            },
                         );
                     }
 
@@ -648,12 +656,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            if self.total_beats > 0.0 {
-                                let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
-                                Some(Message::Transport(TransportMsg::Seek(normalized)))
-                            } else {
-                                None
-                            }
+                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
                         }
                         ClipDragAction::RegionSelect { .. } => {
                             Some(Message::set_time_selection_active(true))

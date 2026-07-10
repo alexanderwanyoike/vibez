@@ -479,15 +479,17 @@ fn cut_time_selection_preserves_material_outside_the_range() {
 
 #[test]
 fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
-    let mut a = arrangement_with_tracks(1);
+    let mut a = arrangement_with_tracks(2);
     let (tid, first) = add_audio_clip(&mut a, 0, 0, 200);
-    let (_, second) = add_audio_clip(&mut a, 0, 300, 300);
-    for clip_id in [first, second] {
-        a.selected_clips.insert(ArrangementSelection::AudioClip {
-            track_id: tid,
-            clip_id,
-        });
-    }
+    let (second_tid, second) = add_audio_clip(&mut a, 1, 300, 300);
+    a.selected_clips.insert(ArrangementSelection::AudioClip {
+        track_id: tid,
+        clip_id: first,
+    });
+    a.selected_clips.insert(ArrangementSelection::AudioClip {
+        track_id: second_tid,
+        clip_id: second,
+    });
     let mut engine = RecordingEngine::default();
     let ctx = ArrangementCtx {
         samples_per_beat: 100.0,
@@ -495,7 +497,7 @@ fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
     };
 
     a.update(ArrangementMsg::ToggleSelectedClipLoop, &mut engine, ctx);
-    assert!(a.tracks[0].clips.iter().all(|clip| clip.loop_enabled));
+    assert!(a.tracks.iter().all(|track| track.clips[0].loop_enabled));
     a.update(
         ArrangementMsg::ResizeSelectedClips {
             anchor: ArrangementSelection::AudioClip {
@@ -509,5 +511,5 @@ fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
     );
 
     assert_eq!(a.tracks[0].clips[0].duration, 400);
-    assert_eq!(a.tracks[0].clips[1].duration, 500);
+    assert_eq!(a.tracks[1].clips[0].duration, 500);
 }

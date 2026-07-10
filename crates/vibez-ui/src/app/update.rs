@@ -24,10 +24,22 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
-        if self.state.view.edit_menu_open
-            && !matches!(&message, Message::View(ViewMsg::ToggleEditMenu))
-        {
-            self.state.view.edit_menu_open = false;
+        if self.state.view.edit_menu_open {
+            let keep_menu = matches!(
+                &message,
+                Message::Tick
+                    | Message::Transport(TransportMsg::EnginePosition(_))
+                    | Message::EngineMetering { .. }
+                    | Message::Transport(TransportMsg::EngineStopped)
+                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
+                    | Message::View(ViewMsg::ToggleEditMenu)
+                    | Message::View(ViewMsg::CursorMoved(_, _))
+                    | Message::View(ViewMsg::WindowResized(_, _))
+                    | Message::View(ViewMsg::MouseReleased)
+            );
+            if !keep_menu {
+                self.state.view.edit_menu_open = false;
+            }
         }
         // Auto-dismiss context menu on any action except tick/engine/menu events
         if self.state.view.context_menu.is_some() {

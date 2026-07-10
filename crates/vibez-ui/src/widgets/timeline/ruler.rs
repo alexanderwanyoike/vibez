@@ -428,12 +428,7 @@ impl canvas::Program<Message> for RulerWidget {
                     let msg = match drag {
                         RulerDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            if self.total_beats > 0.0 {
-                                let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
-                                Some(Message::Transport(TransportMsg::Seek(normalized)))
-                            } else {
-                                None
-                            }
+                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
                         }
                         RulerDragAction::RegionSelect { .. } => {
                             // Completed region select

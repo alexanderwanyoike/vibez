@@ -590,7 +590,7 @@ impl App {
                 let clip_id = *clip_id;
                 let is_note_clip = *is_note_clip;
 
-                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+                let mut col = column![].spacing(0).width(Length::Fixed(220.0));
 
                 col = col.push(menu_btn(
                     icons::TRASH_2,
@@ -599,26 +599,34 @@ impl App {
                 ));
                 col = col.push(menu_btn(
                     icons::COPY,
+                    "Copy".into(),
+                    Message::Arrangement(ArrangementMsg::CopySelectedClips),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Cut".into(),
+                    Message::Arrangement(ArrangementMsg::CutSelectedClips),
+                ));
+                col = col.push(menu_btn(
+                    icons::COPY,
                     "Duplicate".into(),
                     Message::Arrangement(ArrangementMsg::DuplicateSelectedClip),
                 ));
-
-                // Split at playhead
-                let playhead_beats = self.state.position_beats();
-                if is_note_clip {
-                    col = col.push(menu_btn(
-                        icons::SCISSORS,
-                        "Split at Playhead".into(),
-                        Message::split_note_clip(track_id, clip_id, playhead_beats),
-                    ));
-                } else {
-                    let split_sample = self.state.transport.position_samples;
-                    col = col.push(menu_btn(
-                        icons::SCISSORS,
-                        "Split at Playhead".into(),
-                        Message::split_audio_clip(track_id, clip_id, split_sample),
-                    ));
-                }
+                col = col.push(menu_btn(
+                    icons::REPEAT,
+                    "Toggle Loop".into(),
+                    Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Split Selection (Ctrl+E)".into(),
+                    Message::split_selected_at_playhead(),
+                ));
+                col = col.push(menu_btn(
+                    icons::COPY,
+                    "Join Clips (Ctrl+J)".into(),
+                    Message::join_selected_clips(),
+                ));
 
                 // Rename clip
                 col = col.push(menu_btn(
