@@ -8,7 +8,7 @@ use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::ContextMenuTarget;
+use crate::state::{ContextMenuTarget, GridConfig};
 use crate::theme;
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
@@ -16,6 +16,7 @@ pub struct RulerWidget {
     pub playhead_beats: f64,
     pub bpm: f64,
     pub zoom_level: f32,
+    pub grid: GridConfig,
     pub scroll_offset_beats: f64,
     pub total_beats: f64,
     pub loop_enabled: bool,
@@ -51,6 +52,10 @@ impl RulerWidget {
 
     fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
         ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+    }
+
+    fn snapped_beat(&self, beat: f64) -> f64 {
+        self.grid.snap_beat(beat, self.pixels_per_beat())
     }
 }
 
@@ -380,8 +385,8 @@ impl canvas::Program<Message> for RulerWidget {
                             } => {
                                 let dx = (local_x - start_x).abs();
                                 if dx > 4.0 {
-                                    let anchor = anchor.round();
-                                    let current = beat.round();
+                                    let anchor = self.snapped_beat(*anchor);
+                                    let current = self.snapped_beat(beat);
                                     let start = anchor.min(current);
                                     let end = anchor.max(current);
                                     state.drag = Some(RulerDragAction::RegionSelect {
@@ -402,7 +407,7 @@ impl canvas::Program<Message> for RulerWidget {
                                 }
                             }
                             RulerDragAction::RegionSelect { anchor_beat } => {
-                                let current = beat.round();
+                                let current = self.snapped_beat(beat);
                                 let start = anchor_beat.min(current);
                                 let end = anchor_beat.max(current);
                                 if end > start {

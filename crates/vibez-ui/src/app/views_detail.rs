@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, row, text, text_input,
+    button, canvas, center, column, container, horizontal_space, pick_list, row, text, text_input,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -228,7 +228,7 @@ impl App {
                         clip_relative_playhead,
                         clip.duration_beats,
                         track_color,
-                        self.state.view.snap_grid,
+                        self.state.view.grid_config(),
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     )
@@ -404,37 +404,19 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        // Snap grid selector
-        use crate::state::SnapGrid;
-        let mut snap_row = row![].spacing(2);
-        for &grid in SnapGrid::all() {
-            let is_active = self.state.view.snap_grid == grid;
-            let (bg, text_color) = if is_active {
-                (th::accent_dim(), th::accent())
-            } else {
-                (th::bg_elevated(), th::text_dim())
-            };
-            let btn = button(text(grid.label()).size(10).color(text_color))
-                .on_press(Message::View(ViewMsg::SetSnapGrid(grid)))
-                .padding([2, 6])
-                .style(move |_theme: &Theme, _status| button::Style {
-                    background: Some(bg.into()),
-                    text_color,
-                    border: iced::Border {
-                        color: if is_active {
-                            th::accent_dim()
-                        } else {
-                            th::border()
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                });
-            snap_row = snap_row.push(btn);
-        }
+        let snap_picker = pick_list(
+            crate::state::SnapGrid::all(),
+            Some(
+                self.state
+                    .view
+                    .grid_config()
+                    .effective_grid(self.active_editor_pixels_per_beat()),
+            ),
+            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
+        )
+        .width(Length::Fixed(90.0));
         let snap_label = text("Snap:").size(10).color(th::text_dim());
-        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_row]
+        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_picker]
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
@@ -671,10 +653,10 @@ impl App {
 
         row![
             label,
-            grid_btn(crate::state::SnapGrid::Quarter),
-            grid_btn(crate::state::SnapGrid::Eighth),
-            grid_btn(crate::state::SnapGrid::Sixteenth),
-            grid_btn(crate::state::SnapGrid::ThirtySecond),
+            grid_btn(crate::state::SnapGrid::QUARTER),
+            grid_btn(crate::state::SnapGrid::EIGHTH),
+            grid_btn(crate::state::SnapGrid::SIXTEENTH),
+            grid_btn(crate::state::SnapGrid::THIRTY_SECOND),
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center)

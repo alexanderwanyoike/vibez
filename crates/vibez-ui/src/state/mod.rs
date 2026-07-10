@@ -19,6 +19,9 @@ pub struct ViewState {
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
+    pub snap_enabled: bool,
+    pub adaptive_grid: bool,
+    pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
     pub edit_menu_open: bool,
     /// Cursor tracking (for right-click positioning from mouse_area).
@@ -40,7 +43,10 @@ impl Default for ViewState {
             detail_panel_tab: DetailPanelTab::Clip,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
-            snap_grid: SnapGrid::Eighth,
+            snap_grid: SnapGrid::EIGHTH,
+            snap_enabled: true,
+            adaptive_grid: false,
+            adaptive_grid_bias: 0,
             context_menu: None,
             edit_menu_open: false,
             cursor_x: 0.0,
@@ -51,6 +57,17 @@ impl Default for ViewState {
             editing_clip_name: None,
             edit_name_text: String::new(),
         }
+    }
+}
+
+impl ViewState {
+    pub fn grid_config(&self) -> GridConfig {
+        GridConfig::new(
+            self.snap_grid,
+            self.snap_enabled,
+            self.adaptive_grid,
+            self.adaptive_grid_bias,
+        )
     }
 }
 

@@ -12,7 +12,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, ContextMenuTarget, UiTrack};
+use crate::state::{ArrangementSelection, ContextMenuTarget, GridConfig, UiTrack};
 use vibez_core::id::{ClipId, TrackId};
 
 use super::*;
@@ -61,6 +61,7 @@ pub struct TrackClipCanvas {
     pub note_clips: Vec<TimelineNoteClip>,
     pub playhead_beats: f64,
     pub zoom_level: f32,
+    pub grid: GridConfig,
     pub scroll_offset_beats: f64,
     pub total_beats: f64,
     pub sample_rate: u32,
@@ -92,6 +93,7 @@ impl TrackClipCanvas {
         track: &UiTrack,
         playhead_beats: f64,
         zoom_level: f32,
+        grid: GridConfig,
         scroll_offset_beats: f64,
         total_beats: f64,
         sample_rate: u32,
@@ -160,6 +162,7 @@ impl TrackClipCanvas {
             note_clips,
             playhead_beats,
             zoom_level,
+            grid,
             scroll_offset_beats,
             total_beats,
             sample_rate,
@@ -189,6 +192,10 @@ impl TrackClipCanvas {
 
     pub(super) fn x_to_beat(&self, x: f32) -> f64 {
         x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
+    }
+
+    fn snapped_beat(&self, beat: f64) -> f64 {
+        self.grid.snap_beat(beat, self.pixels_per_beat())
     }
 
     /// Samples per beat.
@@ -447,7 +454,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 // `cursor.position_in(bounds)`.
                 if self.sample_drop_active {
                     if let Some(local) = cursor.position_in(bounds) {
-                        let beat = self.x_to_beat(local.x).max(0.0).round();
+                        let beat = self.snapped_beat(self.x_to_beat(local.x).max(0.0));
                         return (
                             canvas::event::Status::Ignored,
                             Some(Message::Browser(BrowserMsg::DragHoverTrack {
@@ -470,10 +477,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             } => {
                                 let dx = (local_x - start_x).abs();
                                 if dx > 4.0 {
-                                    let anchor_snapped = anchor.round();
+                                    let anchor_snapped = self.snapped_beat(*anchor);
                                     let beat =
                                         local_x as f64 / ppb as f64 + self.scroll_offset_beats;
-                                    let current = beat.round();
+                                    let current = self.snapped_beat(beat);
                                     let start = anchor_snapped.min(current);
                                     let end = anchor_snapped.max(current);
                                     state.drag = Some(ClipDragAction::RegionSelect {
@@ -496,7 +503,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             }
                             ClipDragAction::RegionSelect { anchor_beat } => {
                                 let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
-                                let current = beat.round();
+                                let current = self.snapped_beat(beat);
                                 let start = anchor_beat.min(current);
                                 let end = anchor_beat.max(current);
                                 if end > start {
@@ -524,8 +531,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let delta_beats = delta_px as f64 / ppb as f64;
                                 let new_pos = (original_position_beats + delta_beats).max(0.0);
 
-                                // Snap to nearest beat
-                                let snapped = (new_pos * 4.0).round() / 4.0;
+                                let snapped = self.snapped_beat(new_pos);
 
                                 // Check for cross-track drag
                                 let local_y = pos.y - bounds.y;
@@ -592,9 +598,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_start_beat,
                             } => {
                                 let current_beat = self.x_to_beat(local_x);
-                                let new_dur = (current_beat - clip_start_beat).max(0.25);
-                                // Snap to quarter beat
-                                let snapped = (new_dur * 4.0).round() / 4.0;
+                                let min_duration = if self.grid.snap_enabled {
+                                    self.grid.effective_grid(self.pixels_per_beat()).beat_size()
+                                } else {
+                                    0.01
+                                };
+                                let new_dur = (current_beat - clip_start_beat).max(min_duration);
+                                let snapped = self.snapped_beat(new_dur).max(min_duration);
 
                                 if *is_note_clip {
                                     return (
@@ -638,7 +648,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     if let Some(pos) = cursor.position_in(bounds) {
                         // Snap the drop position to the nearest beat so it
                         // matches the indicator drawn in `draw`.
-                        let beat = self.x_to_beat(pos.x).max(0.0).round();
+                        let beat = self.snapped_beat(self.x_to_beat(pos.x).max(0.0));
                         let spb = self.spb();
                         let position_samples = if spb > 0.0 { (beat * spb) as u64 } else { 0 };
                         state.drag = None;

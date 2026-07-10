@@ -21,7 +21,7 @@ use vibez_core::id::{LaneId, TrackId};
 
 use crate::domains::automation::AutomationMsg;
 use crate::message::Message;
-use crate::state::SnapGrid;
+use crate::state::GridConfig;
 use crate::theme as th;
 
 pub const LANE_HEIGHT: f32 = 56.0;
@@ -41,7 +41,7 @@ pub struct AutomationLaneWidget {
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     /// Grid for beat snapping (hold shift to bypass).
-    pub snap: SnapGrid,
+    pub grid: GridConfig,
     pub selected: Option<usize>,
     /// The parameter's current un-automated value (normalized), for
     /// the dotted reference line.
@@ -85,7 +85,7 @@ impl AutomationLaneWidget {
         if state.shift {
             beat
         } else {
-            self.snap.snap_beat(beat).max(0.0)
+            self.grid.snap_beat(beat, self.pixels_per_beat()).max(0.0)
         }
     }
 

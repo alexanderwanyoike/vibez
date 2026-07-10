@@ -284,6 +284,21 @@ impl App {
         self.state.project.dirty = true;
     }
 
+    pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
+        if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
+            if let Some(duration) = self.state.find_track(track_id).and_then(|track| {
+                track
+                    .note_clips
+                    .iter()
+                    .find(|clip| clip.id == clip_id)
+                    .map(|clip| clip.duration_beats)
+            }) {
+                return (self.state.view.window_width - 52.0).max(1.0) / duration.max(1.0) as f32;
+            }
+        }
+        20.0 * self.state.view.zoom_level
+    }
+
     /// Walk `next_track_number` forward past any names already in use so
     /// that `format!("{prefix} {n}")` is unique. Prevents e.g. two lanes
     /// both named "Track 2" when numbering gets out of sync after loads,
