@@ -9,7 +9,6 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
-use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
@@ -348,12 +347,20 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::Arrangement(
-                                ArrangementMsg::SelectArrangementClip {
-                                    selection,
-                                    shift_held: state.shift_held,
-                                },
-                            )),
+                            if near_right
+                                && in_title_bar
+                                && self.selected_clips.contains(&clip_id)
+                                && !state.shift_held
+                            {
+                                None
+                            } else {
+                                Some(Message::Arrangement(
+                                    ArrangementMsg::SelectArrangementClip {
+                                        selection,
+                                        shift_held: state.shift_held,
+                                    },
+                                ))
+                            },
                         );
                     }
 
@@ -592,24 +599,26 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 if *is_note_clip {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::PianoRoll(
-                                            PianoRollMsg::ResizeNoteClipDuration {
-                                                track_id,
-                                                clip_id: *clip_id,
+                                        Some(Message::Arrangement(
+                                            ArrangementMsg::ResizeSelectedClips {
+                                                anchor: ArrangementSelection::NoteClip {
+                                                    track_id,
+                                                    clip_id: *clip_id,
+                                                },
                                                 new_duration_beats: snapped,
                                             },
                                         )),
                                     );
                                 } else {
-                                    let spb = self.spb();
-                                    let new_dur_samples = (snapped * spb) as u64;
                                     return (
                                         canvas::event::Status::Captured,
                                         Some(Message::Arrangement(
-                                            ArrangementMsg::ResizeAudioClip {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                                new_duration: new_dur_samples.max(1),
+                                            ArrangementMsg::ResizeSelectedClips {
+                                                anchor: ArrangementSelection::AudioClip {
+                                                    track_id,
+                                                    clip_id: *clip_id,
+                                                },
+                                                new_duration_beats: snapped,
                                             },
                                         )),
                                     );
@@ -647,12 +656,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            if self.total_beats > 0.0 {
-                                let normalized = (*beat / self.total_beats).clamp(0.0, 1.0);
-                                Some(Message::Transport(TransportMsg::Seek(normalized)))
-                            } else {
-                                None
-                            }
+                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
                         }
                         ClipDragAction::RegionSelect { .. } => {
                             Some(Message::set_time_selection_active(true))

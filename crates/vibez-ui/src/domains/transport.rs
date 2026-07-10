@@ -20,6 +20,8 @@ pub enum TransportMsg {
     TogglePlayback,
     /// Seek to a normalized [0, 1] position on the timeline.
     Seek(f64),
+    /// Seek to an absolute musical position on the arrangement ruler.
+    SeekToBeat(f64),
     BpmChanged(String),
     BpmSubmit,
     /// Increment/decrement project BPM by a whole beat-per-minute.
@@ -103,6 +105,17 @@ impl TransportState {
                     self.position_samples = sample_pos;
                     engine.send(EngineCommand::Seek(sample_pos));
                 }
+                TransportAction::ClearTimeSelection
+            }
+            TransportMsg::SeekToBeat(beat) => {
+                let samples_per_beat = if self.bpm > 0.0 {
+                    self.sample_rate as f64 * 60.0 / self.bpm
+                } else {
+                    0.0
+                };
+                let sample_pos = (beat.max(0.0) * samples_per_beat).round() as u64;
+                self.position_samples = sample_pos;
+                engine.send(EngineCommand::Seek(sample_pos));
                 TransportAction::ClearTimeSelection
             }
             TransportMsg::BpmChanged(text) => {
@@ -260,6 +273,22 @@ mod tests {
         let action = t.update(TransportMsg::Seek(2.0), &mut engine, ctx);
         assert_eq!(t.position_samples, 1000);
         assert_eq!(action, TransportAction::ClearTimeSelection);
+    }
+
+    #[test]
+    fn beat_seek_uses_absolute_ruler_position() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+
+        let action = t.update(
+            TransportMsg::SeekToBeat(3.5),
+            &mut engine,
+            TransportCtx::default(),
+        );
+
+        assert_eq!(t.position_samples, 77_175);
+        assert_eq!(action, TransportAction::ClearTimeSelection);
+        assert!(matches!(engine.0[0], EngineCommand::Seek(77_175)));
     }
 
     #[test]

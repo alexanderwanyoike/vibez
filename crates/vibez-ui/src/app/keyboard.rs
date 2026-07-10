@@ -66,6 +66,9 @@ pub(crate) fn global_key_handler(
             Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
         }
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
+            "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
+            "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
+            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead)),
             "t" | "T" => {
                 if modifiers.shift() {
                     Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
@@ -76,7 +79,13 @@ pub(crate) fn global_key_handler(
             "m" => Some(Message::create_clip_from_selection()),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
-            "l" => Some(Message::Transport(TransportMsg::ToggleArrangementLoop)),
+            "l" | "L" => {
+                if modifiers.shift() {
+                    Some(Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop))
+                } else {
+                    Some(Message::Transport(TransportMsg::ToggleArrangementLoop))
+                }
+            }
             "0" => Some(Message::View(ViewMsg::ZoomToFit)),
             "z" | "Z" => {
                 if modifiers.shift() {

@@ -675,7 +675,8 @@ impl App {
         )
         .size(11)
         .color(th::text_dim());
-        let conf_slider = slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05);
+        let conf_slider =
+            slider(0.0..=1.0, conf, Message::SetWarpConfidenceThreshold).step(0.05_f32);
 
         let rewarp_btn = button(
             text("Re-warp all clips to project tempo")

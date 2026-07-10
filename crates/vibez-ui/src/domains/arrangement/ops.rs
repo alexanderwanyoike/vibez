@@ -11,9 +11,57 @@ use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, ArrangementState, UiClip, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, ArrangementState, ClipClipboard, ClipboardClip, UiClip, UiNoteClip,
+};
 
 use super::*;
+
+fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
+    let raw = clip.source_offset.saturating_add(local_frame);
+    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
+        let loop_len = clip.loop_end - clip.loop_start;
+        (clip.loop_start + (raw - clip.loop_start) % loop_len) as usize
+    } else {
+        raw as usize
+    }
+}
+
+fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
+    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+    let mut visible = Vec::new();
+    for note in &clip.notes {
+        let mut occurrence = note.start_beat;
+        loop {
+            let note_end = occurrence + note.duration_beats;
+            let kept_start = occurrence.max(local_start);
+            let kept_end = note_end.min(local_end);
+            if kept_end > kept_start {
+                visible.push(MidiNote {
+                    start_beat: kept_start - local_start,
+                    duration_beats: kept_end - kept_start,
+                    ..*note
+                });
+            }
+            if !looping
+                || note.start_beat < clip.loop_start_beats
+                || note.start_beat >= clip.loop_end_beats
+            {
+                break;
+            }
+            occurrence += clip.loop_end_beats - clip.loop_start_beats;
+            if occurrence >= local_end {
+                break;
+            }
+        }
+    }
+    visible.sort_by(|a, b| {
+        a.start_beat
+            .partial_cmp(&b.start_beat)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    visible
+}
 
 impl ArrangementState {
     /// A background warp finished: swap in the stretched audio and
@@ -253,17 +301,11 @@ impl ArrangementState {
             })
             .collect();
 
-        let mut clip_data: Vec<(u64, u64, u64, Arc<vibez_core::audio_buffer::DecodedAudio>)> =
-            Vec::new();
+        let mut clip_data: Vec<UiClip> = Vec::new();
         if let Some(track) = self.find_track(track_id) {
             for cid in &clip_ids {
                 if let Some(clip) = track.clips.iter().find(|c| c.id == *cid) {
-                    clip_data.push((
-                        clip.position,
-                        clip.source_offset,
-                        clip.duration,
-                        Arc::clone(&clip.audio),
-                    ));
+                    clip_data.push(clip.clone());
                 }
             }
         }
@@ -273,40 +315,42 @@ impl ArrangementState {
         }
 
         // Sort by position
-        clip_data.sort_by_key(|(pos, _, _, _)| *pos);
+        clip_data.sort_by_key(|clip| clip.position);
 
-        let start_pos = clip_data[0].0;
+        let start_pos = clip_data[0].position;
         let end_pos = clip_data
             .iter()
-            .map(|(pos, _, dur, _)| pos + dur)
+            .map(|clip| clip.position.saturating_add(clip.duration))
             .max()
             .unwrap_or(start_pos);
         let total_duration = end_pos - start_pos;
+        let joined_loop_enabled = clip_data.iter().any(|clip| clip.loop_enabled);
 
         // Determine channel count from first clip
-        let channels = clip_data[0].3.num_channels();
-        let sr = clip_data[0].3.sample_rate;
+        let channels = clip_data[0].audio.num_channels();
+        let sr = clip_data[0].audio.sample_rate;
 
         // Create joined buffer filled with silence
         let mut joined_channels: Vec<Vec<f32>> = (0..channels)
             .map(|_| vec![0.0f32; total_duration as usize])
             .collect();
 
-        // Copy each clip's audio into the correct offset
-        for (pos, source_offset, duration, audio) in &clip_data {
-            let offset_in_joined = (*pos - start_pos) as usize;
-            let src_off = *source_offset as usize;
-            let dur = *duration as usize;
-            let ch_count = channels.min(audio.num_channels());
+        // Consolidate the audible arrangement result, including source
+        // wrapping for clips whose visible duration exceeds their loop.
+        for clip in &clip_data {
+            let offset_in_joined = (clip.position - start_pos) as usize;
+            let dur = clip.duration as usize;
+            let ch_count = channels.min(clip.audio.num_channels());
             for (ch, dst) in joined_channels.iter_mut().enumerate().take(ch_count) {
-                let src = &audio.channels[ch];
-                let src_end = (src_off + dur).min(src.len());
-                let copy_len = src_end.saturating_sub(src_off);
-                let dst_end = (offset_in_joined + copy_len).min(dst.len());
-                let actual_len = dst_end.saturating_sub(offset_in_joined);
-                if actual_len > 0 {
-                    dst[offset_in_joined..offset_in_joined + actual_len]
-                        .copy_from_slice(&src[src_off..src_off + actual_len]);
+                for local in 0..dur {
+                    let dst_frame = offset_in_joined + local;
+                    if dst_frame >= dst.len() {
+                        break;
+                    }
+                    let source_frame = audio_source_frame(clip, local as u64);
+                    if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
+                        dst[dst_frame] = *sample;
+                    }
                 }
             }
         }
@@ -334,9 +378,9 @@ impl ArrangementState {
             position: start_pos,
             source_offset: 0,
             duration: total_duration,
-            loop_enabled: false,
+            loop_enabled: joined_loop_enabled,
             loop_start: 0,
-            loop_end: 0,
+            loop_end: total_duration,
         });
         if let Some(track) = self.find_track_mut(track_id) {
             track.clips.push(UiClip {
@@ -347,9 +391,9 @@ impl ArrangementState {
                 position: start_pos,
                 source_offset: 0,
                 duration: total_duration,
-                loop_enabled: false,
+                loop_enabled: joined_loop_enabled,
                 loop_start: 0,
-                loop_end: 0,
+                loop_end: total_duration,
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -379,11 +423,11 @@ impl ArrangementState {
             })
             .collect();
 
-        let mut clip_data: Vec<(f64, f64, Vec<MidiNote>)> = Vec::new();
+        let mut clip_data: Vec<UiNoteClip> = Vec::new();
         if let Some(track) = self.find_track(track_id) {
             for cid in &clip_ids {
                 if let Some(clip) = track.note_clips.iter().find(|c| c.id == *cid) {
-                    clip_data.push((clip.position_beats, clip.duration_beats, clip.notes.clone()));
+                    clip_data.push(clip.clone());
                 }
             }
         }
@@ -393,23 +437,28 @@ impl ArrangementState {
         }
 
         // Sort by position
-        clip_data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        clip_data.sort_by(|a, b| {
+            a.position_beats
+                .partial_cmp(&b.position_beats)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
-        let start_pos = clip_data[0].0;
+        let start_pos = clip_data[0].position_beats;
         let end_pos = clip_data
             .iter()
-            .map(|(pos, dur, _)| pos + dur)
+            .map(|clip| clip.position_beats + clip.duration_beats)
             .fold(0.0_f64, f64::max);
         let total_duration = end_pos - start_pos;
+        let joined_loop_enabled = clip_data.iter().any(|clip| clip.loop_enabled);
 
-        // Merge notes with adjusted offsets
+        // Merge the audible notes, expanding repeated loop occurrences.
         let mut merged_notes: Vec<MidiNote> = Vec::new();
-        for (pos, _, notes) in &clip_data {
-            let offset = pos - start_pos;
-            for note in notes {
+        for clip in &clip_data {
+            let offset = clip.position_beats - start_pos;
+            for note in visible_notes(clip, 0.0, clip.duration_beats) {
                 merged_notes.push(MidiNote {
                     start_beat: note.start_beat + offset,
-                    ..*note
+                    ..note
                 });
             }
         }
@@ -429,9 +478,9 @@ impl ArrangementState {
             clip_id: new_id,
             position_beats: start_pos,
             duration_beats: total_duration,
-            loop_enabled: false,
+            loop_enabled: joined_loop_enabled,
             loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
+            loop_end_beats: total_duration,
         });
         for note in &merged_notes {
             engine.send(EngineCommand::AddNote {
@@ -448,9 +497,9 @@ impl ArrangementState {
                 duration_beats: total_duration,
                 notes: merged_notes,
                 selected_notes: HashSet::new(),
-                loop_enabled: false,
+                loop_enabled: joined_loop_enabled,
                 loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
+                loop_end_beats: total_duration,
             });
         }
 
@@ -472,112 +521,53 @@ impl ArrangementState {
         split_position: u64,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
-        let mut split_data = None;
-        if let Some(track) = self.find_track(track_id) {
-            if let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) {
-                if split_position > clip.position && split_position < clip.position + clip.duration
-                {
-                    let left_dur = split_position - clip.position;
-                    let right_dur = clip.duration - left_dur;
-                    let right_source_offset = clip.source_offset + left_dur;
-                    split_data = Some((
-                        Arc::clone(&clip.audio),
-                        clip.name.clone(),
-                        clip.source.clone(),
-                        clip.position,
-                        clip.source_offset,
-                        left_dur,
-                        split_position,
-                        right_source_offset,
-                        right_dur,
-                    ));
-                }
-            }
-        }
-        if let Some((
-            audio,
-            name,
-            source,
-            orig_pos,
-            orig_offset,
-            left_dur,
-            right_pos,
-            right_offset,
-            right_dur,
-        )) = split_data
-        {
-            let left_id = ClipId::new();
-            let right_id = ClipId::new();
+        let split = self
+            .find_track(track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == clip_id))
+            .filter(|clip| {
+                split_position > clip.position
+                    && split_position < clip.position.saturating_add(clip.duration)
+            })
+            .map(|clip| {
+                let left_duration = split_position - clip.position;
+                let mut left = clip.clone();
+                left.id = ClipId::new();
+                left.name = format!("{} L", clip.name);
+                left.duration = left_duration;
 
-            // Remove original
+                let mut right = clip.clone();
+                right.id = ClipId::new();
+                right.name = format!("{} R", clip.name);
+                right.position = split_position;
+                right.duration = clip.duration - left_duration;
+                right.source_offset = audio_source_frame(clip, left_duration) as u64;
+                (left, right)
+            });
+        if let Some((left, right)) = split {
+            let left_id = left.id;
+
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
             if let Some(track) = self.find_track_mut(track_id) {
                 track.clips.retain(|c| c.id != clip_id);
             }
 
-            // Add left half
-            engine.send(EngineCommand::AddClip {
-                track_id,
-                clip_id: left_id,
-                audio: Arc::clone(&audio),
-                position: orig_pos,
-                source_offset: orig_offset,
-                duration: left_dur,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.clips.push(UiClip {
-                    id: left_id,
-                    name: format!("{name} L"),
-                    audio: Arc::clone(&audio),
-                    source: source.clone(),
-                    position: orig_pos,
-                    source_offset: orig_offset,
-                    duration: left_dur,
-                    loop_enabled: false,
-                    loop_start: 0,
-                    loop_end: 0,
-                    original_bpm: None,
-                    warped: false,
-                    warped_to_bpm: None,
-                    original_audio: None,
+            for clip in [&left, &right] {
+                engine.send(EngineCommand::AddClip {
+                    track_id,
+                    clip_id: clip.id,
+                    audio: Arc::clone(&clip.audio),
+                    position: clip.position,
+                    source_offset: clip.source_offset,
+                    duration: clip.duration,
+                    loop_enabled: clip.loop_enabled,
+                    loop_start: clip.loop_start,
+                    loop_end: clip.loop_end,
                 });
             }
-
-            // Add right half
-            engine.send(EngineCommand::AddClip {
-                track_id,
-                clip_id: right_id,
-                audio: Arc::clone(&audio),
-                position: right_pos,
-                source_offset: right_offset,
-                duration: right_dur,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-            });
             if let Some(track) = self.find_track_mut(track_id) {
-                track.clips.push(UiClip {
-                    id: right_id,
-                    name: format!("{name} R"),
-                    audio,
-                    source,
-                    position: right_pos,
-                    source_offset: right_offset,
-                    duration: right_dur,
-                    loop_enabled: false,
-                    loop_start: 0,
-                    loop_end: 0,
-                    original_bpm: None,
-                    warped: false,
-                    warped_to_bpm: None,
-                    original_audio: None,
-                });
+                track.clips.extend([left, right]);
             }
 
-            // Update selection: remove original, add left half
             self.selected_clips
                 .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
             self.selected_clips.insert(ArrangementSelection::AudioClip {
@@ -598,115 +588,67 @@ impl ArrangementState {
         split_beat: f64,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
-        let mut split_data = None;
-        if let Some(track) = self.find_track(track_id) {
-            if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
-                let clip_end = clip.position_beats + clip.duration_beats;
-                if split_beat > clip.position_beats && split_beat < clip_end {
-                    let local_split = split_beat - clip.position_beats;
-                    let left_dur = local_split;
-                    let right_dur = clip.duration_beats - local_split;
+        let split = self
+            .find_track(track_id)
+            .and_then(|track| track.note_clips.iter().find(|clip| clip.id == clip_id))
+            .filter(|clip| {
+                split_beat > clip.position_beats
+                    && split_beat < clip.position_beats + clip.duration_beats
+            })
+            .map(|clip| {
+                let local_split = split_beat - clip.position_beats;
+                let mut left = clip.clone();
+                left.id = ClipId::new();
+                left.name = format!("{} L", clip.name);
+                left.duration_beats = local_split;
+                left.notes = visible_notes(clip, 0.0, local_split);
+                left.selected_notes.clear();
 
-                    let mut left_notes = Vec::new();
-                    let mut right_notes = Vec::new();
-                    for note in &clip.notes {
-                        if note.start_beat < local_split {
-                            left_notes.push(*note);
-                        } else {
-                            right_notes.push(MidiNote {
-                                start_beat: note.start_beat - local_split,
-                                ..*note
-                            });
-                        }
-                    }
+                let mut right = clip.clone();
+                right.id = ClipId::new();
+                right.name = format!("{} R", clip.name);
+                right.position_beats = split_beat;
+                right.duration_beats = clip.duration_beats - local_split;
+                right.notes = visible_notes(clip, local_split, clip.duration_beats);
+                right.selected_notes.clear();
 
-                    split_data = Some((
-                        clip.name.clone(),
-                        clip.position_beats,
-                        left_dur,
-                        split_beat,
-                        right_dur,
-                        left_notes,
-                        right_notes,
-                    ));
+                if clip.loop_enabled {
+                    left.loop_start_beats = 0.0;
+                    left.loop_end_beats = left.duration_beats;
+                    right.loop_start_beats = 0.0;
+                    right.loop_end_beats = right.duration_beats;
                 }
-            }
-        }
-        if let Some((name, orig_pos, left_dur, right_pos, right_dur, left_notes, right_notes)) =
-            split_data
-        {
-            let left_id = ClipId::new();
-            let right_id = ClipId::new();
-
-            // Remove original
+                (left, right)
+            });
+        if let Some((left, right)) = split {
+            let left_id = left.id;
             engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
             if let Some(track) = self.find_track_mut(track_id) {
                 track.note_clips.retain(|c| c.id != clip_id);
             }
 
-            // Add left half
-            engine.send(EngineCommand::AddNoteClip {
-                track_id,
-                clip_id: left_id,
-                position_beats: orig_pos,
-                duration_beats: left_dur,
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-            });
-            for note in &left_notes {
-                engine.send(EngineCommand::AddNote {
+            for clip in [&left, &right] {
+                engine.send(EngineCommand::AddNoteClip {
                     track_id,
-                    clip_id: left_id,
-                    note: *note,
+                    clip_id: clip.id,
+                    position_beats: clip.position_beats,
+                    duration_beats: clip.duration_beats,
+                    loop_enabled: clip.loop_enabled,
+                    loop_start_beats: clip.loop_start_beats,
+                    loop_end_beats: clip.loop_end_beats,
                 });
+                for note in &clip.notes {
+                    engine.send(EngineCommand::AddNote {
+                        track_id,
+                        clip_id: clip.id,
+                        note: *note,
+                    });
+                }
             }
             if let Some(track) = self.find_track_mut(track_id) {
-                track.note_clips.push(UiNoteClip {
-                    id: left_id,
-                    name: format!("{name} L"),
-                    position_beats: orig_pos,
-                    duration_beats: left_dur,
-                    notes: left_notes,
-                    selected_notes: HashSet::new(),
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                });
+                track.note_clips.extend([left, right]);
             }
 
-            // Add right half
-            engine.send(EngineCommand::AddNoteClip {
-                track_id,
-                clip_id: right_id,
-                position_beats: right_pos,
-                duration_beats: right_dur,
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-            });
-            for note in &right_notes {
-                engine.send(EngineCommand::AddNote {
-                    track_id,
-                    clip_id: right_id,
-                    note: *note,
-                });
-            }
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.note_clips.push(UiNoteClip {
-                    id: right_id,
-                    name: format!("{name} R"),
-                    position_beats: right_pos,
-                    duration_beats: right_dur,
-                    notes: right_notes,
-                    selected_notes: HashSet::new(),
-                    loop_enabled: false,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 0.0,
-                });
-            }
-
-            // Update selection: remove original, add left half
             self.selected_clips
                 .remove(&ArrangementSelection::NoteClip { track_id, clip_id });
             self.selected_clips.insert(ArrangementSelection::NoteClip {
@@ -733,6 +675,9 @@ impl ArrangementState {
         };
         let target_track = track_id;
         let spb = ctx.samples_per_beat;
+        // Preserve material outside the range. Splitting first turns
+        // the selected span into whole clips that can be removed.
+        let _ = self.op_split_clips_at_region(engine, ctx, start_beats, end_beats, track_id);
         // Collect clip IDs to remove
         let mut audio_removals: Vec<(TrackId, ClipId)> = Vec::new();
         let mut note_removals: Vec<(TrackId, ClipId)> = Vec::new();
@@ -746,14 +691,14 @@ impl ArrangementState {
                 for clip in &track.clips {
                     let clip_start = clip.position as f64 / spb;
                     let clip_end = (clip.position + clip.duration) as f64 / spb;
-                    if clip_start < end_beats && clip_end > start_beats {
+                    if clip_start >= start_beats - 1e-9 && clip_end <= end_beats + 1e-9 {
                         audio_removals.push((track.id, clip.id));
                     }
                 }
             }
             for nc in &track.note_clips {
                 let clip_end = nc.position_beats + nc.duration_beats;
-                if nc.position_beats < end_beats && clip_end > start_beats {
+                if nc.position_beats >= start_beats - 1e-9 && clip_end <= end_beats + 1e-9 {
                     note_removals.push((track.id, nc.id));
                 }
             }
@@ -980,5 +925,450 @@ impl ArrangementState {
             action.status = Some("Join requires same type and track".to_string());
         }
         action
+    }
+
+    pub(super) fn op_copy_selected_clips(&mut self, ctx: ArrangementCtx) -> ArrangementAction {
+        let mut copied = Vec::new();
+        let spb = ctx.samples_per_beat;
+
+        if self.time_selection_active
+            && self.selection_end_beats > self.selection_start_beats
+            && spb > 0.0
+        {
+            let start = self.selection_start_beats;
+            let end = self.selection_end_beats;
+            for track in self
+                .tracks
+                .iter()
+                .filter(|t| self.time_selection_track.is_none_or(|tid| t.id == tid))
+            {
+                for clip in &track.clips {
+                    let clip_start = clip.position as f64 / spb;
+                    let clip_end = (clip.position + clip.duration) as f64 / spb;
+                    let overlap_start = clip_start.max(start);
+                    let overlap_end = clip_end.min(end);
+                    if overlap_end <= overlap_start {
+                        continue;
+                    }
+                    let delta = ((overlap_start - clip_start) * spb).round() as u64;
+                    let duration = ((overlap_end - overlap_start) * spb).round() as u64;
+                    let mut fragment = clip.clone();
+                    fragment.position = 0;
+                    fragment.duration = duration.max(1);
+                    let raw_offset = clip.source_offset.saturating_add(delta);
+                    fragment.source_offset = if clip.loop_enabled && clip.loop_end > clip.loop_start
+                    {
+                        if raw_offset >= clip.loop_end {
+                            clip.loop_start
+                                + (raw_offset - clip.loop_start) % (clip.loop_end - clip.loop_start)
+                        } else {
+                            raw_offset
+                        }
+                    } else {
+                        raw_offset
+                    };
+                    copied.push(ClipboardClip::Audio {
+                        track_id: track.id,
+                        offset_beats: overlap_start - start,
+                        clip: fragment,
+                    });
+                }
+
+                for clip in &track.note_clips {
+                    let clip_end = clip.position_beats + clip.duration_beats;
+                    let overlap_start = clip.position_beats.max(start);
+                    let overlap_end = clip_end.min(end);
+                    if overlap_end <= overlap_start {
+                        continue;
+                    }
+                    let local_start = overlap_start - clip.position_beats;
+                    let local_end = overlap_end - clip.position_beats;
+                    let mut notes = Vec::new();
+                    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+                    for note in &clip.notes {
+                        let mut occurrences = vec![note.start_beat];
+                        if looping
+                            && note.start_beat >= clip.loop_start_beats
+                            && note.start_beat < clip.loop_end_beats
+                        {
+                            let loop_len = clip.loop_end_beats - clip.loop_start_beats;
+                            let mut occurrence = note.start_beat + loop_len;
+                            while occurrence < local_end {
+                                occurrences.push(occurrence);
+                                occurrence += loop_len;
+                            }
+                        }
+                        for occurrence in occurrences {
+                            let note_end = occurrence + note.duration_beats;
+                            let kept_start = occurrence.max(local_start);
+                            let kept_end = note_end.min(local_end);
+                            if kept_end > kept_start {
+                                notes.push(MidiNote {
+                                    start_beat: kept_start - local_start,
+                                    duration_beats: kept_end - kept_start,
+                                    ..*note
+                                });
+                            }
+                        }
+                    }
+                    let mut fragment = clip.clone();
+                    fragment.position_beats = 0.0;
+                    fragment.duration_beats = overlap_end - overlap_start;
+                    fragment.notes = notes;
+                    fragment.selected_notes.clear();
+                    fragment.loop_enabled = false;
+                    fragment.loop_start_beats = 0.0;
+                    fragment.loop_end_beats = 0.0;
+                    copied.push(ClipboardClip::Note {
+                        track_id: track.id,
+                        offset_beats: overlap_start - start,
+                        clip: fragment,
+                    });
+                }
+            }
+        } else {
+            let mut starts = Vec::new();
+            for selection in &self.selected_clips {
+                match selection {
+                    ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
+                        if let Some(clip) = self
+                            .find_track(*track_id)
+                            .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            starts.push(clip.position as f64 / spb);
+                        }
+                    }
+                    ArrangementSelection::NoteClip { track_id, clip_id } => {
+                        if let Some(clip) = self
+                            .find_track(*track_id)
+                            .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            starts.push(clip.position_beats);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let anchor = starts.into_iter().reduce(f64::min).unwrap_or(0.0);
+            for selection in &self.selected_clips {
+                match selection {
+                    ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
+                        if let Some(clip) = self
+                            .find_track(*track_id)
+                            .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            copied.push(ClipboardClip::Audio {
+                                track_id: *track_id,
+                                offset_beats: clip.position as f64 / spb - anchor,
+                                clip: clip.clone(),
+                            });
+                        }
+                    }
+                    ArrangementSelection::NoteClip { track_id, clip_id } => {
+                        if let Some(clip) = self
+                            .find_track(*track_id)
+                            .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            copied.push(ClipboardClip::Note {
+                                track_id: *track_id,
+                                offset_beats: clip.position_beats - anchor,
+                                clip: clip.clone(),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let count = copied.len();
+        if count > 0 {
+            self.clipboard = ClipClipboard { clips: copied };
+        }
+        ArrangementAction {
+            status: Some(if count == 0 {
+                "Nothing to copy".to_string()
+            } else if count == 1 {
+                "Copied clip".to_string()
+            } else {
+                format!("Copied {count} clips")
+            }),
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn op_paste_clips_at_playhead(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+    ) -> ArrangementAction {
+        if self.clipboard.clips.is_empty() || ctx.samples_per_beat <= 0.0 {
+            return ArrangementAction {
+                status: Some("Clipboard is empty".to_string()),
+                ..Default::default()
+            };
+        }
+        let entries = self.clipboard.clips.clone();
+        let mut selected = HashSet::new();
+        for entry in entries {
+            match entry {
+                ClipboardClip::Audio {
+                    track_id,
+                    offset_beats,
+                    mut clip,
+                } => {
+                    if self.find_track(track_id).is_none() {
+                        continue;
+                    }
+                    clip.id = ClipId::new();
+                    clip.position = ctx.playhead_samples.saturating_add(
+                        (offset_beats * ctx.samples_per_beat).round().max(0.0) as u64,
+                    );
+                    engine.send(EngineCommand::AddClip {
+                        track_id,
+                        clip_id: clip.id,
+                        audio: Arc::clone(&clip.audio),
+                        position: clip.position,
+                        source_offset: clip.source_offset,
+                        duration: clip.duration,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start: clip.loop_start,
+                        loop_end: clip.loop_end,
+                    });
+                    selected.insert(ArrangementSelection::AudioClip {
+                        track_id,
+                        clip_id: clip.id,
+                    });
+                    self.find_track_mut(track_id).unwrap().clips.push(clip);
+                }
+                ClipboardClip::Note {
+                    track_id,
+                    offset_beats,
+                    mut clip,
+                } => {
+                    if self.find_track(track_id).is_none() {
+                        continue;
+                    }
+                    clip.id = ClipId::new();
+                    clip.position_beats = ctx.playhead_beats + offset_beats;
+                    engine.send(EngineCommand::AddNoteClip {
+                        track_id,
+                        clip_id: clip.id,
+                        position_beats: clip.position_beats,
+                        duration_beats: clip.duration_beats,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start_beats: clip.loop_start_beats,
+                        loop_end_beats: clip.loop_end_beats,
+                    });
+                    for note in &clip.notes {
+                        engine.send(EngineCommand::AddNote {
+                            track_id,
+                            clip_id: clip.id,
+                            note: *note,
+                        });
+                    }
+                    selected.insert(ArrangementSelection::NoteClip {
+                        track_id,
+                        clip_id: clip.id,
+                    });
+                    self.find_track_mut(track_id).unwrap().note_clips.push(clip);
+                }
+            }
+        }
+        let count = selected.len();
+        self.selected_clips = selected;
+        self.time_selection_active = false;
+        ArrangementAction {
+            status: Some(if count == 1 {
+                "Pasted clip".to_string()
+            } else {
+                format!("Pasted {count} clips")
+            }),
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn op_toggle_selected_clip_loop(
+        &mut self,
+        engine: &mut impl EngineHandle,
+    ) -> ArrangementAction {
+        let selections: Vec<_> = self.selected_clips.iter().copied().collect();
+        let enable = selections.iter().any(|selection| match selection {
+            ArrangementSelection::AudioClip { track_id, clip_id } => self
+                .find_track(*track_id)
+                .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
+                .is_some_and(|c| !c.loop_enabled),
+            ArrangementSelection::NoteClip { track_id, clip_id } => self
+                .find_track(*track_id)
+                .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
+                .is_some_and(|c| !c.loop_enabled),
+        });
+        let mut changed = 0;
+        for selection in selections {
+            match selection {
+                ArrangementSelection::AudioClip { track_id, clip_id } => {
+                    let mut command = None;
+                    if let Some(clip) = self
+                        .find_track_mut(track_id)
+                        .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
+                    {
+                        clip.loop_enabled = enable;
+                        if enable && clip.loop_end <= clip.loop_start {
+                            clip.loop_start = clip.source_offset;
+                            clip.loop_end = clip.source_offset.saturating_add(clip.duration);
+                        }
+                        command = Some((clip.loop_start, clip.loop_end));
+                        changed += 1;
+                    }
+                    if let Some((loop_start, loop_end)) = command {
+                        engine.send(EngineCommand::SetClipLoop {
+                            track_id,
+                            clip_id,
+                            enabled: enable,
+                            loop_start,
+                            loop_end,
+                        });
+                    }
+                }
+                ArrangementSelection::NoteClip { track_id, clip_id } => {
+                    let mut command = None;
+                    if let Some(clip) = self
+                        .find_track_mut(track_id)
+                        .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
+                    {
+                        clip.loop_enabled = enable;
+                        if enable && clip.loop_end_beats <= clip.loop_start_beats {
+                            clip.loop_start_beats = 0.0;
+                            clip.loop_end_beats = clip.duration_beats;
+                        }
+                        command = Some((clip.loop_start_beats, clip.loop_end_beats));
+                        changed += 1;
+                    }
+                    if let Some((loop_start_beats, loop_end_beats)) = command {
+                        engine.send(EngineCommand::SetNoteClipLoop {
+                            track_id,
+                            clip_id,
+                            enabled: enable,
+                            loop_start_beats,
+                            loop_end_beats,
+                        });
+                    }
+                }
+            }
+        }
+        ArrangementAction {
+            status: (changed > 0).then(|| {
+                format!(
+                    "{} loop for {changed} clip{}",
+                    if enable { "Enabled" } else { "Disabled" },
+                    if changed == 1 { "" } else { "s" }
+                )
+            }),
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn op_resize_selected_clips(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+        anchor: ArrangementSelection,
+        new_duration_beats: f64,
+    ) -> ArrangementAction {
+        if ctx.samples_per_beat <= 0.0 {
+            return ArrangementAction::default();
+        }
+        let anchor_duration = match anchor {
+            ArrangementSelection::AudioClip { track_id, clip_id } => self
+                .find_track(track_id)
+                .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
+                .map(|c| c.duration as f64 / ctx.samples_per_beat),
+            ArrangementSelection::NoteClip { track_id, clip_id } => self
+                .find_track(track_id)
+                .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
+                .map(|c| c.duration_beats),
+        };
+        let Some(anchor_duration) = anchor_duration else {
+            return ArrangementAction::default();
+        };
+        let delta = new_duration_beats - anchor_duration;
+        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        };
+        let mut max_end = None::<f64>;
+        for target in targets {
+            match target {
+                ArrangementSelection::AudioClip { track_id, clip_id } => {
+                    let old = self
+                        .find_track(track_id)
+                        .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
+                        .map(|c| c.duration as f64 / ctx.samples_per_beat);
+                    if let Some(old) = old {
+                        let duration =
+                            ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
+                        let action = self.update(
+                            ArrangementMsg::ResizeAudioClip {
+                                track_id,
+                                clip_id,
+                                new_duration: duration.max(1),
+                            },
+                            engine,
+                            ctx,
+                        );
+                        max_end = match (max_end, action.scroll_to_beat) {
+                            (Some(a), Some(b)) => Some(a.max(b)),
+                            (None, value) | (value, None) => value,
+                        };
+                    }
+                }
+                ArrangementSelection::NoteClip { track_id, clip_id } => {
+                    let mut sync = None;
+                    if let Some(clip) = self
+                        .find_track_mut(track_id)
+                        .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
+                    {
+                        clip.duration_beats = (clip.duration_beats + delta).max(0.25);
+                        if clip.loop_enabled && clip.loop_end_beats > clip.duration_beats {
+                            clip.loop_end_beats = clip.duration_beats;
+                            if clip.loop_start_beats >= clip.loop_end_beats {
+                                clip.loop_start_beats = 0.0;
+                            }
+                        }
+                        sync = Some(clip.clone());
+                        max_end = Some(
+                            max_end
+                                .unwrap_or(0.0)
+                                .max(clip.position_beats + clip.duration_beats),
+                        );
+                    }
+                    if let Some(clip) = sync {
+                        engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+                        engine.send(EngineCommand::AddNoteClip {
+                            track_id,
+                            clip_id,
+                            position_beats: clip.position_beats,
+                            duration_beats: clip.duration_beats,
+                            loop_enabled: clip.loop_enabled,
+                            loop_start_beats: clip.loop_start_beats,
+                            loop_end_beats: clip.loop_end_beats,
+                        });
+                        for note in clip.notes {
+                            engine.send(EngineCommand::AddNote {
+                                track_id,
+                                clip_id,
+                                note,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        self.drag_resize_active = true;
+        ArrangementAction {
+            scroll_to_beat: max_end,
+            ..Default::default()
+        }
     }
 }

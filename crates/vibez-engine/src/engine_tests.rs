@@ -40,6 +40,47 @@ fn process_outputs_silence_when_stopped() {
 }
 
 #[test]
+fn midi_clip_commands_keep_project_length_in_sync() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddNoteClip {
+            track_id,
+            clip_id,
+            position_beats: 2.0,
+            duration_beats: 4.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        })
+        .unwrap();
+    let mut output = [0.0; 2];
+    engine.process(&mut output, 2);
+    assert_eq!(engine.transport().audio_length(), Some(132_300));
+
+    cmd_tx.push(EngineCommand::SetBpm(60.0)).unwrap();
+    cmd_tx
+        .push(EngineCommand::MoveNoteClip {
+            track_id,
+            clip_id,
+            new_position_beats: 4.0,
+        })
+        .unwrap();
+    engine.process(&mut output, 2);
+    assert_eq!(engine.transport().audio_length(), Some(352_800));
+
+    cmd_tx
+        .push(EngineCommand::RemoveNoteClip(track_id, clip_id))
+        .unwrap();
+    engine.process(&mut output, 2);
+    assert_eq!(engine.transport().audio_length(), None);
+}
+
+#[test]
 fn play_command_starts_transport() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
 
