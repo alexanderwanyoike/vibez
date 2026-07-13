@@ -339,6 +339,15 @@ impl BrowserState {
         (self.effective_dock_width(window_width) * 0.36)
             .clamp(BROWSER_PLACES_MIN_WIDTH, BROWSER_PLACES_MAX_WIDTH)
     }
+
+    /// The single Results table keeps Name and Status visible throughout the
+    /// resize range, then promotes BPM and Length into dedicated columns once
+    /// the Results pane has enough room to keep every column readable.
+    pub fn results_use_wide_columns(&self, window_width: f32) -> bool {
+        let results_width =
+            self.effective_dock_width(window_width) - self.places_pane_width(window_width);
+        results_width >= 400.0
+    }
 }
 
 /// UI-side state for the Dropbox browser and Settings tab.

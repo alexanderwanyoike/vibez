@@ -383,24 +383,122 @@ impl App {
         filtered_entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
         let selected_source = self.state.browser.selected_source.as_ref();
+        let wide_columns = self
+            .state
+            .browser
+            .results_use_wide_columns(self.state.view.window_width);
+        let table_header: Element<'_, Message> = if wide_columns {
+            container(
+                row![
+                    text("NAME")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fill),
+                    text("BPM")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(36.0)),
+                    text("LENGTH")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(50.0)),
+                    text("STATUS")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(48.0))
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 5.0,
+                right: 12.0,
+                bottom: 5.0,
+                left: 10.0,
+            })
+            .width(Length::Fill)
+            .style(browser_table_header_style)
+            .into()
+        } else {
+            container(
+                row![
+                    text("NAME")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fill),
+                    text("STATUS")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(42.0))
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 5.0,
+                right: 12.0,
+                bottom: 5.0,
+                left: 10.0,
+            })
+            .width(Length::Fill)
+            .style(browser_table_header_style)
+            .into()
+        };
         let mut entries_col = column![].spacing(1);
         for entry in filtered_entries.iter().take(400) {
             let selected = selected_source.is_some_and(|source| &entry.source == source);
+            let cell_color = browser_result_cell_color(selected);
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
-            let entry_body = container(
-                column![
-                    text(entry.name.as_str()).size(12).color(th::text()),
-                    text(entry.relative_path.display().to_string())
-                        .size(10)
-                        .color(if selected { th::text() } else { th::text_dim() })
-                ]
-                .spacing(2)
-                .width(Length::Fill),
-            )
-            .padding([6, 8])
+            let name_cell = column![
+                text(entry.name.as_str())
+                    .size(12)
+                    .color(th::text())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(14.0))
+                    .wrapping(iced::widget::text::Wrapping::None),
+                text(entry.relative_path.display().to_string())
+                    .size(9)
+                    .color(cell_color)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(11.0))
+                    .wrapping(iced::widget::text::Wrapping::None)
+            ]
+            .spacing(2)
             .width(Length::Fill);
+            let table_cells: Element<'_, Message> = if wide_columns {
+                row![
+                    name_cell,
+                    text("—")
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(36.0)),
+                    text("—")
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(50.0)),
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(48.0))
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                row![
+                    name_cell,
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(42.0))
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center)
+                .into()
+            };
+            let entry_body = container(table_cells).padding([6, 8]).width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
                 .on_press(Message::Browser(BrowserMsg::StartDragSample {
                     source: entry.source.clone(),
@@ -408,10 +506,6 @@ impl App {
                 }))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let preview_btn = button(icons::icon(icons::PLAY).size(11).color(th::text_dim()))
-                .on_press(Message::PreviewLocalEntry(entry.source.clone()))
-                .padding([6, 8])
-                .style(browser_row_action_style);
             let selection_marker = container(text(""))
                 .width(Length::Fixed(2.0))
                 .height(Length::Fixed(43.0))
@@ -420,7 +514,7 @@ impl App {
                     ..Default::default()
                 });
             let flat_row = container(
-                row![selection_marker, entry_dragger, preview_btn]
+                row![selection_marker, entry_dragger]
                     .spacing(0)
                     .align_y(iced::Alignment::Center),
             )
@@ -462,6 +556,7 @@ impl App {
                     text(count).size(9).color(th::text_dim())
                 ]
                 .align_y(iced::Alignment::Center),
+                table_header,
                 scrollable(
                     container(entries_col)
                         .width(Length::Fill)
@@ -475,7 +570,7 @@ impl App {
                     scrollable::Scrollbar::default()
                 ))
             ]
-            .spacing(6)
+            .spacing(0)
             .padding(8)
             .height(Length::Fill),
         )
@@ -636,10 +731,6 @@ impl App {
                     }))
                     .on_release(msg)
                     .into();
-                let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::accent()))
-                    .on_press(Message::DropboxPreview(entry.clone()))
-                    .padding([3, 6])
-                    .style(browser_row_action_style);
                 let selection_marker = container(text(""))
                     .width(Length::Fixed(2.0))
                     .height(Length::Fixed(25.0))
@@ -649,7 +740,7 @@ impl App {
                     });
                 rows.push(
                     container(
-                        row![selection_marker, dragger, speaker]
+                        row![selection_marker, dragger]
                             .spacing(2)
                             .align_y(iced::Alignment::Center),
                     )
@@ -722,19 +813,6 @@ fn browser_icon_button_style(_theme: &Theme, status: button::Status) -> button::
             },
             width: 1.0,
             radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn browser_row_action_style(_theme: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-            .then(|| th::bg_hover().into()),
-        text_color: th::text_dim(),
-        border: iced::Border {
-            radius: 0.0.into(),
-            ..Default::default()
         },
         ..Default::default()
     }
@@ -855,6 +933,21 @@ fn browser_results_style(_theme: &Theme) -> container::Style {
     }
 }
 
+fn browser_table_header_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(th::bg_dark().into()),
+        ..Default::default()
+    }
+}
+
+fn browser_result_cell_color(selected: bool) -> iced::Color {
+    if selected {
+        th::text()
+    } else {
+        th::text_dim()
+    }
+}
+
 fn browser_footer_style(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(th::bg_surface().into()),
@@ -864,5 +957,16 @@ fn browser_footer_style(_theme: &Theme) -> container::Style {
             radius: 0.0.into(),
         },
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod browser_table_tests {
+    use super::*;
+
+    #[test]
+    fn selected_result_metadata_uses_the_selected_foreground() {
+        assert_eq!(browser_result_cell_color(true), th::text());
+        assert_eq!(browser_result_cell_color(false), th::text_dim());
     }
 }

@@ -273,6 +273,20 @@ mod tests {
     }
 
     #[test]
+    fn results_table_promotes_metadata_to_columns_only_when_space_allows() {
+        let mut browser = BrowserState::default();
+
+        browser.set_dock_width(crate::state::BROWSER_DOCK_MIN_WIDTH);
+        assert!(!browser.results_use_wide_columns(1_400.0));
+
+        browser.set_dock_width(crate::state::BROWSER_DOCK_DEFAULT_WIDTH);
+        assert!(!browser.results_use_wide_columns(1_400.0));
+
+        browser.set_dock_width(crate::state::BROWSER_DOCK_MAX_WIDTH);
+        assert!(browser.results_use_wide_columns(1_400.0));
+    }
+
+    #[test]
     fn changing_selection_clears_waveform_and_rejects_stale_decode() {
         let first = MediaSourceRef::LocalFile {
             path: PathBuf::from("/samples/first.wav"),
