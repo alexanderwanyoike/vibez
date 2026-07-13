@@ -5,8 +5,9 @@ use std::process::Command;
 use vibez_core::id::ClipId;
 use vibez_core::track::{ClipInfo, MediaSourceRef, TrackInfo};
 use vibez_project::project_format_v1::{
-    detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
-    ProjectContainer, ProjectFileFormat, Provenance, StagedMedia, APPLICATION_ID, FORMAT_VERSION,
+    detect_project_format, hex_sha256, import_legacy_json_file, import_legacy_project_v1,
+    representative_document, save_project_v1, stage_local_file, ProjectContainer,
+    ProjectFileFormat, Provenance, StagedMedia, APPLICATION_ID, FORMAT_VERSION,
 };
 use vibez_project::Project;
 
@@ -244,4 +245,85 @@ fn unsaved_project_uses_staged_copy_before_first_save() {
             .unwrap(),
         bytes
     );
+}
+
+#[test]
+fn legacy_json_import_is_separate_self_contained_and_reports_missing_media() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_media = directory.path().join("present.wav");
+    let missing_media = directory.path().join("missing.wav");
+    let legacy_path = directory.path().join("legacy.vzp");
+    let imported_path = directory.path().join("legacy-imported.vzp");
+    let bytes = b"legacy-local-media".repeat(256);
+    fs::write(&source_media, &bytes).unwrap();
+    let mut project = project_with_source(MediaSourceRef::LocalFile { path: source_media });
+    let mut missing_clip = project.clips[0].clone();
+    missing_clip.id = ClipId::new();
+    missing_clip.name = "missing.wav".into();
+    missing_clip.source = Some(MediaSourceRef::LocalFile {
+        path: missing_media,
+    });
+    project.clips.push(missing_clip);
+    project.save_to_file(&legacy_path).unwrap();
+    let original = fs::read(&legacy_path).unwrap();
+
+    let imported = import_legacy_json_file(&legacy_path, &imported_path).unwrap();
+    assert_eq!(fs::read(&legacy_path).unwrap(), original);
+    assert_eq!(imported.relink.len(), 1);
+    assert!(imported.relink[0].source.contains("missing.wav"));
+    assert_eq!(
+        detect_project_format(&imported_path).unwrap(),
+        ProjectFileFormat::V1
+    );
+    let container = ProjectContainer::open(imported_path).unwrap();
+    let document = container.load_document().unwrap();
+    let MediaSourceRef::ProjectMedia { id, .. } =
+        document.project.clips[0].source.as_ref().unwrap()
+    else {
+        panic!("resolvable legacy media must become Project Media");
+    };
+    assert_eq!(container.read_media(id).unwrap(), bytes);
+}
+
+#[test]
+fn malformed_legacy_import_never_creates_or_changes_a_destination() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("malformed.vzp");
+    let destination = directory.path().join("should-not-exist.vzp");
+    let bytes = b"{ definitely not valid project JSON";
+    fs::write(&source, bytes).unwrap();
+
+    assert!(import_legacy_json_file(&source, &destination).is_err());
+    assert_eq!(fs::read(source).unwrap(), bytes);
+    assert!(!destination.exists());
+}
+
+#[test]
+fn materialized_legacy_remote_reference_keeps_remote_provenance() {
+    let directory = tempfile::tempdir().unwrap();
+    let staged_path = directory.path().join("remote.staged");
+    let destination = directory.path().join("remote-import.vzp");
+    let bytes = b"remote-materialized-media".repeat(128);
+    fs::write(&staged_path, &bytes).unwrap();
+    let source = MediaSourceRef::StagedRemoteProjectMedia {
+        id: hex_sha256(&bytes),
+        file_name: "remote.wav".into(),
+        staging_path: staged_path,
+        provider: "dropbox".into(),
+        connection_id: "legacy-connection".into(),
+        source_id: "id:remote".into(),
+        source_path: "/Samples/remote.wav".into(),
+        rev: Some("rev-1".into()),
+    };
+
+    let imported = import_legacy_project_v1(&destination, project_with_source(source)).unwrap();
+    assert!(imported.relink.is_empty());
+    let document = ProjectContainer::open(destination)
+        .unwrap()
+        .load_document()
+        .unwrap();
+    assert!(matches!(
+        document.project_media[0].provenance,
+        Provenance::Remote { .. }
+    ));
 }

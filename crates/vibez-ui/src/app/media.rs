@@ -345,6 +345,25 @@ impl App {
                     },
                 )
             }
+            staged @ MediaSourceRef::StagedRemoteProjectMedia { .. } => {
+                let name = staged.display_name();
+                let MediaSourceRef::StagedRemoteProjectMedia { staging_path, .. } = &staged else {
+                    unreachable!();
+                };
+                let staging_path = staging_path.clone();
+                Task::perform(
+                    decode_file_async(staging_path),
+                    move |result| match result {
+                        Ok(audio) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            Arc::new(audio),
+                            name.clone(),
+                            staged.clone(),
+                        ),
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
+            }
             MediaSourceRef::ProjectMedia { id, file_name } => {
                 let name = file_name.clone();
                 let retained_source = MediaSourceRef::ProjectMedia { id, file_name };

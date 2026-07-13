@@ -308,6 +308,7 @@ impl App {
                     file_path: clip.source.as_ref().and_then(|source| match source {
                         MediaSourceRef::LocalFile { path } => Some(path.clone()),
                         MediaSourceRef::StagedProjectMedia { .. }
+                        | MediaSourceRef::StagedRemoteProjectMedia { .. }
                         | MediaSourceRef::ProjectMedia { .. }
                         | MediaSourceRef::DropboxFile { .. } => None,
                     }),
@@ -781,9 +782,10 @@ impl App {
             format!("Opened {}", loaded.path.display())
         } else {
             format!(
-                "Opened {} with {} warning(s)",
+                "Opened {} with {} warning(s): {}",
                 loaded.path.display(),
-                loaded.warnings.len()
+                loaded.warnings.len(),
+                loaded.warnings[0]
             )
         };
 

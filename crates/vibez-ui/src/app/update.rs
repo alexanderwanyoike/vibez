@@ -73,6 +73,8 @@ impl App {
                     | Message::Project(ProjectMsg::ToggleFileMenu)
                     | Message::Project(ProjectMsg::DismissFileMenu)
                     | Message::ProjectOpenPathSelected(_)
+                    | Message::ProjectFormatDetected(..)
+                    | Message::LegacyImportDestinationSelected { .. }
                     | Message::ProjectSavePathSelected(_)
                     | Message::ProjectLoaded(_)
                     | Message::ProjectSaved(_)
@@ -658,6 +660,15 @@ impl App {
             }
             Message::ProjectOpenPathSelected(path) => {
                 if let Some(path) = path {
+                    self.state.status_text = format!("Inspecting {}...", path.display());
+                    let inspected = path.clone();
+                    return Task::perform(detect_project_format_async(path), move |result| {
+                        Message::ProjectFormatDetected(inspected.clone(), result)
+                    });
+                }
+            }
+            Message::ProjectFormatDetected(path, result) => match result {
+                Ok(vibez_project::project_format_v1::ProjectFileFormat::V1) => {
                     self.state.status_text = format!("Opening {}...", path.display());
                     let dropbox = self
                         .dropbox_client
@@ -667,6 +678,58 @@ impl App {
                         Message::ProjectLoaded(Box::new(result))
                     });
                 }
+                Ok(vibez_project::project_format_v1::ProjectFileFormat::LegacyJson) => {
+                    let source = path.clone();
+                    let suggested = path
+                        .file_stem()
+                        .map(|stem| format!("{}-imported.vzp", stem.to_string_lossy()))
+                        .unwrap_or_else(|| "Imported-project.vzp".into());
+                    self.state.status_text =
+                        "Legacy JSON detected — choose a separate V1 destination".into();
+                    return Task::perform(
+                        async move {
+                            let handle = rfd::AsyncFileDialog::new()
+                                .set_title("Import Legacy Project as V1")
+                                .set_file_name(&suggested)
+                                .add_filter("Vibez Project Format V1", &["vzp"])
+                                .save_file()
+                                .await;
+                            handle.map(|file| file.path().to_path_buf())
+                        },
+                        move |destination| Message::LegacyImportDestinationSelected {
+                            source: source.clone(),
+                            destination,
+                        },
+                    );
+                }
+                Err(error) => {
+                    self.state.status_text = format!("Project format error: {error}");
+                }
+            },
+            Message::LegacyImportDestinationSelected {
+                source,
+                destination,
+            } => {
+                let Some(mut destination) = destination else {
+                    self.state.status_text =
+                        "Legacy Import cancelled; original project was not modified".into();
+                    return Task::none();
+                };
+                if !destination
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"))
+                {
+                    destination.set_extension("vzp");
+                }
+                self.state.status_text = format!("Importing {}...", source.display());
+                let dropbox = self
+                    .dropbox_client
+                    .clone()
+                    .map(|client| (client, self.dropbox_cache.clone()));
+                return Task::perform(
+                    import_legacy_and_load_async(source, destination, dropbox),
+                    |result| Message::ProjectLoaded(Box::new(result)),
+                );
             }
             Message::ProjectSavePathSelected(path) => {
                 if let Some(mut path) = path {

@@ -395,6 +395,153 @@ async fn decode_and_stage_local_async(
     .map_err(|error| format!("decode/stage task failed: {error}"))?
 }
 
+async fn detect_project_format_async(
+    path: PathBuf,
+) -> Result<vibez_project::project_format_v1::ProjectFileFormat, String> {
+    tokio::task::spawn_blocking(move || {
+        vibez_project::project_format_v1::detect_project_format(&path)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("format detection task failed: {error}"))?
+}
+
+async fn import_legacy_and_load_async(
+    source: PathBuf,
+    destination: PathBuf,
+    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+) -> Result<ProjectLoadResult, String> {
+    if source == destination {
+        return Err("Legacy Import destination must be separate from the source".into());
+    }
+    let original =
+        std::fs::read(&source).map_err(|error| format!("read legacy source: {error}"))?;
+    let legacy_path = source.clone();
+    let mut project = tokio::task::spawn_blocking(move || {
+        Project::load_from_file(&legacy_path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("legacy parse task failed: {error}"))??;
+
+    let remote_sources = collect_remote_sources(&project);
+    if let Some((client, cache)) = dropbox.as_ref() {
+        for remote in remote_sources {
+            let MediaSourceRef::DropboxFile {
+                path_lower,
+                display_path,
+                rev,
+            } = &remote
+            else {
+                continue;
+            };
+            let file_name = Path::new(display_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| display_path.clone());
+            let entry = DropboxEntry {
+                path_lower: path_lower.clone(),
+                path_display: display_path.clone(),
+                name: file_name.clone(),
+                is_folder: false,
+                rev: rev.clone(),
+                size: None,
+            };
+            if let Ok(materialized) = client.download_to_cache(&entry, cache).await {
+                let staged = vibez_project::project_format_v1::stage_remote_file(
+                    &materialized,
+                    file_name,
+                    "dropbox-default".into(),
+                    path_lower.clone(),
+                    display_path.clone(),
+                    rev.clone(),
+                )
+                .map_err(|error| error.to_string())?;
+                replace_project_source(&mut project, &remote, staged);
+            }
+        }
+    }
+
+    let import_destination = destination.clone();
+    let imported = tokio::task::spawn_blocking(move || {
+        vibez_project::project_format_v1::import_legacy_project_v1(&import_destination, project)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Legacy Import task failed: {error}"))??;
+    let after =
+        std::fs::read(&source).map_err(|error| format!("re-read legacy source: {error}"))?;
+    if after != original {
+        return Err("Legacy Import modified its source; converted project was rejected".into());
+    }
+
+    let mut loaded = load_project_async(destination, dropbox).await?;
+    loaded.warnings.extend(
+        imported
+            .relink
+            .into_iter()
+            .map(|item| format!("Relink required: {} ({})", item.source, item.reason)),
+    );
+    Ok(loaded)
+}
+
+fn collect_remote_sources(project: &Project) -> Vec<MediaSourceRef> {
+    let mut sources = Vec::new();
+    let mut collect = |source: &Option<MediaSourceRef>| {
+        if let Some(source @ MediaSourceRef::DropboxFile { .. }) = source {
+            if !sources.contains(source) {
+                sources.push(source.clone());
+            }
+        }
+    };
+    for clip in &project.clips {
+        collect(&clip.source);
+    }
+    for track in project
+        .tracks
+        .iter()
+        .chain(project.master.iter())
+        .chain(project.buses.iter())
+    {
+        match &track.native_instrument {
+            Some(InstrumentStateInfo::Sampler { source, .. }) => collect(source),
+            Some(InstrumentStateInfo::DrumRack { pads }) => {
+                for pad in pads {
+                    collect(&pad.source);
+                }
+            }
+            _ => {}
+        }
+    }
+    sources
+}
+
+fn replace_project_source(project: &mut Project, from: &MediaSourceRef, to: MediaSourceRef) {
+    let replace = |source: &mut Option<MediaSourceRef>| {
+        if source.as_ref() == Some(from) {
+            *source = Some(to.clone());
+        }
+    };
+    for clip in &mut project.clips {
+        replace(&mut clip.source);
+    }
+    for track in project
+        .tracks
+        .iter_mut()
+        .chain(project.master.iter_mut())
+        .chain(project.buses.iter_mut())
+    {
+        match &mut track.native_instrument {
+            Some(InstrumentStateInfo::Sampler { source, .. }) => replace(source),
+            Some(InstrumentStateInfo::DrumRack { pads }) => {
+                for pad in pads {
+                    replace(&mut pad.source);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn save_project_async(
     path: PathBuf,
     source_path: Option<PathBuf>,
@@ -744,6 +891,9 @@ async fn hydrate_saved_source(
     match source {
         MediaSourceRef::LocalFile { path }
         | MediaSourceRef::StagedProjectMedia {
+            staging_path: path, ..
+        }
+        | MediaSourceRef::StagedRemoteProjectMedia {
             staging_path: path, ..
         } => decode_blocking(path.clone()).await,
         MediaSourceRef::ProjectMedia { id, file_name } => {

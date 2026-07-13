@@ -21,6 +21,17 @@ pub enum MediaSourceRef {
         staging_path: PathBuf,
         source_path: PathBuf,
     },
+    /// Remote bytes materialized into Vibez-owned staging during Legacy Import.
+    StagedRemoteProjectMedia {
+        id: String,
+        file_name: String,
+        staging_path: PathBuf,
+        provider: String,
+        connection_id: String,
+        source_id: String,
+        source_path: String,
+        rev: Option<String>,
+    },
     /// Playback-critical media embedded in a Project Format V1 container.
     ProjectMedia {
         id: String,
@@ -42,6 +53,7 @@ impl MediaSourceRef {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.display().to_string()),
             MediaSourceRef::StagedProjectMedia { file_name, .. }
+            | MediaSourceRef::StagedRemoteProjectMedia { file_name, .. }
             | MediaSourceRef::ProjectMedia { file_name, .. } => file_name.clone(),
             MediaSourceRef::DropboxFile { display_path, .. } => PathBuf::from(display_path)
                 .file_name()

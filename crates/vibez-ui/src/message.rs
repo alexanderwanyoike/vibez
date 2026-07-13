@@ -9,6 +9,7 @@ use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
+use vibez_project::project_format_v1::ProjectFileFormat;
 use vibez_project::project_format_v1::SaveObservation;
 use vibez_project::Project;
 
@@ -228,6 +229,11 @@ pub enum Message {
     SaveProject,
     SaveProjectAs,
     ProjectOpenPathSelected(Option<PathBuf>),
+    ProjectFormatDetected(PathBuf, Result<ProjectFileFormat, String>),
+    LegacyImportDestinationSelected {
+        source: PathBuf,
+        destination: Option<PathBuf>,
+    },
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
     ProjectSaved(Box<Result<ProjectSaveResult, String>>),

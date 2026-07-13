@@ -104,6 +104,18 @@ pub struct SaveResult {
     pub observation: SaveObservation,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyRelinkItem {
+    pub source: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LegacyImportResult {
+    pub saved: SaveResult,
+    pub relink: Vec<LegacyRelinkItem>,
+}
+
 #[derive(Debug)]
 pub enum ProjectFormatError {
     Io(std::io::Error),
@@ -412,6 +424,40 @@ pub fn stage_local_file(path: &Path) -> Result<MediaSourceRef, ProjectFormatErro
     })
 }
 
+pub fn stage_remote_file(
+    materialized_path: &Path,
+    file_name: String,
+    connection_id: String,
+    source_id: String,
+    source_path: String,
+    rev: Option<String>,
+) -> Result<MediaSourceRef, ProjectFormatError> {
+    let content = fs::read(materialized_path)?;
+    let id = hex_sha256(&content);
+    let root = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("vibez")
+        .join("staged-project-media");
+    fs::create_dir_all(&root)?;
+    let staging_path = root.join(format!("{id}-remote"));
+    if !staging_path.exists() {
+        let temporary = root.join(format!(".{id}.remote.partial"));
+        fs::write(&temporary, content)?;
+        fs::rename(temporary, &staging_path)?;
+    }
+    Ok(MediaSourceRef::StagedRemoteProjectMedia {
+        id,
+        file_name,
+        staging_path,
+        provider: "dropbox".into(),
+        connection_id,
+        source_id,
+        source_path,
+        rev,
+    })
+}
+
 /// Saves a production Project Format V1 container. `source_container` is the
 /// currently open V1 path, when any; a different destination performs Save As
 /// by copying that self-contained container before committing the new document.
@@ -457,24 +503,84 @@ pub fn save_project_v1(
     })
 }
 
+/// Converts an already-parsed legacy project into a separate V1 destination.
+/// Resolvable references become Project Media; unavailable references remain
+/// in the document and are returned as an explicit relink report.
+pub fn import_legacy_project_v1(
+    destination: &Path,
+    mut project: Project,
+) -> Result<LegacyImportResult, ProjectFormatError> {
+    if destination.exists() {
+        return Err(ProjectFormatError::ExistingDestination(
+            destination.to_path_buf(),
+        ));
+    }
+    let mut staged_media = Vec::new();
+    let mut relink = Vec::new();
+    prepare_project_media_inner(&mut project, &mut staged_media, Some(&mut relink))?;
+    let mut document = ProjectDocumentV1::new(project.clone());
+    let (_container, observation) =
+        ProjectContainer::create_from_staged(destination, &mut document, &staged_media)?;
+    Ok(LegacyImportResult {
+        saved: SaveResult {
+            project,
+            observation,
+        },
+        relink,
+    })
+}
+
+pub fn import_legacy_json_file(
+    source: &Path,
+    destination: &Path,
+) -> Result<LegacyImportResult, ProjectFormatError> {
+    if source == destination {
+        return Err(ProjectFormatError::InvalidContainer(
+            "Legacy Import destination must be separate from its source".into(),
+        ));
+    }
+    if detect_project_format(source)? != ProjectFileFormat::LegacyJson {
+        return Err(ProjectFormatError::InvalidContainer(
+            "Legacy Import requires a JSON source".into(),
+        ));
+    }
+    let original = fs::read(source)?;
+    let project: Project = serde_json::from_slice(&original)?;
+    let imported = import_legacy_project_v1(destination, project)?;
+    if fs::read(source)? != original {
+        return Err(ProjectFormatError::InvalidContainer(
+            "Legacy Import modified its source".into(),
+        ));
+    }
+    Ok(imported)
+}
+
 fn prepare_project_media(
     project: &mut Project,
     staged_media: &mut Vec<StagedMedia>,
 ) -> Result<(), ProjectFormatError> {
+    prepare_project_media_inner(project, staged_media, None)
+}
+
+fn prepare_project_media_inner(
+    project: &mut Project,
+    staged_media: &mut Vec<StagedMedia>,
+    mut relink: Option<&mut Vec<LegacyRelinkItem>>,
+) -> Result<(), ProjectFormatError> {
     for clip in &mut project.clips {
         if let Some(source) = &mut clip.source {
-            prepare_source(source, staged_media)?;
+            prepare_source(source, staged_media, relink.as_deref_mut())?;
             clip.file_path = None;
         }
     }
     for track in &mut project.tracks {
-        prepare_track_sources(track, staged_media)?;
+        prepare_track_sources(track, staged_media, relink.as_deref_mut())?;
     }
     if let Some(master) = &mut project.master {
-        prepare_track_sources(master, staged_media)?;
+        prepare_track_sources(master, staged_media, relink.as_deref_mut())?;
     }
     for bus in &mut project.buses {
-        prepare_track_sources(bus, staged_media)?;
+        prepare_track_sources(bus, staged_media, relink.as_deref_mut())?;
     }
     Ok(())
 }
@@ -482,16 +588,17 @@ fn prepare_project_media(
 fn prepare_track_sources(
     track: &mut TrackInfo,
     staged_media: &mut Vec<StagedMedia>,
+    mut relink: Option<&mut Vec<LegacyRelinkItem>>,
 ) -> Result<(), ProjectFormatError> {
     match &mut track.native_instrument {
         Some(InstrumentStateInfo::Sampler {
             source: Some(source),
             ..
-        }) => prepare_source(source, staged_media)?,
+        }) => prepare_source(source, staged_media, relink.as_deref_mut())?,
         Some(InstrumentStateInfo::DrumRack { pads }) => {
             for pad in pads {
                 if let Some(source) = &mut pad.source {
-                    prepare_source(source, staged_media)?;
+                    prepare_source(source, staged_media, relink.as_deref_mut())?;
                 }
             }
         }
@@ -503,6 +610,7 @@ fn prepare_track_sources(
 fn prepare_source(
     source: &mut MediaSourceRef,
     staged_media: &mut Vec<StagedMedia>,
+    mut relink: Option<&mut Vec<LegacyRelinkItem>>,
 ) -> Result<(), ProjectFormatError> {
     let (path, file_name, provenance) = match source {
         MediaSourceRef::LocalFile { path } => {
@@ -530,9 +638,50 @@ fn prepare_source(
                 source_path: source_path.clone(),
             },
         ),
-        MediaSourceRef::ProjectMedia { .. } | MediaSourceRef::DropboxFile { .. } => return Ok(()),
+        MediaSourceRef::StagedRemoteProjectMedia {
+            file_name,
+            staging_path,
+            provider,
+            connection_id,
+            source_id,
+            source_path,
+            rev,
+            ..
+        } => (
+            staging_path.clone(),
+            file_name.clone(),
+            Provenance::Remote {
+                provider: provider.clone(),
+                connection_id: connection_id.clone(),
+                source_id: source_id.clone(),
+                source_path: source_path.clone(),
+                revision: rev.clone(),
+            },
+        ),
+        MediaSourceRef::ProjectMedia { .. } => return Ok(()),
+        MediaSourceRef::DropboxFile { display_path, .. } => {
+            if let Some(relink) = relink.as_deref_mut() {
+                relink.push(LegacyRelinkItem {
+                    source: display_path.clone(),
+                    reason: "Remote source was not available during Legacy Import".into(),
+                });
+            }
+            return Ok(());
+        }
     };
-    let content = fs::read(&path)?;
+    let content = match fs::read(&path) {
+        Ok(content) => content,
+        Err(error) => {
+            if let Some(relink) = relink {
+                relink.push(LegacyRelinkItem {
+                    source: source.display_name(),
+                    reason: error.to_string(),
+                });
+                return Ok(());
+            }
+            return Err(error.into());
+        }
+    };
     let id = hex_sha256(&content);
     if !staged_media.iter().any(|item| item.id == id) {
         staged_media.push(StagedMedia {
