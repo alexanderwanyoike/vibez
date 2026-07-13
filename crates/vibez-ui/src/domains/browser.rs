@@ -22,7 +22,6 @@ pub enum BrowserMsg {
     ResizeDock(f32),
     EndDockResize,
     NudgeDockWidth(f32),
-    TogglePlacesDrawer,
     SampleBrowserSearchChanged(String),
     SelectSampleBrowserRoot(Option<PathBuf>),
     SelectSampleBrowserEntry(MediaSourceRef),
@@ -90,15 +89,11 @@ impl BrowserState {
                 self.set_dock_width(self.dock_width + delta);
                 action.persist_settings = true;
             }
-            BrowserMsg::TogglePlacesDrawer => {
-                self.places_drawer_open = !self.places_drawer_open;
-            }
             BrowserMsg::SampleBrowserSearchChanged(query) => {
                 self.search = query;
             }
             BrowserMsg::SelectSampleBrowserRoot(root) => {
                 self.root_filter = root;
-                self.places_drawer_open = false;
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
                 if self.select_source(source.clone()) {
@@ -107,7 +102,6 @@ impl BrowserState {
             }
             BrowserMsg::SetSampleBrowserMode(mode) => {
                 self.mode = mode;
-                self.places_drawer_open = false;
                 if mode == crate::state::SampleBrowserMode::Dropbox
                     && !self.dropbox.folders.contains_key("")
                     && !self.dropbox.listing_in_progress.contains("")
@@ -234,10 +228,6 @@ mod tests {
     #[test]
     fn dock_width_clamps_and_persists_only_when_committed() {
         let mut browser = BrowserState::default();
-        assert_eq!(
-            browser.dock_layout(1400.0),
-            crate::state::BrowserDockLayout::Standard
-        );
 
         let action = browser.update(BrowserMsg::BeginDockResize);
         assert!(!action.persist_settings);
@@ -258,14 +248,11 @@ mod tests {
         assert_eq!(browser.effective_dock_width(1_500.0), 620.0);
         assert_eq!(browser.effective_dock_width(900.0), 340.0);
         assert_eq!(browser.dock_width, 620.0);
-        assert_eq!(
-            browser.dock_layout(900.0),
-            crate::state::BrowserDockLayout::Narrow
-        );
+        assert!((browser.places_pane_width(900.0) - 124.0).abs() < f32::EPSILON * 100.0);
     }
 
     #[test]
-    fn layout_transitions_do_not_change_browser_context() {
+    fn resizing_keeps_one_places_and_results_shell_without_changing_context() {
         let mut browser = BrowserState {
             search: "break".into(),
             root_filter: Some(PathBuf::from("/samples")),
@@ -275,20 +262,11 @@ mod tests {
             ..BrowserState::default()
         };
         browser.set_dock_width(350.0);
-        assert_eq!(
-            browser.dock_layout(1_400.0),
-            crate::state::BrowserDockLayout::Narrow
-        );
+        assert!((browser.places_pane_width(1_400.0) - 126.0).abs() < f32::EPSILON * 100.0);
         browser.set_dock_width(460.0);
-        assert_eq!(
-            browser.dock_layout(1_400.0),
-            crate::state::BrowserDockLayout::Standard
-        );
+        assert!((browser.places_pane_width(1_400.0) - 165.6).abs() < f32::EPSILON * 100.0);
         browser.set_dock_width(580.0);
-        assert_eq!(
-            browser.dock_layout(1_400.0),
-            crate::state::BrowserDockLayout::Wide
-        );
+        assert!((browser.places_pane_width(1_400.0) - 176.0).abs() < f32::EPSILON * 100.0);
         assert_eq!(browser.search, "break");
         assert_eq!(browser.root_filter, Some(PathBuf::from("/samples")));
         assert!(browser.selected_source.is_some());

@@ -3,6 +3,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
@@ -53,6 +54,19 @@ pub(crate) fn global_key_handler(
         && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
     {
         return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
+    }
+
+    // Alt+Left / Alt+Right: resize the Browser without permanent header chrome.
+    if modifiers.alt() && !modifiers.control() && !modifiers.shift() && !modifiers.logo() {
+        match key {
+            iced::keyboard::Key::Named(Named::ArrowLeft) => {
+                return Some(Message::Browser(BrowserMsg::NudgeDockWidth(-40.0)));
+            }
+            iced::keyboard::Key::Named(Named::ArrowRight) => {
+                return Some(Message::Browser(BrowserMsg::NudgeDockWidth(40.0)));
+            }
+            _ => {}
+        }
     }
 
     if modifiers.command() {
@@ -159,5 +173,22 @@ mod tests {
                     )
             ));
         }
+    }
+
+    #[test]
+    fn alt_arrows_resize_the_browser_without_header_buttons() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        let narrower = global_key_handler(Key::Named(Named::ArrowLeft), Modifiers::ALT);
+        let wider = global_key_handler(Key::Named(Named::ArrowRight), Modifiers::ALT);
+
+        assert!(matches!(
+            narrower,
+            Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == -40.0
+        ));
+        assert!(matches!(
+            wider,
+            Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == 40.0
+        ));
     }
 }

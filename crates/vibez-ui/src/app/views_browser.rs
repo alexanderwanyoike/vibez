@@ -12,7 +12,7 @@ use vibez_dropbox::DropboxEntry;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{BrowserDockLayout, SampleBrowserEntry, SampleBrowserMode};
+use crate::state::{SampleBrowserEntry, SampleBrowserMode};
 use crate::theme as th;
 
 use super::*;
@@ -23,21 +23,11 @@ impl App {
             .state
             .browser
             .effective_dock_width(self.state.view.window_width);
-        let layout = self.state.browser.dock_layout(self.state.view.window_width);
-        let layout_label = match layout {
-            BrowserDockLayout::Narrow => "NARROW",
-            BrowserDockLayout::Standard => "STANDARD",
-            BrowserDockLayout::Wide => "WIDE",
-        };
+        let places_width = self
+            .state
+            .browser
+            .places_pane_width(self.state.view.window_width);
 
-        let width_down = button(text("−").size(14).color(th::text_dim()))
-            .on_press(Message::Browser(BrowserMsg::NudgeDockWidth(-40.0)))
-            .padding([2, 7])
-            .style(browser_icon_button_style);
-        let width_up = button(text("+").size(13).color(th::text_dim()))
-            .on_press(Message::Browser(BrowserMsg::NudgeDockWidth(40.0)))
-            .padding([2, 7])
-            .style(browser_icon_button_style);
         let close = button(icons::icon(icons::X).size(11).color(th::text_dim()))
             .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
             .padding([3, 6])
@@ -45,10 +35,7 @@ impl App {
 
         let title_row = row![
             text("BROWSER").size(12).color(th::text()),
-            text(layout_label).size(9).color(th::text_muted()),
             horizontal_space(),
-            width_down,
-            width_up,
             close
         ]
         .spacing(5)
@@ -77,48 +64,15 @@ impl App {
             SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
         };
 
-        let content: Element<'_, Message> = if layout == BrowserDockLayout::Wide {
-            row![
-                container(self.view_browser_places())
-                    .width(Length::Fixed(158.0))
-                    .height(Length::Fill)
-                    .style(browser_places_style),
-                body
-            ]
-            .height(Length::Fill)
-            .into()
-        } else {
-            let place_name = match self.state.browser.mode {
-                SampleBrowserMode::Local => "Local  /  All Roots",
-                SampleBrowserMode::Dropbox => "Remote  /  Alex's Dropbox",
-            };
-            let disclosure = if self.state.browser.places_drawer_open {
-                icons::CHEVRON_UP
-            } else {
-                icons::CHEVRON_DOWN
-            };
-            let location = button(
-                row![
-                    text(place_name).size(11).color(th::text()),
-                    horizontal_space(),
-                    icons::icon(disclosure).size(10).color(th::text_dim())
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::Browser(BrowserMsg::TogglePlacesDrawer))
-            .padding([6, 9])
-            .width(Length::Fill)
-            .style(browser_location_button_style);
-            let mut stack = column![location].spacing(4).height(Length::Fill);
-            if self.state.browser.places_drawer_open {
-                stack = stack.push(
-                    container(self.view_browser_places())
-                        .width(Length::Fill)
-                        .style(browser_places_style),
-                );
-            }
-            stack.push(body).into()
-        };
+        let content: Element<'_, Message> = row![
+            container(self.view_browser_places())
+                .width(Length::Fixed(places_width))
+                .height(Length::Fill)
+                .style(browser_places_style),
+            body
+        ]
+        .height(Length::Fill)
+        .into();
 
         container(
             column![
@@ -126,7 +80,7 @@ impl App {
                     .padding([8, 10])
                     .style(browser_header_style),
                 content,
-                self.view_browser_audition_footer(layout)
+                self.view_browser_audition_footer()
             ]
             .height(Length::Fill),
         )
@@ -255,7 +209,7 @@ impl App {
                 text(if self.state.browser.dropbox.connected {
                     "Alex's Dropbox"
                 } else {
-                    "Dropbox · disconnected"
+                    "Disconnected"
                 })
                 .size(10)
                 .color(connection_color),
@@ -263,27 +217,43 @@ impl App {
             .padding([3, 0]),
         ]);
 
-        let add = button(text("+ Root").size(10).color(th::text_dim()))
-            .on_press(Message::AddSampleLibraryRoot)
-            .padding([4, 7])
-            .style(browser_icon_button_style);
-        let mut rescan = button(text("Rescan").size(10).color(th::text_dim()))
-            .padding([4, 7])
-            .style(browser_icon_button_style);
+        let add = button(
+            row![
+                icons::icon(icons::PLUS).size(10).color(th::text_muted()),
+                text("ADD ROOT").size(9).color(th::text_dim())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::AddSampleLibraryRoot)
+        .padding([4, 5])
+        .width(Length::Fill)
+        .style(browser_utility_action_style);
+        let mut rescan = button(
+            row![
+                icons::icon(icons::REPEAT).size(10).color(th::text_muted()),
+                text("RESCAN").size(9).color(th::text_dim())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 5])
+        .width(Length::Fill)
+        .style(browser_utility_action_style);
         if !self.state.browser.roots.is_empty() && !self.state.browser.scan_in_progress {
             rescan = rescan.on_press(Message::RescanSampleLibrary);
         }
         places = places.push(
-            row![add, rescan]
+            column![add, rescan]
                 .spacing(4)
                 .padding([8, 0])
-                .align_y(iced::Alignment::Center),
+                .align_x(iced::Alignment::Start),
         );
 
         container(places.padding(9)).width(Length::Fill).into()
     }
 
-    fn view_browser_audition_footer(&self, layout: BrowserDockLayout) -> Element<'_, Message> {
+    fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
         let selected_label = match self.state.browser.mode {
@@ -352,64 +322,17 @@ impl App {
         ]
         .spacing(5)
         .align_y(iced::Alignment::Center);
-        let import_message = match self.state.browser.mode {
-            SampleBrowserMode::Local => {
-                selected_local.map(|_| Message::ImportSelectedBrowserSampleToArrangement)
-            }
-            SampleBrowserMode::Dropbox => selected_dropbox
-                .as_ref()
-                .filter(|entry| entry.is_supported_audio())
-                .map(|entry| Message::DropboxImportToArrangement(entry.clone())),
-        };
-        let device_message = match self.state.browser.mode {
-            SampleBrowserMode::Local => (selected_local.is_some()
-                && self.selected_browser_device_target().is_some())
-            .then_some(Message::LoadSelectedBrowserSampleToDevice),
-            SampleBrowserMode::Dropbox => selected_dropbox
-                .as_ref()
-                .filter(|entry| entry.is_supported_audio())
-                .filter(|_| self.selected_browser_device_target().is_some())
-                .map(|entry| Message::DropboxImportToDevice(entry.clone())),
-        };
-        let mut arrange = button(text("Add to Arrange").size(10).color(th::text_dim()))
-            .padding([4, 7])
-            .style(browser_transport_button_style);
-        if let Some(message) = import_message {
-            arrange = arrange.on_press(message);
-        }
-        let mut device = button(text("Load Device").size(10).color(th::text_dim()))
-            .padding([4, 7])
-            .style(browser_transport_button_style);
-        if let Some(message) = device_message {
-            device = device.on_press(message);
-        }
-        let import_controls = row![arrange, device].spacing(5);
-        let contents: Element<'_, Message> = if layout == BrowserDockLayout::Narrow {
-            column![
-                row![
-                    text("AUDITION").size(9).color(th::text_muted()),
-                    horizontal_space(),
-                    text(selected_label).size(10).color(th::text_dim())
-                ]
-                .align_y(iced::Alignment::Center),
-                controls
+        let contents: Element<'_, Message> = column![
+            row![
+                text("AUDITION").size(9).color(th::text_muted()),
+                horizontal_space(),
+                text(selected_label).size(10).color(th::text_dim())
             ]
-            .spacing(5)
-            .into()
-        } else {
-            column![
-                row![
-                    text("AUDITION").size(9).color(th::text_muted()),
-                    text(selected_label).size(11).color(th::text()),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-                controls,
-                import_controls
-            ]
-            .spacing(5)
-            .into()
-        };
+            .align_y(iced::Alignment::Center),
+            controls
+        ]
+        .spacing(5)
+        .into();
 
         container(contents)
             .padding([7, 9])
@@ -521,11 +444,11 @@ impl App {
         }
 
         let count = format!(
-            "{} shown / {} indexed{}",
+            "{} / {}{}",
             filtered_entries.len().min(400),
             self.state.browser.entries.len(),
             if self.state.browser.scan_in_progress {
-                " (scanning...)"
+                " …"
             } else {
                 ""
             }
@@ -828,30 +751,6 @@ fn browser_row_divider<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn browser_location_button_style(_theme: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        background: Some(
-            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                th::bg_hover()
-            } else {
-                th::bg_elevated()
-            }
-            .into(),
-        ),
-        text_color: th::text(),
-        border: iced::Border {
-            color: if matches!(status, button::Status::Pressed) {
-                th::accent()
-            } else {
-                th::divider()
-            },
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
 fn browser_place_button_style(active: bool, status: button::Status) -> button::Style {
     button::Style {
         background: Some(
@@ -872,6 +771,24 @@ fn browser_place_button_style(active: bool, status: button::Status) -> button::S
                 iced::Color::TRANSPARENT
             },
             width: if active { 1.0 } else { 0.0 },
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn browser_utility_action_style(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| th::bg_hover().into()),
+        text_color: if matches!(status, button::Status::Pressed) {
+            th::accent()
+        } else {
+            th::text_dim()
+        },
+        border: iced::Border {
+            color: iced::Color::TRANSPARENT,
+            width: 0.0,
             radius: 0.0.into(),
         },
         ..Default::default()

@@ -218,25 +218,8 @@ pub const BROWSER_DOCK_MIN_WIDTH: f32 = 300.0;
 pub const BROWSER_DOCK_DEFAULT_WIDTH: f32 = 410.0;
 pub const BROWSER_DOCK_MAX_WIDTH: f32 = 650.0;
 pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BrowserDockLayout {
-    Narrow,
-    Standard,
-    Wide,
-}
-
-impl BrowserDockLayout {
-    pub fn for_width(width: f32) -> Self {
-        if width < 400.0 {
-            Self::Narrow
-        } else if width < 520.0 {
-            Self::Standard
-        } else {
-            Self::Wide
-        }
-    }
-}
+pub const BROWSER_PLACES_MIN_WIDTH: f32 = 124.0;
+pub const BROWSER_PLACES_MAX_WIDTH: f32 = 176.0;
 
 /// Browser domain slice: sample library, Dropbox browsing, and
 /// drag-and-drop from the browser into the arrangement.
@@ -247,7 +230,6 @@ pub struct BrowserState {
     /// narrow window without overwriting this preference.
     pub dock_width: f32,
     pub dock_resize_active: bool,
-    pub places_drawer_open: bool,
     pub search: String,
     pub roots: Vec<PathBuf>,
     pub entries: Vec<SampleBrowserEntry>,
@@ -277,7 +259,6 @@ impl Default for BrowserState {
             open: true,
             dock_width: BROWSER_DOCK_DEFAULT_WIDTH,
             dock_resize_active: false,
-            places_drawer_open: false,
             search: String::new(),
             roots: Vec::new(),
             entries: Vec::new(),
@@ -354,8 +335,9 @@ impl BrowserState {
         self.dock_width.min(available).max(BROWSER_DOCK_MIN_WIDTH)
     }
 
-    pub fn dock_layout(&self, window_width: f32) -> BrowserDockLayout {
-        BrowserDockLayout::for_width(self.effective_dock_width(window_width))
+    pub fn places_pane_width(&self, window_width: f32) -> f32 {
+        (self.effective_dock_width(window_width) * 0.36)
+            .clamp(BROWSER_PLACES_MIN_WIDTH, BROWSER_PLACES_MAX_WIDTH)
     }
 }
 
