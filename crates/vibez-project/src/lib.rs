@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use vibez_core::midi::NoteClipInfo;
 use vibez_core::track::{ClipInfo, TrackInfo};
 
+pub mod project_format_v1_proof;
+
 /// A serializable project containing tracks and clips.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
