@@ -1,18 +1,17 @@
-//! Browser domain: the sample library, Dropbox browsing state, and
+//! Browser domain: local and remote sample browsing state, and
 //! drag-and-drop from the browser into the arrangement.
 //!
 //! Only the synchronous state transitions live here. Anything that
-//! spawns work (file dialogs, decode, Dropbox HTTP) stays in app.rs
+//! spawns work (file dialogs, decode, provider HTTP) stays in app.rs
 //! as an iced Task and routes results back through these messages.
 
 use std::path::PathBuf;
 
+use crate::message::{LocalRootWatchEvent, SampleLibraryScanResult};
+use crate::remote_provider::RemoteCatalogEntry;
+use crate::state::{BrowserState, LocalRootCatalogState, SampleBrowserMode};
 use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
-
-use crate::message::{LocalRootWatchEvent, SampleLibraryScanResult};
-use crate::state::{BrowserState, LocalRootCatalogState, SampleBrowserMode};
 
 /// Messages the browser domain handles (sync tranche).
 #[derive(Debug, Clone)]
@@ -68,8 +67,9 @@ pub enum BrowserMsg {
         result: Result<SampleLibraryScanResult, String>,
     },
     RemoveSampleLibraryRoot(PathBuf),
-    DropboxCollapseFolder(String),
-    DropboxSelectEntry(DropboxEntry),
+    SelectRemoteFolder(String),
+    ToggleRemoteFolder(String),
+    SelectRemoteEntry(RemoteCatalogEntry),
     SetDropboxAppKey(String),
 }
 
@@ -80,10 +80,6 @@ pub struct BrowserAction {
     pub status: Option<String>,
     /// UI settings changed (browser visibility, library roots).
     pub persist_settings: bool,
-    /// Dropbox mode was entered with no cached root listing; the
-    /// router should kick off a root list_folder call if a client is
-    /// connected.
-    pub expand_dropbox_root: bool,
     /// Decode a Local selection for the truthful Audition waveform without
     /// starting playback.
     pub load_waveform: Option<MediaSourceRef>,
@@ -146,14 +142,7 @@ impl BrowserState {
             }
             BrowserMsg::SetSampleBrowserMode(mode) => {
                 self.mode = mode;
-                if mode == crate::state::SampleBrowserMode::Dropbox
-                    && !self.dropbox.folders.contains_key("")
-                    && !self.dropbox.listing_in_progress.contains("")
-                {
-                    // The router only acts on this when a Dropbox
-                    // client is actually connected.
-                    action.expand_dropbox_root = true;
-                }
+                self.reset_results_window();
             }
             BrowserMsg::BeginPendingDrag {
                 source,
@@ -373,19 +362,33 @@ impl BrowserState {
                 action.persist_settings = true;
                 action.status = Some("Removed sample root".to_string());
             }
-            BrowserMsg::DropboxCollapseFolder(path) => {
-                self.dropbox.expanded.remove(&path);
+            BrowserMsg::SelectRemoteFolder(path) => {
+                self.remote.current_path = path;
+                if !self.remote.current_path.is_empty() {
+                    self.remote
+                        .expanded
+                        .insert(self.remote.current_path.clone());
+                }
+                self.remote.selected_path = None;
+                self.search_scope = crate::state::BrowserSearchScope::SelectedFolder;
+                self.clear_selection();
+                self.reset_results_window();
             }
-            BrowserMsg::DropboxSelectEntry(entry) => {
-                self.dropbox.selected_path = Some(entry.path_lower.clone());
+            BrowserMsg::ToggleRemoteFolder(path) => {
+                if !self.remote.expanded.remove(&path) {
+                    self.remote.expanded.insert(path);
+                }
+            }
+            BrowserMsg::SelectRemoteEntry(entry) => {
+                self.remote.selected_path = Some(entry.provider_item_id.clone());
                 self.select_source(MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower,
-                    display_path: entry.path_display,
-                    rev: entry.rev,
+                    path_lower: entry.provider_item_id,
+                    display_path: entry.path,
+                    rev: entry.revision,
                 });
             }
             BrowserMsg::SetDropboxAppKey(key) => {
-                self.dropbox.app_key_input = key;
+                self.remote.app_key_input = key;
             }
         }
         action
@@ -632,13 +635,72 @@ mod tests {
     }
 
     #[test]
-    fn dropbox_mode_requests_root_listing_once() {
+    fn remote_mode_uses_the_persisted_catalog_without_requesting_network_work() {
         let mut b = BrowserState::default();
-        let action = b.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Dropbox));
-        assert!(action.expand_dropbox_root);
-        b.dropbox.folders.insert(String::new(), Vec::new());
-        let action = b.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Dropbox));
-        assert!(!action.expand_dropbox_root);
+        let action = b.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Remote));
+        assert_eq!(b.mode, SampleBrowserMode::Remote);
+        assert_eq!(action, BrowserAction::default());
+    }
+
+    #[test]
+    fn remote_navigation_cycles_folder_connection_and_everywhere_scopes() {
+        let mut browser = BrowserState::default();
+        browser.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Remote));
+        browser.update(BrowserMsg::SelectRemoteFolder("/megalodon".into()));
+        assert_eq!(browser.remote.current_path, "/megalodon");
+        assert!(browser.remote.expanded.contains("/megalodon"));
+        assert_eq!(
+            browser.search_scope,
+            crate::state::BrowserSearchScope::SelectedFolder
+        );
+
+        browser.update(BrowserMsg::CycleSearchScope);
+        assert_eq!(browser.search_scope, crate::state::BrowserSearchScope::Root);
+        browser.update(BrowserMsg::CycleSearchScope);
+        assert_eq!(
+            browser.search_scope,
+            crate::state::BrowserSearchScope::Everywhere
+        );
+        browser.update(BrowserMsg::CycleSearchScope);
+        assert_eq!(
+            browser.search_scope,
+            crate::state::BrowserSearchScope::SelectedFolder
+        );
+    }
+
+    #[test]
+    fn remote_selection_preserves_provider_identity_and_source_location() {
+        let mut browser = BrowserState::default();
+        browser.update(BrowserMsg::SelectRemoteEntry(RemoteCatalogEntry {
+            provider_item_id: "/megalodon/kick.wav".into(),
+            path: "/Megalodon/Kick.wav".into(),
+            parent_path: "/megalodon".into(),
+            name: "Kick.wav".into(),
+            is_folder: false,
+            revision: Some("rev-7".into()),
+            size: Some(2048),
+        }));
+        assert_eq!(
+            browser.selected_source,
+            Some(MediaSourceRef::DropboxFile {
+                path_lower: "/megalodon/kick.wav".into(),
+                display_path: "/Megalodon/Kick.wav".into(),
+                rev: Some("rev-7".into()),
+            })
+        );
+        assert_eq!(
+            browser.remote.selected_path.as_deref(),
+            Some("/megalodon/kick.wav")
+        );
+    }
+
+    #[test]
+    fn remote_search_edits_are_catalog_only_and_request_no_provider_effect() {
+        let mut browser = BrowserState::default();
+        browser.mode = SampleBrowserMode::Remote;
+        let action = browser.update(BrowserMsg::SampleBrowserSearchChanged("kick".into()));
+        assert_eq!(browser.search, "kick");
+        assert_eq!(action, BrowserAction::default());
     }
 
     #[test]

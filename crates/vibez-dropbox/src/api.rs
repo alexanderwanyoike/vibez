@@ -12,7 +12,10 @@ use tokio::sync::Mutex;
 
 use crate::cache::DropboxCache;
 use crate::oauth::refresh_access_token;
-use crate::types::{AccountInfo, DropboxEntry, DropboxError, DropboxResult, Tokens};
+use crate::types::{
+    AccountInfo, DropboxEntry, DropboxError, DropboxListItem, DropboxListPage, DropboxResult,
+    Tokens,
+};
 
 const API_BASE: &str = "https://api.dropboxapi.com";
 const CONTENT_BASE: &str = "https://content.dropboxapi.com";
@@ -73,6 +76,36 @@ impl DropboxClient {
     /// path: `""` means the root. Pagination is handled here; callers
     /// receive the full list.
     pub async fn list_folder(&self, path: &str) -> DropboxResult<Vec<DropboxEntry>> {
+        let mut page = self.list_folder_page(path, false, None).await?;
+        let mut out: Vec<DropboxEntry> = page
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                DropboxListItem::Entry(entry) => Some(entry),
+                DropboxListItem::Deleted { .. } => None,
+            })
+            .collect();
+        while page.has_more {
+            page = self
+                .list_folder_page(path, false, Some(&page.cursor))
+                .await?;
+            out.extend(page.items.into_iter().filter_map(|item| match item {
+                DropboxListItem::Entry(entry) => Some(entry),
+                DropboxListItem::Deleted { .. } => None,
+            }));
+        }
+
+        Ok(out)
+    }
+
+    /// Fetch one metadata page. A missing cursor starts a listing; a cursor
+    /// continues either pagination or Dropbox's delta stream.
+    pub async fn list_folder_page(
+        &self,
+        path: &str,
+        recursive: bool,
+        cursor: Option<&str>,
+    ) -> DropboxResult<DropboxListPage> {
         #[derive(Deserialize)]
         struct Page {
             entries: Vec<ApiEntry>,
@@ -80,32 +113,30 @@ impl DropboxClient {
             has_more: bool,
         }
 
-        let body = serde_json::json!({
-            "path": path,
-            "recursive": false,
-            "include_deleted": false,
-            "include_has_explicit_shared_members": false,
-            "include_mounted_folders": true,
-            "include_non_downloadable_files": false,
-        });
-
-        let mut page: Page = self
-            .post_json(&format!("{API_BASE}/2/files/list_folder"), &body)
-            .await?;
-
-        let mut out: Vec<DropboxEntry> = page.entries.into_iter().map(Into::into).collect();
-        while page.has_more {
-            let cont_body = serde_json::json!({ "cursor": page.cursor });
-            page = self
-                .post_json(
-                    &format!("{API_BASE}/2/files/list_folder/continue"),
-                    &cont_body,
-                )
-                .await?;
-            out.extend(page.entries.into_iter().map(Into::into));
-        }
-
-        Ok(out)
+        let (url, body) = if let Some(cursor) = cursor {
+            (
+                format!("{API_BASE}/2/files/list_folder/continue"),
+                serde_json::json!({ "cursor": cursor }),
+            )
+        } else {
+            (
+                format!("{API_BASE}/2/files/list_folder"),
+                serde_json::json!({
+                    "path": path,
+                    "recursive": recursive,
+                    "include_deleted": true,
+                    "include_has_explicit_shared_members": false,
+                    "include_mounted_folders": true,
+                    "include_non_downloadable_files": false,
+                }),
+            )
+        };
+        let page: Page = self.post_json(&url, &body).await?;
+        Ok(DropboxListPage {
+            items: page.entries.into_iter().filter_map(Into::into).collect(),
+            cursor: page.cursor,
+            has_more: page.has_more,
+        })
     }
 
     /// Download a file. Returns the raw bytes. The UI wraps this in
@@ -242,11 +273,13 @@ enum ApiEntry {
         path_lower: String,
         path_display: String,
     },
+    #[serde(rename = "deleted")]
+    Deleted { path_lower: String },
     #[serde(other)]
     Other,
 }
 
-impl From<ApiEntry> for DropboxEntry {
+impl From<ApiEntry> for Option<DropboxListItem> {
     fn from(entry: ApiEntry) -> Self {
         match entry {
             ApiEntry::File {
@@ -255,27 +288,37 @@ impl From<ApiEntry> for DropboxEntry {
                 path_display,
                 rev,
                 size,
-            } => DropboxEntry {
+            } => Some(DropboxListItem::Entry(DropboxEntry {
                 path_lower,
                 path_display,
                 name,
                 is_folder: false,
                 rev,
                 size,
-            },
+            })),
             ApiEntry::Folder {
                 name,
                 path_lower,
                 path_display,
-            } => DropboxEntry {
+            } => Some(DropboxListItem::Entry(DropboxEntry {
                 path_lower,
                 path_display,
                 name,
                 is_folder: true,
                 rev: None,
                 size: None,
-            },
-            ApiEntry::Other => DropboxEntry {
+            })),
+            ApiEntry::Deleted { path_lower } => Some(DropboxListItem::Deleted { path_lower }),
+            ApiEntry::Other => None,
+        }
+    }
+}
+
+impl From<ApiEntry> for DropboxEntry {
+    fn from(entry: ApiEntry) -> Self {
+        match Option::<DropboxListItem>::from(entry) {
+            Some(DropboxListItem::Entry(entry)) => entry,
+            _ => DropboxEntry {
                 path_lower: String::new(),
                 path_display: String::new(),
                 name: String::new(),
@@ -324,5 +367,18 @@ mod tests {
         assert!(entry.is_folder);
         assert_eq!(entry.name, "Drums");
         assert!(entry.rev.is_none());
+    }
+
+    #[test]
+    fn api_entry_preserves_deleted_identity_for_delta_reconciliation() {
+        let parsed: ApiEntry =
+            serde_json::from_str(r#"{ ".tag": "deleted", "path_lower": "/drums/old-kick.wav" }"#)
+                .unwrap();
+        assert_eq!(
+            Option::<DropboxListItem>::from(parsed),
+            Some(DropboxListItem::Deleted {
+                path_lower: "/drums/old-kick.wav".into(),
+            })
+        );
     }
 }

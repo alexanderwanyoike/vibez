@@ -153,11 +153,31 @@ impl App {
             }
             _ => None,
         };
-        let dropbox_ui_state = crate::state::DropboxUiState {
+        let catalog_store = crate::remote_provider::RemoteCatalogStore::for_dropbox();
+        let (remote_catalog, mut remote_catalog_state) = match catalog_store.load() {
+            Ok(catalog) => (catalog, crate::state::RemoteCatalogState::Ready),
+            Err(error) => (
+                crate::remote_provider::RemoteCatalogSnapshot::default(),
+                crate::state::RemoteCatalogState::Stale { error },
+            ),
+        };
+        if dropbox_client.is_none()
+            && matches!(
+                remote_catalog_state,
+                crate::state::RemoteCatalogState::Ready
+            )
+        {
+            remote_catalog_state = crate::state::RemoteCatalogState::AuthenticationRequired {
+                error: "Sign in to refresh; showing the last saved Remote catalog".into(),
+            };
+        }
+        let remote_ui_state = crate::state::RemoteUiState {
             connected: dropbox_client.is_some(),
             account_email: dropbox_settings.account_email.clone(),
             app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
             has_app_key: resolved_key.is_some(),
+            catalog: remote_catalog,
+            catalog_state: remote_catalog_state,
             ..Default::default()
         };
 
@@ -178,7 +198,7 @@ impl App {
                 audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
                 audition_loop: ui_settings.audition_loop,
                 roots: ui_settings.sample_library_roots,
-                dropbox: dropbox_ui_state,
+                remote: remote_ui_state,
                 ..Default::default()
             },
             ..Default::default()
@@ -255,7 +275,7 @@ impl App {
         app.ensure_master_eq();
 
         let roots = app.state.browser.roots.clone();
-        let startup_task = Task::batch(roots.into_iter().map(|root| {
+        let local_startup_task = Task::batch(roots.into_iter().map(|root| {
             let revision = app.state.browser.begin_root_scan(&root, false);
             Task::perform(scan_sample_root_async(root.clone()), move |result| {
                 Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
@@ -265,6 +285,12 @@ impl App {
                 })
             })
         }));
+        let remote_startup_task = if app.dropbox_client.is_some() {
+            app.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Refreshing;
+            Task::done(Message::RefreshRemoteConnection)
+        } else {
+            Task::none()
+        };
 
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
@@ -276,7 +302,10 @@ impl App {
             .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
             .unwrap_or_else(Task::none);
 
-        (app, Task::batch([startup_task, open_task]))
+        (
+            app,
+            Task::batch([local_startup_task, remote_startup_task, open_task]),
+        )
     }
 
     /// Find a theme by name: built-ins first, then the scanned user
@@ -619,14 +648,6 @@ async fn connect_dropbox_async(
     let info = client.current_account().await.map_err(|e| e.to_string())?;
     let tokens = client.tokens().await;
     Ok((info, tokens))
-}
-
-async fn list_dropbox_folder_async(
-    client: Arc<DropboxClient>,
-    path: String,
-) -> Result<(String, Vec<DropboxEntry>), String> {
-    let entries = client.list_folder(&path).await.map_err(|e| e.to_string())?;
-    Ok((path, entries))
 }
 
 async fn fetch_dropbox_sample_async(

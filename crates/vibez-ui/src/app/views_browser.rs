@@ -9,13 +9,11 @@ use iced::widget::{
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
-use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
-
 use crate::icons;
 use crate::message::Message;
 use crate::state::{AuditionMode, SampleBrowserEntry, SampleBrowserMode};
 use crate::theme as th;
+use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::AuditionSync;
 
 use super::*;
@@ -96,18 +94,52 @@ impl App {
                 .align_y(iced::Alignment::Center)
                 .into()
             }
-            SampleBrowserMode::Dropbox => row![
-                text("SCOPE").size(9).color(th::text_muted()),
-                text("REMOTE CATALOG").size(9).color(th::text_dim())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center)
-            .into(),
+            SampleBrowserMode::Remote => {
+                let scope_label = match self.state.browser.search_scope {
+                    crate::state::BrowserSearchScope::SelectedFolder => "THIS FOLDER",
+                    crate::state::BrowserSearchScope::Root => "THIS CONNECTION",
+                    crate::state::BrowserSearchScope::Everywhere => "EVERYWHERE",
+                };
+                let location = self
+                    .state
+                    .browser
+                    .remote
+                    .current_path
+                    .rsplit('/')
+                    .find(|part| !part.is_empty())
+                    .unwrap_or("Alex's Dropbox");
+                row![
+                    button(
+                        row![
+                            text("SCOPE").size(9).color(th::text_muted()),
+                            text(scope_label).size(9).color(th::text())
+                        ]
+                        .spacing(5)
+                    )
+                    .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
+                    .padding([3, 0])
+                    .style(browser_utility_action_style),
+                    horizontal_space(),
+                    text(location)
+                        .size(9)
+                        .color(th::text_dim())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
         };
 
         let body: Element<'_, Message> = match self.state.browser.mode {
+            SampleBrowserMode::Local
+                if !self.state.browser.search.trim().is_empty()
+                    && self.state.browser.search_scope
+                        == crate::state::BrowserSearchScope::Everywhere =>
+            {
+                self.view_remote_browser()
+            }
             SampleBrowserMode::Local => self.view_local_sample_browser(),
-            SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
+            SampleBrowserMode::Remote => self.view_remote_browser(),
         };
 
         let content: Element<'_, Message> = row![
@@ -165,7 +197,7 @@ impl App {
 
     fn view_browser_places(&self) -> Element<'_, Message> {
         let local_active = self.state.browser.mode == SampleBrowserMode::Local;
-        let remote_active = self.state.browser.mode == SampleBrowserMode::Dropbox;
+        let remote_active = self.state.browser.mode == SampleBrowserMode::Remote;
         let place_button = |label: &'static str, active: bool, mode| {
             button(
                 row![
@@ -295,26 +327,42 @@ impl App {
         places = places.push(place_button(
             "Remote",
             remote_active,
-            SampleBrowserMode::Dropbox,
+            SampleBrowserMode::Remote,
         ));
-        let connection_color = if self.state.browser.dropbox.connected {
-            th::text_dim()
-        } else {
-            th::text_muted()
-        };
-        places = places.push(row![
-            horizontal_space().width(Length::Fixed(22.0)),
-            container(
-                text(if self.state.browser.dropbox.connected {
-                    "Alex's Dropbox"
-                } else {
-                    "Disconnected"
-                })
+        let connection_active = remote_active && self.state.browser.remote.current_path.is_empty();
+        let connection = button(
+            text(self.state.browser.remote.catalog.connection_name.as_str())
                 .size(10)
-                .color(connection_color),
-            )
-            .padding([3, 0]),
-        ]);
+                .color(if connection_active {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                })
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
+            String::new(),
+        )))
+        .padding([4, 2])
+        .width(Length::Fill)
+        .style(move |_theme: &Theme, status| browser_place_button_style(connection_active, status));
+        places = places.push(
+            row![
+                horizontal_space().width(Length::Fixed(14.0)),
+                text("▾").size(10).color(th::text_muted()),
+                connection,
+                text(self.state.browser.remote.catalog_state.label())
+                    .size(8)
+                    .color(th::text_muted())
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center),
+        );
+        let mut remote_rows = Vec::new();
+        self.render_remote_places_tree("", 1, &mut remote_rows);
+        for remote_row in remote_rows {
+            places = places.push(remote_row);
+        }
 
         let add = button(
             row![
@@ -433,6 +481,85 @@ impl App {
         }
     }
 
+    fn render_remote_places_tree<'a>(
+        &'a self,
+        parent: &str,
+        depth: usize,
+        rows: &mut Vec<Element<'a, Message>>,
+    ) {
+        let mut children: Vec<_> = self
+            .state
+            .browser
+            .remote
+            .catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.is_folder && entry.parent_path == parent)
+            .collect();
+        children.sort_by_key(|entry| entry.name.to_ascii_lowercase());
+        for folder in children {
+            let expanded = self
+                .state
+                .browser
+                .remote
+                .expanded
+                .contains(&folder.provider_item_id);
+            let active = self.state.browser.mode == SampleBrowserMode::Remote
+                && self.state.browser.remote.current_path == folder.provider_item_id;
+            let has_children = self
+                .state
+                .browser
+                .remote
+                .catalog
+                .entries
+                .iter()
+                .any(|entry| entry.is_folder && entry.parent_path == folder.provider_item_id);
+            let toggle: Element<'a, Message> = if has_children {
+                button(
+                    text(if expanded { "▾" } else { "▸" })
+                        .size(10)
+                        .color(th::text_muted()),
+                )
+                .on_press(Message::Browser(BrowserMsg::ToggleRemoteFolder(
+                    folder.provider_item_id.clone(),
+                )))
+                .padding([3, 2])
+                .style(browser_utility_action_style)
+                .into()
+            } else {
+                container(text("·").size(9).color(th::text_muted()))
+                    .padding([3, 3])
+                    .into()
+            };
+            let select = button(
+                text(folder.name.clone())
+                    .size(9)
+                    .color(if active { th::accent() } else { th::text_dim() })
+                    .height(Length::Fixed(12.0))
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
+                folder.provider_item_id.clone(),
+            )))
+            .padding([3, 1])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
+            rows.push(
+                row![
+                    horizontal_space().width(Length::Fixed((depth as f32 * 8.0).min(40.0))),
+                    toggle,
+                    select
+                ]
+                .spacing(1)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+            if expanded {
+                self.render_remote_places_tree(&folder.provider_item_id, depth + 1, rows);
+            }
+        }
+    }
+
     fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
@@ -440,7 +567,7 @@ impl App {
             SampleBrowserMode::Local => selected_local
                 .map(|entry| entry.name.clone())
                 .unwrap_or_else(|| "No source selected".into()),
-            SampleBrowserMode::Dropbox => selected_dropbox
+            SampleBrowserMode::Remote => selected_dropbox
                 .as_ref()
                 .map(|entry| entry.name.clone())
                 .unwrap_or_else(|| "No source selected".into()),
@@ -450,7 +577,7 @@ impl App {
             SampleBrowserMode::Local => {
                 selected_local.map(|entry| Message::PreviewLocalEntry(entry.source.clone()))
             }
-            SampleBrowserMode::Dropbox => selected_dropbox
+            SampleBrowserMode::Remote => selected_dropbox
                 .as_ref()
                 .filter(|entry| entry.is_supported_audio())
                 .map(|entry| Message::DropboxPreview(entry.clone())),
@@ -558,7 +685,7 @@ impl App {
         let controls = row![
             play,
             stop,
-            text(if self.state.browser.dropbox.preview_in_progress {
+            text(if self.state.browser.remote.preview_in_progress {
                 "FETCHING"
             } else if self.state.browser.audition_loading {
                 "PREPARING"
@@ -1138,69 +1265,358 @@ impl App {
             .into()
     }
 
-    pub(super) fn view_dropbox_browser(&self) -> Element<'_, Message> {
-        if !self.state.browser.dropbox.connected {
-            let hint = if self.state.browser.dropbox.auth_in_progress {
-                "Waiting for browser authorisation..."
+    pub(super) fn view_remote_browser(&self) -> Element<'_, Message> {
+        let browser = &self.state.browser;
+        let remote = &browser.remote;
+        let query = browser.search.trim().to_ascii_lowercase();
+        let searching = !query.is_empty();
+        let current = remote.current_path.as_str();
+        let in_current_tree = |entry: &crate::remote_provider::RemoteCatalogEntry| {
+            current.is_empty()
+                || entry.provider_item_id == current
+                || entry
+                    .provider_item_id
+                    .strip_prefix(current)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        };
+        let mut results: Vec<&crate::remote_provider::RemoteCatalogEntry> = remote
+            .catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.is_folder || entry.is_supported_audio())
+            .filter(|entry| {
+                if searching {
+                    let in_scope = match browser.search_scope {
+                        crate::state::BrowserSearchScope::SelectedFolder => in_current_tree(entry),
+                        crate::state::BrowserSearchScope::Root
+                        | crate::state::BrowserSearchScope::Everywhere => true,
+                    };
+                    in_scope
+                        && (entry.name.to_ascii_lowercase().contains(&query)
+                            || entry.path.to_ascii_lowercase().contains(&query))
+                } else {
+                    entry.parent_path == current
+                }
+            })
+            .collect();
+        results.sort_by(|left, right| {
+            (!left.is_folder, left.name.to_ascii_lowercase())
+                .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
+        });
+        let mut local_everywhere: Vec<&SampleBrowserEntry> =
+            if searching && browser.search_scope == crate::state::BrowserSearchScope::Everywhere {
+                browser
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.name.to_ascii_lowercase().contains(&query)
+                            || entry
+                                .relative_path
+                                .to_string_lossy()
+                                .to_ascii_lowercase()
+                                .contains(&query)
+                    })
+                    .collect()
             } else {
-                "Connect in Settings > Dropbox to browse your library."
+                Vec::new()
             };
-            return container(
-                column![
-                    text("RESULTS").size(9).color(th::text_muted()),
-                    text("Remote Connection unavailable")
-                        .size(13)
-                        .color(th::text()),
-                    text(hint).size(11).color(th::text_dim())
-                ]
-                .spacing(8)
-                .padding(12),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(browser_results_style)
-            .into();
-        }
-
-        let mut rows: Vec<Element<'_, Message>> = Vec::new();
-        self.render_dropbox_tree(String::new(), 0, &mut rows);
-        if rows.is_empty() {
-            let msg = if self.state.browser.dropbox.listing_in_progress.contains("") {
-                "Listing your Dropbox..."
-            } else {
-                "Empty (or still fetching)."
-            };
-            rows.push(text(msg).size(11).color(th::text_dim()).into());
-        }
-        let mut entries_col = column![].spacing(2);
-        for row in rows {
-            entries_col = entries_col.push(row);
-        }
-        let status: Element<'_, Message> =
-            if let Some(error) = self.state.browser.dropbox.last_error.clone() {
-                text(format!("Error · {error}"))
+        local_everywhere.sort_by_key(|entry| entry.name.to_ascii_lowercase());
+        let total_results = results.len() + local_everywhere.len();
+        let visible_results = total_results.min(browser.results_visible_limit);
+        let remote_visible = results.len().min(visible_results);
+        results.truncate(remote_visible);
+        local_everywhere.truncate(visible_results.saturating_sub(remote_visible));
+        let wide_columns = browser.results_use_wide_columns(self.state.view.window_width);
+        let table_header: Element<'_, Message> = if wide_columns {
+            row![
+                text("NAME")
                     .size(9)
-                    .color(th::danger())
+                    .color(th::text_muted())
+                    .width(Length::Fill),
+                text("BPM")
+                    .size(9)
+                    .color(th::text_muted())
+                    .width(Length::Fixed(36.0)),
+                text("LENGTH")
+                    .size(9)
+                    .color(th::text_muted())
+                    .width(Length::Fixed(50.0)),
+                text("AVAIL")
+                    .size(9)
+                    .color(th::text_muted())
+                    .width(Length::Fixed(48.0))
+            ]
+            .spacing(4)
+            .padding([5, 8])
+            .into()
+        } else {
+            row![
+                text("NAME")
+                    .size(9)
+                    .color(th::text_muted())
+                    .width(Length::Fill),
+                text("AVAIL")
+                    .size(9)
+                    .color(th::text_muted())
+                    .width(Length::Fixed(42.0))
+            ]
+            .padding([5, 8])
+            .into()
+        };
+        let mut entries_col = column![].spacing(0);
+        let catalog_notice = match &remote.catalog_state {
+            crate::state::RemoteCatalogState::Stale { error }
+            | crate::state::RemoteCatalogState::AuthenticationRequired { error } => {
+                Some(error.clone())
+            }
+            crate::state::RemoteCatalogState::Partial { pages, error } => {
+                Some(format!("Partial refresh after {pages} page(s) · {error}"))
+            }
+            crate::state::RemoteCatalogState::Ready
+            | crate::state::RemoteCatalogState::Refreshing => None,
+        };
+        if let Some(notice) = catalog_notice {
+            entries_col = entries_col
+                .push(container(text(notice).size(9).color(th::danger())).padding([5, 8]))
+                .push(browser_row_divider());
+        }
+        for entry in results {
+            let selected = remote.selected_path.as_deref() == Some(&entry.provider_item_id);
+            let cell_color = if selected { th::text() } else { th::text_dim() };
+            let context = if entry.parent_path.is_empty() {
+                remote.catalog.connection_name.clone()
+            } else {
+                format!("{} · {}", remote.catalog.connection_name, entry.parent_path)
+            };
+            let name_cell = column![
+                text(if entry.is_folder {
+                    format!("› {}", entry.name)
+                } else {
+                    entry.name.clone()
+                })
+                .size(12)
+                .color(th::text())
+                .width(Length::Fill)
+                .height(Length::Fixed(14.0))
+                .wrapping(iced::widget::text::Wrapping::None),
+                text(context)
+                    .size(9)
+                    .color(cell_color)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(11.0))
+                    .wrapping(iced::widget::text::Wrapping::None)
+            ]
+            .spacing(2)
+            .width(Length::Fill);
+            let cells: Element<'_, Message> = if wide_columns {
+                row![
+                    name_cell,
+                    text("—")
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(36.0)),
+                    text("—")
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(50.0)),
+                    text("REMOTE")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(48.0))
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                row![
+                    name_cell,
+                    text("REMOTE")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(42.0))
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            };
+            let message = if entry.is_folder {
+                Message::Browser(BrowserMsg::SelectRemoteFolder(
+                    entry.provider_item_id.clone(),
+                ))
+            } else {
+                Message::Browser(BrowserMsg::SelectRemoteEntry((*entry).clone()))
+            };
+            let body = container(cells).padding([6, 8]).width(Length::Fill);
+            let interactive: Element<'_, Message> = if entry.is_folder {
+                button(body)
+                    .on_press(message)
+                    .padding(0)
+                    .width(Length::Fill)
+                    .style(browser_utility_action_style)
                     .into()
             } else {
-                let account = self
-                    .state
-                    .browser
-                    .dropbox
-                    .account_email
-                    .clone()
-                    .unwrap_or_else(|| "Connected".into());
-                text(account).size(9).color(th::text_dim()).into()
+                let source = MediaSourceRef::DropboxFile {
+                    path_lower: entry.provider_item_id.clone(),
+                    display_path: entry.path.clone(),
+                    rev: entry.revision.clone(),
+                };
+                mouse_area(body)
+                    .on_press(Message::BeginPendingBrowserDrag(source, entry.name.clone()))
+                    .on_release(message)
+                    .into()
             };
+            let selection_marker = container(text(""))
+                .width(Length::Fixed(2.0))
+                .height(Length::Fixed(43.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: selected.then(|| th::accent().into()),
+                    ..Default::default()
+                });
+            entries_col = entries_col
+                .push(
+                    container(row![selection_marker, interactive])
+                        .width(Length::Fill)
+                        .style(move |_theme: &Theme| container::Style {
+                            background: selected.then(|| th::accent_dim().into()),
+                            ..Default::default()
+                        }),
+                )
+                .push(browser_row_divider());
+        }
+        for entry in local_everywhere {
+            let selected = browser.selected_source.as_ref() == Some(&entry.source);
+            let cell_color = if selected { th::text() } else { th::text_dim() };
+            let name_cell = column![
+                text(entry.name.as_str())
+                    .size(12)
+                    .color(th::text())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(14.0))
+                    .wrapping(iced::widget::text::Wrapping::None),
+                text(format!(
+                    "Local · {}/{}",
+                    browser_root_name(&entry.root_path),
+                    entry.relative_path.display()
+                ))
+                .size(9)
+                .color(cell_color)
+                .width(Length::Fill)
+                .height(Length::Fixed(11.0))
+                .wrapping(iced::widget::text::Wrapping::None)
+            ]
+            .spacing(2)
+            .width(Length::Fill);
+            let cells: Element<'_, Message> = if wide_columns {
+                row![
+                    name_cell,
+                    text("—")
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(36.0)),
+                    text(
+                        entry
+                            .duration_seconds
+                            .map(format_browser_duration)
+                            .unwrap_or_else(|| "—".into())
+                    )
+                    .size(10)
+                    .color(cell_color)
+                    .width(Length::Fixed(50.0)),
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(48.0))
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                row![
+                    name_cell,
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(42.0))
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            };
+            let body = container(cells).padding([6, 8]).width(Length::Fill);
+            let interactive: Element<'_, Message> = mouse_area(body)
+                .on_press(Message::BeginPendingBrowserDrag(
+                    entry.source.clone(),
+                    entry.name.clone(),
+                ))
+                .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
+                .into();
+            let selection_marker = container(text(""))
+                .width(Length::Fixed(2.0))
+                .height(Length::Fixed(43.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: selected.then(|| th::accent().into()),
+                    ..Default::default()
+                });
+            entries_col = entries_col
+                .push(
+                    container(row![selection_marker, interactive])
+                        .width(Length::Fill)
+                        .style(move |_theme: &Theme| container::Style {
+                            background: selected.then(|| th::accent_dim().into()),
+                            ..Default::default()
+                        }),
+                )
+                .push(browser_row_divider());
+        }
+        if total_results == 0 {
+            let empty = if remote.catalog.entries.is_empty() {
+                "No saved Remote metadata yet; connect and refresh when available"
+            } else if searching {
+                "No media or folders match this scope"
+            } else {
+                "This Remote folder has no child folders or supported media"
+            };
+            entries_col = entries_col
+                .push(container(text(empty).size(11).color(th::text_dim())).padding([8, 4]));
+        }
+        if browser.has_more_results(total_results) {
+            entries_col = entries_col.push(
+                button(text("SHOW MORE").size(9).color(th::text_dim()))
+                    .on_press(Message::Browser(BrowserMsg::ShowMoreLocalResults))
+                    .padding([7, 8])
+                    .width(Length::Fill)
+                    .style(browser_utility_action_style),
+            );
+        }
+        let refresh = button(text("REFRESH").size(9).color(th::text_dim()))
+            .on_press(Message::RefreshRemoteConnection)
+            .padding([3, 5])
+            .style(browser_utility_action_style);
+        let state_color = if matches!(
+            remote.catalog_state,
+            crate::state::RemoteCatalogState::Stale { .. }
+                | crate::state::RemoteCatalogState::Partial { .. }
+                | crate::state::RemoteCatalogState::AuthenticationRequired { .. }
+        ) {
+            th::danger()
+        } else {
+            th::text_dim()
+        };
 
         container(
             column![
                 row![
                     text("RESULTS").size(9).color(th::text_muted()),
                     horizontal_space(),
-                    status
+                    text(format!(
+                        "{} · {visible_results}/{total_results}",
+                        remote.catalog_state.label()
+                    ))
+                    .size(9)
+                    .color(state_color),
+                    refresh
                 ]
+                .spacing(5)
                 .align_y(iced::Alignment::Center),
+                table_header,
                 scrollable(
                     container(entries_col)
                         .width(Length::Fill)
@@ -1214,7 +1630,7 @@ impl App {
                     scrollable::Scrollbar::default()
                 ))
             ]
-            .spacing(6)
+            .spacing(0)
             .padding(8)
             .height(Length::Fill),
         )
@@ -1222,133 +1638,6 @@ impl App {
         .height(Length::Fill)
         .style(browser_results_style)
         .into()
-    }
-
-    pub(super) fn render_dropbox_tree(
-        &self,
-        path: String,
-        depth: usize,
-        rows: &mut Vec<Element<'_, Message>>,
-    ) {
-        let Some(entries) = self.state.browser.dropbox.folders.get(&path) else {
-            return;
-        };
-        let mut sorted: Vec<&DropboxEntry> = entries.iter().collect();
-        sorted.sort_by(|a, b| {
-            (!a.is_folder, a.name.to_lowercase()).cmp(&(!b.is_folder, b.name.to_lowercase()))
-        });
-        for entry in sorted {
-            let expanded = self
-                .state
-                .browser
-                .dropbox
-                .expanded
-                .contains(&entry.path_lower);
-            let selected =
-                self.state.browser.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
-
-            let prefix = if entry.is_folder {
-                if expanded {
-                    "v "
-                } else {
-                    "> "
-                }
-            } else if entry.is_supported_audio() {
-                "· "
-            } else {
-                "  "
-            };
-            let indent = "  ".repeat(depth);
-            let label = format!("{indent}{prefix}{}", entry.name);
-            let msg = if entry.is_folder {
-                if expanded {
-                    Message::Browser(BrowserMsg::DropboxCollapseFolder(entry.path_lower.clone()))
-                } else {
-                    Message::DropboxExpandFolder(entry.path_lower.clone())
-                }
-            } else {
-                Message::Browser(BrowserMsg::DropboxSelectEntry(entry.clone()))
-            };
-            if entry.is_supported_audio() {
-                // Audio rows use a container + mouse_area so press events
-                // reach us (iced Button captures ButtonPressed, which would
-                // hide the drag from mouse_area).
-                let text_color = if selected { th::accent() } else { th::text() };
-                let row_body = container(text(label).size(11).color(text_color))
-                    .padding([3, 6])
-                    .width(Length::Fill);
-                let source = MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower.clone(),
-                    display_path: entry.path_display.clone(),
-                    rev: entry.rev.clone(),
-                };
-                let dragger: Element<'_, Message> = mouse_area(row_body)
-                    .on_press(Message::BeginPendingBrowserDrag(source, entry.name.clone()))
-                    .on_release(msg)
-                    .into();
-                let selection_marker = container(text(""))
-                    .width(Length::Fixed(2.0))
-                    .height(Length::Fixed(25.0))
-                    .style(move |_theme: &Theme| container::Style {
-                        background: selected.then(|| th::accent().into()),
-                        ..Default::default()
-                    });
-                rows.push(
-                    container(
-                        row![selection_marker, dragger]
-                            .spacing(2)
-                            .align_y(iced::Alignment::Center),
-                    )
-                    .width(Length::Fill)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: selected.then(|| th::accent_dim().into()),
-                        ..Default::default()
-                    })
-                    .into(),
-                );
-            } else {
-                // Folders + non-audio entries keep the button path since they
-                // don't participate in drag.
-                let btn = button(text(label).size(11).color(if selected {
-                    th::accent()
-                } else if entry.is_folder {
-                    th::text()
-                } else {
-                    th::text_dim()
-                }))
-                .on_press(msg)
-                .padding([3, 6])
-                .width(Length::Fill)
-                .style(move |_theme: &Theme, status| {
-                    let bg = if selected {
-                        Some(th::accent_dim().into())
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
-                        }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: if selected { th::accent() } else { th::text() },
-                        border: iced::Border {
-                            radius: 0.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }
-                });
-                rows.push(btn.into());
-            }
-
-            rows.push(browser_row_divider());
-
-            if entry.is_folder && expanded {
-                self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
-            }
-        }
     }
 }
 

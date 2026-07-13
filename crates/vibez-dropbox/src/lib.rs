@@ -19,4 +19,7 @@ pub use api::DropboxClient;
 pub use cache::DropboxCache;
 pub use oauth::{run_flow as run_oauth_flow, BrowserOpener, SystemBrowserOpener};
 pub use settings::{load_app_key_with_env_override, DropboxSettings};
-pub use types::{AccountInfo, DropboxEntry, DropboxError, DropboxResult, Tokens};
+pub use types::{
+    AccountInfo, DropboxEntry, DropboxError, DropboxListItem, DropboxListPage, DropboxResult,
+    Tokens,
+};

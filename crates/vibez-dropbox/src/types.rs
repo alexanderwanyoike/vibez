@@ -42,6 +42,19 @@ pub struct DropboxEntry {
     pub size: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropboxListItem {
+    Entry(DropboxEntry),
+    Deleted { path_lower: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropboxListPage {
+    pub items: Vec<DropboxListItem>,
+    pub cursor: String,
+    pub has_more: bool,
+}
+
 impl DropboxEntry {
     pub fn file_extension(&self) -> Option<&str> {
         self.name.rsplit_once('.').map(|(_, ext)| ext)

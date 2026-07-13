@@ -9,9 +9,10 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
 use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
+
+use crate::remote_provider::RemoteCatalogSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuditionMode {
@@ -263,7 +264,7 @@ impl UndoHistory {
 pub enum SampleBrowserMode {
     #[default]
     Local,
-    Dropbox,
+    Remote,
 }
 
 pub const BROWSER_DOCK_MIN_WIDTH: f32 = 300.0;
@@ -306,7 +307,7 @@ impl LocalRootCatalogState {
     }
 }
 
-/// Browser domain slice: sample library, Dropbox browsing, and
+/// Browser domain slice: local and remote sample browsing, and
 /// drag-and-drop from the browser into the arrangement.
 #[derive(Debug, Clone)]
 pub struct BrowserState {
@@ -353,7 +354,7 @@ pub struct BrowserState {
     pub audition_bpm_detecting: bool,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
-    pub dropbox: DropboxUiState,
+    pub remote: RemoteUiState,
     pub pending_drag: Option<PendingMediaDrag>,
     pub drag_source: Option<MediaSourceRef>,
     pub drag_label: Option<String>,
@@ -400,7 +401,7 @@ impl Default for BrowserState {
             audition_bpm_detecting: false,
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
-            dropbox: DropboxUiState::default(),
+            remote: RemoteUiState::default(),
             pending_drag: None,
             drag_source: None,
             drag_label: None,
@@ -529,6 +530,21 @@ impl BrowserState {
     }
 
     pub fn cycle_search_scope(&mut self) {
+        if self.mode == SampleBrowserMode::Remote {
+            self.search_scope = match self.search_scope {
+                BrowserSearchScope::SelectedFolder if self.remote.current_path.is_empty() => {
+                    BrowserSearchScope::Everywhere
+                }
+                BrowserSearchScope::SelectedFolder => BrowserSearchScope::Root,
+                BrowserSearchScope::Root => BrowserSearchScope::Everywhere,
+                BrowserSearchScope::Everywhere if self.remote.current_path.is_empty() => {
+                    BrowserSearchScope::SelectedFolder
+                }
+                BrowserSearchScope::Everywhere => BrowserSearchScope::SelectedFolder,
+            };
+            self.reset_results_window();
+            return;
+        }
         self.search_scope = match self.search_scope {
             BrowserSearchScope::SelectedFolder
                 if self.current_folder.is_some()
@@ -853,9 +869,71 @@ impl BrowserState {
     }
 }
 
-/// UI-side state for the Dropbox browser and Settings tab.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum RemoteCatalogState {
+    #[default]
+    Ready,
+    Refreshing,
+    Stale {
+        error: String,
+    },
+    Partial {
+        pages: usize,
+        error: String,
+    },
+    AuthenticationRequired {
+        error: String,
+    },
+}
+
+impl RemoteCatalogState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Ready => "READY",
+            Self::Refreshing => "REFRESHING",
+            Self::Stale { .. } => "STALE",
+            Self::Partial { .. } => "PARTIAL",
+            Self::AuthenticationRequired { .. } => "SIGN IN",
+        }
+    }
+}
+
+#[cfg(test)]
+mod remote_catalog_state_tests {
+    use super::RemoteCatalogState;
+
+    #[test]
+    fn refresh_auth_stale_and_partial_states_have_distinct_labels() {
+        assert_eq!(RemoteCatalogState::Refreshing.label(), "REFRESHING");
+        assert_eq!(
+            RemoteCatalogState::AuthenticationRequired {
+                error: "sign in".into()
+            }
+            .label(),
+            "SIGN IN"
+        );
+        assert_eq!(
+            RemoteCatalogState::Stale {
+                error: "offline".into()
+            }
+            .label(),
+            "STALE"
+        );
+        assert_eq!(
+            RemoteCatalogState::Partial {
+                pages: 1,
+                error: "offline".into()
+            }
+            .label(),
+            "PARTIAL"
+        );
+    }
+}
+
+/// Provider-neutral Browser state for Remote Connections. Dropbox V1 auth
+/// fields remain here because Dropbox is the sole shipped adapter.
 #[derive(Debug, Default, Clone)]
-pub struct DropboxUiState {
+pub struct RemoteUiState {
     pub connected: bool,
     pub account_email: Option<String>,
     /// App key entered in settings (may be empty until the user pastes one).
@@ -865,13 +943,13 @@ pub struct DropboxUiState {
     /// An OAuth flow is in progress; Connect button is disabled.
     pub auth_in_progress: bool,
     pub last_error: Option<String>,
-    /// Listing cache keyed by Dropbox folder path (`""` for root).
-    pub folders: HashMap<String, Vec<DropboxEntry>>,
-    /// Paths for which a list_folder call is currently in flight.
-    pub listing_in_progress: HashSet<String>,
-    /// Paths expanded in the tree UI.
+    pub catalog: RemoteCatalogSnapshot,
+    pub catalog_state: RemoteCatalogState,
+    /// Current provider folder (`""` means the connection root).
+    pub current_path: String,
+    /// Paths expanded beneath the connection in Places.
     pub expanded: HashSet<String>,
-    /// `path_lower` of the currently-selected Dropbox entry, if any.
+    /// Provider item identity of the current Remote selection.
     pub selected_path: Option<String>,
     /// A preview fetch / playback is in flight.
     pub preview_in_progress: bool,

@@ -434,11 +434,8 @@ pub enum Message {
     ConnectDropbox,
     DropboxConnected(Result<DropboxConnectOutcome, String>),
     DisconnectDropbox,
-    DropboxExpandFolder(String),
-    DropboxFolderListed {
-        path: String,
-        result: Result<Vec<DropboxEntry>, String>,
-    },
+    RefreshRemoteConnection,
+    RemoteCatalogRefreshed(crate::remote_provider::RemoteRefreshResult),
     DropboxPreview(DropboxEntry),
     DropboxPreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),

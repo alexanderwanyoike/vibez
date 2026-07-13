@@ -739,13 +739,22 @@ impl App {
     }
 
     pub(super) fn selected_dropbox_entry(&self) -> Option<DropboxEntry> {
-        let selected = self.state.browser.dropbox.selected_path.as_ref()?;
-        for entries in self.state.browser.dropbox.folders.values() {
-            if let Some(entry) = entries.iter().find(|e| &e.path_lower == selected) {
-                return Some(entry.clone());
-            }
-        }
-        None
+        let selected = self.state.browser.remote.selected_path.as_ref()?;
+        self.state
+            .browser
+            .remote
+            .catalog
+            .entries
+            .iter()
+            .find(|entry| &entry.provider_item_id == selected && !entry.is_folder)
+            .map(|entry| DropboxEntry {
+                path_lower: entry.provider_item_id.clone(),
+                path_display: entry.path.clone(),
+                name: entry.name.clone(),
+                is_folder: false,
+                rev: entry.revision.clone(),
+                size: entry.size,
+            })
     }
 
     pub(super) fn handle_add_clip_to_track(&mut self, track_id: TrackId) -> Task<Message> {

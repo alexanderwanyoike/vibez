@@ -500,7 +500,7 @@ impl App {
         .size(11)
         .color(th::text_dim());
 
-        let app_key_input = text_input("App key", &self.state.browser.dropbox.app_key_input)
+        let app_key_input = text_input("App key", &self.state.browser.remote.app_key_input)
             .on_input(|s| Message::Browser(BrowserMsg::SetDropboxAppKey(s)))
             .on_submit(Message::SaveDropboxAppKey)
             .size(13)
@@ -531,11 +531,11 @@ impl App {
             .spacing(8)
             .align_y(iced::Alignment::Center);
 
-        let account_line: Element<'_, Message> = if self.state.browser.dropbox.connected {
+        let account_line: Element<'_, Message> = if self.state.browser.remote.connected {
             let email = self
                 .state
                 .browser
-                .dropbox
+                .remote
                 .account_email
                 .clone()
                 .unwrap_or_else(|| "connected".into());
@@ -543,7 +543,7 @@ impl App {
                 .size(12)
                 .color(th::accent())
                 .into()
-        } else if self.state.browser.dropbox.auth_in_progress {
+        } else if self.state.browser.remote.auth_in_progress {
             text("Waiting for browser authorisation...")
                 .size(12)
                 .color(th::text_dim())
@@ -553,10 +553,10 @@ impl App {
         };
 
         let can_connect =
-            self.state.browser.dropbox.has_app_key && !self.state.browser.dropbox.auth_in_progress;
-        let connect_label = if self.state.browser.dropbox.auth_in_progress {
+            self.state.browser.remote.has_app_key && !self.state.browser.remote.auth_in_progress;
+        let connect_label = if self.state.browser.remote.auth_in_progress {
             "Connecting..."
-        } else if self.state.browser.dropbox.connected {
+        } else if self.state.browser.remote.connected {
             "Reconnect"
         } else {
             "Connect"
@@ -586,7 +586,7 @@ impl App {
             })
         };
 
-        let disconnect_btn: Element<'_, Message> = if self.state.browser.dropbox.connected {
+        let disconnect_btn: Element<'_, Message> = if self.state.browser.remote.connected {
             button(text("Disconnect").size(12).color(th::text_dim()))
                 .on_press(Message::DisconnectDropbox)
                 .padding([6, 12])
@@ -610,7 +610,7 @@ impl App {
         };
 
         let error_line: Element<'_, Message> =
-            if let Some(err) = self.state.browser.dropbox.last_error.clone() {
+            if let Some(err) = self.state.browser.remote.last_error.clone() {
                 text(err).size(11).color(th::danger()).into()
             } else {
                 horizontal_space().width(Length::Shrink).into()

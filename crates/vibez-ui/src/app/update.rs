@@ -1298,12 +1298,12 @@ impl App {
 
             // -- Dropbox --
             Message::SaveDropboxAppKey => {
-                let value = self.state.browser.dropbox.app_key_input.trim().to_string();
+                let value = self.state.browser.remote.app_key_input.trim().to_string();
                 self.dropbox_settings.app_key = if value.is_empty() { None } else { Some(value) };
                 if let Err(err) = self.dropbox_settings.save() {
-                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
+                    self.state.browser.remote.last_error = Some(format!("save settings: {err}"));
                 }
-                self.state.browser.dropbox.has_app_key =
+                self.state.browser.remote.has_app_key =
                     load_app_key_with_env_override(&self.dropbox_settings).is_some();
                 self.state.status_text = "Dropbox app key saved".to_string();
             }
@@ -1311,7 +1311,7 @@ impl App {
                 return self.handle_connect_dropbox();
             }
             Message::DropboxConnected(Ok(outcome)) => {
-                self.state.browser.dropbox.auth_in_progress = false;
+                self.state.browser.remote.auth_in_progress = false;
                 if let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) {
                     let client = DropboxClient::new(app_key, outcome.tokens.clone());
                     self.dropbox_client = Some(Arc::new(client));
@@ -1319,46 +1319,80 @@ impl App {
                 self.dropbox_settings.tokens = Some(outcome.tokens.clone());
                 self.dropbox_settings.account_email = Some(outcome.info.email.clone());
                 if let Err(err) = self.dropbox_settings.save() {
-                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
+                    self.state.browser.remote.last_error = Some(format!("save settings: {err}"));
                 }
-                self.state.browser.dropbox.connected = true;
-                self.state.browser.dropbox.account_email = Some(outcome.info.email.clone());
+                self.state.browser.remote.connected = true;
+                self.state.browser.remote.account_email = Some(outcome.info.email.clone());
                 self.state.status_text = format!("Dropbox connected: {}", outcome.info.email);
+                return self.handle_remote_catalog_refresh();
             }
             Message::DropboxConnected(Err(err)) => {
-                self.state.browser.dropbox.auth_in_progress = false;
-                self.state.browser.dropbox.last_error = Some(err.clone());
+                self.state.browser.remote.auth_in_progress = false;
+                self.state.browser.remote.last_error = Some(err.clone());
                 self.state.status_text = format!("Dropbox connect failed: {err}");
             }
             Message::DisconnectDropbox => {
                 self.dropbox_client = None;
                 self.dropbox_settings.clear_tokens();
                 let _ = self.dropbox_settings.save();
-                self.state.browser.dropbox = crate::state::DropboxUiState {
-                    app_key_input: self.state.browser.dropbox.app_key_input.clone(),
-                    has_app_key: self.state.browser.dropbox.has_app_key,
-                    ..Default::default()
+                self.state.browser.remote.connected = false;
+                self.state.browser.remote.account_email = None;
+                self.state.browser.remote.auth_in_progress = false;
+                self.state.browser.remote.preview_in_progress = false;
+                self.state.browser.remote.catalog_state =
+                    crate::state::RemoteCatalogState::AuthenticationRequired {
+                        error: "Disconnected; showing the last saved catalog".into(),
+                    };
+                self.state.status_text =
+                    "Dropbox disconnected; saved Remote catalog remains available".to_string();
+            }
+            Message::RefreshRemoteConnection => {
+                return self.handle_remote_catalog_refresh();
+            }
+            Message::RemoteCatalogRefreshed(result) => {
+                crate::remote_provider::reconcile_remote_catalog(
+                    &mut self.state.browser.remote.catalog,
+                    &result,
+                );
+                let save_error = crate::remote_provider::RemoteCatalogStore::for_dropbox()
+                    .save(&self.state.browser.remote.catalog)
+                    .err();
+                self.state.browser.remote.catalog_state = match (&result.error, save_error) {
+                    (Some(error), _)
+                        if error.kind
+                            == crate::remote_provider::RemoteProviderErrorKind::Authentication =>
+                    {
+                        crate::state::RemoteCatalogState::AuthenticationRequired {
+                            error: error.message.clone(),
+                        }
+                    }
+                    (Some(error), _) if result.pages > 0 => {
+                        crate::state::RemoteCatalogState::Partial {
+                            pages: result.pages,
+                            error: error.message.clone(),
+                        }
+                    }
+                    (Some(error), _) => crate::state::RemoteCatalogState::Stale {
+                        error: error.message.clone(),
+                    },
+                    (None, Some(error)) => crate::state::RemoteCatalogState::Stale { error },
+                    (None, None) => crate::state::RemoteCatalogState::Ready,
                 };
-                self.state.status_text = "Dropbox disconnected".to_string();
-            }
-            Message::DropboxExpandFolder(path) => {
-                return self.handle_dropbox_expand_folder(path);
-            }
-            Message::DropboxFolderListed { path, result } => {
-                self.state.browser.dropbox.listing_in_progress.remove(&path);
-                match result {
-                    Ok(entries) => {
-                        self.state.browser.dropbox.folders.insert(path, entries);
-                    }
-                    Err(err) => {
-                        self.state.browser.dropbox.last_error = Some(err.clone());
-                        self.state.status_text = format!("Dropbox error: {err}");
-                    }
-                }
+                let item_count = self.state.browser.remote.catalog.entries.len();
+                self.state.status_text = match result.error {
+                    None => format!(
+                        "Remote catalog refreshed: {item_count} items across {} page(s)",
+                        result.pages
+                    ),
+                    Some(error) => format!(
+                        "Remote catalog kept {} items after refresh error: {}",
+                        item_count, error.message
+                    ),
+                };
             }
             Message::DropboxPreview(entry) => {
                 let Some(client) = self.dropbox_client.clone() else {
-                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
+                    self.state.browser.remote.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
                 let source = MediaSourceRef::DropboxFile {
@@ -1369,7 +1403,7 @@ impl App {
                 self.state.browser.select_source(source.clone());
                 self.state.browser.begin_audition_load(&source);
                 let cache = self.dropbox_cache.clone();
-                self.state.browser.dropbox.preview_in_progress = true;
+                self.state.browser.remote.preview_in_progress = true;
                 self.state.status_text = format!("Fetching preview: {}", entry.name);
                 return Task::perform(
                     fetch_dropbox_sample_async(client, cache, entry),
@@ -1382,7 +1416,7 @@ impl App {
                 );
             }
             Message::DropboxPreviewReady(source, Ok(audio)) => {
-                self.state.browser.dropbox.preview_in_progress = false;
+                self.state.browser.remote.preview_in_progress = false;
                 if self
                     .state
                     .browser
@@ -1392,10 +1426,10 @@ impl App {
                 }
             }
             Message::DropboxPreviewReady(source, Err(err)) => {
-                self.state.browser.dropbox.preview_in_progress = false;
+                self.state.browser.remote.preview_in_progress = false;
                 let is_current = self.state.browser.selected_source.as_ref() == Some(&source);
                 self.state.browser.fail_waveform_load(&source, err.clone());
-                self.state.browser.dropbox.last_error = Some(err.clone());
+                self.state.browser.remote.last_error = Some(err.clone());
                 if is_current {
                     self.stop_browser_audition();
                     self.state.status_text = format!("Preview error: {err}");

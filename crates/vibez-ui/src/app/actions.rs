@@ -117,9 +117,6 @@ impl App {
         if action.persist_settings {
             self.persist_ui_settings();
         }
-        if action.expand_dropbox_root && self.dropbox_client.is_some() {
-            return self.update(Message::DropboxExpandFolder(String::new()));
-        }
         if !action.debounce_root_scans.is_empty() {
             return Task::batch(
                 action
