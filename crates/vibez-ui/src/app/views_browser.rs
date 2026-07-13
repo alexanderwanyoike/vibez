@@ -264,8 +264,21 @@ impl App {
                 )))
                 .padding([4, 2])
                 .style(browser_utility_action_style);
+            let root_state = self.state.browser.root_catalog_label(root);
+            let state_marker = text(match root_state {
+                "INDEXING" | "UPDATING" => "↻",
+                "STALE" | "WATCH ERR" => "!",
+                "WARN" => "!",
+                _ => "·",
+            })
+            .size(9)
+            .color(if matches!(root_state, "STALE" | "WATCH ERR" | "WARN") {
+                th::danger()
+            } else {
+                th::text_muted()
+            });
             local_tree_rows.push(
-                row![toggle, root_button, remove]
+                row![toggle, root_button, state_marker, remove]
                     .spacing(1)
                     .align_y(iced::Alignment::Center)
                     .into(),
@@ -657,27 +670,40 @@ impl App {
         let mut remaining = visible_results;
         let mut entries_col = column![].spacing(1);
 
-        if let Some(error) = &self.state.browser.scan_error {
+        let notice = self
+            .state
+            .browser
+            .current_local_root()
+            .and_then(|root| {
+                self.state
+                    .browser
+                    .root_catalog_message(root)
+                    .map(|message| (root, message))
+            })
+            .or_else(|| {
+                self.state.browser.roots.iter().find_map(|root| {
+                    self.state
+                        .browser
+                        .root_catalog_message(root)
+                        .map(|message| (root, message))
+                })
+            });
+        if let Some((root, message)) = &notice {
             entries_col = entries_col.push(
                 container(
-                    text(format!("INDEX ERROR · {error}"))
+                    text(format!("{} · {message}", browser_root_name(root)))
                         .size(9)
-                        .color(th::danger())
+                        .color(
+                            if matches!(
+                                self.state.browser.root_catalog_label(root),
+                                "STALE" | "WATCH ERR" | "WARN"
+                            ) {
+                                th::danger()
+                            } else {
+                                th::text_dim()
+                            },
+                        )
                         .wrapping(iced::widget::text::Wrapping::None),
-                )
-                .padding([6, 8]),
-            );
-        } else if let Some(first_warning) = self.state.browser.scan_warnings.first() {
-            entries_col = entries_col.push(
-                container(
-                    text(format!(
-                        "WARN {} · {}",
-                        self.state.browser.scan_warnings.len(),
-                        first_warning
-                    ))
-                    .size(9)
-                    .color(th::danger())
-                    .wrapping(iced::widget::text::Wrapping::None),
                 )
                 .padding([6, 8]),
             );
@@ -688,7 +714,7 @@ impl App {
                 .push(self.view_local_folder_result(
                     browser_root_name(root),
                     format!("LOCAL ROOT · {}", root.display()),
-                    "ROOT",
+                    self.state.browser.root_catalog_label(root).to_string(),
                     root.clone(),
                     wide_columns,
                 ))
@@ -705,7 +731,7 @@ impl App {
                         "FOLDER",
                         None,
                     ),
-                    "FOLDER",
+                    "FOLDER".into(),
                     folder.path.clone(),
                     wide_columns,
                 ))
@@ -798,7 +824,7 @@ impl App {
             entries_col = entries_col.push(flat_row).push(browser_row_divider());
         }
 
-        if total_results == 0 && self.state.browser.scan_error.is_none() {
+        if total_results == 0 && notice.is_none() {
             entries_col = entries_col.push(
                 container(
                     text(if searching {
@@ -834,7 +860,7 @@ impl App {
         let count = if self.state.browser.scan_in_progress {
             format!("INDEXING… · {}", self.state.browser.entries.len())
         } else if self.state.browser.scan_error.is_some() {
-            "INDEX ERROR".into()
+            "STALE".into()
         } else if self.state.browser.scan_warnings.is_empty() {
             format!("{visible_results} / {total_results}")
         } else {
@@ -880,7 +906,7 @@ impl App {
         &self,
         name: String,
         context: String,
-        status: &'static str,
+        status: String,
         destination: std::path::PathBuf,
         wide_columns: bool,
     ) -> Element<'_, Message> {

@@ -120,6 +120,33 @@ impl App {
         if action.expand_dropbox_root && self.dropbox_client.is_some() {
             return self.update(Message::DropboxExpandFolder(String::new()));
         }
+        if !action.debounce_root_scans.is_empty() {
+            return Task::batch(
+                action
+                    .debounce_root_scans
+                    .into_iter()
+                    .map(|(root, revision)| {
+                        Task::perform(
+                            async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+                                (root, revision)
+                            },
+                            |(root, revision)| {
+                                Message::Browser(BrowserMsg::ReconcileLocalRoot { root, revision })
+                            },
+                        )
+                    }),
+            );
+        }
+        if let Some((root, revision)) = action.scan_root {
+            return Task::perform(scan_sample_root_async(root.clone()), move |result| {
+                Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                    root: root.clone(),
+                    revision,
+                    result,
+                })
+            });
+        }
         if let Some((track_id, beat, source)) = action.drop_on_arrangement {
             let position_samples = self.state.beats_to_samples(beat);
             return self.dispatch_drop_on_arrangement(track_id, position_samples, source);

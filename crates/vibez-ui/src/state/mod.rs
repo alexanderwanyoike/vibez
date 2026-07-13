@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod ui_types;
@@ -230,6 +230,30 @@ pub enum BrowserSearchScope {
     Everywhere,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalRootCatalogState {
+    Indexing,
+    Updating,
+    Ready { warnings: Vec<String> },
+    Stale { error: String },
+}
+
+impl LocalRootCatalogState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Indexing => "INDEXING",
+            Self::Updating => "UPDATING",
+            Self::Ready { warnings } if warnings.is_empty() => "READY",
+            Self::Ready { .. } => "WARN",
+            Self::Stale { .. } => "STALE",
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Indexing | Self::Updating)
+    }
+}
+
 /// Browser domain slice: sample library, Dropbox browsing, and
 /// drag-and-drop from the browser into the arrangement.
 #[derive(Debug, Clone)]
@@ -249,6 +273,9 @@ pub struct BrowserState {
     pub expanded_local_folders: HashSet<PathBuf>,
     pub search_scope: BrowserSearchScope,
     pub results_visible_limit: usize,
+    pub root_catalog_states: HashMap<PathBuf, LocalRootCatalogState>,
+    pub root_refresh_revisions: HashMap<PathBuf, u64>,
+    pub root_watch_errors: HashMap<PathBuf, String>,
     pub scan_warnings: Vec<String>,
     pub scan_error: Option<String>,
     pub selected_source: Option<MediaSourceRef>,
@@ -284,6 +311,9 @@ impl Default for BrowserState {
             expanded_local_folders: HashSet::new(),
             search_scope: BrowserSearchScope::default(),
             results_visible_limit: BROWSER_RESULTS_PAGE_SIZE,
+            root_catalog_states: HashMap::new(),
+            root_refresh_revisions: HashMap::new(),
+            root_watch_errors: HashMap::new(),
             scan_warnings: Vec::new(),
             scan_error: None,
             selected_source: None,
@@ -303,6 +333,81 @@ impl Default for BrowserState {
 }
 
 impl BrowserState {
+    pub fn begin_root_scan(&mut self, root: &Path, from_watcher: bool) -> u64 {
+        let revision = *self
+            .root_refresh_revisions
+            .entry(root.to_path_buf())
+            .and_modify(|revision| *revision = revision.saturating_add(1))
+            .or_insert(1);
+        self.root_catalog_states.insert(
+            root.to_path_buf(),
+            if from_watcher {
+                LocalRootCatalogState::Updating
+            } else {
+                LocalRootCatalogState::Indexing
+            },
+        );
+        self.refresh_scan_diagnostics();
+        revision
+    }
+
+    pub fn root_refresh_is_current(&self, root: &Path, revision: u64) -> bool {
+        self.roots.iter().any(|configured| configured == root)
+            && self.root_refresh_revisions.get(root).copied() == Some(revision)
+    }
+
+    pub fn root_catalog_label(&self, root: &Path) -> &'static str {
+        if self.root_watch_errors.contains_key(root) {
+            "WATCH ERR"
+        } else {
+            self.root_catalog_states
+                .get(root)
+                .map(LocalRootCatalogState::label)
+                .unwrap_or("PENDING")
+        }
+    }
+
+    pub fn root_catalog_message(&self, root: &Path) -> Option<String> {
+        if let Some(error) = self.root_watch_errors.get(root) {
+            return Some(format!("WATCH ERROR · {error}"));
+        }
+        match self.root_catalog_states.get(root) {
+            Some(LocalRootCatalogState::Indexing) => Some("INDEXING LOCAL ROOT…".into()),
+            Some(LocalRootCatalogState::Updating) => Some("UPDATING LOCAL ROOT…".into()),
+            Some(LocalRootCatalogState::Ready { warnings }) if !warnings.is_empty() => {
+                Some(format!("WARN {} · {}", warnings.len(), warnings[0]))
+            }
+            Some(LocalRootCatalogState::Stale { error }) => {
+                Some(format!("STALE · {error} · RESCAN TO REPAIR"))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn refresh_scan_diagnostics(&mut self) {
+        self.scan_in_progress = self
+            .root_catalog_states
+            .values()
+            .any(LocalRootCatalogState::is_busy);
+        self.scan_warnings = self
+            .root_catalog_states
+            .values()
+            .filter_map(|state| match state {
+                LocalRootCatalogState::Ready { warnings } => Some(warnings.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .cloned()
+            .collect();
+        self.scan_error = self
+            .root_catalog_states
+            .values()
+            .find_map(|state| match state {
+                LocalRootCatalogState::Stale { error } => Some(error.clone()),
+                _ => None,
+            });
+    }
+
     pub fn reset_results_window(&mut self) {
         self.results_visible_limit = BROWSER_RESULTS_PAGE_SIZE;
     }

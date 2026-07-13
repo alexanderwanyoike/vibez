@@ -9,6 +9,7 @@ use std::sync::Arc;
 use vibez_core::id::ClipId;
 use vibez_core::track::MediaSourceRef;
 
+use crate::message::SampleLibraryScanResult;
 use crate::state::{SampleBrowserEntry, SampleBrowserFolder};
 
 pub(crate) struct AutoWarpInput {
@@ -192,6 +193,13 @@ pub(crate) fn scan_root_into(
             }
         };
         let path = item.path();
+        if path
+            .strip_prefix(root)
+            .ok()
+            .is_some_and(path_contains_hidden_component)
+        {
+            continue;
+        }
         let file_type = match item.file_type() {
             Ok(file_type) => file_type,
             Err(err) => {
@@ -265,6 +273,37 @@ pub(crate) fn scan_root_into(
             search_text,
         });
     }
+}
+
+pub(crate) fn scan_sample_root(root: &PathBuf) -> Result<SampleLibraryScanResult, String> {
+    if !root.is_dir() {
+        return Err(format!("Root is unavailable: {}", root.display()));
+    }
+    let mut entries = Vec::new();
+    let mut folders = Vec::new();
+    let mut warnings = Vec::new();
+    scan_root_into(root, root, &mut entries, &mut folders, &mut warnings);
+    entries.sort_by(|a, b| {
+        a.relative_path
+            .cmp(&b.relative_path)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    folders.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(SampleLibraryScanResult {
+        entries,
+        folders,
+        warnings,
+    })
+}
+
+pub(crate) fn path_contains_hidden_component(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        name.to_str()
+            .is_some_and(|name| name.starts_with('.') && name != "." && name != "..")
+    })
 }
 
 pub(crate) fn is_supported_audio_file(path: &std::path::Path) -> bool {
@@ -364,5 +403,44 @@ mod local_catalog_tests {
             "2,000-entry scan took {:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn local_catalog_ignores_hidden_entries() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Samples");
+        fs::create_dir_all(root.join(".cache")).unwrap();
+        fs::create_dir_all(root.join("Visible")).unwrap();
+        fs::write(root.join(".hidden.wav"), []).unwrap();
+        fs::write(root.join(".cache/inside.wav"), []).unwrap();
+        fs::write(root.join("Visible/keep.wav"), []).unwrap();
+
+        let catalog = scan_sample_root(&root).unwrap();
+
+        assert_eq!(catalog.entries.len(), 1);
+        assert_eq!(catalog.entries[0].name, "keep.wav");
+        assert_eq!(catalog.folders.len(), 1);
+        assert_eq!(catalog.folders[0].name, "Visible");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_catalog_does_not_follow_symlinks_outside_the_root() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Samples");
+        let outside = temporary.path().join("Outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("escape.wav"), []).unwrap();
+        symlink(&outside, root.join("linked-outside")).unwrap();
+
+        let catalog = scan_sample_root(&root).unwrap();
+
+        assert!(catalog.entries.is_empty());
+        assert!(catalog.folders.is_empty());
+        assert_eq!(catalog.warnings.len(), 1);
+        assert!(catalog.warnings[0].contains("Skipped symbolic link"));
     }
 }

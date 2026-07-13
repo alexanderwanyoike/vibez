@@ -108,6 +108,7 @@ mod actions;
 mod audio_tasks;
 mod bounce;
 mod keyboard;
+mod local_watcher;
 
 pub(crate) use audio_tasks::*;
 pub(crate) use keyboard::*;
@@ -244,15 +245,17 @@ impl App {
         // the first frame.
         app.ensure_master_eq();
 
-        let startup_task = if app.state.browser.roots.is_empty() {
-            Task::none()
-        } else {
-            app.state.browser.scan_in_progress = true;
-            Task::perform(
-                scan_sample_library_async(app.state.browser.roots.clone()),
-                |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-            )
-        };
+        let roots = app.state.browser.roots.clone();
+        let startup_task = Task::batch(roots.into_iter().map(|root| {
+            let revision = app.state.browser.begin_root_scan(&root, false);
+            Task::perform(scan_sample_root_async(root.clone()), move |result| {
+                Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                    root: root.clone(),
+                    revision,
+                    result,
+                })
+            })
+        }));
 
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
@@ -353,6 +356,7 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(UI_TICK_MS)).map(|_| Message::Tick),
+            local_watcher::subscription(self.state.browser.roots.clone()),
             iced::keyboard::on_key_press(global_key_handler),
             iced::event::listen_with(|event, _status, _id| match event {
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
@@ -761,37 +765,8 @@ async fn hydrate_dropbox_source(
         .map_err(|e| format!("Skipped '{label}' ({e})"))
 }
 
-async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryScanResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let mut entries = Vec::new();
-        let mut folders = Vec::new();
-        let mut warnings = Vec::new();
-
-        for root in roots {
-            if !root.is_dir() {
-                warnings.push(format!("Missing root: {}", root.display()));
-                continue;
-            }
-            scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
-        }
-
-        entries.sort_by(|a, b| {
-            a.relative_path
-                .cmp(&b.relative_path)
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        folders.sort_by(|a, b| {
-            a.root_path
-                .cmp(&b.root_path)
-                .then_with(|| a.relative_path.cmp(&b.relative_path))
-        });
-
-        Ok(SampleLibraryScanResult {
-            entries,
-            folders,
-            warnings,
-        })
-    })
-    .await
-    .map_err(|err| format!("scan task failed: {err}"))?
+async fn scan_sample_root_async(root: PathBuf) -> Result<SampleLibraryScanResult, String> {
+    tokio::task::spawn_blocking(move || scan_sample_root(&root))
+        .await
+        .map_err(|err| format!("scan task failed: {err}"))?
 }

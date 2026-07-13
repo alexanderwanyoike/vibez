@@ -534,25 +534,30 @@ impl App {
                         self.persist_ui_settings();
                     }
                     self.state.browser.select_local_folder(Some(path.clone()));
-                    self.state.browser.scan_in_progress = true;
-                    self.state.browser.scan_error = None;
-                    self.state.browser.scan_warnings.clear();
+                    let revision = self.state.browser.begin_root_scan(&path, false);
                     self.state.status_text = format!("Scanning {}...", path.display());
-                    return Task::perform(
-                        scan_sample_library_async(self.state.browser.roots.clone()),
-                        |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-                    );
+                    return Task::perform(scan_sample_root_async(path.clone()), move |result| {
+                        Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                            root: path.clone(),
+                            revision,
+                            result,
+                        })
+                    });
                 }
             }
             Message::RescanSampleLibrary => {
-                self.state.browser.scan_in_progress = true;
-                self.state.browser.scan_error = None;
-                self.state.browser.scan_warnings.clear();
                 self.state.status_text = "Rescanning sample library...".to_string();
-                return Task::perform(
-                    scan_sample_library_async(self.state.browser.roots.clone()),
-                    |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-                );
+                let roots = self.state.browser.roots.clone();
+                return Task::batch(roots.into_iter().map(|root| {
+                    let revision = self.state.browser.begin_root_scan(&root, false);
+                    Task::perform(scan_sample_root_async(root.clone()), move |result| {
+                        Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                            root: root.clone(),
+                            revision,
+                            result,
+                        })
+                    })
+                }));
             }
             Message::ClickLocalBrowserEntry(source) => {
                 // Card 07 owns selection-driven Audition. For now click only

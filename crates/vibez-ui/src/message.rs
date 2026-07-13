@@ -60,6 +60,16 @@ pub struct SampleLibraryScanResult {
 }
 
 #[derive(Debug, Clone)]
+pub enum LocalRootWatchEvent {
+    Changed(Vec<PathBuf>),
+    Watching(Vec<PathBuf>),
+    Failed {
+        roots: Vec<PathBuf>,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct BounceOutcome {
     pub audio: Arc<DecodedAudio>,
     pub source: MediaSourceRef,

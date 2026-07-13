@@ -11,8 +11,8 @@ use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
 
-use crate::message::SampleLibraryScanResult;
-use crate::state::{BrowserState, SampleBrowserMode};
+use crate::message::{LocalRootWatchEvent, SampleLibraryScanResult};
+use crate::state::{BrowserState, LocalRootCatalogState, SampleBrowserMode};
 
 /// Messages the browser domain handles (sync tranche).
 #[derive(Debug, Clone)]
@@ -40,7 +40,16 @@ pub enum BrowserMsg {
         beat: f64,
     },
     EndDragSample,
-    SampleLibraryScanned(Result<SampleLibraryScanResult, String>),
+    LocalRootWatchEvent(LocalRootWatchEvent),
+    ReconcileLocalRoot {
+        root: PathBuf,
+        revision: u64,
+    },
+    LocalRootCatalogReconciled {
+        root: PathBuf,
+        revision: u64,
+        result: Result<SampleLibraryScanResult, String>,
+    },
     RemoveSampleLibraryRoot(PathBuf),
     DropboxCollapseFolder(String),
     DropboxSelectEntry(DropboxEntry),
@@ -64,6 +73,10 @@ pub struct BrowserAction {
     /// Decode a Local selection for the truthful Audition waveform without
     /// starting playback.
     pub load_waveform: Option<MediaSourceRef>,
+    /// Debounce filesystem activity before asking the domain to reconcile.
+    pub debounce_root_scans: Vec<(PathBuf, u64)>,
+    /// The newest debounce token for this root matured and may be scanned.
+    pub scan_root: Option<(PathBuf, u64)>,
 }
 
 impl BrowserState {
@@ -155,20 +168,74 @@ impl BrowserState {
                     action.status = Some("Drag cancelled".to_string());
                 }
             }
-            BrowserMsg::SampleLibraryScanned(result) => {
-                self.scan_in_progress = false;
+            BrowserMsg::LocalRootWatchEvent(event) => match event {
+                LocalRootWatchEvent::Changed(roots) => {
+                    for root in roots {
+                        if self.roots.iter().any(|configured| configured == &root) {
+                            let revision = self.begin_root_scan(&root, true);
+                            action.debounce_root_scans.push((root, revision));
+                        }
+                    }
+                }
+                LocalRootWatchEvent::Watching(roots) => {
+                    for root in roots {
+                        self.root_watch_errors.remove(&root);
+                    }
+                    self.refresh_scan_diagnostics();
+                }
+                LocalRootWatchEvent::Failed { roots, message } => {
+                    for root in roots {
+                        if self.roots.iter().any(|configured| configured == &root) {
+                            self.root_watch_errors.insert(root, message.clone());
+                        }
+                    }
+                    self.refresh_scan_diagnostics();
+                    action.status = Some(format!("Local watch error: {message}"));
+                }
+            },
+            BrowserMsg::ReconcileLocalRoot { root, revision } => {
+                if self.root_refresh_is_current(&root, revision) {
+                    action.scan_root = Some((root, revision));
+                }
+            }
+            BrowserMsg::LocalRootCatalogReconciled {
+                root,
+                revision,
+                result,
+            } => {
+                if !self.root_refresh_is_current(&root, revision) {
+                    return action;
+                }
                 match result {
                     Ok(scan) => {
-                        self.entries = scan.entries;
-                        self.folders = scan.folders;
-                        self.scan_warnings = scan.warnings;
-                        self.scan_error = None;
+                        self.entries.retain(|entry| entry.root_path != root);
+                        self.entries.extend(scan.entries);
+                        self.entries.sort_by(|a, b| {
+                            a.root_path
+                                .cmp(&b.root_path)
+                                .then_with(|| a.relative_path.cmp(&b.relative_path))
+                        });
+                        self.folders.retain(|folder| folder.root_path != root);
+                        self.folders.extend(scan.folders);
+                        self.folders.sort_by(|a, b| {
+                            a.root_path
+                                .cmp(&b.root_path)
+                                .then_with(|| a.relative_path.cmp(&b.relative_path))
+                        });
+                        let warning_count = scan.warnings.len();
+                        self.root_catalog_states.insert(
+                            root.clone(),
+                            LocalRootCatalogState::Ready {
+                                warnings: scan.warnings,
+                            },
+                        );
+                        self.reset_results_window();
                         let current_exists = self.current_folder.as_ref().is_none_or(|current| {
                             self.roots.iter().any(|root| root == current)
                                 || self.folders.iter().any(|folder| &folder.path == current)
                         });
                         if !current_exists {
-                            self.select_local_folder(None);
+                            self.select_local_folder(Some(root.clone()));
                         }
                         if self
                             .selected_source
@@ -180,19 +247,33 @@ impl BrowserState {
                         {
                             self.clear_selection();
                         }
-                        action.status = Some(if self.scan_warnings.is_empty() {
-                            format!("Indexed {} samples", self.entries.len())
+                        self.refresh_scan_diagnostics();
+                        let root_count = self
+                            .entries
+                            .iter()
+                            .filter(|entry| entry.root_path == root)
+                            .count();
+                        action.status = Some(if warning_count == 0 {
+                            format!("Indexed {root_count} samples in {}", root.display())
                         } else {
                             format!(
-                                "Indexed {} samples with {} warning(s)",
-                                self.entries.len(),
-                                self.scan_warnings.len()
+                                "Indexed {root_count} samples in {} with {warning_count} warning(s)",
+                                root.display()
                             )
                         });
                     }
-                    Err(err) => {
-                        self.scan_error = Some(err.clone());
-                        action.status = Some(format!("Sample scan error: {err}"));
+                    Err(error) => {
+                        self.root_catalog_states.insert(
+                            root.clone(),
+                            LocalRootCatalogState::Stale {
+                                error: error.clone(),
+                            },
+                        );
+                        self.refresh_scan_diagnostics();
+                        action.status = Some(format!(
+                            "Local root unavailable; kept stale catalog for {} ({error})",
+                            root.display()
+                        ));
                     }
                 }
             }
@@ -209,8 +290,12 @@ impl BrowserState {
                 self.folders.retain(|folder| folder.root_path != path);
                 self.expanded_local_folders
                     .retain(|folder| !folder.starts_with(&path));
+                self.root_catalog_states.remove(&path);
+                self.root_refresh_revisions.remove(&path);
+                self.root_watch_errors.remove(&path);
                 self.scan_warnings.clear();
                 self.scan_error = None;
+                self.refresh_scan_diagnostics();
                 if self
                     .selected_source
                     .as_ref()
@@ -420,36 +505,189 @@ mod tests {
 
     #[test]
     fn scan_completion_and_failure_remain_visible_in_browser_state() {
+        let root = PathBuf::from("/samples");
         let mut browser = BrowserState {
-            scan_in_progress: true,
+            roots: vec![root.clone()],
             ..BrowserState::default()
         };
+        let revision = browser.begin_root_scan(&root, false);
         let folder = crate::state::SampleBrowserFolder {
             path: PathBuf::from("/samples/drums"),
-            root_path: PathBuf::from("/samples"),
+            root_path: root.clone(),
             relative_path: PathBuf::from("drums"),
             name: "drums".into(),
             search_text: "drums".into(),
         };
 
-        browser.update(BrowserMsg::SampleLibraryScanned(Ok(
-            crate::message::SampleLibraryScanResult {
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root: root.clone(),
+            revision,
+            result: Ok(crate::message::SampleLibraryScanResult {
                 entries: Vec::new(),
                 folders: vec![folder.clone()],
                 warnings: vec!["Unreadable folder".into()],
-            },
-        )));
+            }),
+        });
         assert!(!browser.scan_in_progress);
         assert_eq!(browser.folders, vec![folder]);
         assert_eq!(browser.scan_warnings, vec!["Unreadable folder"]);
         assert!(browser.scan_error.is_none());
 
-        browser.scan_in_progress = true;
-        browser.update(BrowserMsg::SampleLibraryScanned(Err(
-            "catalog failed".into()
-        )));
+        let revision = browser.begin_root_scan(&root, false);
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root,
+            revision,
+            result: Err("catalog failed".into()),
+        });
         assert!(!browser.scan_in_progress);
         assert_eq!(browser.scan_error.as_deref(), Some("catalog failed"));
+        assert_eq!(browser.folders.len(), 1, "stale catalog must be retained");
+    }
+
+    #[test]
+    fn watcher_bursts_only_reconcile_the_latest_root_revision() {
+        let root = PathBuf::from("/samples");
+        let mut browser = BrowserState {
+            roots: vec![root.clone()],
+            ..BrowserState::default()
+        };
+
+        let first = browser.update(BrowserMsg::LocalRootWatchEvent(
+            crate::message::LocalRootWatchEvent::Changed(vec![root.clone()]),
+        ));
+        let second = browser.update(BrowserMsg::LocalRootWatchEvent(
+            crate::message::LocalRootWatchEvent::Changed(vec![root.clone()]),
+        ));
+        let first_revision = first.debounce_root_scans[0].1;
+        let second_revision = second.debounce_root_scans[0].1;
+        assert!(second_revision > first_revision);
+
+        let stale = browser.update(BrowserMsg::ReconcileLocalRoot {
+            root: root.clone(),
+            revision: first_revision,
+        });
+        assert!(stale.scan_root.is_none());
+        let current = browser.update(BrowserMsg::ReconcileLocalRoot {
+            root: root.clone(),
+            revision: second_revision,
+        });
+        assert_eq!(current.scan_root, Some((root, second_revision)));
+    }
+
+    #[test]
+    fn watcher_failures_are_scoped_to_the_affected_root() {
+        let samples = PathBuf::from("/samples");
+        let other = PathBuf::from("/other");
+        let mut browser = BrowserState {
+            roots: vec![samples.clone(), other.clone()],
+            ..BrowserState::default()
+        };
+
+        browser.update(BrowserMsg::LocalRootWatchEvent(
+            crate::message::LocalRootWatchEvent::Failed {
+                roots: vec![samples.clone()],
+                message: "watch limit reached".into(),
+            },
+        ));
+
+        assert_eq!(browser.root_catalog_label(&samples), "WATCH ERR");
+        assert_eq!(browser.root_catalog_label(&other), "PENDING");
+        assert!(browser.root_catalog_message(&samples).is_some());
+        assert!(browser.root_catalog_message(&other).is_none());
+    }
+
+    #[test]
+    fn affected_root_reconciliation_preserves_other_catalogs_and_updates_search() {
+        fn entry(root: &PathBuf, name: &str) -> crate::state::SampleBrowserEntry {
+            crate::state::SampleBrowserEntry {
+                source: MediaSourceRef::LocalFile {
+                    path: root.join(name),
+                },
+                name: name.into(),
+                root_path: root.clone(),
+                relative_path: PathBuf::from(name),
+                format: "WAV".into(),
+                file_size: Some(1),
+                modified: None,
+                search_text: name.to_lowercase(),
+            }
+        }
+
+        let samples = PathBuf::from("/samples");
+        let other = PathBuf::from("/other");
+        let mut browser = BrowserState {
+            roots: vec![samples.clone(), other.clone()],
+            entries: vec![entry(&samples, "old.wav"), entry(&other, "keep.wav")],
+            ..BrowserState::default()
+        };
+        let revision = browser.begin_root_scan(&samples, true);
+
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root: samples.clone(),
+            revision,
+            result: Ok(crate::message::SampleLibraryScanResult {
+                entries: vec![entry(&samples, "new.wav")],
+                folders: Vec::new(),
+                warnings: Vec::new(),
+            }),
+        });
+
+        assert!(browser.entries.iter().any(|entry| entry.name == "new.wav"));
+        assert!(browser.entries.iter().any(|entry| entry.name == "keep.wav"));
+        assert!(!browser.entries.iter().any(|entry| entry.name == "old.wav"));
+        browser.select_local_folder(Some(samples));
+        assert!(browser.local_entry_is_result(
+            browser
+                .entries
+                .iter()
+                .find(|entry| entry.name == "new.wav")
+                .unwrap(),
+            "new"
+        ));
+    }
+
+    #[test]
+    fn manual_rescan_repairs_a_stale_root_without_discarding_old_data_first() {
+        let root = PathBuf::from("/samples");
+        let mut browser = BrowserState {
+            roots: vec![root.clone()],
+            entries: vec![crate::state::SampleBrowserEntry {
+                source: MediaSourceRef::LocalFile {
+                    path: root.join("old.wav"),
+                },
+                name: "old.wav".into(),
+                root_path: root.clone(),
+                relative_path: PathBuf::from("old.wav"),
+                format: "WAV".into(),
+                file_size: Some(1),
+                modified: None,
+                search_text: "old.wav".into(),
+            }],
+            ..BrowserState::default()
+        };
+        let revision = browser.begin_root_scan(&root, true);
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root: root.clone(),
+            revision,
+            result: Err("offline".into()),
+        });
+        assert_eq!(browser.root_catalog_label(&root), "STALE");
+        assert_eq!(browser.entries.len(), 1);
+
+        let revision = browser.begin_root_scan(&root, false);
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root: root.clone(),
+            revision,
+            result: Ok(crate::message::SampleLibraryScanResult {
+                entries: Vec::new(),
+                folders: Vec::new(),
+                warnings: Vec::new(),
+            }),
+        });
+
+        assert_eq!(browser.root_catalog_label(&root), "READY");
+        assert!(browser.entries.is_empty());
+        assert!(browser.scan_error.is_none());
     }
 
     #[test]
