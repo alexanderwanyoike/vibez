@@ -109,4 +109,21 @@ mod tests {
         let loaded: UiSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.sample_browser_width, 612.0);
     }
+
+    #[test]
+    fn multiple_local_roots_roundtrip_in_ui_configuration() {
+        let roots = vec![
+            PathBuf::from("/samples/drums"),
+            PathBuf::from("/samples/field-recordings"),
+        ];
+        let settings = UiSettings {
+            sample_library_roots: roots.clone(),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: UiSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.sample_library_roots, roots);
+    }
 }

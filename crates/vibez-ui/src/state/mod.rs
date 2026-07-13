@@ -220,6 +220,15 @@ pub const BROWSER_DOCK_MAX_WIDTH: f32 = 650.0;
 pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
 pub const BROWSER_PLACES_MIN_WIDTH: f32 = 124.0;
 pub const BROWSER_PLACES_MAX_WIDTH: f32 = 176.0;
+pub const BROWSER_RESULTS_PAGE_SIZE: usize = 200;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserSearchScope {
+    #[default]
+    SelectedFolder,
+    Root,
+    Everywhere,
+}
 
 /// Browser domain slice: sample library, Dropbox browsing, and
 /// drag-and-drop from the browser into the arrangement.
@@ -233,7 +242,15 @@ pub struct BrowserState {
     pub search: String,
     pub roots: Vec<PathBuf>,
     pub entries: Vec<SampleBrowserEntry>,
-    pub root_filter: Option<PathBuf>,
+    pub folders: Vec<SampleBrowserFolder>,
+    /// Absolute Local Source Storage folder currently shown in Results. `None`
+    /// is the All Roots location.
+    pub current_folder: Option<PathBuf>,
+    pub expanded_local_folders: HashSet<PathBuf>,
+    pub search_scope: BrowserSearchScope,
+    pub results_visible_limit: usize,
+    pub scan_warnings: Vec<String>,
+    pub scan_error: Option<String>,
     pub selected_source: Option<MediaSourceRef>,
     /// Decoded audio used only for the selected Browser source's visual
     /// waveform. Audition still travels through the existing engine path.
@@ -262,7 +279,13 @@ impl Default for BrowserState {
             search: String::new(),
             roots: Vec::new(),
             entries: Vec::new(),
-            root_filter: None,
+            folders: Vec::new(),
+            current_folder: None,
+            expanded_local_folders: HashSet::new(),
+            search_scope: BrowserSearchScope::default(),
+            results_visible_limit: BROWSER_RESULTS_PAGE_SIZE,
+            scan_warnings: Vec::new(),
+            scan_error: None,
             selected_source: None,
             waveform_source: None,
             waveform_audio: None,
@@ -280,6 +303,110 @@ impl Default for BrowserState {
 }
 
 impl BrowserState {
+    pub fn reset_results_window(&mut self) {
+        self.results_visible_limit = BROWSER_RESULTS_PAGE_SIZE;
+    }
+
+    pub fn select_local_folder(&mut self, folder: Option<PathBuf>) {
+        self.current_folder = folder;
+        if let Some(folder) = &self.current_folder {
+            self.expanded_local_folders.insert(folder.clone());
+        }
+        self.search_scope = BrowserSearchScope::SelectedFolder;
+        self.reset_results_window();
+    }
+
+    pub fn current_local_root(&self) -> Option<&PathBuf> {
+        let current = self.current_folder.as_ref()?;
+        self.roots
+            .iter()
+            .filter(|root| current.starts_with(root))
+            .max_by_key(|root| root.components().count())
+    }
+
+    pub fn search_scope_path(&self) -> Option<&std::path::Path> {
+        match self.search_scope {
+            BrowserSearchScope::SelectedFolder => self.current_folder.as_deref(),
+            BrowserSearchScope::Root => self.current_local_root().map(PathBuf::as_path),
+            BrowserSearchScope::Everywhere => None,
+        }
+    }
+
+    pub fn search_scope_label(&self) -> &'static str {
+        match self.search_scope {
+            BrowserSearchScope::SelectedFolder if self.current_folder.is_none() => "EVERYWHERE",
+            BrowserSearchScope::SelectedFolder
+                if self.current_folder.as_ref() == self.current_local_root() =>
+            {
+                "THIS ROOT"
+            }
+            BrowserSearchScope::SelectedFolder => "THIS FOLDER",
+            BrowserSearchScope::Root => "THIS ROOT",
+            BrowserSearchScope::Everywhere => "EVERYWHERE",
+        }
+    }
+
+    pub fn cycle_search_scope(&mut self) {
+        self.search_scope = match self.search_scope {
+            BrowserSearchScope::SelectedFolder
+                if self.current_folder.is_some()
+                    && self.current_folder.as_ref() != self.current_local_root() =>
+            {
+                BrowserSearchScope::Root
+            }
+            BrowserSearchScope::SelectedFolder | BrowserSearchScope::Root => {
+                BrowserSearchScope::Everywhere
+            }
+            BrowserSearchScope::Everywhere if self.current_folder.is_some() => {
+                BrowserSearchScope::SelectedFolder
+            }
+            BrowserSearchScope::Everywhere => BrowserSearchScope::Everywhere,
+        };
+        self.reset_results_window();
+    }
+
+    pub fn path_is_in_search_scope(&self, path: &std::path::Path) -> bool {
+        self.search_scope_path()
+            .is_none_or(|scope| path.starts_with(scope))
+    }
+
+    pub fn local_folder_is_result(
+        &self,
+        folder: &SampleBrowserFolder,
+        normalized_query: &str,
+    ) -> bool {
+        if normalized_query.is_empty() {
+            return self
+                .current_folder
+                .as_deref()
+                .is_some_and(|current| folder.path.parent() == Some(current));
+        }
+        self.path_is_in_search_scope(&folder.path) && folder.search_text.contains(normalized_query)
+    }
+
+    pub fn local_entry_is_result(
+        &self,
+        entry: &SampleBrowserEntry,
+        normalized_query: &str,
+    ) -> bool {
+        let path = entry.root_path.join(&entry.relative_path);
+        if normalized_query.is_empty() {
+            return self
+                .current_folder
+                .as_deref()
+                .is_some_and(|current| path.parent() == Some(current));
+        }
+        self.path_is_in_search_scope(&path) && entry.search_text.contains(normalized_query)
+    }
+
+    pub fn visible_result_count(&self, total: usize) -> usize {
+        total.min(self.results_visible_limit)
+    }
+
+    pub fn has_more_results(&self, total: usize) -> bool {
+        self.results_visible_limit < total
+    }
+
     pub fn select_source(&mut self, source: MediaSourceRef) -> bool {
         let changed = self.selected_source.as_ref() != Some(&source);
         self.selected_source = Some(source);

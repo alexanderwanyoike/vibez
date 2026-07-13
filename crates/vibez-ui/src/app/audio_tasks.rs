@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vibez_core::id::ClipId;
 use vibez_core::track::MediaSourceRef;
 
-use crate::state::SampleBrowserEntry;
+use crate::state::{SampleBrowserEntry, SampleBrowserFolder};
 
 pub(crate) struct AutoWarpInput {
     pub(crate) audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
@@ -169,6 +169,7 @@ pub(crate) fn scan_root_into(
     root: &PathBuf,
     dir: &PathBuf,
     entries: &mut Vec<SampleBrowserEntry>,
+    folders: &mut Vec<SampleBrowserFolder>,
     warnings: &mut Vec<String>,
 ) {
     let read_dir = match std::fs::read_dir(dir) {
@@ -180,15 +181,53 @@ pub(crate) fn scan_root_into(
     };
 
     for item in read_dir {
-        let Ok(item) = item else {
-            continue;
+        let item = match item {
+            Ok(item) => item,
+            Err(err) => {
+                warnings.push(format!(
+                    "Failed to read an item in {} ({err})",
+                    dir.display()
+                ));
+                continue;
+            }
         };
         let path = item.path();
-        if path.is_dir() {
-            scan_root_into(root, &path, entries, warnings);
+        let file_type = match item.file_type() {
+            Ok(file_type) => file_type,
+            Err(err) => {
+                warnings.push(format!("Failed to inspect {} ({err})", path.display()));
+                continue;
+            }
+        };
+        if file_type.is_symlink() {
+            warnings.push(format!("Skipped symbolic link: {}", path.display()));
             continue;
         }
-        if !is_supported_audio_file(&path) {
+        if file_type.is_dir() {
+            let relative_path = path
+                .strip_prefix(root)
+                .map(|relative| relative.to_path_buf())
+                .unwrap_or_else(|_| path.clone());
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            folders.push(SampleBrowserFolder {
+                path: path.clone(),
+                root_path: root.clone(),
+                search_text: format!(
+                    "{} {} {}",
+                    name.to_lowercase(),
+                    relative_path.display().to_string().to_lowercase(),
+                    root.display().to_string().to_lowercase()
+                ),
+                relative_path,
+                name,
+            });
+            scan_root_into(root, &path, entries, folders, warnings);
+            continue;
+        }
+        if !file_type.is_file() || !is_supported_audio_file(&path) {
             continue;
         }
         let relative_path = path
@@ -200,16 +239,29 @@ pub(crate) fn scan_root_into(
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
         let search_text = format!(
-            "{} {} {}",
+            "{} {} {} {}",
             name.to_lowercase(),
             relative_path.display().to_string().to_lowercase(),
-            root.display().to_string().to_lowercase()
+            root.display().to_string().to_lowercase(),
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default()
+                .to_lowercase()
         );
+        let metadata = item.metadata().ok();
         entries.push(SampleBrowserEntry {
             source: MediaSourceRef::LocalFile { path },
             name,
             root_path: root.clone(),
             relative_path,
+            format: item
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("AUDIO")
+                .to_ascii_uppercase(),
+            file_size: metadata.as_ref().map(std::fs::Metadata::len),
+            modified: metadata.and_then(|metadata| metadata.modified().ok()),
             search_text,
         });
     }
@@ -225,4 +277,92 @@ pub(crate) fn is_supported_audio_file(path: &std::path::Path) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod local_catalog_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{Duration, Instant};
+
+    fn snapshot_tree(root: &std::path::Path) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+        fn visit(
+            root: &std::path::Path,
+            directory: &std::path::Path,
+            snapshot: &mut Vec<(PathBuf, Option<Vec<u8>>)>,
+        ) {
+            let mut children: Vec<_> = fs::read_dir(directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            children.sort();
+            for path in children {
+                let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                if path.is_dir() {
+                    snapshot.push((relative, None));
+                    visit(root, &path, snapshot);
+                } else {
+                    snapshot.push((relative, Some(fs::read(path).unwrap())));
+                }
+            }
+        }
+
+        let mut snapshot = Vec::new();
+        visit(root, root, &mut snapshot);
+        snapshot
+    }
+
+    #[test]
+    fn local_catalog_is_read_only_media_only_and_preserves_source_identity() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Samples");
+        let drums = root.join("Drums");
+        let nested = drums.join("One Shots");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(drums.join("kick.wav"), b"same bytes").unwrap();
+        fs::write(nested.join("kick-copy.wav"), b"same bytes").unwrap();
+        fs::write(drums.join("notes.pdf"), b"not media").unwrap();
+        fs::write(root.join("cover.png"), b"not media").unwrap();
+        let before = snapshot_tree(&root);
+
+        let mut entries = Vec::new();
+        let mut folders = Vec::new();
+        let mut warnings = Vec::new();
+        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
+
+        assert_eq!(snapshot_tree(&root), before);
+        assert!(warnings.is_empty());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(folders.len(), 2);
+        assert!(entries.iter().all(|entry| entry.format == "WAV"));
+        assert!(entries.iter().all(|entry| entry.file_size == Some(10)));
+        assert_ne!(entries[0].source, entries[1].source);
+        assert!(entries
+            .iter()
+            .all(|entry| !entry.name.ends_with(".pdf") && !entry.name.ends_with(".png")));
+    }
+
+    #[test]
+    fn large_synthetic_catalog_scan_remains_bounded_in_wall_time() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Large Samples");
+        fs::create_dir_all(&root).unwrap();
+        for index in 0..2_000 {
+            fs::write(root.join(format!("sample-{index:04}.wav")), []).unwrap();
+        }
+
+        let mut entries = Vec::new();
+        let mut folders = Vec::new();
+        let mut warnings = Vec::new();
+        let started = Instant::now();
+        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
+
+        assert_eq!(entries.len(), 2_000);
+        assert!(warnings.is_empty());
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "2,000-entry scan took {:?}",
+            started.elapsed()
+        );
+    }
 }

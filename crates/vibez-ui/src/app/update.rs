@@ -533,7 +533,10 @@ impl App {
                         self.state.browser.roots.sort();
                         self.persist_ui_settings();
                     }
+                    self.state.browser.select_local_folder(Some(path.clone()));
                     self.state.browser.scan_in_progress = true;
+                    self.state.browser.scan_error = None;
+                    self.state.browser.scan_warnings.clear();
                     self.state.status_text = format!("Scanning {}...", path.display());
                     return Task::perform(
                         scan_sample_library_async(self.state.browser.roots.clone()),
@@ -543,6 +546,8 @@ impl App {
             }
             Message::RescanSampleLibrary => {
                 self.state.browser.scan_in_progress = true;
+                self.state.browser.scan_error = None;
+                self.state.browser.scan_warnings.clear();
                 self.state.status_text = "Rescanning sample library...".to_string();
                 return Task::perform(
                     scan_sample_library_async(self.state.browser.roots.clone()),
@@ -550,9 +555,9 @@ impl App {
                 );
             }
             Message::ClickLocalBrowserEntry(source) => {
-                // Previously auto-previewed on click; now click only
-                // selects. Preview fires via the speaker icon (see
-                // `Message::PreviewLocalEntry`).
+                // Card 07 owns selection-driven Audition. For now click only
+                // selects and populates the truthful waveform; explicit Play
+                // remains in the persistent Audition footer.
                 let changed = self.state.browser.select_source(source.clone());
                 if changed {
                     self.state.browser.begin_waveform_load(&source);

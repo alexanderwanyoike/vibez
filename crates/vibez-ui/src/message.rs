@@ -11,7 +11,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
-use crate::state::{SampleBrowserEntry, SettingsTab};
+use crate::state::{SampleBrowserEntry, SampleBrowserFolder, SettingsTab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrumPadParam {
@@ -55,6 +55,7 @@ pub struct LoadedDrumRackPadData {
 #[derive(Debug, Clone)]
 pub struct SampleLibraryScanResult {
     pub entries: Vec<SampleBrowserEntry>,
+    pub folders: Vec<SampleBrowserFolder>,
     pub warnings: Vec<String>,
 }
 

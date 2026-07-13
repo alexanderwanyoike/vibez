@@ -764,14 +764,15 @@ async fn hydrate_dropbox_source(
 async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryScanResult, String> {
     tokio::task::spawn_blocking(move || {
         let mut entries = Vec::new();
+        let mut folders = Vec::new();
         let mut warnings = Vec::new();
 
         for root in roots {
-            if !root.exists() {
+            if !root.is_dir() {
                 warnings.push(format!("Missing root: {}", root.display()));
                 continue;
             }
-            scan_root_into(&root, &root, &mut entries, &mut warnings);
+            scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
         }
 
         entries.sort_by(|a, b| {
@@ -779,8 +780,17 @@ async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryS
                 .cmp(&b.relative_path)
                 .then_with(|| a.name.cmp(&b.name))
         });
+        folders.sort_by(|a, b| {
+            a.root_path
+                .cmp(&b.root_path)
+                .then_with(|| a.relative_path.cmp(&b.relative_path))
+        });
 
-        Ok(SampleLibraryScanResult { entries, warnings })
+        Ok(SampleLibraryScanResult {
+            entries,
+            folders,
+            warnings,
+        })
     })
     .await
     .map_err(|err| format!("scan task failed: {err}"))?

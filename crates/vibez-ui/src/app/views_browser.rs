@@ -1,5 +1,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
+use std::path::Path;
+
 use iced::widget::{
     button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, text,
     text_input,
@@ -59,6 +61,49 @@ impl App {
                 selection: th::accent(),
             });
 
+        let search_context: Element<'_, Message> = match self.state.browser.mode {
+            SampleBrowserMode::Local => {
+                let scope = button(
+                    row![
+                        text("SCOPE").size(9).color(th::text_muted()),
+                        text(self.state.browser.search_scope_label())
+                            .size(9)
+                            .color(th::text())
+                    ]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
+                .padding([3, 0])
+                .style(browser_utility_action_style);
+                let location = self
+                    .state
+                    .browser
+                    .current_folder
+                    .as_ref()
+                    .and_then(|folder| folder.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "All Roots".into());
+                row![
+                    scope,
+                    horizontal_space(),
+                    text(location)
+                        .size(9)
+                        .color(th::text_dim())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
+            SampleBrowserMode::Dropbox => row![
+                text("SCOPE").size(9).color(th::text_muted()),
+                text("REMOTE CATALOG").size(9).color(th::text_dim())
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        };
+
         let body: Element<'_, Message> = match self.state.browser.mode {
             SampleBrowserMode::Local => self.view_local_sample_browser(),
             SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
@@ -76,7 +121,7 @@ impl App {
 
         container(
             column![
-                container(column![title_row, search].spacing(7))
+                container(column![title_row, search, search_context].spacing(6))
                     .padding([8, 10])
                     .style(browser_header_style),
                 content,
@@ -149,13 +194,13 @@ impl App {
         ]
         .spacing(3);
 
-        let all_active = local_active && self.state.browser.root_filter.is_none();
+        let all_active = local_active && self.state.browser.current_folder.is_none();
         let all_roots = button(text("All Roots").size(10).color(if all_active {
             th::accent()
         } else {
             th::text_dim()
         }))
-        .on_press(Message::Browser(BrowserMsg::SelectSampleBrowserRoot(None)))
+        .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(None)))
         .padding([4, 8])
         .width(Length::Fill)
         .style(move |_theme: &Theme, status| browser_place_button_style(all_active, status));
@@ -164,33 +209,73 @@ impl App {
             all_roots
         ]);
 
+        let mut local_tree_rows = Vec::new();
         for root in &self.state.browser.roots {
             let active = local_active
                 && self
                     .state
                     .browser
-                    .root_filter
+                    .current_folder
                     .as_ref()
                     .is_some_and(|selected| selected == root);
+            let expanded = self.state.browser.expanded_local_folders.contains(root);
+            let has_children = self
+                .state
+                .browser
+                .folders
+                .iter()
+                .any(|folder| folder.root_path == *root && folder.path.parent() == Some(root));
             let label = root
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string());
-            let root_button = button(text(label).size(10).color(if active {
-                th::accent()
+            let toggle: Element<'_, Message> = if has_children {
+                button(
+                    text(if expanded { "▾" } else { "▸" })
+                        .size(10)
+                        .color(th::text_muted()),
+                )
+                .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
+                    root.clone(),
+                )))
+                .padding([4, 2])
+                .style(browser_utility_action_style)
+                .into()
             } else {
-                th::text_dim()
-            }))
-            .on_press(Message::Browser(BrowserMsg::SelectSampleBrowserRoot(Some(
+                container(text("·").size(9).color(th::text_muted()))
+                    .padding([4, 3])
+                    .into()
+            };
+            let root_button = button(
+                text(label)
+                    .size(10)
+                    .color(if active { th::accent() } else { th::text_dim() })
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
                 root.clone(),
             ))))
-            .padding([4, 8])
+            .padding([4, 2])
             .width(Length::Fill)
             .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
-            places = places.push(row![
-                horizontal_space().width(Length::Fixed(14.0)),
-                root_button
-            ]);
+            let remove = button(icons::icon(icons::X).size(8).color(th::text_muted()))
+                .on_press(Message::Browser(BrowserMsg::RemoveSampleLibraryRoot(
+                    root.clone(),
+                )))
+                .padding([4, 2])
+                .style(browser_utility_action_style);
+            local_tree_rows.push(
+                row![toggle, root_button, remove]
+                    .spacing(1)
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+            );
+            if expanded {
+                self.render_local_places_tree(root, root, 1, &mut local_tree_rows);
+            }
+        }
+        for local_row in local_tree_rows {
+            places = places.push(local_row);
         }
 
         places = places.push(place_button(
@@ -250,7 +335,88 @@ impl App {
                 .align_x(iced::Alignment::Start),
         );
 
-        container(places.padding(9)).width(Length::Fill).into()
+        container(
+            scrollable(container(places.padding(9)).width(Length::Fill)).direction(
+                scrollable::Direction::Vertical(scrollable::Scrollbar::default()),
+            ),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn render_local_places_tree<'a>(
+        &'a self,
+        root: &Path,
+        parent: &Path,
+        depth: usize,
+        rows: &mut Vec<Element<'a, Message>>,
+    ) {
+        let mut children: Vec<_> = self
+            .state
+            .browser
+            .folders
+            .iter()
+            .filter(|folder| folder.root_path == root && folder.path.parent() == Some(parent))
+            .collect();
+        children.sort_by_key(|folder| folder.name.to_lowercase());
+
+        for folder in children {
+            let expanded = self
+                .state
+                .browser
+                .expanded_local_folders
+                .contains(&folder.path);
+            let active = self.state.browser.mode == SampleBrowserMode::Local
+                && self.state.browser.current_folder.as_ref() == Some(&folder.path);
+            let has_children =
+                self.state.browser.folders.iter().any(|child| {
+                    child.root_path == root && child.path.parent() == Some(&folder.path)
+                });
+            let toggle: Element<'a, Message> = if has_children {
+                button(
+                    text(if expanded { "▾" } else { "▸" })
+                        .size(10)
+                        .color(th::text_muted()),
+                )
+                .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
+                    folder.path.clone(),
+                )))
+                .padding([3, 2])
+                .style(browser_utility_action_style)
+                .into()
+            } else {
+                container(text("·").size(9).color(th::text_muted()))
+                    .padding([3, 3])
+                    .into()
+            };
+            let select = button(
+                text(folder.name.clone())
+                    .size(9)
+                    .color(if active { th::accent() } else { th::text_dim() })
+                    .height(Length::Fixed(12.0))
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
+                folder.path.clone(),
+            ))))
+            .padding([3, 1])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
+            rows.push(
+                row![
+                    horizontal_space().width(Length::Fixed((depth as f32 * 8.0).min(40.0))),
+                    toggle,
+                    select
+                ]
+                .spacing(1)
+                .align_y(iced::Alignment::Center)
+                .into(),
+            );
+            if expanded {
+                self.render_local_places_tree(root, &folder.path, depth + 1, rows);
+            }
+        }
     }
 
     fn view_browser_audition_footer(&self) -> Element<'_, Message> {
@@ -365,7 +531,47 @@ impl App {
             .into();
         }
 
-        let search_lower = self.state.browser.search.to_lowercase();
+        let search_lower = self.state.browser.search.trim().to_lowercase();
+        let searching = !search_lower.is_empty();
+        let current_folder = self.state.browser.current_folder.as_deref();
+
+        let mut root_results: Vec<&std::path::PathBuf> = if !searching && current_folder.is_none() {
+            self.state.browser.roots.iter().collect()
+        } else if searching && self.state.browser.search_scope_path().is_none() {
+            self.state
+                .browser
+                .roots
+                .iter()
+                .filter(|root| {
+                    root.display()
+                        .to_string()
+                        .to_lowercase()
+                        .contains(&search_lower)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        root_results.sort_by_key(|root| browser_root_name(root).to_lowercase());
+
+        let mut folder_results: Vec<_> = self
+            .state
+            .browser
+            .folders
+            .iter()
+            .filter(|folder| {
+                self.state
+                    .browser
+                    .local_folder_is_result(folder, &search_lower)
+            })
+            .collect();
+        folder_results.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.path.cmp(&b.path))
+        });
+
         let mut filtered_entries: Vec<&SampleBrowserEntry> = self
             .state
             .browser
@@ -374,13 +580,15 @@ impl App {
             .filter(|entry| {
                 self.state
                     .browser
-                    .root_filter
-                    .as_ref()
-                    .is_none_or(|root| &entry.root_path == root)
+                    .local_entry_is_result(entry, &search_lower)
             })
-            .filter(|entry| search_lower.is_empty() || entry.search_text.contains(&search_lower))
             .collect();
-        filtered_entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+        filtered_entries.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.relative_path.cmp(&b.relative_path))
+        });
 
         let selected_source = self.state.browser.selected_source.as_ref();
         let wide_columns = self
@@ -444,8 +652,67 @@ impl App {
             .style(browser_table_header_style)
             .into()
         };
+        let total_results = root_results.len() + folder_results.len() + filtered_entries.len();
+        let visible_results = self.state.browser.visible_result_count(total_results);
+        let mut remaining = visible_results;
         let mut entries_col = column![].spacing(1);
-        for entry in filtered_entries.iter().take(400) {
+
+        if let Some(error) = &self.state.browser.scan_error {
+            entries_col = entries_col.push(
+                container(
+                    text(format!("INDEX ERROR · {error}"))
+                        .size(9)
+                        .color(th::danger())
+                        .wrapping(iced::widget::text::Wrapping::None),
+                )
+                .padding([6, 8]),
+            );
+        } else if let Some(first_warning) = self.state.browser.scan_warnings.first() {
+            entries_col = entries_col.push(
+                container(
+                    text(format!(
+                        "WARN {} · {}",
+                        self.state.browser.scan_warnings.len(),
+                        first_warning
+                    ))
+                    .size(9)
+                    .color(th::danger())
+                    .wrapping(iced::widget::text::Wrapping::None),
+                )
+                .padding([6, 8]),
+            );
+        }
+
+        for root in root_results.into_iter().take(remaining) {
+            entries_col = entries_col
+                .push(self.view_local_folder_result(
+                    browser_root_name(root),
+                    format!("LOCAL ROOT · {}", root.display()),
+                    "ROOT",
+                    root.clone(),
+                    wide_columns,
+                ))
+                .push(browser_row_divider());
+            remaining = remaining.saturating_sub(1);
+        }
+        for folder in folder_results.into_iter().take(remaining) {
+            entries_col = entries_col
+                .push(self.view_local_folder_result(
+                    folder.name.clone(),
+                    browser_folder_context(
+                        &folder.root_path,
+                        &folder.relative_path,
+                        "FOLDER",
+                        None,
+                    ),
+                    "FOLDER",
+                    folder.path.clone(),
+                    wide_columns,
+                ))
+                .push(browser_row_divider());
+            remaining = remaining.saturating_sub(1);
+        }
+        for entry in filtered_entries.into_iter().take(remaining) {
             let selected = selected_source.is_some_and(|source| &entry.source == source);
             let cell_color = browser_result_cell_color(selected);
             // mouse_area returns early if its child captures the event, so
@@ -458,12 +725,17 @@ impl App {
                     .width(Length::Fill)
                     .height(Length::Fixed(14.0))
                     .wrapping(iced::widget::text::Wrapping::None),
-                text(entry.relative_path.display().to_string())
-                    .size(9)
-                    .color(cell_color)
-                    .width(Length::Fill)
-                    .height(Length::Fixed(11.0))
-                    .wrapping(iced::widget::text::Wrapping::None)
+                text(browser_folder_context(
+                    &entry.root_path,
+                    &entry.relative_path,
+                    &entry.format,
+                    entry.file_size,
+                ))
+                .size(9)
+                .color(cell_color)
+                .width(Length::Fill)
+                .height(Length::Fixed(11.0))
+                .wrapping(iced::widget::text::Wrapping::None)
             ]
             .spacing(2)
             .width(Length::Fill);
@@ -526,27 +798,51 @@ impl App {
             entries_col = entries_col.push(flat_row).push(browser_row_divider());
         }
 
-        if filtered_entries.is_empty() {
+        if total_results == 0 && self.state.browser.scan_error.is_none() {
             entries_col = entries_col.push(
                 container(
-                    text("No samples match the current filters")
-                        .size(11)
-                        .color(th::text_dim()),
+                    text(if searching {
+                        "No media or folders match this scope"
+                    } else {
+                        "This location has no child folders or supported media"
+                    })
+                    .size(11)
+                    .color(th::text_dim()),
                 )
                 .padding([8, 4]),
             );
         }
 
-        let count = format!(
-            "{} / {}{}",
-            filtered_entries.len().min(400),
-            self.state.browser.entries.len(),
-            if self.state.browser.scan_in_progress {
-                " …"
-            } else {
-                ""
-            }
-        );
+        if self.state.browser.has_more_results(total_results) {
+            let hidden = total_results.saturating_sub(visible_results);
+            entries_col = entries_col.push(browser_row_divider()).push(
+                button(
+                    text(format!(
+                        "SHOW {} MORE",
+                        hidden.min(crate::state::BROWSER_RESULTS_PAGE_SIZE)
+                    ))
+                    .size(9)
+                    .color(th::text_dim()),
+                )
+                .on_press(Message::Browser(BrowserMsg::ShowMoreLocalResults))
+                .padding([7, 8])
+                .width(Length::Fill)
+                .style(browser_utility_action_style),
+            );
+        }
+
+        let count = if self.state.browser.scan_in_progress {
+            format!("INDEXING… · {}", self.state.browser.entries.len())
+        } else if self.state.browser.scan_error.is_some() {
+            "INDEX ERROR".into()
+        } else if self.state.browser.scan_warnings.is_empty() {
+            format!("{visible_results} / {total_results}")
+        } else {
+            format!(
+                "{visible_results} / {total_results} · WARN {}",
+                self.state.browser.scan_warnings.len()
+            )
+        };
 
         container(
             column![
@@ -578,6 +874,71 @@ impl App {
         .height(Length::Fill)
         .style(browser_results_style)
         .into()
+    }
+
+    fn view_local_folder_result(
+        &self,
+        name: String,
+        context: String,
+        status: &'static str,
+        destination: std::path::PathBuf,
+        wide_columns: bool,
+    ) -> Element<'_, Message> {
+        let name_cell = column![
+            text(format!("› {name}"))
+                .size(12)
+                .color(th::text())
+                .width(Length::Fill)
+                .height(Length::Fixed(14.0))
+                .wrapping(iced::widget::text::Wrapping::None),
+            text(context)
+                .size(9)
+                .color(th::text_dim())
+                .width(Length::Fill)
+                .height(Length::Fixed(11.0))
+                .wrapping(iced::widget::text::Wrapping::None)
+        ]
+        .spacing(2)
+        .width(Length::Fill);
+        let cells: Element<'_, Message> = if wide_columns {
+            row![
+                name_cell,
+                text("—")
+                    .size(10)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(36.0)),
+                text("—")
+                    .size(10)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(50.0)),
+                text(status)
+                    .size(9)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(48.0))
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            row![
+                name_cell,
+                text(status)
+                    .size(9)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(42.0))
+            ]
+            .align_y(iced::Alignment::Center)
+            .into()
+        };
+
+        button(container(cells).padding([6, 8]).width(Length::Fill))
+            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
+                destination,
+            ))))
+            .padding(0)
+            .width(Length::Fill)
+            .style(browser_utility_action_style)
+            .into()
     }
 
     pub(super) fn view_dropbox_browser(&self) -> Element<'_, Message> {
@@ -794,6 +1155,41 @@ impl App {
                 self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
             }
         }
+    }
+}
+
+fn browser_root_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+fn browser_folder_context(
+    root: &Path,
+    relative_path: &Path,
+    detail: &str,
+    file_size: Option<u64>,
+) -> String {
+    let size = file_size
+        .map(format_browser_file_size)
+        .map(|size| format!(" · {size}"))
+        .unwrap_or_default();
+    format!(
+        "{detail}{size} · {}/{}",
+        browser_root_name(root),
+        relative_path.display()
+    )
+}
+
+fn format_browser_file_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if (bytes as f64) < MIB {
+        format!("{:.1} KB", bytes as f64 / KIB)
+    } else {
+        format!("{:.1} MB", bytes as f64 / MIB)
     }
 }
 
