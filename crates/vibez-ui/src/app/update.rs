@@ -220,6 +220,21 @@ impl App {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {
                     self.state.project.file_menu_open = false;
                 }
+                let browser_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::ResizeDock(*x))
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::EndDockResize)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = browser_resize {
+                    let action = self.state.browser.update(browser_msg);
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
                 let ctx = crate::domains::view::ViewCtx {
                     total_beats: self.state.total_beats(),
                 };
@@ -549,6 +564,10 @@ impl App {
                         Message::LocalSamplePreviewReady,
                     );
                 }
+            }
+            Message::StopBrowserPreview => {
+                self.send_command(EngineCommand::StopPreview);
+                self.state.status_text = "Audition stopped".to_string();
             }
             // -- Drag-and-drop from sample browser --
             Message::DropSampleOnArrangement {

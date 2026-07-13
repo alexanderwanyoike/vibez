@@ -18,6 +18,11 @@ use crate::state::{BrowserState, SampleBrowserMode};
 #[derive(Debug, Clone)]
 pub enum BrowserMsg {
     ToggleSampleBrowser,
+    BeginDockResize,
+    ResizeDock(f32),
+    EndDockResize,
+    NudgeDockWidth(f32),
+    TogglePlacesDrawer,
     SampleBrowserSearchChanged(String),
     SelectSampleBrowserRoot(Option<PathBuf>),
     SelectSampleBrowserEntry(MediaSourceRef),
@@ -64,17 +69,40 @@ impl BrowserState {
                 self.open = !self.open;
                 action.persist_settings = true;
             }
+            BrowserMsg::BeginDockResize => {
+                self.dock_resize_active = true;
+            }
+            BrowserMsg::ResizeDock(width) => {
+                if self.dock_resize_active {
+                    self.set_dock_width(width);
+                }
+            }
+            BrowserMsg::EndDockResize => {
+                if self.dock_resize_active {
+                    self.dock_resize_active = false;
+                    action.persist_settings = true;
+                }
+            }
+            BrowserMsg::NudgeDockWidth(delta) => {
+                self.set_dock_width(self.dock_width + delta);
+                action.persist_settings = true;
+            }
+            BrowserMsg::TogglePlacesDrawer => {
+                self.places_drawer_open = !self.places_drawer_open;
+            }
             BrowserMsg::SampleBrowserSearchChanged(query) => {
                 self.search = query;
             }
             BrowserMsg::SelectSampleBrowserRoot(root) => {
                 self.root_filter = root;
+                self.places_drawer_open = false;
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
                 self.selected_source = Some(source);
             }
             BrowserMsg::SetSampleBrowserMode(mode) => {
                 self.mode = mode;
+                self.places_drawer_open = false;
                 if mode == crate::state::SampleBrowserMode::Dropbox
                     && !self.dropbox.folders.contains_key("")
                     && !self.dropbox.listing_in_progress.contains("")
@@ -190,6 +218,69 @@ mod tests {
         let action = b.update(BrowserMsg::ToggleSampleBrowser);
         assert!(!b.open);
         assert!(action.persist_settings);
+    }
+
+    #[test]
+    fn dock_width_clamps_and_persists_only_when_committed() {
+        let mut browser = BrowserState::default();
+        assert_eq!(
+            browser.dock_layout(1400.0),
+            crate::state::BrowserDockLayout::Standard
+        );
+
+        let action = browser.update(BrowserMsg::BeginDockResize);
+        assert!(!action.persist_settings);
+        browser.update(BrowserMsg::ResizeDock(900.0));
+        assert_eq!(browser.dock_width, crate::state::BROWSER_DOCK_MAX_WIDTH);
+        let action = browser.update(BrowserMsg::EndDockResize);
+        assert!(action.persist_settings);
+
+        let action = browser.update(BrowserMsg::NudgeDockWidth(-1_000.0));
+        assert_eq!(browser.dock_width, crate::state::BROWSER_DOCK_MIN_WIDTH);
+        assert!(action.persist_settings);
+    }
+
+    #[test]
+    fn dock_yields_to_arrange_without_forgetting_preference() {
+        let mut browser = BrowserState::default();
+        browser.set_dock_width(620.0);
+        assert_eq!(browser.effective_dock_width(1_500.0), 620.0);
+        assert_eq!(browser.effective_dock_width(900.0), 340.0);
+        assert_eq!(browser.dock_width, 620.0);
+        assert_eq!(
+            browser.dock_layout(900.0),
+            crate::state::BrowserDockLayout::Narrow
+        );
+    }
+
+    #[test]
+    fn layout_transitions_do_not_change_browser_context() {
+        let mut browser = BrowserState {
+            search: "break".into(),
+            root_filter: Some(PathBuf::from("/samples")),
+            selected_source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("/samples/break.wav"),
+            }),
+            ..BrowserState::default()
+        };
+        browser.set_dock_width(350.0);
+        assert_eq!(
+            browser.dock_layout(1_400.0),
+            crate::state::BrowserDockLayout::Narrow
+        );
+        browser.set_dock_width(460.0);
+        assert_eq!(
+            browser.dock_layout(1_400.0),
+            crate::state::BrowserDockLayout::Standard
+        );
+        browser.set_dock_width(580.0);
+        assert_eq!(
+            browser.dock_layout(1_400.0),
+            crate::state::BrowserDockLayout::Wide
+        );
+        assert_eq!(browser.search, "break");
+        assert_eq!(browser.root_filter, Some(PathBuf::from("/samples")));
+        assert!(browser.selected_source.is_some());
     }
 
     #[test]

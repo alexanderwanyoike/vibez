@@ -8,6 +8,8 @@ pub struct UiSettings {
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
+    #[serde(default = "default_sample_browser_width")]
+    pub sample_browser_width: f32,
     /// Automatically detect each dropped sample's BPM and warp it to
     /// the project tempo on import. Off by default; users opt in from
     /// Settings → Warping.
@@ -34,6 +36,7 @@ impl Default for UiSettings {
         Self {
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
+            sample_browser_width: default_sample_browser_width(),
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
@@ -72,6 +75,38 @@ fn default_sample_browser_open() -> bool {
     true
 }
 
+fn default_sample_browser_width() -> f32 {
+    crate::state::BROWSER_DOCK_DEFAULT_WIDTH
+}
+
 fn default_warp_confidence_threshold() -> f32 {
     0.6
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_receive_the_browser_width_default() {
+        let loaded: UiSettings =
+            serde_json::from_str(r#"{"sample_library_roots":[],"sample_browser_open":false}"#)
+                .unwrap();
+        assert!(!loaded.sample_browser_open);
+        assert_eq!(
+            loaded.sample_browser_width,
+            crate::state::BROWSER_DOCK_DEFAULT_WIDTH
+        );
+    }
+
+    #[test]
+    fn browser_width_roundtrips() {
+        let settings = UiSettings {
+            sample_browser_width: 612.0,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: UiSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.sample_browser_width, 612.0);
+    }
 }

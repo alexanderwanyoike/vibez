@@ -212,11 +212,40 @@ pub enum SampleBrowserMode {
     Dropbox,
 }
 
+pub const BROWSER_DOCK_MIN_WIDTH: f32 = 300.0;
+pub const BROWSER_DOCK_DEFAULT_WIDTH: f32 = 410.0;
+pub const BROWSER_DOCK_MAX_WIDTH: f32 = 650.0;
+pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserDockLayout {
+    Narrow,
+    Standard,
+    Wide,
+}
+
+impl BrowserDockLayout {
+    pub fn for_width(width: f32) -> Self {
+        if width < 400.0 {
+            Self::Narrow
+        } else if width < 520.0 {
+            Self::Standard
+        } else {
+            Self::Wide
+        }
+    }
+}
+
 /// Browser domain slice: sample library, Dropbox browsing, and
 /// drag-and-drop from the browser into the arrangement.
 #[derive(Debug, Clone)]
 pub struct BrowserState {
     pub open: bool,
+    /// Remembered user width. The rendered width may temporarily yield to a
+    /// narrow window without overwriting this preference.
+    pub dock_width: f32,
+    pub dock_resize_active: bool,
+    pub places_drawer_open: bool,
     pub search: String,
     pub roots: Vec<PathBuf>,
     pub entries: Vec<SampleBrowserEntry>,
@@ -238,6 +267,9 @@ impl Default for BrowserState {
     fn default() -> Self {
         Self {
             open: true,
+            dock_width: BROWSER_DOCK_DEFAULT_WIDTH,
+            dock_resize_active: false,
+            places_drawer_open: false,
             search: String::new(),
             roots: Vec::new(),
             entries: Vec::new(),
@@ -251,6 +283,22 @@ impl Default for BrowserState {
             drag_hover_track: None,
             drag_hover_beat: 0.0,
         }
+    }
+}
+
+impl BrowserState {
+    pub fn set_dock_width(&mut self, width: f32) {
+        self.dock_width = width.clamp(BROWSER_DOCK_MIN_WIDTH, BROWSER_DOCK_MAX_WIDTH);
+    }
+
+    pub fn effective_dock_width(&self, window_width: f32) -> f32 {
+        let available = (window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
+            .clamp(BROWSER_DOCK_MIN_WIDTH, BROWSER_DOCK_MAX_WIDTH);
+        self.dock_width.min(available).max(BROWSER_DOCK_MIN_WIDTH)
+    }
+
+    pub fn dock_layout(&self, window_width: f32) -> BrowserDockLayout {
+        BrowserDockLayout::for_width(self.effective_dock_width(window_width))
     }
 }
 

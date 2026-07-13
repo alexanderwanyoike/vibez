@@ -252,6 +252,7 @@ pub enum Message {
     ClickLocalBrowserEntry(MediaSourceRef),
     /// Speaker-icon click on a Local browser row: audition.
     PreviewLocalEntry(MediaSourceRef),
+    StopBrowserPreview,
     LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
     DropSampleOnArrangement {
         track_id: TrackId,

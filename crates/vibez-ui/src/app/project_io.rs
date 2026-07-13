@@ -197,6 +197,7 @@ impl App {
         let settings = UiSettings {
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
+            sample_browser_width: self.state.browser.dock_width,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),

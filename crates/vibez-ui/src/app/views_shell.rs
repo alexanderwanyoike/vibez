@@ -37,9 +37,13 @@ impl App {
         };
         let content: Element<'_, Message> =
             if self.state.view.workspace == Workspace::Arrange && self.state.browser.open {
-                row![self.view_sample_browser_panel(), workspace_content]
-                    .height(Length::FillPortion(5))
-                    .into()
+                row![
+                    self.view_sample_browser_panel(),
+                    self.view_browser_splitter(),
+                    workspace_content
+                ]
+                .height(Length::FillPortion(5))
+                .into()
             } else {
                 workspace_content
             };

@@ -87,6 +87,7 @@ pub fn run() -> iced::Result {
             #[allow(unused_mut)]
             let mut settings = iced::window::Settings {
                 icon,
+                min_size: Some(iced::Size::new(900.0, 600.0)),
                 ..Default::default()
             };
             // WM_CLASS / app_id: lets docks and taskbars match the
@@ -168,6 +169,10 @@ impl App {
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             browser: crate::state::BrowserState {
                 open: ui_settings.sample_browser_open,
+                dock_width: ui_settings.sample_browser_width.clamp(
+                    crate::state::BROWSER_DOCK_MIN_WIDTH,
+                    crate::state::BROWSER_DOCK_MAX_WIDTH,
+                ),
                 roots: ui_settings.sample_library_roots,
                 dropbox: dropbox_ui_state,
                 ..Default::default()
