@@ -307,7 +307,9 @@ impl App {
                     source: clip.source.clone(),
                     file_path: clip.source.as_ref().and_then(|source| match source {
                         MediaSourceRef::LocalFile { path } => Some(path.clone()),
-                        MediaSourceRef::DropboxFile { .. } => None,
+                        MediaSourceRef::StagedProjectMedia { .. }
+                        | MediaSourceRef::ProjectMedia { .. }
+                        | MediaSourceRef::DropboxFile { .. } => None,
                     }),
                     loop_enabled: clip.loop_enabled,
                     loop_start: clip.loop_start,
@@ -364,6 +366,32 @@ impl App {
                 .iter()
                 .map(|bus| self.track_info_from_ui(bus))
                 .collect(),
+        }
+    }
+
+    pub(super) fn apply_saved_project_sources(&mut self, project: &Project) {
+        for saved_clip in &project.clips {
+            if let Some(track) = self.state.find_track_mut(saved_clip.track_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == saved_clip.id) {
+                    clip.source = saved_clip.source.clone();
+                }
+            }
+        }
+        for saved_track in &project.tracks {
+            let Some(track) = self.state.find_track_mut(saved_track.id) else {
+                continue;
+            };
+            match &saved_track.native_instrument {
+                Some(InstrumentStateInfo::Sampler { source, .. }) => {
+                    track.sample_source = source.clone();
+                }
+                Some(InstrumentStateInfo::DrumRack { pads }) => {
+                    for (slot, saved_pad) in track.drum_rack_pads.iter_mut().zip(pads) {
+                        slot.source = saved_pad.source.clone();
+                    }
+                }
+                _ => {}
+            }
         }
     }
 

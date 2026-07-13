@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::{Subscription, Task, Theme};
@@ -24,7 +24,7 @@ use vibez_project::Project;
 use crate::icons;
 use crate::message::{
     LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message, ProjectLoadResult,
-    SampleLibraryScanResult,
+    ProjectSaveResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::AppState;
@@ -382,13 +382,52 @@ async fn decode_file_async(
     .map_err(|e| format!("decode task failed: {e}"))?
 }
 
-async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, String> {
+async fn decode_and_stage_local_async(
+    path: PathBuf,
+) -> Result<(vibez_core::audio_buffer::DecodedAudio, MediaSourceRef), String> {
     tokio::task::spawn_blocking(move || {
-        let save_path = path;
-        project
-            .save_to_file(&save_path)
-            .map(|_| save_path)
-            .map_err(|err| err.to_string())
+        let audio = file_io::decode_audio_file(&path).map_err(|error| error.to_string())?;
+        let source = vibez_project::project_format_v1::stage_local_file(&path)
+            .map_err(|error| error.to_string())?;
+        Ok((audio, source))
+    })
+    .await
+    .map_err(|error| format!("decode/stage task failed: {error}"))?
+}
+
+async fn save_project_async(
+    path: PathBuf,
+    source_path: Option<PathBuf>,
+    project: Project,
+) -> Result<ProjectSaveResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let is_v1_destination = path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"));
+        if is_v1_destination {
+            let v1_source = source_path.as_deref().filter(|source| {
+                vibez_project::project_format_v1::detect_project_format(source).is_ok_and(
+                    |format| format == vibez_project::project_format_v1::ProjectFileFormat::V1,
+                )
+            });
+            let saved =
+                vibez_project::project_format_v1::save_project_v1(&path, v1_source, project)
+                    .map_err(|error| error.to_string())?;
+            Ok(ProjectSaveResult {
+                path,
+                project: saved.project,
+                observation: Some(saved.observation),
+            })
+        } else {
+            project
+                .save_to_file(&path)
+                .map_err(|error| error.to_string())?;
+            Ok(ProjectSaveResult {
+                path,
+                project,
+                observation: None,
+            })
+        }
     })
     .await
     .map_err(|err| format!("save task failed: {err}"))?
@@ -582,8 +621,25 @@ async fn load_project_async(
     dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
 ) -> Result<ProjectLoadResult, String> {
     let load_path = path.clone();
-    let project = tokio::task::spawn_blocking(move || {
-        Project::load_from_file(&load_path).map_err(|err| err.to_string())
+    let (project, container_path) = tokio::task::spawn_blocking(move || {
+        match vibez_project::project_format_v1::detect_project_format(&load_path)
+            .map_err(|error| error.to_string())?
+        {
+            vibez_project::project_format_v1::ProjectFileFormat::V1 => {
+                let container =
+                    vibez_project::project_format_v1::ProjectContainer::open(&load_path)
+                        .map_err(|error| error.to_string())?;
+                let document = container
+                    .load_document()
+                    .map_err(|error| error.to_string())?;
+                Ok((document.project, Some(load_path)))
+            }
+            vibez_project::project_format_v1::ProjectFileFormat::LegacyJson => {
+                Project::load_from_file(&load_path)
+                    .map(|project| (project, None))
+                    .map_err(|error| error.to_string())
+            }
+        }
     })
     .await
     .map_err(|err| format!("load task failed: {err}"))??;
@@ -595,22 +651,17 @@ async fn load_project_async(
 
     for clip in &project.clips {
         match clip.resolved_source().cloned() {
-            Some(MediaSourceRef::LocalFile { path: clip_path }) => {
-                match decode_blocking(clip_path).await {
-                    Ok(audio) => {
-                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
-                    }
-                    Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
-                }
-            }
-            Some(source @ MediaSourceRef::DropboxFile { .. }) => {
-                match hydrate_dropbox_source(dropbox.as_ref(), &source, &clip.name).await {
-                    Ok(audio) => {
-                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
-                    }
-                    Err(err) => warnings.push(err),
-                }
-            }
+            Some(source) => match hydrate_saved_source(
+                container_path.as_ref(),
+                dropbox.as_ref(),
+                &source,
+                &clip.name,
+            )
+            .await
+            {
+                Ok(audio) => clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await),
+                Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
+            },
             None => warnings.push(format!(
                 "Skipped clip '{}' (missing source reference)",
                 clip.name
@@ -624,32 +675,24 @@ async fn load_project_async(
                 InstrumentStateInfo::Sampler {
                     source: Some(source),
                     ..
-                } => match source {
-                    MediaSourceRef::LocalFile { path: sample_path } => {
-                        match decode_blocking(sample_path.clone()).await {
-                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                track_id: track.id,
-                                source: source.clone(),
-                                audio: Arc::new(audio),
-                                name: source.display_name(),
-                            }),
-                            Err(err) => warnings.push(format!(
-                                "Skipped sampler source on '{}' ({})",
-                                track.name, err
-                            )),
-                        }
-                    }
-                    MediaSourceRef::DropboxFile { .. } => {
-                        match hydrate_dropbox_source(dropbox.as_ref(), source, &track.name).await {
-                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                track_id: track.id,
-                                source: source.clone(),
-                                audio: Arc::new(audio),
-                                name: source.display_name(),
-                            }),
-                            Err(err) => warnings.push(err),
-                        }
-                    }
+                } => match hydrate_saved_source(
+                    container_path.as_ref(),
+                    dropbox.as_ref(),
+                    source,
+                    &track.name,
+                )
+                .await
+                {
+                    Ok(audio) => sampler_samples.push(LoadedSamplerData {
+                        track_id: track.id,
+                        source: source.clone(),
+                        audio: Arc::new(audio),
+                        name: source.display_name(),
+                    }),
+                    Err(err) => warnings.push(format!(
+                        "Skipped sampler source on '{}' ({})",
+                        track.name, err
+                    )),
                 },
                 InstrumentStateInfo::DrumRack { pads } => {
                     for (pad_index, pad) in pads.iter().enumerate() {
@@ -657,38 +700,23 @@ async fn load_project_async(
                             continue;
                         };
                         let label = format!("drum pad {} on '{}'", pad_index + 1, track.name);
-                        match source {
-                            MediaSourceRef::LocalFile { path: sample_path } => {
-                                match decode_blocking(sample_path.clone()).await {
-                                    Ok(audio) => {
-                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
-                                            track_id: track.id,
-                                            pad_index,
-                                            source: source.clone(),
-                                            audio: Arc::new(audio),
-                                            name: source.display_name(),
-                                            state: pad.clone(),
-                                        })
-                                    }
-                                    Err(err) => warnings.push(format!("Skipped {label} ({err})")),
-                                }
-                            }
-                            MediaSourceRef::DropboxFile { .. } => {
-                                match hydrate_dropbox_source(dropbox.as_ref(), source, &label).await
-                                {
-                                    Ok(audio) => {
-                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
-                                            track_id: track.id,
-                                            pad_index,
-                                            source: source.clone(),
-                                            audio: Arc::new(audio),
-                                            name: source.display_name(),
-                                            state: pad.clone(),
-                                        })
-                                    }
-                                    Err(err) => warnings.push(err),
-                                }
-                            }
+                        match hydrate_saved_source(
+                            container_path.as_ref(),
+                            dropbox.as_ref(),
+                            source,
+                            &label,
+                        )
+                        .await
+                        {
+                            Ok(audio) => drum_rack_pad_samples.push(LoadedDrumRackPadData {
+                                track_id: track.id,
+                                pad_index,
+                                source: source.clone(),
+                                audio: Arc::new(audio),
+                                name: source.display_name(),
+                                state: pad.clone(),
+                            }),
+                            Err(err) => warnings.push(format!("Skipped {label} ({err})")),
                         }
                     }
                 }
@@ -705,6 +733,45 @@ async fn load_project_async(
         drum_rack_pad_samples,
         warnings,
     })
+}
+
+async fn hydrate_saved_source(
+    container_path: Option<&PathBuf>,
+    dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
+    source: &MediaSourceRef,
+    label: &str,
+) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
+    match source {
+        MediaSourceRef::LocalFile { path }
+        | MediaSourceRef::StagedProjectMedia {
+            staging_path: path, ..
+        } => decode_blocking(path.clone()).await,
+        MediaSourceRef::ProjectMedia { id, file_name } => {
+            let container_path = container_path
+                .cloned()
+                .ok_or_else(|| format!("{label} has Project Media without a V1 container"))?;
+            let id = id.clone();
+            let extension = Path::new(file_name)
+                .extension()
+                .map(|value| value.to_string_lossy().into_owned());
+            tokio::task::spawn_blocking(move || {
+                let container =
+                    vibez_project::project_format_v1::ProjectContainer::open(container_path)
+                        .map_err(|error| error.to_string())?;
+                let bytes = container
+                    .read_media(&id)
+                    .map_err(|error| error.to_string())?;
+                vibez_audio_io::file_io::decode_audio_cursor(
+                    std::io::Cursor::new(bytes),
+                    extension.as_deref(),
+                )
+                .map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| format!("Project Media decode task failed: {error}"))?
+        }
+        MediaSourceRef::DropboxFile { .. } => hydrate_dropbox_source(dropbox, source, label).await,
+    }
 }
 
 async fn decode_blocking(path: PathBuf) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
@@ -779,4 +846,58 @@ async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryS
     })
     .await
     .map_err(|err| format!("scan task failed: {err}"))?
+}
+
+#[cfg(test)]
+mod project_format_v1_tests {
+    use super::*;
+    use vibez_core::audio_buffer::DecodedAudio;
+    use vibez_core::id::ClipId;
+    use vibez_core::track::TrackInfo;
+
+    #[tokio::test]
+    async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.wav");
+        let project_path = directory.path().join("self-contained.vzp");
+        let audio = DecodedAudio {
+            channels: vec![vec![0.0, 0.25, -0.5, 0.75, -1.0]],
+            sample_rate: 44_100,
+        };
+        vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
+        let track = TrackInfo::new("Audio");
+        let project = Project {
+            tracks: vec![track.clone()],
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: "source.wav".into(),
+                position: 0,
+                source_offset: 0,
+                duration: audio.num_frames() as u64,
+                source: Some(MediaSourceRef::LocalFile {
+                    path: source_path.clone(),
+                }),
+                file_path: Some(source_path.clone()),
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: audio.num_frames() as u64,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..Project::default()
+        };
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+        std::fs::remove_file(source_path).unwrap();
+
+        let loaded = load_project_async(project_path, None).await.unwrap();
+        assert_eq!(loaded.clips.len(), 1);
+        assert_eq!(loaded.clips[0].audio.num_frames(), audio.num_frames());
+        assert!(matches!(
+            loaded.project.clips[0].source,
+            Some(MediaSourceRef::ProjectMedia { .. })
+        ));
+        assert_eq!(loaded.project.tracks[0].id, track.id);
+    }
 }

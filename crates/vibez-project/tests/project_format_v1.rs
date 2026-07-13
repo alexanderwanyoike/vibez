@@ -2,10 +2,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use vibez_project::project_format_v1_proof::{
-    hex_sha256, representative_document, ProofContainer, Provenance, StagedMedia, APPLICATION_ID,
-    FORMAT_VERSION,
+use vibez_core::id::ClipId;
+use vibez_core::track::{ClipInfo, MediaSourceRef, TrackInfo};
+use vibez_project::project_format_v1::{
+    detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
+    ProjectContainer, ProjectFileFormat, Provenance, StagedMedia, APPLICATION_ID, FORMAT_VERSION,
 };
+use vibez_project::Project;
 
 fn stage(path: PathBuf, id: &str, seed: u8) -> (StagedMedia, Vec<u8>) {
     let bytes: Vec<u8> = (0..2 * 1024 * 1024)
@@ -39,7 +42,7 @@ fn representative_container_roundtrips_incrementally_and_save_as() {
     let mut document = representative_document();
 
     let (mut container, full_save) =
-        ProofContainer::create_from_staged(&path, &mut document, &[staged]).unwrap();
+        ProjectContainer::create_from_staged(&path, &mut document, &[staged]).unwrap();
     assert_eq!(full_save.media_rows_written, 1);
     assert_eq!(full_save.media_bytes_written, media_bytes.len() as u64);
     assert!(
@@ -80,7 +83,7 @@ fn representative_container_roundtrips_incrementally_and_save_as() {
 
     let save_as = container.save_as(&save_as_path).unwrap();
     assert!(save_as.container_bytes > media_bytes.len() as u64);
-    let copied = ProofContainer::open(&save_as_path).unwrap();
+    let copied = ProjectContainer::open(&save_as_path).unwrap();
     assert_eq!(
         serde_json::to_vec(&copied.load_document().unwrap()).unwrap(),
         serde_json::to_vec(&document).unwrap()
@@ -93,7 +96,7 @@ fn format_markers_are_explicit_and_file_is_not_zip() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("proof.vzp");
     let mut document = representative_document();
-    let (container, _) = ProofContainer::create_from_staged(&path, &mut document, &[]).unwrap();
+    let (container, _) = ProjectContainer::create_from_staged(&path, &mut document, &[]).unwrap();
     drop(container);
 
     let bytes = fs::read(&path).unwrap();
@@ -119,7 +122,7 @@ fn process_interruption_preserves_last_committed_document_and_media() {
     let (staged, media_bytes) = stage(directory.path().join("proof.staged"), "proof-media", 83);
     let mut document = representative_document();
     let (container, _) =
-        ProofContainer::create_from_staged(&path, &mut document, &[staged]).unwrap();
+        ProjectContainer::create_from_staged(&path, &mut document, &[staged]).unwrap();
     let committed_json = serde_json::to_vec(&container.load_document().unwrap()).unwrap();
     let committed_fingerprint = container.media_fingerprint("proof-media").unwrap();
     drop(container);
@@ -132,7 +135,7 @@ fn process_interruption_preserves_last_committed_document_and_media() {
         .unwrap();
     assert_eq!(status.code(), Some(86));
 
-    let recovered = ProofContainer::open(&path).unwrap();
+    let recovered = ProjectContainer::open(&path).unwrap();
     assert_eq!(
         serde_json::to_vec(&recovered.load_document().unwrap()).unwrap(),
         committed_json
@@ -144,5 +147,101 @@ fn process_interruption_preserves_last_committed_document_and_media() {
     assert_eq!(
         hex_sha256(&recovered.read_media("proof-media").unwrap()),
         hex_sha256(&media_bytes)
+    );
+}
+
+fn project_with_source(source: MediaSourceRef) -> Project {
+    let track = TrackInfo::new("Audio");
+    Project {
+        tracks: vec![track.clone()],
+        clips: vec![ClipInfo {
+            id: ClipId::new(),
+            track_id: track.id,
+            name: source.display_name(),
+            position: 0,
+            source_offset: 0,
+            duration: 128,
+            source: Some(source),
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 128,
+            original_bpm: Some(120.0),
+            warped: false,
+            warped_to_bpm: None,
+        }],
+        ..Project::default()
+    }
+}
+
+#[test]
+fn production_save_is_self_contained_incremental_and_save_as_reuses_media() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("source.wav");
+    let path = directory.path().join("song.vzp");
+    let save_as_path = directory.path().join("song-copy.vzp");
+    let bytes = b"playback-critical-media".repeat(1024);
+    fs::write(&source_path, &bytes).unwrap();
+    let project = project_with_source(MediaSourceRef::LocalFile {
+        path: source_path.clone(),
+    });
+
+    let first = save_project_v1(&path, None, project).unwrap();
+    assert_eq!(first.observation.media_rows_written, 1);
+    assert_eq!(detect_project_format(&path).unwrap(), ProjectFileFormat::V1);
+    fs::remove_file(&source_path).unwrap();
+
+    let container = ProjectContainer::open(&path).unwrap();
+    let document = container.load_document().unwrap();
+    let MediaSourceRef::ProjectMedia { id, .. } =
+        document.project.clips[0].source.as_ref().unwrap()
+    else {
+        panic!("committed project must reference Project Media");
+    };
+    assert_eq!(container.read_media(id).unwrap(), bytes);
+    let fingerprint = container.media_fingerprint(id).unwrap();
+    drop(container);
+
+    let incremental = save_project_v1(&path, Some(&path), first.project.clone()).unwrap();
+    assert_eq!(incremental.observation.media_rows_written, 0);
+    let reopened = ProjectContainer::open(&path).unwrap();
+    assert_eq!(reopened.media_fingerprint(id).unwrap(), fingerprint);
+    drop(reopened);
+
+    let save_as = save_project_v1(&save_as_path, Some(&path), incremental.project).unwrap();
+    assert_eq!(save_as.observation.media_rows_written, 0);
+    let copied = ProjectContainer::open(save_as_path).unwrap();
+    assert_eq!(copied.read_media(id).unwrap(), bytes);
+}
+
+#[test]
+fn unsaved_project_uses_staged_copy_before_first_save() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("fragile-source.wav");
+    let path = directory.path().join("staged.vzp");
+    let bytes = b"staged-before-save".repeat(512);
+    fs::write(&source_path, &bytes).unwrap();
+    let staged_source = stage_local_file(&source_path).unwrap();
+    let MediaSourceRef::StagedProjectMedia { staging_path, .. } = &staged_source else {
+        panic!("local import must become Staged Project Media");
+    };
+    let staging_path = staging_path.clone();
+    fs::remove_file(source_path).unwrap();
+
+    let saved = save_project_v1(&path, None, project_with_source(staged_source)).unwrap();
+    assert!(
+        !staging_path.exists(),
+        "commit should consume the staging copy"
+    );
+    let MediaSourceRef::ProjectMedia { id, .. } = saved.project.clips[0].source.as_ref().unwrap()
+    else {
+        panic!("saved project must no longer reference staging");
+    };
+    assert_eq!(
+        ProjectContainer::open(path)
+            .unwrap()
+            .read_media(id)
+            .unwrap(),
+        bytes
     );
 }

@@ -331,16 +331,16 @@ impl App {
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
                     self.state.status_text = format!("Loading {file_name}...");
-                    let source = MediaSourceRef::LocalFile { path: path.clone() };
-
-                    return Task::perform(decode_file_async(path), move |result| match result {
-                        Ok(audio) => Message::SamplerSampleDecoded(
-                            track_id,
-                            Arc::new(audio),
-                            file_name.clone(),
-                            source.clone(),
-                        ),
-                        Err(e) => Message::SamplerDecodeError(track_id, e),
+                    return Task::perform(decode_and_stage_local_async(path), move |result| {
+                        match result {
+                            Ok((audio, source)) => Message::SamplerSampleDecoded(
+                                track_id,
+                                Arc::new(audio),
+                                file_name.clone(),
+                                source,
+                            ),
+                            Err(e) => Message::SamplerDecodeError(track_id, e),
+                        }
                     });
                 }
             }
@@ -634,7 +634,10 @@ impl App {
                 self.state.project.file_menu_open = false;
                 let project = self.project_from_state();
                 if let Some(path) = self.state.project.current_path.clone() {
-                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                    return Task::perform(
+                        save_project_async(path.clone(), Some(path), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
                 }
                 return self.update(Message::SaveProjectAs);
             }
@@ -645,7 +648,7 @@ impl App {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Save Vibez Project")
                             .set_file_name("Untitled.vzp")
-                            .add_filter("Vibez Project", &["vzp", "vibez"])
+                            .add_filter("Vibez Project Format V1", &["vzp"])
                             .save_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -667,11 +670,17 @@ impl App {
             }
             Message::ProjectSavePathSelected(path) => {
                 if let Some(mut path) = path {
-                    if path.extension().is_none() {
+                    if !path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"))
+                    {
                         path.set_extension("vzp");
                     }
                     let project = self.project_from_state();
-                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                    return Task::perform(
+                        save_project_async(path, self.state.project.current_path.clone(), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
                 }
             }
             Message::ProjectLoaded(result) => match *result {
@@ -682,11 +691,12 @@ impl App {
                     self.state.status_text = format!("Project load error: {err}");
                 }
             },
-            Message::ProjectSaved(result) => match result {
-                Ok(path) => {
-                    self.state.project.current_path = Some(path.clone());
+            Message::ProjectSaved(result) => match *result {
+                Ok(saved) => {
+                    self.apply_saved_project_sources(&saved.project);
+                    self.state.project.current_path = Some(saved.path.clone());
                     self.state.project.dirty = false;
-                    self.state.status_text = format!("Saved {}", path.display());
+                    self.state.status_text = format!("Saved {}", saved.path.display());
                 }
                 Err(err) => {
                     self.state.status_text = format!("Project save error: {err}");

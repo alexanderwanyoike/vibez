@@ -13,6 +13,19 @@ pub enum MediaSourceRef {
     LocalFile {
         path: PathBuf,
     },
+    /// Project-owned bytes copied to a staging area before the first save.
+    /// This reference must never survive in a committed project document.
+    StagedProjectMedia {
+        id: String,
+        file_name: String,
+        staging_path: PathBuf,
+        source_path: PathBuf,
+    },
+    /// Playback-critical media embedded in a Project Format V1 container.
+    ProjectMedia {
+        id: String,
+        file_name: String,
+    },
     DropboxFile {
         path_lower: String,
         display_path: String,
@@ -28,6 +41,8 @@ impl MediaSourceRef {
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.display().to_string()),
+            MediaSourceRef::StagedProjectMedia { file_name, .. }
+            | MediaSourceRef::ProjectMedia { file_name, .. } => file_name.clone(),
             MediaSourceRef::DropboxFile { display_path, .. } => PathBuf::from(display_path)
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())

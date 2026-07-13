@@ -1,17 +1,18 @@
-//! Bounded Project Format V1 container proof.
+//! Production Project Format V1 SQLite container.
 //!
-//! This module deliberately does not replace [`crate::Project`]'s production
-//! JSON save/load path. It exists to measure and validate the SQLite-backed
-//! container proposed for Project Format V1 before production persistence is
-//! built on it.
+//! Project documents and playback-critical Project Media commit together.
+//! The container preserves unchanged media rows during ordinary saves and can
+//! create a self-contained Save As copy without returning to Source Storage.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
 
 use crate::Project;
 
@@ -91,8 +92,20 @@ pub struct SaveObservation {
     pub media_bytes_written: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectFileFormat {
+    V1,
+    LegacyJson,
+}
+
+#[derive(Debug, Clone)]
+pub struct SaveResult {
+    pub project: Project,
+    pub observation: SaveObservation,
+}
+
 #[derive(Debug)]
-pub enum ProofError {
+pub enum ProjectFormatError {
     Io(std::io::Error),
     Sql(rusqlite::Error),
     Json(serde_json::Error),
@@ -101,14 +114,14 @@ pub enum ProofError {
     ExistingDestination(PathBuf),
 }
 
-impl std::fmt::Display for ProofError {
+impl std::fmt::Display for ProjectFormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(f, "I/O error: {error}"),
             Self::Sql(error) => write!(f, "SQLite error: {error}"),
             Self::Json(error) => write!(f, "JSON error: {error}"),
             Self::InvalidContainer(message) => {
-                write!(f, "invalid Project Format V1 proof container: {message}")
+                write!(f, "invalid Project Format V1 container: {message}")
             }
             Self::MissingMedia(id) => write!(f, "project media {id:?} was not found"),
             Self::ExistingDestination(path) => {
@@ -118,42 +131,42 @@ impl std::fmt::Display for ProofError {
     }
 }
 
-impl std::error::Error for ProofError {}
+impl std::error::Error for ProjectFormatError {}
 
-impl From<std::io::Error> for ProofError {
+impl From<std::io::Error> for ProjectFormatError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
     }
 }
 
-impl From<rusqlite::Error> for ProofError {
+impl From<rusqlite::Error> for ProjectFormatError {
     fn from(value: rusqlite::Error) -> Self {
         Self::Sql(value)
     }
 }
 
-impl From<serde_json::Error> for ProofError {
+impl From<serde_json::Error> for ProjectFormatError {
     fn from(value: serde_json::Error) -> Self {
         Self::Json(value)
     }
 }
 
-pub struct ProofContainer {
+pub struct ProjectContainer {
     path: PathBuf,
     connection: Connection,
 }
 
-impl ProofContainer {
-    /// First-save proof: transactionally creates a new container and takes
+impl ProjectContainer {
+    /// First save: transactionally creates a new container and takes
     /// ownership of staged bytes. Staging files are removed only after commit.
     pub fn create_from_staged(
         path: impl AsRef<Path>,
         document: &mut ProjectDocumentV1,
         staged_media: &[StagedMedia],
-    ) -> Result<(Self, SaveObservation), ProofError> {
+    ) -> Result<(Self, SaveObservation), ProjectFormatError> {
         let path = path.as_ref();
         if path.exists() {
-            return Err(ProofError::ExistingDestination(path.to_path_buf()));
+            return Err(ProjectFormatError::ExistingDestination(path.to_path_buf()));
         }
 
         let started = Instant::now();
@@ -164,12 +177,21 @@ impl ProofContainer {
 
         let transaction = connection.transaction()?;
         let mut media_bytes_written = 0_u64;
+        let mut media_rows_written = 0_usize;
         for staged in staged_media {
             let content = fs::read(&staged.path)?;
             let entry = media_entry(staged, &content);
-            insert_media(&transaction, &entry, &content)?;
-            media_bytes_written += content.len() as u64;
-            document.project_media.push(entry);
+            if insert_media(&transaction, &entry, &content)? {
+                media_rows_written += 1;
+                media_bytes_written += content.len() as u64;
+            }
+            if !document
+                .project_media
+                .iter()
+                .any(|item| item.id == entry.id)
+            {
+                document.project_media.push(entry);
+            }
         }
         write_document(&transaction, document)?;
         transaction.commit()?;
@@ -178,13 +200,13 @@ impl ProofContainer {
         // longer needed. Cleanup failure is intentionally non-fatal because
         // losing the newly committed Project Media would be worse.
         for staged in staged_media {
-            let _ = fs::remove_file(&staged.path);
+            cleanup_staging_copy(staged);
         }
 
         let observation = SaveObservation {
             elapsed: started.elapsed(),
             container_bytes: fs::metadata(path)?.len(),
-            media_rows_written: staged_media.len(),
+            media_rows_written,
             media_bytes_written,
         };
         Ok((
@@ -196,7 +218,7 @@ impl ProofContainer {
         ))
     }
 
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, ProofError> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, ProjectFormatError> {
         let path = path.as_ref();
         let connection = Connection::open_with_flags(
             path,
@@ -210,7 +232,7 @@ impl ProofContainer {
         })
     }
 
-    pub fn load_document(&self) -> Result<ProjectDocumentV1, ProofError> {
+    pub fn load_document(&self) -> Result<ProjectDocumentV1, ProjectFormatError> {
         let json: Vec<u8> = self.connection.query_row(
             "SELECT json FROM project_document WHERE singleton = 1",
             [],
@@ -218,7 +240,7 @@ impl ProofContainer {
         )?;
         let document: ProjectDocumentV1 = serde_json::from_slice(&json)?;
         if document.format_version != FORMAT_VERSION {
-            return Err(ProofError::InvalidContainer(format!(
+            return Err(ProjectFormatError::InvalidContainer(format!(
                 "document version is {}, expected {FORMAT_VERSION}",
                 document.format_version
             )));
@@ -226,7 +248,7 @@ impl ProofContainer {
         Ok(document)
     }
 
-    pub fn read_media(&self, id: &str) -> Result<Vec<u8>, ProofError> {
+    pub fn read_media(&self, id: &str) -> Result<Vec<u8>, ProjectFormatError> {
         self.connection
             .query_row(
                 "SELECT content FROM project_media WHERE id = ?1",
@@ -234,10 +256,10 @@ impl ProofContainer {
                 |row| row.get(0),
             )
             .optional()?
-            .ok_or_else(|| ProofError::MissingMedia(id.to_owned()))
+            .ok_or_else(|| ProjectFormatError::MissingMedia(id.to_owned()))
     }
 
-    pub fn media_fingerprint(&self, id: &str) -> Result<(i64, String, u64), ProofError> {
+    pub fn media_fingerprint(&self, id: &str) -> Result<(i64, String, u64), ProjectFormatError> {
         self.connection
             .query_row(
                 "SELECT rowid, sha256, byte_len FROM project_media WHERE id = ?1",
@@ -245,7 +267,7 @@ impl ProofContainer {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as u64)),
             )
             .optional()?
-            .ok_or_else(|| ProofError::MissingMedia(id.to_owned()))
+            .ok_or_else(|| ProjectFormatError::MissingMedia(id.to_owned()))
     }
 
     /// Incrementally updates only the versioned project document. The media
@@ -253,7 +275,7 @@ impl ProofContainer {
     pub fn save_document(
         &mut self,
         document: &ProjectDocumentV1,
-    ) -> Result<SaveObservation, ProofError> {
+    ) -> Result<SaveObservation, ProjectFormatError> {
         let started = Instant::now();
         let transaction = self.connection.transaction()?;
         write_document(&transaction, document)?;
@@ -266,14 +288,58 @@ impl ProofContainer {
         })
     }
 
+    /// Commits newly staged Project Media and the document in one transaction.
+    /// Existing content-addressed rows are retained without rewriting.
+    pub fn save_with_staged(
+        &mut self,
+        document: &mut ProjectDocumentV1,
+        staged_media: &[StagedMedia],
+    ) -> Result<SaveObservation, ProjectFormatError> {
+        let started = Instant::now();
+        let transaction = self.connection.transaction()?;
+        let mut media_rows_written = 0_usize;
+        let mut media_bytes_written = 0_u64;
+        for staged in staged_media {
+            let content = fs::read(&staged.path)?;
+            let entry = media_entry(staged, &content);
+            if insert_media(&transaction, &entry, &content)? {
+                media_rows_written += 1;
+                media_bytes_written += content.len() as u64;
+            }
+            if !document
+                .project_media
+                .iter()
+                .any(|item| item.id == entry.id)
+            {
+                document.project_media.push(entry);
+            }
+        }
+        write_document(&transaction, document)?;
+        transaction.commit()?;
+        for staged in staged_media {
+            cleanup_staging_copy(staged);
+        }
+        Ok(SaveObservation {
+            elapsed: started.elapsed(),
+            container_bytes: fs::metadata(&self.path)?.len(),
+            media_rows_written,
+            media_bytes_written,
+        })
+    }
+
     /// Creates a self-contained snapshot without changing the source path.
-    pub fn save_as(&self, destination: impl AsRef<Path>) -> Result<SaveObservation, ProofError> {
+    pub fn save_as(
+        &self,
+        destination: impl AsRef<Path>,
+    ) -> Result<SaveObservation, ProjectFormatError> {
         let destination = destination.as_ref();
         if destination.exists() {
-            return Err(ProofError::ExistingDestination(destination.to_path_buf()));
+            return Err(ProjectFormatError::ExistingDestination(
+                destination.to_path_buf(),
+            ));
         }
         let destination_text = destination.to_str().ok_or_else(|| {
-            ProofError::InvalidContainer("Save As destination is not valid UTF-8".into())
+            ProjectFormatError::InvalidContainer("Save As destination is not valid UTF-8".into())
         })?;
         let started = Instant::now();
         self.connection
@@ -281,7 +347,7 @@ impl ProofContainer {
         let reopened = Self::open(destination)?;
         let document = reopened.load_document()?;
         if document.format_version != FORMAT_VERSION {
-            return Err(ProofError::InvalidContainer(
+            return Err(ProjectFormatError::InvalidContainer(
                 "Save As lost format marker".into(),
             ));
         }
@@ -292,6 +358,192 @@ impl ProofContainer {
             media_bytes_written: 0,
         })
     }
+}
+
+pub fn detect_project_format(path: &Path) -> Result<ProjectFileFormat, ProjectFormatError> {
+    let mut header = [0_u8; 16];
+    let read = fs::File::open(path)?.read(&mut header)?;
+    if read == header.len() && &header == b"SQLite format 3\0" {
+        let container = ProjectContainer::open(path)?;
+        container.load_document()?;
+        Ok(ProjectFileFormat::V1)
+    } else {
+        Ok(ProjectFileFormat::LegacyJson)
+    }
+}
+
+/// Copies Local Source Storage into a Vibez-owned staging location before an
+/// unsaved project begins depending on it. The content hash is the eventual
+/// Project Media identity, so repeated imports reuse the same staged bytes.
+pub fn stage_local_file(path: &Path) -> Result<MediaSourceRef, ProjectFormatError> {
+    let content = fs::read(path)?;
+    let id = hex_sha256(&content);
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project-media".to_string());
+    let root = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("vibez")
+        .join("staged-project-media");
+    fs::create_dir_all(&root)?;
+    let safe_name: String = file_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let staging_path = root.join(format!("{id}-{safe_name}"));
+    if !staging_path.exists() {
+        let temporary = root.join(format!(".{id}.partial"));
+        fs::write(&temporary, content)?;
+        fs::rename(temporary, &staging_path)?;
+    }
+    Ok(MediaSourceRef::StagedProjectMedia {
+        id,
+        file_name,
+        staging_path,
+        source_path: path.to_path_buf(),
+    })
+}
+
+/// Saves a production Project Format V1 container. `source_container` is the
+/// currently open V1 path, when any; a different destination performs Save As
+/// by copying that self-contained container before committing the new document.
+pub fn save_project_v1(
+    destination: &Path,
+    source_container: Option<&Path>,
+    mut project: Project,
+) -> Result<SaveResult, ProjectFormatError> {
+    let same_container = source_container.is_some_and(|source| source == destination);
+    let mut staged_media = Vec::new();
+    prepare_project_media(&mut project, &mut staged_media)?;
+
+    let (mut container, mut document) = if same_container {
+        let container = ProjectContainer::open(destination)?;
+        let document = container.load_document()?;
+        (container, document)
+    } else if let Some(source) = source_container.filter(|source| source.exists()) {
+        if destination.exists() {
+            return Err(ProjectFormatError::ExistingDestination(
+                destination.to_path_buf(),
+            ));
+        }
+        let source = ProjectContainer::open(source)?;
+        source.save_as(destination)?;
+        let copied = ProjectContainer::open(destination)?;
+        let document = copied.load_document()?;
+        (copied, document)
+    } else {
+        let mut document = ProjectDocumentV1::new(project.clone());
+        let (_container, observation) =
+            ProjectContainer::create_from_staged(destination, &mut document, &staged_media)?;
+        return Ok(SaveResult {
+            project,
+            observation,
+        });
+    };
+
+    document.project = project.clone();
+    let observation = container.save_with_staged(&mut document, &staged_media)?;
+    Ok(SaveResult {
+        project,
+        observation,
+    })
+}
+
+fn prepare_project_media(
+    project: &mut Project,
+    staged_media: &mut Vec<StagedMedia>,
+) -> Result<(), ProjectFormatError> {
+    for clip in &mut project.clips {
+        if let Some(source) = &mut clip.source {
+            prepare_source(source, staged_media)?;
+            clip.file_path = None;
+        }
+    }
+    for track in &mut project.tracks {
+        prepare_track_sources(track, staged_media)?;
+    }
+    if let Some(master) = &mut project.master {
+        prepare_track_sources(master, staged_media)?;
+    }
+    for bus in &mut project.buses {
+        prepare_track_sources(bus, staged_media)?;
+    }
+    Ok(())
+}
+
+fn prepare_track_sources(
+    track: &mut TrackInfo,
+    staged_media: &mut Vec<StagedMedia>,
+) -> Result<(), ProjectFormatError> {
+    match &mut track.native_instrument {
+        Some(InstrumentStateInfo::Sampler {
+            source: Some(source),
+            ..
+        }) => prepare_source(source, staged_media)?,
+        Some(InstrumentStateInfo::DrumRack { pads }) => {
+            for pad in pads {
+                if let Some(source) = &mut pad.source {
+                    prepare_source(source, staged_media)?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn prepare_source(
+    source: &mut MediaSourceRef,
+    staged_media: &mut Vec<StagedMedia>,
+) -> Result<(), ProjectFormatError> {
+    let (path, file_name, provenance) = match source {
+        MediaSourceRef::LocalFile { path } => {
+            let file_name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "project-media".to_string());
+            (
+                path.clone(),
+                file_name,
+                Provenance::Local {
+                    source_path: path.clone(),
+                },
+            )
+        }
+        MediaSourceRef::StagedProjectMedia {
+            file_name,
+            staging_path,
+            source_path,
+            ..
+        } => (
+            staging_path.clone(),
+            file_name.clone(),
+            Provenance::Local {
+                source_path: source_path.clone(),
+            },
+        ),
+        MediaSourceRef::ProjectMedia { .. } | MediaSourceRef::DropboxFile { .. } => return Ok(()),
+    };
+    let content = fs::read(&path)?;
+    let id = hex_sha256(&content);
+    if !staged_media.iter().any(|item| item.id == id) {
+        staged_media.push(StagedMedia {
+            id: id.clone(),
+            file_name: file_name.clone(),
+            path,
+            provenance,
+        });
+    }
+    *source = MediaSourceRef::ProjectMedia { id, file_name };
+    Ok(())
 }
 
 /// Starts a real transaction, overwrites the document and a media row, then
@@ -323,12 +575,12 @@ fn configure_connection(connection: &Connection) -> Result<(), rusqlite::Error> 
     Ok(())
 }
 
-fn validate_container(connection: &Connection) -> Result<(), ProofError> {
+fn validate_container(connection: &Connection) -> Result<(), ProjectFormatError> {
     let application_id: u32 =
         connection.query_row("PRAGMA application_id", [], |row| row.get(0))?;
     let user_version: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if application_id != APPLICATION_ID || user_version != FORMAT_VERSION {
-        return Err(ProofError::InvalidContainer(format!(
+        return Err(ProjectFormatError::InvalidContainer(format!(
             "application_id={application_id:#x}, user_version={user_version}"
         )));
     }
@@ -338,9 +590,9 @@ fn validate_container(connection: &Connection) -> Result<(), ProofError> {
 fn write_document(
     transaction: &Transaction<'_>,
     document: &ProjectDocumentV1,
-) -> Result<(), ProofError> {
+) -> Result<(), ProjectFormatError> {
     if document.format_version != FORMAT_VERSION {
-        return Err(ProofError::InvalidContainer(format!(
+        return Err(ProjectFormatError::InvalidContainer(format!(
             "cannot save document version {} as version {FORMAT_VERSION}",
             document.format_version
         )));
@@ -356,9 +608,9 @@ fn insert_media(
     transaction: &Transaction<'_>,
     entry: &ProjectMediaEntry,
     content: &[u8],
-) -> Result<(), ProofError> {
-    transaction.execute(
-        "INSERT INTO project_media(id, file_name, byte_len, sha256, provenance_json, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+) -> Result<bool, ProjectFormatError> {
+    let inserted = transaction.execute(
+        "INSERT OR IGNORE INTO project_media(id, file_name, byte_len, sha256, provenance_json, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             entry.id,
             entry.file_name,
@@ -368,7 +620,17 @@ fn insert_media(
             content
         ],
     )?;
-    Ok(())
+    Ok(inserted == 1)
+}
+
+fn cleanup_staging_copy(staged: &StagedMedia) {
+    let disposable = match &staged.provenance {
+        Provenance::Local { source_path } => source_path != &staged.path,
+        Provenance::Remote { .. } => true,
+    };
+    if disposable {
+        let _ = fs::remove_file(&staged.path);
+    }
 }
 
 fn media_entry(staged: &StagedMedia, content: &[u8]) -> ProjectMediaEntry {
