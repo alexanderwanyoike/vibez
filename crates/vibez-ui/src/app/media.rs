@@ -760,7 +760,10 @@ impl App {
             async {
                 let handle = rfd::AsyncFileDialog::new()
                     .set_title("Add Audio Clip")
-                    .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
+                    .add_filter(
+                        "Supported Audio",
+                        vibez_core::audio_format::SUPPORTED_AUDIO_EXTENSIONS,
+                    )
                     .pick_file()
                     .await;
                 handle.map(|h| h.path().to_path_buf())

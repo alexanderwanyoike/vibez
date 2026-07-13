@@ -8,6 +8,7 @@ Thumbs.db
 *.mp3
 *.flac
 *.ogg
+!crates/vibez-audio-io/tests/fixtures/**
 !assets/**
 .env
 

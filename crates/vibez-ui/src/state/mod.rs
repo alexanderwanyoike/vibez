@@ -795,6 +795,18 @@ impl BrowserState {
         if self.selected_source.as_ref() != Some(&source) {
             return false;
         }
+        let channels = audio.num_channels();
+        let sample_rate = audio.sample_rate;
+        let duration_seconds = if sample_rate > 0 {
+            Some(audio.num_frames() as f64 / sample_rate as f64)
+        } else {
+            None
+        };
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.source == source) {
+            entry.duration_seconds = duration_seconds;
+            entry.channels = Some(channels);
+            entry.sample_rate = Some(sample_rate);
+        }
         self.waveform_source = Some(source);
         self.waveform_audio = Some(audio);
         self.waveform_loading = false;

@@ -262,12 +262,13 @@ pub(crate) fn scan_root_into(
             name,
             root_path: root.clone(),
             relative_path,
-            format: item
-                .path()
-                .extension()
-                .and_then(|extension| extension.to_str())
+            format: vibez_core::audio_format::audio_format_for_path(&item.path())
+                .map(|format| format.label)
                 .unwrap_or("AUDIO")
-                .to_ascii_uppercase(),
+                .to_string(),
+            duration_seconds: None,
+            channels: None,
+            sample_rate: None,
             file_size: metadata.as_ref().map(std::fs::Metadata::len),
             modified: metadata.and_then(|metadata| metadata.modified().ok()),
             search_text,
@@ -307,15 +308,7 @@ pub(crate) fn path_contains_hidden_component(path: &std::path::Path) -> bool {
 }
 
 pub(crate) fn is_supported_audio_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "wav" | "wave" | "mp3" | "flac" | "ogg" | "aac" | "m4a" | "aif" | "aiff"
-            )
-        })
-        .unwrap_or(false)
+    vibez_core::audio_format::is_supported_audio_path(path)
 }
 
 #[cfg(test)]
@@ -379,6 +372,35 @@ mod local_catalog_tests {
         assert!(entries
             .iter()
             .all(|entry| !entry.name.ends_with(".pdf") && !entry.name.ends_with(".png")));
+    }
+
+    #[test]
+    fn local_catalog_uses_the_shared_audio_support_matrix() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Formats");
+        fs::create_dir_all(&root).unwrap();
+        for extension in vibez_core::audio_format::SUPPORTED_AUDIO_EXTENSIONS {
+            fs::write(root.join(format!("fixture.{extension}")), []).unwrap();
+        }
+        fs::write(root.join("upper.M4A"), []).unwrap();
+        fs::write(root.join("raw.aac"), []).unwrap();
+        fs::write(root.join("notes.mid"), []).unwrap();
+
+        let catalog = scan_sample_root(&root).unwrap();
+
+        assert_eq!(
+            catalog.entries.len(),
+            vibez_core::audio_format::SUPPORTED_AUDIO_EXTENSIONS.len() + 1
+        );
+        assert!(catalog
+            .entries
+            .iter()
+            .any(|entry| entry.name == "upper.M4A"));
+        assert!(!catalog.entries.iter().any(|entry| entry.name == "raw.aac"));
+        assert!(!catalog
+            .entries
+            .iter()
+            .any(|entry| entry.name == "notes.mid"));
     }
 
     #[test]

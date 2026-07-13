@@ -31,7 +31,7 @@ vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio
 cpal = "0.16"
-symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "wav", "aac", "pcm"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "ogg", "vorbis", "wav", "aiff", "isomp4", "aac", "pcm"] }
 rubato = "0.16"
 rtrb = "0.3"
 audio_thread_priority = "0.32"

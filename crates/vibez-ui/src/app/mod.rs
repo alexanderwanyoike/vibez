@@ -952,12 +952,145 @@ mod project_format_v1_tests {
     use vibez_core::id::ClipId;
     use vibez_core::midi::{InstrumentKind, TrackKind};
     use vibez_core::track::{InstrumentStateInfo, TrackInfo};
+    use vibez_engine::commands::{AuditionSync, EngineCommand};
 
     fn one_second_audio() -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
             channels: vec![vec![0.25; 44_100]],
             sample_rate: 44_100,
         })
+    }
+
+    fn format_fixture(file_name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../vibez-audio-io/tests/fixtures")
+            .join(file_name)
+    }
+
+    fn assert_audible(audio: Arc<DecodedAudio>, label: &str) {
+        let (mut engine, mut commands, _events) = vibez_engine::engine::AudioEngine::new();
+        commands
+            .push(EngineCommand::StartAudition {
+                audio,
+                sync: AuditionSync::Off,
+                looped: false,
+            })
+            .unwrap();
+        let mut output = vec![0.0_f32; 8_192];
+        engine.process(&mut output, 2);
+        assert!(
+            output.iter().any(|sample| sample.abs() > 1.0e-5),
+            "{label} produced no Audition output"
+        );
+    }
+
+    #[tokio::test]
+    async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
+        let fixtures = [
+            ("mono-44100-s16.wav", "WAV", 1, 44_100),
+            ("stereo-48000-s24.aiff", "AIFF", 2, 48_000),
+            ("mono-32000-s24.flac", "FLAC", 1, 32_000),
+            ("stereo-44100.mp3", "MP3", 2, 44_100),
+            ("mono-48000.ogg", "OGG", 1, 48_000),
+            ("stereo-44100.m4a", "M4A", 2, 44_100),
+        ];
+
+        for (file_name, format, channels, sample_rate) in fixtures {
+            let directory = tempfile::tempdir().unwrap();
+            let source_path = directory.path().join(file_name);
+            std::fs::copy(format_fixture(file_name), &source_path).unwrap();
+
+            let catalog =
+                crate::app::audio_tasks::scan_sample_root(&directory.path().to_path_buf()).unwrap();
+            assert_eq!(catalog.entries.len(), 1, "{file_name}");
+            assert_eq!(catalog.entries[0].format, format);
+            let source = catalog.entries[0].source.clone();
+
+            let audition = decode_local_for_preview_async(source_path.clone())
+                .await
+                .unwrap();
+            assert_eq!(audition.num_channels(), channels, "{file_name}");
+            assert_eq!(audition.sample_rate, sample_rate, "{file_name}");
+            assert_audible(Arc::clone(&audition), file_name);
+
+            let mut browser = crate::state::BrowserState {
+                entries: catalog.entries,
+                ..crate::state::BrowserState::default()
+            };
+            browser.select_source(source);
+            assert!(browser.install_audition(
+                browser.selected_source.clone().unwrap(),
+                Arc::clone(&audition)
+            ));
+            let metadata = &browser.entries[0];
+            assert_eq!(metadata.channels, Some(channels));
+            assert_eq!(metadata.sample_rate, Some(sample_rate));
+            assert!(metadata
+                .duration_seconds
+                .is_some_and(|duration| duration > 0.0));
+
+            let (imported, staged) = decode_and_stage_local_async(source_path.clone())
+                .await
+                .unwrap();
+            assert_eq!(imported.num_frames(), audition.num_frames(), "{file_name}");
+            let track = TrackInfo::new("Audio");
+            let project_path = directory.path().join("format-roundtrip.vzp");
+            let project = Project {
+                tracks: vec![track.clone()],
+                clips: vec![ClipInfo {
+                    id: ClipId::new(),
+                    track_id: track.id,
+                    name: file_name.into(),
+                    position: 0,
+                    source_offset: 0,
+                    duration: imported.num_frames() as u64,
+                    source: Some(staged),
+                    file_path: None,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 0,
+                    original_bpm: None,
+                    warped: false,
+                    warped_to_bpm: None,
+                }],
+                ..Project::default()
+            };
+            vibez_project::project_format_v1::save_project_v1(&project_path, None, project)
+                .unwrap();
+            std::fs::remove_file(source_path).unwrap();
+
+            let reopened = load_project_async(project_path, None).await.unwrap();
+            let reopened_audio = Arc::clone(&reopened.clips[0].audio);
+            assert_eq!(reopened_audio.num_channels(), channels, "{file_name}");
+            assert_eq!(reopened_audio.sample_rate, sample_rate, "{file_name}");
+            assert_eq!(
+                reopened_audio.num_frames(),
+                imported.num_frames(),
+                "{file_name}"
+            );
+            assert!(matches!(
+                reopened.project.clips[0].source,
+                Some(MediaSourceRef::ProjectMedia { .. })
+            ));
+            assert_audible(reopened_audio, file_name);
+        }
+    }
+
+    #[tokio::test]
+    async fn corrupt_advertised_local_source_never_reaches_staging() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("corrupt.wav");
+        std::fs::write(&source_path, b"RIFF not decodable audio").unwrap();
+
+        let catalog =
+            crate::app::audio_tasks::scan_sample_root(&directory.path().to_path_buf()).unwrap();
+        assert_eq!(catalog.entries.len(), 1, "extension is only eligibility");
+        let preview_error = decode_local_for_preview_async(source_path.clone())
+            .await
+            .unwrap_err();
+        let import_error = decode_and_stage_local_async(source_path).await.unwrap_err();
+        assert!(!preview_error.is_empty());
+        assert!(!import_error.is_empty());
     }
 
     #[tokio::test]

@@ -897,6 +897,21 @@ impl App {
         for entry in filtered_entries.into_iter().take(remaining) {
             let selected = selected_source.is_some_and(|source| &entry.source == source);
             let cell_color = browser_result_cell_color(selected);
+            let metadata_detail = browser_entry_metadata(entry);
+            let bpm = if selected {
+                self.state
+                    .browser
+                    .audition_bpm_confirmed
+                    .or(self.state.browser.audition_bpm_suggestion)
+                    .map(|bpm| format!("{bpm:.0}"))
+                    .unwrap_or_else(|| "—".into())
+            } else {
+                "—".into()
+            };
+            let length = entry
+                .duration_seconds
+                .map(format_browser_duration)
+                .unwrap_or_else(|| "—".into());
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
@@ -910,7 +925,7 @@ impl App {
                 text(browser_folder_context(
                     &entry.root_path,
                     &entry.relative_path,
-                    &entry.format,
+                    &metadata_detail,
                     entry.file_size,
                 ))
                 .size(9)
@@ -924,11 +939,11 @@ impl App {
             let table_cells: Element<'_, Message> = if wide_columns {
                 row![
                     name_cell,
-                    text("—")
+                    text(bpm)
                         .size(10)
                         .color(cell_color)
                         .width(Length::Fixed(36.0)),
-                    text("—")
+                    text(length)
                         .size(10)
                         .color(cell_color)
                         .width(Length::Fixed(50.0)),
@@ -1360,6 +1375,35 @@ fn browser_folder_context(
     )
 }
 
+fn browser_entry_metadata(entry: &SampleBrowserEntry) -> String {
+    let channels = entry.channels.map(|channels| match channels {
+        1 => "MONO".into(),
+        2 => "STEREO".into(),
+        channels => format!("{channels} CH"),
+    });
+    let sample_rate = entry.sample_rate.map(|sample_rate| {
+        if sample_rate % 1_000 == 0 {
+            format!("{} KHZ", sample_rate / 1_000)
+        } else {
+            format!("{:.1} KHZ", sample_rate as f64 / 1_000.0)
+        }
+    });
+    std::iter::once(entry.format.clone())
+        .chain(channels)
+        .chain(sample_rate)
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn format_browser_duration(seconds: f64) -> String {
+    if seconds >= 60.0 {
+        let total_seconds = seconds.round() as u64;
+        format!("{}:{:02}", total_seconds / 60, total_seconds % 60)
+    } else {
+        format!("{seconds:.1}s")
+    }
+}
+
 fn format_browser_file_size(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -1569,5 +1613,29 @@ mod browser_table_tests {
     fn selected_result_metadata_uses_the_selected_foreground() {
         assert_eq!(browser_result_cell_color(true), th::text());
         assert_eq!(browser_result_cell_color(false), th::text_dim());
+    }
+
+    #[test]
+    fn decoded_metadata_is_compact_and_truthful() {
+        let entry = SampleBrowserEntry {
+            source: MediaSourceRef::LocalFile {
+                path: "/samples/loop.aiff".into(),
+            },
+            name: "loop.aiff".into(),
+            root_path: "/samples".into(),
+            relative_path: "loop.aiff".into(),
+            format: "AIFF".into(),
+            duration_seconds: Some(119.6),
+            channels: Some(2),
+            sample_rate: Some(48_000),
+            file_size: Some(42),
+            modified: None,
+            search_text: "loop aiff".into(),
+        };
+        assert_eq!(browser_entry_metadata(&entry), "AIFF · STEREO · 48 KHZ");
+        assert_eq!(
+            format_browser_duration(entry.duration_seconds.unwrap()),
+            "2:00"
+        );
     }
 }

@@ -119,6 +119,10 @@ pub struct SampleBrowserEntry {
     pub root_path: PathBuf,
     pub relative_path: PathBuf,
     pub format: String,
+    /// Derived only after the shared decoder validates/materializes the source.
+    pub duration_seconds: Option<f64>,
+    pub channels: Option<usize>,
+    pub sample_rate: Option<u32>,
     pub file_size: Option<u64>,
     pub modified: Option<SystemTime>,
     pub search_text: String,
