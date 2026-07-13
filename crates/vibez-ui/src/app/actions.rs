@@ -9,7 +9,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::message::Message;
 use crate::plugin_window::PluginWindowEvent;
-use crate::state::{ArrangementSelection, DetailPanelTab, UiEffect};
+use crate::state::{ArrangementSelection, AuditionMode, DetailPanelTab, UiEffect};
 
 use super::*;
 
@@ -422,9 +422,26 @@ impl App {
                     }
                     EngineEvent::AuditionStopped => {
                         self.state.browser.stop_audition_state();
-                        if self.state.status_text == "RAW Audition playing" {
+                        if matches!(
+                            self.state.status_text.as_str(),
+                            "RAW Audition playing" | "WARP Audition playing"
+                        ) {
                             self.state.status_text = "Audition finished".into();
                         }
+                    }
+                    EngineEvent::AuditionQueued => {
+                        self.state.browser.audition_loading = false;
+                        self.state.browser.audition_playing = false;
+                        self.state.browser.audition_queued = true;
+                    }
+                    EngineEvent::AuditionStarted => {
+                        self.state.browser.audition_loading = false;
+                        self.state.browser.audition_queued = false;
+                        self.state.browser.audition_playing = true;
+                        self.state.status_text = match self.state.browser.audition_mode {
+                            AuditionMode::Raw => "RAW Audition playing".into(),
+                            AuditionMode::Warp => "WARP Audition playing".into(),
+                        };
                     }
                     EngineEvent::TrackMeter {
                         track_id,

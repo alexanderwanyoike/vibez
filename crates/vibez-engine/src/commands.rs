@@ -7,6 +7,14 @@ use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
+/// Quantization policy for the next Browser Audition start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditionSync {
+    Off,
+    Beat,
+    Bar,
+}
+
 /// Commands sent from the UI thread to the audio engine (via rtrb).
 ///
 /// These are pushed into an `rtrb::Producer<EngineCommand>` on the UI side
@@ -228,13 +236,19 @@ pub enum EngineCommand {
     },
 
     // -- Dedicated Audition Bus --
-    /// Start RAW one-shot playback after project master processing. The
-    /// previous source crossfades out while the new source fades in.
-    StartAudition(Arc<DecodedAudio>),
+    /// Request Browser Audition playback after project master processing.
+    /// Beat/Bar quantization applies only while transport is already running.
+    StartAudition {
+        audio: Arc<DecodedAudio>,
+        sync: AuditionSync,
+        looped: bool,
+    },
     /// Stop the Audition Bus with a short click-safe fade.
     StopAudition,
     /// Set Audition Bus gain independently from project mixer state.
     SetAuditionGain(f32),
+    /// Change looping for the active or queued Browser Audition.
+    SetAuditionLoop(bool),
 
     // -- External MIDI input --
     /// Route a live note-on from an external MIDI source (hardware

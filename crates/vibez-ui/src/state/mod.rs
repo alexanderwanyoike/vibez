@@ -10,7 +10,21 @@ use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
+use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuditionMode {
+    #[default]
+    Raw,
+    Warp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuditionImportInput {
+    pub mode: AuditionMode,
+    pub source_bpm: Option<f64>,
+}
 
 /// View domain slice: everything about how the project is being
 /// looked at, none of it part of the project itself.
@@ -289,6 +303,16 @@ pub struct BrowserState {
     pub audition_gain: f32,
     pub audition_loading: bool,
     pub audition_playing: bool,
+    pub audition_queued: bool,
+    pub audition_mode: AuditionMode,
+    pub audition_sync: AuditionSync,
+    pub audition_loop: bool,
+    pub audition_bpm_source: Option<MediaSourceRef>,
+    pub audition_bpm_suggestion: Option<f64>,
+    pub audition_bpm_confidence: Option<f32>,
+    pub audition_bpm_confirmed: Option<f64>,
+    pub audition_bpm_edit: String,
+    pub audition_bpm_detecting: bool,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
     pub dropbox: DropboxUiState,
@@ -329,6 +353,16 @@ impl Default for BrowserState {
             audition_gain: 1.0,
             audition_loading: false,
             audition_playing: false,
+            audition_queued: false,
+            audition_mode: AuditionMode::default(),
+            audition_sync: AuditionSync::Off,
+            audition_loop: false,
+            audition_bpm_source: None,
+            audition_bpm_suggestion: None,
+            audition_bpm_confidence: None,
+            audition_bpm_confirmed: None,
+            audition_bpm_edit: String::new(),
+            audition_bpm_detecting: false,
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
             dropbox: DropboxUiState::default(),
@@ -525,6 +559,7 @@ impl BrowserState {
         self.selected_source = Some(source);
         if changed {
             self.clear_waveform();
+            self.clear_audition_bpm();
         }
         changed
     }
@@ -532,6 +567,7 @@ impl BrowserState {
     pub fn clear_selection(&mut self) {
         self.selected_source = None;
         self.clear_waveform();
+        self.clear_audition_bpm();
     }
 
     pub fn begin_waveform_load(&mut self, source: &MediaSourceRef) {
@@ -559,6 +595,7 @@ impl BrowserState {
     pub fn stop_audition_state(&mut self) {
         self.audition_loading = false;
         self.audition_playing = false;
+        self.audition_queued = false;
     }
 
     pub fn toggle_audition_enabled(&mut self) -> bool {
@@ -568,6 +605,81 @@ impl BrowserState {
 
     pub fn set_audition_gain(&mut self, gain: f32) {
         self.audition_gain = gain.clamp(0.0, 2.0);
+    }
+
+    pub fn mark_audition_requested(&mut self, queued: bool) {
+        self.audition_loading = false;
+        self.audition_queued = queued;
+        self.audition_playing = !queued;
+    }
+
+    pub fn begin_bpm_detection(&mut self, source: &MediaSourceRef) -> bool {
+        if self.selected_source.as_ref() != Some(source)
+            || self.audition_bpm_source.as_ref() == Some(source)
+            || self.audition_bpm_detecting
+        {
+            return false;
+        }
+        self.audition_bpm_detecting = true;
+        true
+    }
+
+    pub fn install_bpm_suggestion(
+        &mut self,
+        source: MediaSourceRef,
+        estimate: Option<(f64, f32)>,
+    ) -> bool {
+        if self.selected_source.as_ref() != Some(&source) {
+            return false;
+        }
+        self.audition_bpm_source = Some(source);
+        self.audition_bpm_detecting = false;
+        self.audition_bpm_suggestion = estimate.map(|value| value.0);
+        self.audition_bpm_confidence = estimate.map(|value| value.1);
+        if self.audition_bpm_edit.is_empty() {
+            self.audition_bpm_edit = estimate
+                .map(|value| format!("{:.1}", value.0))
+                .unwrap_or_default();
+        }
+        true
+    }
+
+    pub fn confirm_audition_bpm(&mut self) -> Result<f64, &'static str> {
+        let bpm = self
+            .audition_bpm_edit
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| "Enter a positive source BPM")?;
+        if !bpm.is_finite() || bpm <= 0.0 {
+            return Err("Enter a positive source BPM");
+        }
+        self.audition_bpm_confirmed = Some(bpm);
+        Ok(bpm)
+    }
+
+    pub fn clear_audition_bpm(&mut self) {
+        self.audition_bpm_source = None;
+        self.audition_bpm_suggestion = None;
+        self.audition_bpm_confidence = None;
+        self.audition_bpm_confirmed = None;
+        self.audition_bpm_edit.clear();
+        self.audition_bpm_detecting = false;
+    }
+
+    pub fn audition_import_input(&self) -> Option<AuditionImportInput> {
+        match self.audition_mode {
+            AuditionMode::Raw => Some(AuditionImportInput {
+                mode: AuditionMode::Raw,
+                source_bpm: None,
+            }),
+            AuditionMode::Warp => {
+                self.audition_bpm_confirmed
+                    .map(|source_bpm| AuditionImportInput {
+                        mode: AuditionMode::Warp,
+                        source_bpm: Some(source_bpm),
+                    })
+            }
+        }
     }
 
     pub fn install_waveform(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {

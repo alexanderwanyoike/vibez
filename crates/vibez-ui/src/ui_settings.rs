@@ -14,6 +14,8 @@ pub struct UiSettings {
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
     pub audition_gain: f32,
+    #[serde(default)]
+    pub audition_loop: bool,
     /// Automatically detect each dropped sample's BPM and warp it to
     /// the project tempo on import. Off by default; users opt in from
     /// Settings → Warping.
@@ -43,6 +45,7 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
+            audition_loop: false,
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
@@ -129,6 +132,7 @@ mod tests {
         let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
         assert!(loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 1.0);
+        assert!(!loaded.audition_loop);
     }
 
     #[test]
@@ -136,12 +140,14 @@ mod tests {
         let settings = UiSettings {
             audition_enabled: false,
             audition_gain: 0.42,
+            audition_loop: true,
             ..Default::default()
         };
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert!(!loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 0.42);
+        assert!(loaded.audition_loop);
     }
 
     #[test]

@@ -201,6 +201,7 @@ impl App {
             sample_browser_width: self.state.browser.dock_width,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
+            audition_loop: self.state.browser.audition_loop,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),

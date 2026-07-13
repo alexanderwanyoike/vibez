@@ -14,8 +14,9 @@ use vibez_dropbox::DropboxEntry;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{SampleBrowserEntry, SampleBrowserMode};
+use crate::state::{AuditionMode, SampleBrowserEntry, SampleBrowserMode};
 use crate::theme as th;
+use vibez_engine::commands::AuditionSync;
 
 use super::*;
 
@@ -477,6 +478,64 @@ impl App {
         .on_press(Message::ToggleAuditionEnabled)
         .padding([2, 4])
         .style(browser_utility_action_style);
+        let import_label = match self.state.browser.audition_import_input() {
+            Some(input) if input.mode == AuditionMode::Raw => "IMPORT RAW".to_string(),
+            Some(input) => format!("IMPORT WARP {:.1}", input.source_bpm.unwrap_or_default()),
+            None => "IMPORT BLOCKED".to_string(),
+        };
+
+        let raw_active = self.state.browser.audition_mode == AuditionMode::Raw;
+        let raw = button(text("RAW").size(9))
+            .on_press(Message::SetAuditionMode(AuditionMode::Raw))
+            .padding([2, 5])
+            .style(move |_theme: &Theme, status| browser_place_button_style(raw_active, status));
+        let warp_active = self.state.browser.audition_mode == AuditionMode::Warp;
+        let warp = button(text("WARP").size(9))
+            .on_press(Message::SetAuditionMode(AuditionMode::Warp))
+            .padding([2, 5])
+            .style(move |_theme: &Theme, status| browser_place_button_style(warp_active, status));
+        let sync_button = |label, value| {
+            let active = self.state.browser.audition_sync == value;
+            button(text(label).size(9))
+                .on_press(Message::SetAuditionSync(value))
+                .padding([2, 4])
+                .style(move |_theme: &Theme, status| browser_place_button_style(active, status))
+        };
+        let looped = self.state.browser.audition_loop;
+        let loop_toggle = button(text(if looped { "LOOP ON" } else { "LOOP OFF" }).size(9))
+            .on_press(Message::ToggleAuditionLoop)
+            .padding([2, 4])
+            .style(move |_theme: &Theme, status| browser_place_button_style(looped, status));
+
+        let bpm_input = text_input("BPM", &self.state.browser.audition_bpm_edit)
+            .on_input(Message::AuditionBpmEditChanged)
+            .on_submit(Message::ConfirmAuditionBpm)
+            .size(10)
+            .padding([3, 5])
+            .width(Length::Fixed(62.0))
+            .style(browser_compact_input_style);
+        let confirm_bpm = button(text("CONFIRM").size(9))
+            .on_press(Message::ConfirmAuditionBpm)
+            .padding([3, 5])
+            .style(browser_utility_action_style);
+        let bpm_state = if self.state.browser.audition_bpm_detecting {
+            "DETECTING".to_string()
+        } else if let Some(confirmed) = self.state.browser.audition_bpm_confirmed {
+            format!("CONFIRMED {confirmed:.1}")
+        } else if let Some(suggestion) = self.state.browser.audition_bpm_suggestion {
+            let low = self
+                .state
+                .browser
+                .audition_bpm_confidence
+                .is_some_and(|confidence| confidence < self.state.warp_confidence_threshold);
+            if low {
+                format!("SUGGEST {suggestion:.1} · LOW")
+            } else {
+                format!("SUGGEST {suggestion:.1}")
+            }
+        } else {
+            "MANUAL FOR WARP".to_string()
+        };
 
         let waveform: Element<'_, Message> = container(
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
@@ -499,14 +558,24 @@ impl App {
         let controls = row![
             play,
             stop,
-            text(if self.state.browser.audition_loading {
-                "LOADING"
+            text(if self.state.browser.dropbox.preview_in_progress {
+                "FETCHING"
+            } else if self.state.browser.audition_loading {
+                "PREPARING"
+            } else if self.state.browser.audition_queued {
+                "QUEUED"
             } else if self.state.browser.audition_playing {
                 "PLAYING"
             } else if self.state.browser.waveform_error.is_some() {
                 "UNAVAILABLE"
             } else if self.state.browser.waveform_audio.is_some() {
-                "RAW"
+                match self.state.browser.audition_mode {
+                    AuditionMode::Raw => "RAW",
+                    AuditionMode::Warp if self.state.browser.audition_bpm_confirmed.is_some() => {
+                        "WARP READY"
+                    }
+                    AuditionMode::Warp => "BPM NEEDED",
+                }
             } else {
                 "SELECT"
             })
@@ -554,6 +623,7 @@ impl App {
             row![
                 text("AUDITION").size(9).color(th::text_muted()),
                 follow_toggle,
+                text(import_label).size(9).color(th::text_dim()),
                 text(selected_label)
                     .size(10)
                     .color(th::text_dim())
@@ -562,6 +632,36 @@ impl App {
                     .wrapping(iced::widget::text::Wrapping::None)
             ]
             .spacing(5)
+            .align_y(iced::Alignment::Center),
+            row![
+                text("MODE").size(9).color(th::text_muted()),
+                raw,
+                warp,
+                text("SYNC").size(9).color(th::text_muted()),
+                sync_button("OFF", AuditionSync::Off),
+                sync_button("BEAT", AuditionSync::Beat),
+                sync_button("BAR", AuditionSync::Bar),
+                horizontal_space(),
+                loop_toggle,
+            ]
+            .spacing(3)
+            .align_y(iced::Alignment::Center),
+            row![
+                text("BPM").size(9).color(th::text_muted()),
+                bpm_input,
+                confirm_bpm,
+                text(bpm_state)
+                    .size(9)
+                    .color(if self.state.browser.audition_bpm_confirmed.is_some() {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    })
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            ]
+            .spacing(4)
             .align_y(iced::Alignment::Center),
             controls,
             gain_row
@@ -1356,6 +1456,24 @@ fn browser_utility_action_style(_theme: &Theme, status: button::Status) -> butto
             radius: 0.0.into(),
         },
         ..Default::default()
+    }
+}
+
+fn browser_compact_input_style(
+    _theme: &Theme,
+    _status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    iced::widget::text_input::Style {
+        background: th::bg_dark().into(),
+        border: iced::Border {
+            color: th::border(),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        icon: th::text_dim(),
+        placeholder: th::text_dim(),
+        value: th::text(),
+        selection: th::accent(),
     }
 }
 

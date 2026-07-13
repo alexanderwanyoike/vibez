@@ -432,12 +432,45 @@ mod tests {
         let mut browser = BrowserState::default();
         assert!(browser.audition_enabled);
         assert_eq!(browser.audition_gain, 1.0);
+        assert_eq!(browser.audition_mode, crate::state::AuditionMode::Raw);
+        assert_eq!(
+            browser.audition_sync,
+            vibez_engine::commands::AuditionSync::Off
+        );
+        assert!(!browser.audition_loop);
 
         assert!(!browser.toggle_audition_enabled());
         browser.set_audition_gain(3.0);
         assert_eq!(browser.audition_gain, 2.0);
         browser.set_audition_gain(-1.0);
         assert_eq!(browser.audition_gain, 0.0);
+    }
+
+    #[test]
+    fn warp_import_input_requires_positive_confirmed_bpm_for_the_current_source() {
+        let first = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/loop.wav"),
+        };
+        let second = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/other.wav"),
+        };
+        let mut browser = BrowserState::default();
+        browser.select_source(first.clone());
+        browser.audition_mode = crate::state::AuditionMode::Warp;
+        assert!(browser.audition_import_input().is_none());
+
+        assert!(browser.install_bpm_suggestion(first, Some((127.8, 0.42))));
+        assert_eq!(browser.audition_bpm_edit, "127.8");
+        assert_eq!(browser.confirm_audition_bpm().unwrap(), 127.8);
+        let input = browser.audition_import_input().unwrap();
+        assert_eq!(input.mode, crate::state::AuditionMode::Warp);
+        assert_eq!(input.source_bpm, Some(127.8));
+
+        browser.select_source(second);
+        assert!(browser.audition_bpm_confirmed.is_none());
+        assert!(browser.audition_import_input().is_none());
+        browser.audition_bpm_edit = "0".into();
+        assert!(browser.confirm_audition_bpm().is_err());
     }
 
     #[test]

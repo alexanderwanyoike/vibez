@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use iced::Task;
 
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
-use vibez_engine::commands::EngineCommand;
+use vibez_engine::commands::{AuditionSync, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message};
-use crate::state::{SampleBrowserEntry, UiClip, UiDrumPad, UiTrack};
+use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad, UiTrack};
 
 use super::*;
 
@@ -20,6 +21,93 @@ impl App {
     pub(super) fn stop_browser_audition(&mut self) {
         self.send_command(EngineCommand::StopAudition);
         self.state.browser.stop_audition_state();
+    }
+
+    pub(super) fn start_browser_audition(&mut self, audio: Arc<DecodedAudio>) {
+        let queued =
+            self.state.transport.playing && self.state.browser.audition_sync != AuditionSync::Off;
+        self.send_command(EngineCommand::StartAudition {
+            audio,
+            sync: self.state.browser.audition_sync,
+            looped: self.state.browser.audition_loop,
+        });
+        self.state.browser.mark_audition_requested(queued);
+        let mode = match self.state.browser.audition_mode {
+            AuditionMode::Raw => "RAW",
+            AuditionMode::Warp => "WARP",
+        };
+        self.state.status_text = if queued {
+            format!("{mode} Audition queued")
+        } else {
+            format!("{mode} Audition playing")
+        };
+    }
+
+    pub(super) fn schedule_browser_bpm_detection(
+        &mut self,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
+    ) -> Task<Message> {
+        if !self.state.browser.begin_bpm_detection(&source) {
+            return Task::none();
+        }
+        let sample_rate = audio.sample_rate;
+        Task::perform(detect_clip_bpm_async(audio, sample_rate), move |estimate| {
+            Message::BrowserBpmDetected(
+                source.clone(),
+                estimate.map(|value| (value.bpm, value.confidence)),
+            )
+        })
+    }
+
+    pub(super) fn prepare_browser_warp(
+        &mut self,
+        source: MediaSourceRef,
+        raw: Arc<DecodedAudio>,
+        source_bpm: f64,
+    ) -> Task<Message> {
+        let project_bpm = self.state.transport.bpm;
+        self.state.browser.begin_audition_load(&source);
+        self.state.status_text = format!("Preparing WARP at {source_bpm:.1} BPM...");
+        Task::perform(
+            warp_browser_audition_async(raw, source_bpm, project_bpm),
+            move |result| Message::BrowserAuditionWarpReady {
+                source: source.clone(),
+                source_bpm,
+                project_bpm,
+                result,
+            },
+        )
+    }
+
+    pub(super) fn play_browser_mode(
+        &mut self,
+        source: MediaSourceRef,
+        raw: Arc<DecodedAudio>,
+    ) -> Task<Message> {
+        let detection = self.schedule_browser_bpm_detection(source.clone(), Arc::clone(&raw));
+        match self.state.browser.audition_mode {
+            AuditionMode::Raw => {
+                self.start_browser_audition(raw);
+                detection
+            }
+            AuditionMode::Warp => {
+                self.stop_browser_audition();
+                if let Some(source_bpm) = self.state.browser.audition_bpm_confirmed {
+                    Task::batch([
+                        detection,
+                        self.prepare_browser_warp(source, raw, source_bpm),
+                    ])
+                } else {
+                    self.state.status_text = if self.state.browser.audition_bpm_detecting {
+                        "Detecting source BPM; WARP awaits confirmation".into()
+                    } else {
+                        "Confirm or enter a positive source BPM for WARP".into()
+                    };
+                    detection
+                }
+            }
+        }
     }
 
     pub(super) fn selected_sample_browser_entry(&self) -> Option<&SampleBrowserEntry> {
@@ -791,7 +879,11 @@ impl App {
                         })
                     });
                 if let Some((audio, name)) = audition {
-                    self.send_command(EngineCommand::StartAudition(audio));
+                    self.send_command(EngineCommand::StartAudition {
+                        audio,
+                        sync: AuditionSync::Off,
+                        looped: false,
+                    });
                     self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
                 }
                 self.update(Message::select_drum_rack_pad(track_id, pad_index))

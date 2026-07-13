@@ -78,6 +78,10 @@ pub enum EngineEvent {
 
     /// The post-master Audition Bus became silent after stop or source end.
     AuditionStopped,
+    /// Audition is waiting for its transport beat/bar boundary.
+    AuditionQueued,
+    /// Audition crossed its requested boundary and began rendering.
+    AuditionStarted,
 }
 
 #[cfg(test)]
@@ -101,6 +105,8 @@ mod tests {
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;
         let _audition_stopped = EngineEvent::AuditionStopped;
+        let _audition_queued = EngineEvent::AuditionQueued;
+        let _audition_started = EngineEvent::AuditionStarted;
     }
 
     #[test]

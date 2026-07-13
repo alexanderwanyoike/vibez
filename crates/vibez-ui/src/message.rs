@@ -11,7 +11,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::Project;
 
-use crate::state::{SampleBrowserEntry, SampleBrowserFolder, SettingsTab};
+use crate::state::{AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrumPadParam {
@@ -266,9 +266,21 @@ pub enum Message {
     StopBrowserPreview,
     ToggleAuditionEnabled,
     SetAuditionGain(f32),
+    SetAuditionMode(AuditionMode),
+    SetAuditionSync(vibez_engine::commands::AuditionSync),
+    ToggleAuditionLoop,
+    AuditionBpmEditChanged(String),
+    ConfirmAuditionBpm,
     EscapePressed,
     LocalSamplePreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
+    BrowserBpmDetected(MediaSourceRef, Option<(f64, f32)>),
+    BrowserAuditionWarpReady {
+        source: MediaSourceRef,
+        source_bpm: f64,
+        project_bpm: f64,
+        result: Result<Arc<DecodedAudio>, String>,
+    },
     DropSampleOnArrangement {
         track_id: TrackId,
         position_samples: u64,

@@ -176,6 +176,7 @@ impl App {
                 ),
                 audition_enabled: ui_settings.audition_enabled,
                 audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
+                audition_loop: ui_settings.audition_loop,
                 roots: ui_settings.sample_library_roots,
                 dropbox: dropbox_ui_state,
                 ..Default::default()
@@ -244,6 +245,9 @@ impl App {
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,
+        ));
+        app.send_command(EngineCommand::SetAuditionLoop(
+            app.state.browser.audition_loop,
         ));
 
         // Console model: the master bus carries its channel EQ from
@@ -423,6 +427,19 @@ async fn detect_clip_bpm_async(
     tokio::task::spawn_blocking(move || vibez_core::onset::detect_bpm(&audio, sample_rate))
         .await
         .unwrap_or(None)
+}
+
+async fn warp_browser_audition_async(
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    source_bpm: f64,
+    project_bpm: f64,
+) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::warp::rewarp_for_load(&audio, source_bpm, project_bpm)
+            .ok_or_else(|| "Could not create pitch-preserving WARP Audition".to_string())
+    })
+    .await
+    .map_err(|error| format!("audition warp task failed: {error}"))?
 }
 
 async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpOutcome {

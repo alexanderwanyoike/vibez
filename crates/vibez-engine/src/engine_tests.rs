@@ -23,6 +23,14 @@ fn make_constant_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
     })
 }
 
+fn start_audition(audio: Arc<DecodedAudio>) -> EngineCommand {
+    EngineCommand::StartAudition {
+        audio,
+        sync: AuditionSync::Off,
+        looped: false,
+    }
+}
+
 #[test]
 fn new_returns_ring_buffer_endpoints() {
     let (engine, _cmd_tx, _event_rx) = AudioEngine::new();
@@ -905,7 +913,7 @@ fn audition_plays_even_when_transport_stopped() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let audio = make_constant_audio(4_096, 0.4);
 
-    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+    cmd_tx.push(start_audition(audio)).unwrap();
 
     let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
@@ -921,7 +929,7 @@ fn audition_stop_uses_a_short_fade_without_stopping_transport() {
     let audio = make_constant_audio(4_096, 0.5);
 
     cmd_tx.push(EngineCommand::Play).unwrap();
-    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+    cmd_tx.push(start_audition(audio)).unwrap();
     let mut started = vec![0.0f32; 1_024];
     engine.process(&mut started, 2);
     assert!(engine.transport().is_playing());
@@ -939,7 +947,7 @@ fn audition_auto_completes_at_end_of_audio() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let audio = make_constant_audio(512, 0.6);
 
-    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+    cmd_tx.push(start_audition(audio)).unwrap();
 
     let mut buf = vec![0.0f32; 2_048];
     engine.process(&mut buf, 2);
@@ -954,13 +962,13 @@ fn newer_audition_crossfades_over_the_previous_source() {
     let a = make_constant_audio(4_096, 0.8);
     let b = make_constant_audio(4_096, 0.2);
 
-    cmd_tx.push(EngineCommand::StartAudition(a)).unwrap();
+    cmd_tx.push(start_audition(a)).unwrap();
     let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
     let before = buf[1_000];
     assert!(before > 0.7);
 
-    cmd_tx.push(EngineCommand::StartAudition(b)).unwrap();
+    cmd_tx.push(start_audition(b)).unwrap();
     let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
     assert!((buf[0] - before).abs() < 0.02, "replacement must not click");
@@ -975,12 +983,126 @@ fn audition_gain_is_independent_and_bypasses_project_master_gain() {
         .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.0))
         .unwrap();
     cmd_tx.push(EngineCommand::SetAuditionGain(0.25)).unwrap();
-    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+    cmd_tx.push(start_audition(audio)).unwrap();
 
     let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
     let peak = buf.iter().copied().fold(0.0_f32, f32::max);
     assert!((peak - 0.2).abs() < 0.01);
+}
+
+#[test]
+fn synced_audition_starts_immediately_when_transport_is_stopped() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            sync: AuditionSync::Bar,
+            looped: false,
+        })
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 1_024];
+    engine.process(&mut buf, 2);
+
+    assert!(buf.iter().any(|sample| sample.abs() > 0.3));
+    assert!(!engine.transport().is_playing());
+}
+
+#[test]
+fn beat_synced_audition_queues_to_the_next_running_transport_boundary() {
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
+    cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            sync: AuditionSync::Beat,
+            looped: false,
+        })
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 28_000];
+    engine.process(&mut buf, 2);
+
+    let boundary_offset = 22_050 - 10_000;
+    assert!(buf[..boundary_offset * 2]
+        .iter()
+        .all(|sample| sample.abs() < f32::EPSILON));
+    assert!(buf[(boundary_offset + 100) * 2..]
+        .iter()
+        .any(|sample| sample.abs() > 0.1));
+    let mut queued = false;
+    let mut started = false;
+    while let Ok(event) = event_rx.pop() {
+        queued |= matches!(event, EngineEvent::AuditionQueued);
+        started |= matches!(event, EngineEvent::AuditionStarted);
+    }
+    assert!(queued && started);
+}
+
+#[test]
+fn queued_audition_starts_immediately_if_transport_stops_before_boundary() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
+    cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            sync: AuditionSync::Bar,
+            looped: false,
+        })
+        .unwrap();
+
+    let mut queued = vec![0.0f32; 256];
+    engine.process(&mut queued, 2);
+    assert!(queued.iter().all(|sample| sample.abs() < f32::EPSILON));
+
+    cmd_tx.push(EngineCommand::Stop).unwrap();
+    let mut started = vec![0.0f32; 1_024];
+    engine.process(&mut started, 2);
+
+    assert!(started.iter().any(|sample| sample.abs() > 0.3));
+    assert!(!engine.transport().is_playing());
+}
+
+#[test]
+fn beat_and_bar_boundaries_are_deterministic() {
+    assert_eq!(next_audition_boundary(10_000, 120.0, 44_100, 1), 22_050);
+    assert_eq!(next_audition_boundary(10_000, 120.0, 44_100, 4), 88_200);
+    assert_eq!(next_audition_boundary(88_200, 120.0, 44_100, 4), 176_400);
+}
+
+#[test]
+fn audition_loop_crossfades_the_source_boundary_without_silence_or_a_click() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let samples: Vec<f32> = (0..4_096)
+        .map(|frame| -0.5 + frame as f32 / 4_095.0)
+        .collect();
+    let audio = Arc::new(DecodedAudio {
+        channels: vec![samples.clone(), samples],
+        sample_rate: 44_100,
+    });
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio,
+            sync: AuditionSync::Off,
+            looped: true,
+        })
+        .unwrap();
+
+    let mut buf = vec![0.0f32; 20_000];
+    engine.process(&mut buf, 2);
+
+    let left: Vec<f32> = buf.chunks_exact(2).map(|frame| frame[0]).collect();
+    assert!(left[4_500..].iter().any(|sample| sample.abs() > 0.3));
+    let largest_step = left[300..]
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(largest_step < 0.02, "loop boundary step was {largest_step}");
 }
 
 #[test]
