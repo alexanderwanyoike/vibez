@@ -1,7 +1,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text, text_input,
+    button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -57,7 +58,19 @@ impl App {
             .on_input(|value| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(value)))
             .size(12)
             .padding([7, 9])
-            .width(Length::Fill);
+            .width(Length::Fill)
+            .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
+                background: th::bg_dark().into(),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                icon: th::text_dim(),
+                placeholder: th::text_dim(),
+                value: th::text(),
+                selection: th::accent(),
+            });
 
         let body: Element<'_, Message> = match self.state.browser.mode {
             SampleBrowserMode::Local => self.view_local_sample_browser(),
@@ -303,23 +316,38 @@ impl App {
             .padding([6, 8])
             .style(browser_transport_button_style);
 
-        let waveform = container(text("▁▂▄▇▅▂▃▆▄▁▃▇▆▂▁").size(13).color(th::waveform()))
-            .padding([5, 7])
+        let waveform: Element<'_, Message> = container(
+            canvas(crate::widgets::browser_waveform::BrowserWaveform {
+                audio: self.state.browser.waveform_audio.clone(),
+            })
             .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::display_bg().into()),
-                border: iced::Border {
-                    color: th::divider(),
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            });
+            .height(Length::Fixed(26.0)),
+        )
+        .width(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            border: iced::Border {
+                color: th::divider(),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into();
 
         let controls = row![
             play,
             stop,
-            text("RAW").size(9).color(th::text_dim()),
+            text(if self.state.browser.waveform_loading {
+                "LOADING"
+            } else if self.state.browser.waveform_error.is_some() {
+                "UNAVAILABLE"
+            } else if self.state.browser.waveform_audio.is_some() {
+                "RAW"
+            } else {
+                "SELECT"
+            })
+            .size(9)
+            .color(th::text_dim()),
             waveform
         ]
         .spacing(5)
@@ -440,36 +468,16 @@ impl App {
             // plain container as the click target instead.
             let entry_body = container(
                 column![
-                    text(entry.name.as_str()).size(12).color(if selected {
-                        th::accent()
-                    } else {
-                        th::text()
-                    }),
+                    text(entry.name.as_str()).size(12).color(th::text()),
                     text(entry.relative_path.display().to_string())
                         .size(10)
-                        .color(th::text_dim())
+                        .color(if selected { th::text() } else { th::text_dim() })
                 ]
                 .spacing(2)
                 .width(Length::Fill),
             )
             .padding([6, 8])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(
-                    if selected {
-                        th::accent_dim()
-                    } else {
-                        th::bg_elevated()
-                    }
-                    .into(),
-                ),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
+            .width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
                 .on_press(Message::Browser(BrowserMsg::StartDragSample {
                     source: entry.source.clone(),
@@ -480,12 +488,25 @@ impl App {
             let preview_btn = button(icons::icon(icons::PLAY).size(11).color(th::text_dim()))
                 .on_press(Message::PreviewLocalEntry(entry.source.clone()))
                 .padding([6, 8])
-                .style(browser_transport_button_style);
-            entries_col = entries_col.push(
-                row![entry_dragger, preview_btn]
-                    .spacing(4)
+                .style(browser_row_action_style);
+            let selection_marker = container(text(""))
+                .width(Length::Fixed(2.0))
+                .height(Length::Fixed(43.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: selected.then(|| th::accent().into()),
+                    ..Default::default()
+                });
+            let flat_row = container(
+                row![selection_marker, entry_dragger, preview_btn]
+                    .spacing(0)
                     .align_y(iced::Alignment::Center),
-            );
+            )
+            .width(Length::Fill)
+            .style(move |_theme: &Theme| container::Style {
+                background: selected.then(|| th::accent_dim().into()),
+                ..Default::default()
+            });
+            entries_col = entries_col.push(flat_row).push(browser_row_divider());
         }
 
         if filtered_entries.is_empty() {
@@ -518,9 +539,18 @@ impl App {
                     text(count).size(9).color(th::text_dim())
                 ]
                 .align_y(iced::Alignment::Center),
-                scrollable(entries_col).height(Length::Fill).direction(
-                    scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+                scrollable(
+                    container(entries_col)
+                        .width(Length::Fill)
+                        .padding(iced::Padding {
+                            right: 12.0,
+                            ..Default::default()
+                        })
                 )
+                .height(Length::Fill)
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::default()
+                ))
             ]
             .spacing(6)
             .padding(8)
@@ -595,9 +625,18 @@ impl App {
                     status
                 ]
                 .align_y(iced::Alignment::Center),
-                scrollable(entries_col).height(Length::Fill).direction(
-                    scrollable::Direction::Vertical(scrollable::Scrollbar::default())
+                scrollable(
+                    container(entries_col)
+                        .width(Length::Fill)
+                        .padding(iced::Padding {
+                            right: 12.0,
+                            ..Default::default()
+                        })
                 )
+                .height(Length::Fill)
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::default()
+                ))
             ]
             .spacing(6)
             .padding(8)
@@ -661,19 +700,7 @@ impl App {
                 let text_color = if selected { th::accent() } else { th::text() };
                 let row_body = container(text(label).size(11).color(text_color))
                     .padding([3, 6])
-                    .width(Length::Fill)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(
-                            if selected {
-                                th::accent_dim()
-                            } else {
-                                th::bg_elevated()
-                            }
-                            .into(),
-                        ),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    });
+                    .width(Length::Fill);
                 let source = MediaSourceRef::DropboxFile {
                     path_lower: entry.path_lower.clone(),
                     display_path: entry.path_display.clone(),
@@ -689,25 +716,26 @@ impl App {
                 let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::accent()))
                     .on_press(Message::DropboxPreview(entry.clone()))
                     .padding([3, 6])
-                    .style(|_theme: &Theme, status| {
-                        let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
-                        };
-                        button::Style {
-                            background: bg,
-                            text_color: th::accent(),
-                            border: iced::Border::default(),
-                            ..Default::default()
-                        }
+                    .style(browser_row_action_style);
+                let selection_marker = container(text(""))
+                    .width(Length::Fixed(2.0))
+                    .height(Length::Fixed(25.0))
+                    .style(move |_theme: &Theme| container::Style {
+                        background: selected.then(|| th::accent().into()),
+                        ..Default::default()
                     });
                 rows.push(
-                    row![dragger, speaker]
-                        .spacing(2)
-                        .align_y(iced::Alignment::Center)
-                        .into(),
+                    container(
+                        row![selection_marker, dragger, speaker]
+                            .spacing(2)
+                            .align_y(iced::Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .style(move |_theme: &Theme| container::Style {
+                        background: selected.then(|| th::accent_dim().into()),
+                        ..Default::default()
+                    })
+                    .into(),
                 );
             } else {
                 // Folders + non-audio entries keep the button path since they
@@ -730,18 +758,23 @@ impl App {
                             button::Status::Hovered | button::Status::Pressed => {
                                 Some(th::bg_hover().into())
                             }
-                            _ => Some(th::bg_elevated().into()),
+                            _ => None,
                         }
                     };
                     button::Style {
                         background: bg,
                         text_color: if selected { th::accent() } else { th::text() },
-                        border: iced::Border::default(),
+                        border: iced::Border {
+                            radius: 0.0.into(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }
                 });
                 rows.push(btn.into());
             }
+
+            rows.push(browser_row_divider());
 
             if entry.is_folder && expanded {
                 self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
@@ -765,10 +798,34 @@ fn browser_icon_button_style(_theme: &Theme, status: button::Status) -> button::
                 th::border()
             },
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }
+}
+
+fn browser_row_action_style(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then(|| th::bg_hover().into()),
+        text_color: th::text_dim(),
+        border: iced::Border {
+            radius: 0.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn browser_row_divider<'a>() -> Element<'a, Message> {
+    container(text(""))
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::divider().into()),
+            ..Default::default()
+        })
+        .into()
 }
 
 fn browser_location_button_style(_theme: &Theme, status: button::Status) -> button::Style {
@@ -789,7 +846,7 @@ fn browser_location_button_style(_theme: &Theme, status: button::Status) -> butt
                 th::divider()
             },
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }
@@ -815,7 +872,7 @@ fn browser_place_button_style(active: bool, status: button::Status) -> button::S
                 iced::Color::TRANSPARENT
             },
             width: if active { 1.0 } else { 0.0 },
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }
@@ -839,7 +896,7 @@ fn browser_transport_button_style(_theme: &Theme, status: button::Status) -> but
                 th::border()
             },
             width: 1.0,
-            radius: 3.0.into(),
+            radius: 0.0.into(),
         },
         ..Default::default()
     }

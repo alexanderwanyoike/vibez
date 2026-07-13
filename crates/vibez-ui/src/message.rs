@@ -253,7 +253,8 @@ pub enum Message {
     /// Speaker-icon click on a Local browser row: audition.
     PreviewLocalEntry(MediaSourceRef),
     StopBrowserPreview,
-    LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
+    LocalSamplePreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
+    BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     DropSampleOnArrangement {
         track_id: TrackId,
         position_samples: u64,
@@ -383,7 +384,7 @@ pub enum Message {
         result: Result<Vec<DropboxEntry>, String>,
     },
     DropboxPreview(DropboxEntry),
-    DropboxPreviewReady(Result<Arc<DecodedAudio>, String>),
+    DropboxPreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),
     DropboxImportToDevice(DropboxEntry),
 }

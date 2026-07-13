@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 mod ui_types;
 pub use ui_types::*;
 
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
@@ -251,6 +253,12 @@ pub struct BrowserState {
     pub entries: Vec<SampleBrowserEntry>,
     pub root_filter: Option<PathBuf>,
     pub selected_source: Option<MediaSourceRef>,
+    /// Decoded audio used only for the selected Browser source's visual
+    /// waveform. Audition still travels through the existing engine path.
+    pub waveform_source: Option<MediaSourceRef>,
+    pub waveform_audio: Option<Arc<DecodedAudio>>,
+    pub waveform_loading: bool,
+    pub waveform_error: Option<String>,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
     pub dropbox: DropboxUiState,
@@ -275,6 +283,10 @@ impl Default for BrowserState {
             entries: Vec::new(),
             root_filter: None,
             selected_source: None,
+            waveform_source: None,
+            waveform_audio: None,
+            waveform_loading: false,
+            waveform_error: None,
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
             dropbox: DropboxUiState::default(),
@@ -287,6 +299,51 @@ impl Default for BrowserState {
 }
 
 impl BrowserState {
+    pub fn select_source(&mut self, source: MediaSourceRef) -> bool {
+        let changed = self.selected_source.as_ref() != Some(&source);
+        self.selected_source = Some(source);
+        if changed {
+            self.clear_waveform();
+        }
+        changed
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected_source = None;
+        self.clear_waveform();
+    }
+
+    pub fn begin_waveform_load(&mut self, source: &MediaSourceRef) {
+        if self.selected_source.as_ref() == Some(source) {
+            self.waveform_loading = true;
+        }
+    }
+
+    pub fn install_waveform(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {
+        if self.selected_source.as_ref() != Some(&source) {
+            return false;
+        }
+        self.waveform_source = Some(source);
+        self.waveform_audio = Some(audio);
+        self.waveform_loading = false;
+        self.waveform_error = None;
+        true
+    }
+
+    pub fn fail_waveform_load(&mut self, source: &MediaSourceRef, error: String) {
+        if self.selected_source.as_ref() == Some(source) {
+            self.waveform_loading = false;
+            self.waveform_error = Some(error);
+        }
+    }
+
+    fn clear_waveform(&mut self) {
+        self.waveform_source = None;
+        self.waveform_audio = None;
+        self.waveform_loading = false;
+        self.waveform_error = None;
+    }
+
     pub fn set_dock_width(&mut self, width: f32) {
         self.dock_width = width.clamp(BROWSER_DOCK_MIN_WIDTH, BROWSER_DOCK_MAX_WIDTH);
     }

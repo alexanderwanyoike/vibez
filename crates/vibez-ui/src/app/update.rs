@@ -553,16 +553,25 @@ impl App {
                 // Previously auto-previewed on click; now click only
                 // selects. Preview fires via the speaker icon (see
                 // `Message::PreviewLocalEntry`).
-                self.state.browser.selected_source = Some(source);
+                let changed = self.state.browser.select_source(source.clone());
+                if changed {
+                    self.state.browser.begin_waveform_load(&source);
+                    if let MediaSourceRef::LocalFile { path } = source.clone() {
+                        return Task::perform(
+                            decode_local_for_preview_async(path),
+                            move |result| Message::BrowserWaveformReady(source.clone(), result),
+                        );
+                    }
+                }
             }
             Message::PreviewLocalEntry(source) => {
-                self.state.browser.selected_source = Some(source.clone());
-                if let MediaSourceRef::LocalFile { path } = source {
+                self.state.browser.select_source(source.clone());
+                self.state.browser.begin_waveform_load(&source);
+                if let MediaSourceRef::LocalFile { path } = source.clone() {
                     self.state.status_text = "Previewing...".to_string();
-                    return Task::perform(
-                        decode_local_for_preview_async(path),
-                        Message::LocalSamplePreviewReady,
-                    );
+                    return Task::perform(decode_local_for_preview_async(path), move |result| {
+                        Message::LocalSamplePreviewReady(source.clone(), result)
+                    });
                 }
             }
             Message::StopBrowserPreview => {
@@ -594,12 +603,22 @@ impl App {
                 return self
                     .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
-            Message::LocalSamplePreviewReady(Ok(audio)) => {
+            Message::LocalSamplePreviewReady(source, Ok(audio)) => {
+                self.state
+                    .browser
+                    .install_waveform(source, Arc::clone(&audio));
                 self.send_command(EngineCommand::StartPreview(audio));
                 self.state.status_text = "Preview playing".to_string();
             }
-            Message::LocalSamplePreviewReady(Err(err)) => {
+            Message::LocalSamplePreviewReady(source, Err(err)) => {
+                self.state.browser.fail_waveform_load(&source, err.clone());
                 self.state.status_text = format!("Preview error: {err}");
+            }
+            Message::BrowserWaveformReady(source, Ok(audio)) => {
+                self.state.browser.install_waveform(source, audio);
+            }
+            Message::BrowserWaveformReady(source, Err(err)) => {
+                self.state.browser.fail_waveform_load(&source, err);
             }
             Message::ImportSelectedBrowserSampleToArrangement => {
                 return self.handle_import_selected_browser_sample_to_arrangement();
@@ -1098,20 +1117,37 @@ impl App {
                     self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
                     return Task::none();
                 };
+                let source = MediaSourceRef::DropboxFile {
+                    path_lower: entry.path_lower.clone(),
+                    display_path: entry.path_display.clone(),
+                    rev: entry.rev.clone(),
+                };
+                self.state.browser.select_source(source.clone());
+                self.state.browser.begin_waveform_load(&source);
                 let cache = self.dropbox_cache.clone();
                 self.state.browser.dropbox.preview_in_progress = true;
                 self.state.status_text = format!("Fetching preview: {}", entry.name);
-                return Task::perform(fetch_dropbox_sample_async(client, cache, entry), |result| {
-                    Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio))
-                });
+                return Task::perform(
+                    fetch_dropbox_sample_async(client, cache, entry),
+                    move |result| {
+                        Message::DropboxPreviewReady(
+                            source.clone(),
+                            result.map(|(audio, _, _)| audio),
+                        )
+                    },
+                );
             }
-            Message::DropboxPreviewReady(Ok(audio)) => {
+            Message::DropboxPreviewReady(source, Ok(audio)) => {
                 self.state.browser.dropbox.preview_in_progress = false;
+                self.state
+                    .browser
+                    .install_waveform(source, Arc::clone(&audio));
                 self.send_command(EngineCommand::StartPreview(audio));
                 self.state.status_text = "Preview playing".to_string();
             }
-            Message::DropboxPreviewReady(Err(err)) => {
+            Message::DropboxPreviewReady(source, Err(err)) => {
                 self.state.browser.dropbox.preview_in_progress = false;
+                self.state.browser.fail_waveform_load(&source, err.clone());
                 self.state.browser.dropbox.last_error = Some(err.clone());
                 self.state.status_text = format!("Preview error: {err}");
             }

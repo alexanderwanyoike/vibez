@@ -59,6 +59,9 @@ pub struct BrowserAction {
     /// A drag was released over a lane: import `source` onto this
     /// track at this beat.
     pub drop_on_arrangement: Option<(TrackId, f64, MediaSourceRef)>,
+    /// Decode a Local selection for the truthful Audition waveform without
+    /// starting playback.
+    pub load_waveform: Option<MediaSourceRef>,
 }
 
 impl BrowserState {
@@ -98,7 +101,9 @@ impl BrowserState {
                 self.places_drawer_open = false;
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
-                self.selected_source = Some(source);
+                if self.select_source(source.clone()) {
+                    action.load_waveform = Some(source);
+                }
             }
             BrowserMsg::SetSampleBrowserMode(mode) => {
                 self.mode = mode;
@@ -152,8 +157,14 @@ impl BrowserState {
                             })
                             .is_none()
                         {
-                            self.selected_source =
-                                self.entries.first().map(|entry| entry.source.clone());
+                            if let Some(source) =
+                                self.entries.first().map(|entry| entry.source.clone())
+                            {
+                                self.select_source(source.clone());
+                                action.load_waveform = Some(source);
+                            } else {
+                                self.clear_selection();
+                            }
                         }
                         action.status = Some(if scan.warnings.is_empty() {
                             format!("Indexed {} samples", self.entries.len())
@@ -184,7 +195,7 @@ impl BrowserState {
                     })
                     .is_none()
                 {
-                    self.selected_source = None;
+                    self.clear_selection();
                 }
                 action.persist_settings = true;
                 action.status = Some("Removed sample root".to_string());
@@ -194,7 +205,7 @@ impl BrowserState {
             }
             BrowserMsg::DropboxSelectEntry(entry) => {
                 self.dropbox.selected_path = Some(entry.path_lower.clone());
-                self.selected_source = Some(MediaSourceRef::DropboxFile {
+                self.select_source(MediaSourceRef::DropboxFile {
                     path_lower: entry.path_lower,
                     display_path: entry.path_display,
                     rev: entry.rev,
@@ -281,6 +292,31 @@ mod tests {
         assert_eq!(browser.search, "break");
         assert_eq!(browser.root_filter, Some(PathBuf::from("/samples")));
         assert!(browser.selected_source.is_some());
+    }
+
+    #[test]
+    fn changing_selection_clears_waveform_and_rejects_stale_decode() {
+        let first = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/first.wav"),
+        };
+        let second = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/second.wav"),
+        };
+        let audio = std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+            channels: vec![vec![0.0, 0.8, -0.4]],
+            sample_rate: 44_100,
+        });
+        let mut browser = BrowserState::default();
+
+        browser.select_source(first.clone());
+        browser.begin_waveform_load(&first);
+        assert!(browser.install_waveform(first.clone(), std::sync::Arc::clone(&audio)));
+        assert!(browser.waveform_audio.is_some());
+
+        browser.select_source(second);
+        assert!(browser.waveform_audio.is_none());
+        assert!(!browser.install_waveform(first, audio));
+        assert!(browser.waveform_audio.is_none());
     }
 
     #[test]
