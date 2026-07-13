@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, column, container, horizontal_space, mouse_area, row, scrollable, slider, text,
     text_input,
 };
 use iced::{Element, Length, Theme};
@@ -464,6 +464,19 @@ impl App {
             .on_press(Message::StopBrowserPreview)
             .padding([6, 8])
             .style(browser_transport_button_style);
+        let enabled = self.state.browser.audition_enabled;
+        let follow_toggle = button(
+            text(if enabled { "ENABLED ON" } else { "ENABLED OFF" })
+                .size(9)
+                .color(if enabled {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                }),
+        )
+        .on_press(Message::ToggleAuditionEnabled)
+        .padding([2, 4])
+        .style(browser_utility_action_style);
 
         let waveform: Element<'_, Message> = container(
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
@@ -486,8 +499,10 @@ impl App {
         let controls = row![
             play,
             stop,
-            text(if self.state.browser.waveform_loading {
+            text(if self.state.browser.audition_loading {
                 "LOADING"
+            } else if self.state.browser.audition_playing {
+                "PLAYING"
             } else if self.state.browser.waveform_error.is_some() {
                 "UNAVAILABLE"
             } else if self.state.browser.waveform_audio.is_some() {
@@ -501,14 +516,55 @@ impl App {
         ]
         .spacing(5)
         .align_y(iced::Alignment::Center);
+        let gain = self.state.browser.audition_gain;
+        let gain_slider = slider(0.0..=2.0, gain, Message::SetAuditionGain)
+            .step(0.01)
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| iced::widget::slider::Style {
+                rail: iced::widget::slider::Rail {
+                    backgrounds: (th::accent_dim().into(), th::divider().into()),
+                    width: 2.0,
+                    border: iced::Border::default(),
+                },
+                handle: iced::widget::slider::Handle {
+                    shape: iced::widget::slider::HandleShape::Rectangle {
+                        width: 6,
+                        border_radius: 0.0.into(),
+                    },
+                    background: if matches!(status, iced::widget::slider::Status::Dragged) {
+                        th::accent().into()
+                    } else {
+                        th::text_dim().into()
+                    },
+                    border_width: 0.0,
+                    border_color: iced::Color::TRANSPARENT,
+                },
+            });
+        let gain_row = row![
+            text("GAIN").size(9).color(th::text_muted()),
+            gain_slider,
+            text(audition_gain_label(gain))
+                .size(9)
+                .color(th::text_dim())
+                .width(Length::Fixed(48.0))
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
         let contents: Element<'_, Message> = column![
             row![
                 text("AUDITION").size(9).color(th::text_muted()),
-                horizontal_space(),
-                text(selected_label).size(10).color(th::text_dim())
+                follow_toggle,
+                text(selected_label)
+                    .size(10)
+                    .color(th::text_dim())
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .wrapping(iced::widget::text::Wrapping::None)
             ]
+            .spacing(5)
             .align_y(iced::Alignment::Center),
-            controls
+            controls,
+            gain_row
         ]
         .spacing(5)
         .into();
@@ -1249,6 +1305,14 @@ fn browser_row_divider<'a>() -> Element<'a, Message> {
             ..Default::default()
         })
         .into()
+}
+
+fn audition_gain_label(gain: f32) -> String {
+    if gain <= 0.0001 {
+        "−∞ dB".into()
+    } else {
+        format!("{:+.1} dB", 20.0 * gain.log10())
+    }
 }
 
 fn browser_place_button_style(active: bool, status: button::Status) -> button::Style {

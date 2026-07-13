@@ -416,14 +416,28 @@ mod tests {
         let mut browser = BrowserState::default();
 
         browser.select_source(first.clone());
-        browser.begin_waveform_load(&first);
-        assert!(browser.install_waveform(first.clone(), std::sync::Arc::clone(&audio)));
+        browser.begin_audition_load(&first);
+        assert!(browser.install_audition(first.clone(), std::sync::Arc::clone(&audio)));
         assert!(browser.waveform_audio.is_some());
+        assert!(browser.audition_playing);
 
         browser.select_source(second);
         assert!(browser.waveform_audio.is_none());
-        assert!(!browser.install_waveform(first, audio));
+        assert!(!browser.install_audition(first, audio));
         assert!(browser.waveform_audio.is_none());
+    }
+
+    #[test]
+    fn audition_defaults_on_and_remembers_clamped_gain_state() {
+        let mut browser = BrowserState::default();
+        assert!(browser.audition_enabled);
+        assert_eq!(browser.audition_gain, 1.0);
+
+        assert!(!browser.toggle_audition_enabled());
+        browser.set_audition_gain(3.0);
+        assert_eq!(browser.audition_gain, 2.0);
+        browser.set_audition_gain(-1.0);
+        assert_eq!(browser.audition_gain, 0.0);
     }
 
     #[test]
@@ -437,6 +451,9 @@ mod tests {
             source: source.clone(),
             label: "kick.wav".to_string(),
         });
+        assert!(b.selected_source.is_none());
+        assert!(!b.audition_loading);
+        assert!(!b.audition_playing);
         b.update(BrowserMsg::DragHoverTrack {
             track_id: tid,
             beat: 8.0,
@@ -598,13 +615,13 @@ mod tests {
 
     #[test]
     fn affected_root_reconciliation_preserves_other_catalogs_and_updates_search() {
-        fn entry(root: &PathBuf, name: &str) -> crate::state::SampleBrowserEntry {
+        fn entry(root: &std::path::Path, name: &str) -> crate::state::SampleBrowserEntry {
             crate::state::SampleBrowserEntry {
                 source: MediaSourceRef::LocalFile {
                     path: root.join(name),
                 },
                 name: name.into(),
-                root_path: root.clone(),
+                root_path: root.to_path_buf(),
                 relative_path: PathBuf::from(name),
                 format: "WAV".into(),
                 file_size: Some(1),

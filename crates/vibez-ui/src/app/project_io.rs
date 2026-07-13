@@ -23,6 +23,7 @@ use super::*;
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        self.stop_browser_audition();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
         self.send_command(EngineCommand::Stop);
@@ -198,6 +199,8 @@ impl App {
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,
+            audition_enabled: self.state.browser.audition_enabled,
+            audition_gain: self.state.browser.audition_gain,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),

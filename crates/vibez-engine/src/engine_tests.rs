@@ -901,70 +901,86 @@ fn resize_clip_preserves_loop_state() {
 }
 
 #[test]
-fn preview_plays_even_when_transport_stopped() {
+fn audition_plays_even_when_transport_stopped() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let audio = make_constant_audio(64, 0.4);
+    let audio = make_constant_audio(4_096, 0.4);
 
-    cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
+    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
 
-    // Transport is stopped: regular tracks would produce silence,
-    // but the preview voice should still render.
-    let mut buf = vec![0.0f32; 16];
+    let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
 
     let peak = buf.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
-    assert!(peak > 0.3, "preview should be audible: peak {peak}");
+    assert!(peak > 0.3, "audition should be audible: peak {peak}");
+    assert!(!engine.transport().is_playing());
 }
 
 #[test]
-fn stop_preview_silences_playback() {
+fn audition_stop_uses_a_short_fade_without_stopping_transport() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let audio = make_constant_audio(1024, 0.5);
+    let audio = make_constant_audio(4_096, 0.5);
 
-    cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
-    cmd_tx.push(EngineCommand::StopPreview).unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+    let mut started = vec![0.0f32; 1_024];
+    engine.process(&mut started, 2);
+    assert!(engine.transport().is_playing());
 
-    let mut buf = vec![0.0f32; 16];
+    cmd_tx.push(EngineCommand::StopAudition).unwrap();
+    let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
-    assert!(buf.iter().all(|s| s.abs() < 1e-6));
+    assert!(buf[0].abs() > 0.1, "stop must begin with a fade, not a cut");
+    assert!(buf[500..].iter().all(|s| s.abs() < 1e-6));
+    assert!(engine.transport().is_playing());
 }
 
 #[test]
-fn preview_auto_completes_at_end_of_audio() {
+fn audition_auto_completes_at_end_of_audio() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let audio = make_constant_audio(8, 0.6);
+    let audio = make_constant_audio(512, 0.6);
 
-    cmd_tx.push(EngineCommand::StartPreview(audio)).unwrap();
+    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
 
-    // First 4 frames: audible
-    let mut buf = vec![0.0f32; 8];
+    let mut buf = vec![0.0f32; 2_048];
     engine.process(&mut buf, 2);
     assert!(buf.iter().any(|s| s.abs() > 0.5));
-
-    // Next 16 frames: past end of 8-frame audio. Preview auto-clears.
-    let mut buf = vec![0.0f32; 32];
-    engine.process(&mut buf, 2);
-    // First 8 samples of buf correspond to frames 4-7 of preview (audible).
-    // The remaining should be silence.
-    let tail = &buf[16..];
+    let tail = &buf[1_024..];
     assert!(tail.iter().all(|s| s.abs() < 1e-6));
 }
 
 #[test]
-fn starting_new_preview_interrupts_previous() {
+fn newer_audition_crossfades_over_the_previous_source() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
-    let a = make_constant_audio(1024, 0.8);
-    let b = make_constant_audio(1024, 0.2);
+    let a = make_constant_audio(4_096, 0.8);
+    let b = make_constant_audio(4_096, 0.2);
 
-    cmd_tx.push(EngineCommand::StartPreview(a)).unwrap();
-    let mut buf = vec![0.0f32; 16];
+    cmd_tx.push(EngineCommand::StartAudition(a)).unwrap();
+    let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
-    assert!(buf[0].abs() > 0.7);
+    let before = buf[1_000];
+    assert!(before > 0.7);
 
-    cmd_tx.push(EngineCommand::StartPreview(b)).unwrap();
-    let mut buf = vec![0.0f32; 16];
+    cmd_tx.push(EngineCommand::StartAudition(b)).unwrap();
+    let mut buf = vec![0.0f32; 1_024];
     engine.process(&mut buf, 2);
-    assert!(buf[0].abs() < 0.3);
+    assert!((buf[0] - before).abs() < 0.02, "replacement must not click");
+    assert!((buf[600] - 0.2).abs() < 0.01, "new source must take over");
+}
+
+#[test]
+fn audition_gain_is_independent_and_bypasses_project_master_gain() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let audio = make_constant_audio(4_096, 0.8);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.0))
+        .unwrap();
+    cmd_tx.push(EngineCommand::SetAuditionGain(0.25)).unwrap();
+    cmd_tx.push(EngineCommand::StartAudition(audio)).unwrap();
+
+    let mut buf = vec![0.0f32; 1_024];
+    engine.process(&mut buf, 2);
+    let peak = buf.iter().copied().fold(0.0_f32, f32::max);
+    assert!((peak - 0.2).abs() < 0.01);
 }
 
 #[test]

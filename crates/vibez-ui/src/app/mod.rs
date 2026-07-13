@@ -174,6 +174,8 @@ impl App {
                     crate::state::BROWSER_DOCK_MIN_WIDTH,
                     crate::state::BROWSER_DOCK_MAX_WIDTH,
                 ),
+                audition_enabled: ui_settings.audition_enabled,
+                audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
                 roots: ui_settings.sample_library_roots,
                 dropbox: dropbox_ui_state,
                 ..Default::default()
@@ -240,6 +242,9 @@ impl App {
 
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
+        app.send_command(EngineCommand::SetAuditionGain(
+            app.state.browser.audition_gain,
+        ));
 
         // Console model: the master bus carries its channel EQ from
         // the first frame.

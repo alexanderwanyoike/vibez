@@ -75,6 +75,9 @@ pub enum EngineEvent {
 
     /// Playback has stopped (transport entered stopped state).
     PlaybackStopped,
+
+    /// The post-master Audition Bus became silent after stop or source end.
+    AuditionStopped,
 }
 
 #[cfg(test)]
@@ -97,6 +100,7 @@ mod tests {
         };
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;
+        let _audition_stopped = EngineEvent::AuditionStopped;
     }
 
     #[test]

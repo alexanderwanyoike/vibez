@@ -227,13 +227,14 @@ pub enum EngineCommand {
         loop_end_beats: f64,
     },
 
-    // -- Preview (sample auditioning) --
-    /// Start previewing a decoded audio buffer on the hidden preview
-    /// channel. Bypasses transport, mute, and solo; one-shot; the
-    /// previous preview is cut if still playing.
-    StartPreview(Arc<DecodedAudio>),
-    /// Stop any in-progress preview.
-    StopPreview,
+    // -- Dedicated Audition Bus --
+    /// Start RAW one-shot playback after project master processing. The
+    /// previous source crossfades out while the new source fades in.
+    StartAudition(Arc<DecodedAudio>),
+    /// Stop the Audition Bus with a short click-safe fade.
+    StopAudition,
+    /// Set Audition Bus gain independently from project mixer state.
+    SetAuditionGain(f32),
 
     // -- External MIDI input --
     /// Route a live note-on from an external MIDI source (hardware

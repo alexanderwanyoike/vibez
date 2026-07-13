@@ -259,11 +259,14 @@ pub enum Message {
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RescanSampleLibrary,
-    /// Click in the Local sample browser: select only, no preview.
+    /// Select a Local source; starts RAW Audition when selection-follow is on.
     ClickLocalBrowserEntry(MediaSourceRef),
-    /// Speaker-icon click on a Local browser row: audition.
+    /// Explicit Play in the persistent Audition footer.
     PreviewLocalEntry(MediaSourceRef),
     StopBrowserPreview,
+    ToggleAuditionEnabled,
+    SetAuditionGain(f32),
+    EscapePressed,
     LocalSamplePreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     DropSampleOnArrangement {

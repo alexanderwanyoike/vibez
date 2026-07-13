@@ -44,7 +44,9 @@ pub enum BounceMode {
 }
 
 /// Snapshot of the parts of a project needed to render offline, plus the
-/// decoded audio for every asset referenced by the snapshot.
+/// decoded audio for every asset referenced by the snapshot. The live Audition
+/// Bus is intentionally absent, so exports, stems, and resampling cannot capture
+/// Browser playback.
 pub struct BounceRequest {
     pub tracks: Vec<TrackInfo>,
     /// Master bus (gain + effect chain), applied to the summed mix
@@ -421,6 +423,33 @@ mod tests {
             automation: Vec::new(),
             sends: Vec::new(),
         }
+    }
+
+    #[test]
+    fn offline_project_render_has_no_audition_bus_input() {
+        let request = BounceRequest {
+            tracks: Vec::new(),
+            master: None,
+            buses: Vec::new(),
+            audio_clips: Vec::new(),
+            note_clips: Vec::new(),
+            clip_audio: HashMap::new(),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 512),
+            bpm: 120.0,
+            sample_rate: 44_100,
+        };
+
+        let result = render_offline(&request);
+
+        assert!(result
+            .audio
+            .channels
+            .iter()
+            .flatten()
+            .all(|sample| sample.abs() < f32::EPSILON));
     }
 
     #[test]

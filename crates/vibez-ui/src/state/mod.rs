@@ -285,6 +285,10 @@ pub struct BrowserState {
     pub waveform_audio: Option<Arc<DecodedAudio>>,
     pub waveform_loading: bool,
     pub waveform_error: Option<String>,
+    pub audition_enabled: bool,
+    pub audition_gain: f32,
+    pub audition_loading: bool,
+    pub audition_playing: bool,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
     pub dropbox: DropboxUiState,
@@ -321,6 +325,10 @@ impl Default for BrowserState {
             waveform_audio: None,
             waveform_loading: false,
             waveform_error: None,
+            audition_enabled: true,
+            audition_gain: 1.0,
+            audition_loading: false,
+            audition_playing: false,
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
             dropbox: DropboxUiState::default(),
@@ -530,6 +538,36 @@ impl BrowserState {
         if self.selected_source.as_ref() == Some(source) {
             self.waveform_loading = true;
         }
+    }
+
+    pub fn begin_audition_load(&mut self, source: &MediaSourceRef) {
+        self.begin_waveform_load(source);
+        if self.selected_source.as_ref() == Some(source) {
+            self.audition_loading = true;
+        }
+    }
+
+    pub fn install_audition(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {
+        if !self.install_waveform(source, audio) {
+            return false;
+        }
+        self.audition_loading = false;
+        self.audition_playing = true;
+        true
+    }
+
+    pub fn stop_audition_state(&mut self) {
+        self.audition_loading = false;
+        self.audition_playing = false;
+    }
+
+    pub fn toggle_audition_enabled(&mut self) -> bool {
+        self.audition_enabled = !self.audition_enabled;
+        self.audition_enabled
+    }
+
+    pub fn set_audition_gain(&mut self, gain: f32) {
+        self.audition_gain = gain.clamp(0.0, 2.0);
     }
 
     pub fn install_waveform(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {

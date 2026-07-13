@@ -420,6 +420,12 @@ impl App {
                     EngineEvent::PlaybackStarted => {
                         self.state.transport.playing = true;
                     }
+                    EngineEvent::AuditionStopped => {
+                        self.state.browser.stop_audition_state();
+                        if self.state.status_text == "RAW Audition playing" {
+                            self.state.status_text = "Audition finished".into();
+                        }
+                    }
                     EngineEvent::TrackMeter {
                         track_id,
                         peak_l,

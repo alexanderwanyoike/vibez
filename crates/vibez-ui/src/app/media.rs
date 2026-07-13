@@ -17,6 +17,11 @@ use crate::state::{SampleBrowserEntry, UiClip, UiDrumPad, UiTrack};
 use super::*;
 
 impl App {
+    pub(super) fn stop_browser_audition(&mut self) {
+        self.send_command(EngineCommand::StopAudition);
+        self.state.browser.stop_audition_state();
+    }
+
     pub(super) fn selected_sample_browser_entry(&self) -> Option<&SampleBrowserEntry> {
         let selected = self.state.browser.selected_source.as_ref()?;
         self.state
@@ -769,7 +774,7 @@ impl App {
             None => {
                 // No active drag: treat release as a click.
                 // Select the pad AND audition its loaded sample
-                // via the engine's preview channel (bypasses
+                // via the engine's Audition Bus (bypasses
                 // transport + mute + solo; one-shot). This is
                 // the fastest way to hear what's on a pad
                 // without drawing notes into the piano roll.
@@ -786,7 +791,7 @@ impl App {
                         })
                     });
                 if let Some((audio, name)) = audition {
-                    self.send_command(EngineCommand::StartPreview(audio));
+                    self.send_command(EngineCommand::StartAudition(audio));
                     self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
                 }
                 self.update(Message::select_drum_rack_pad(track_id, pad_index))

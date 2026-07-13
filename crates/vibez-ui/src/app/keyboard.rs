@@ -31,9 +31,9 @@ pub(crate) fn global_key_handler(
         return Some(Message::Transport(TransportMsg::TogglePlayback));
     }
 
-    // Escape: cancel editing
+    // Escape: the router stops Audition first, then falls back to cancel editing.
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
-        return Some(Message::View(ViewMsg::CancelEditing));
+        return Some(Message::EscapePressed);
     }
 
     // Delete/Backspace: context-resolved in update() (selected notes
@@ -189,6 +189,20 @@ mod tests {
         assert!(matches!(
             wider,
             Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == 40.0
+        ));
+    }
+
+    #[test]
+    fn space_is_transport_and_escape_routes_through_audition_priority() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Space), Modifiers::empty()),
+            Some(Message::Transport(TransportMsg::TogglePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
+            Some(Message::EscapePressed)
         ));
     }
 }

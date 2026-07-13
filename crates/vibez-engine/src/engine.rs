@@ -58,8 +58,8 @@ pub struct AudioEngine {
     /// Consumer side, parked here until the UI takes it before the
     /// engine moves to the audio thread.
     spectrum_rx: Option<Consumer<f32>>,
-    /// One-shot sample preview, bypasses transport and soloed/muted state.
-    preview: Option<PreviewVoice>,
+    /// One-shot Browser audition after project master processing.
+    audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
@@ -69,12 +69,52 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
 }
 
-/// Dedicated single-voice preview channel used by the sample browser.
-/// Plays `audio` start-to-end irrespective of transport state and is
-/// interrupted whenever a new preview starts.
-struct PreviewVoice {
+/// Dedicated Browser signal path mixed after project master processing.
+struct AuditionBus {
+    active: Option<AuditionVoice>,
+    outgoing: Option<AuditionVoice>,
+    gain: f32,
+}
+
+struct AuditionVoice {
     audio: Arc<DecodedAudio>,
     position: u64,
+    fade_in_frames: usize,
+    fade_out_remaining: Option<usize>,
+}
+
+impl AuditionBus {
+    fn new() -> Self {
+        Self {
+            active: None,
+            outgoing: None,
+            gain: 1.0,
+        }
+    }
+
+    fn start(&mut self, audio: Arc<DecodedAudio>, fade_frames: usize) {
+        if let Some(mut active) = self.active.take() {
+            if active.position > 0 {
+                active.fade_out_remaining = Some(fade_frames);
+                self.outgoing = Some(active);
+            }
+        }
+        self.active = Some(AuditionVoice {
+            audio,
+            position: 0,
+            fade_in_frames: fade_frames,
+            fade_out_remaining: None,
+        });
+    }
+
+    fn stop(&mut self, fade_frames: usize) {
+        if let Some(mut active) = self.active.take() {
+            if active.position > 0 {
+                active.fade_out_remaining = Some(fade_frames);
+                self.outgoing = Some(active);
+            }
+        }
+    }
 }
 
 impl AudioEngine {
@@ -97,7 +137,7 @@ impl AudioEngine {
             spectrum_track: None,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
-            preview: None,
+            audition: AuditionBus::new(),
             sample_rate: 44100,
             cmd_rx,
             event_tx,
@@ -243,8 +283,8 @@ impl AudioEngine {
             push_spectrum(&mut self.spectrum_tx, output, channels);
         }
 
-        // ---- 4.5 Preview channel (bypasses transport) -------------------
-        self.process_preview(output, frames, channels);
+        // ---- 4.5 Audition Bus (post-master, outside project graph) ------
+        self.process_audition(output, frames, channels);
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
@@ -523,41 +563,27 @@ impl AudioEngine {
         }
     }
 
-    /// Render the preview voice into the output buffer on top of whatever
-    /// the main graph produced. Bypasses transport, solo, and mute; a
-    /// `StartPreview` command during playback simply overlays the preview.
-    fn process_preview(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let Some(preview) = self.preview.as_mut() else {
-            return;
-        };
-        let audio_channels = preview.audio.num_channels();
-        let audio_frames = preview.audio.num_frames();
-        if audio_channels == 0 || audio_frames == 0 {
-            self.preview = None;
-            return;
+    fn process_audition(&mut self, output: &mut [f32], frames: usize, channels: usize) {
+        let had_voice = self.audition.active.is_some() || self.audition.outgoing.is_some();
+        let gain = self.audition.gain;
+        if self
+            .audition
+            .outgoing
+            .as_mut()
+            .is_some_and(|voice| render_audition_voice(voice, output, frames, channels, gain))
+        {
+            self.audition.outgoing = None;
         }
-
-        let start = preview.position as usize;
-        let mut consumed = 0usize;
-        for frame in 0..frames {
-            let source = start + frame;
-            if source >= audio_frames {
-                break;
-            }
-            for ch in 0..channels {
-                let sample = if ch < audio_channels {
-                    preview.audio.sample(ch, source)
-                } else {
-                    preview.audio.sample(audio_channels - 1, source)
-                };
-                output[frame * channels + ch] += sample;
-            }
-            consumed += 1;
+        if self
+            .audition
+            .active
+            .as_mut()
+            .is_some_and(|voice| render_audition_voice(voice, output, frames, channels, gain))
+        {
+            self.audition.active = None;
         }
-
-        preview.position = preview.position.saturating_add(consumed as u64);
-        if preview.position as usize >= audio_frames {
-            self.preview = None;
+        if had_voice && self.audition.active.is_none() && self.audition.outgoing.is_none() {
+            let _ = self.event_tx.push(EngineEvent::AuditionStopped);
         }
     }
 
@@ -1080,12 +1106,16 @@ impl AudioEngine {
                     }
                 }
 
-                // -- Preview --
-                EngineCommand::StartPreview(audio) => {
-                    self.preview = Some(PreviewVoice { audio, position: 0 });
+                // -- Dedicated Audition Bus --
+                EngineCommand::StartAudition(audio) => {
+                    self.audition
+                        .start(audio, audition_fade_frames(self.sample_rate));
                 }
-                EngineCommand::StopPreview => {
-                    self.preview = None;
+                EngineCommand::StopAudition => {
+                    self.audition.stop(audition_fade_frames(self.sample_rate));
+                }
+                EngineCommand::SetAuditionGain(gain) => {
+                    self.audition.gain = gain.clamp(0.0, 2.0);
                 }
 
                 // -- External MIDI input --
@@ -1291,6 +1321,61 @@ impl AudioEngine {
             self.transport.set_audio_length(None);
         }
     }
+}
+
+const AUDITION_FADE_MS: usize = 5;
+
+fn audition_fade_frames(sample_rate: u32) -> usize {
+    ((sample_rate as usize * AUDITION_FADE_MS) / 1_000).max(1)
+}
+
+/// Mix one RAW audition voice. Returns true once its source or fade is done.
+fn render_audition_voice(
+    voice: &mut AuditionVoice,
+    output: &mut [f32],
+    frames: usize,
+    channels: usize,
+    bus_gain: f32,
+) -> bool {
+    let audio_channels = voice.audio.num_channels();
+    let audio_frames = voice.audio.num_frames();
+    if audio_channels == 0 || audio_frames == 0 || channels == 0 {
+        return true;
+    }
+
+    for frame in 0..frames {
+        let source = voice.position as usize;
+        if source >= audio_frames {
+            return true;
+        }
+        let attack = if source < voice.fade_in_frames {
+            (source + 1) as f32 / voice.fade_in_frames as f32
+        } else {
+            1.0
+        };
+        let remaining_source = audio_frames.saturating_sub(source + 1);
+        let natural_release =
+            (remaining_source as f32 / voice.fade_in_frames as f32).clamp(0.0, 1.0);
+        let commanded_release = match voice.fade_out_remaining {
+            Some(remaining) => {
+                let envelope = remaining.saturating_sub(1) as f32 / voice.fade_in_frames as f32;
+                voice.fade_out_remaining = Some(remaining.saturating_sub(1));
+                envelope
+            }
+            None => 1.0,
+        };
+        let envelope = attack.min(natural_release) * commanded_release * bus_gain;
+        for ch in 0..channels {
+            let source_channel = ch.min(audio_channels - 1);
+            output[frame * channels + ch] += voice.audio.sample(source_channel, source) * envelope;
+        }
+        voice.position = voice.position.saturating_add(1);
+        if voice.fade_out_remaining == Some(0) {
+            return true;
+        }
+    }
+
+    voice.position as usize >= audio_frames
 }
 
 /// Stream a block to the UI spectrum analyser as mono samples.

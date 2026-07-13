@@ -560,13 +560,20 @@ impl App {
                 }));
             }
             Message::ClickLocalBrowserEntry(source) => {
-                // Card 07 owns selection-driven Audition. For now click only
-                // selects and populates the truthful waveform; explicit Play
-                // remains in the persistent Audition footer.
                 let changed = self.state.browser.select_source(source.clone());
                 if changed {
-                    self.state.browser.begin_waveform_load(&source);
                     if let MediaSourceRef::LocalFile { path } = source.clone() {
+                        if self.state.browser.audition_enabled {
+                            self.state.browser.begin_audition_load(&source);
+                            self.state.status_text = "Loading RAW Audition...".to_string();
+                            return Task::perform(
+                                decode_local_for_preview_async(path),
+                                move |result| {
+                                    Message::LocalSamplePreviewReady(source.clone(), result)
+                                },
+                            );
+                        }
+                        self.state.browser.begin_waveform_load(&source);
                         return Task::perform(
                             decode_local_for_preview_async(path),
                             move |result| Message::BrowserWaveformReady(source.clone(), result),
@@ -576,17 +583,44 @@ impl App {
             }
             Message::PreviewLocalEntry(source) => {
                 self.state.browser.select_source(source.clone());
-                self.state.browser.begin_waveform_load(&source);
+                self.state.browser.begin_audition_load(&source);
                 if let MediaSourceRef::LocalFile { path } = source.clone() {
-                    self.state.status_text = "Previewing...".to_string();
+                    self.state.status_text = "Loading RAW Audition...".to_string();
                     return Task::perform(decode_local_for_preview_async(path), move |result| {
                         Message::LocalSamplePreviewReady(source.clone(), result)
                     });
                 }
             }
             Message::StopBrowserPreview => {
-                self.send_command(EngineCommand::StopPreview);
+                self.stop_browser_audition();
                 self.state.status_text = "Audition stopped".to_string();
+            }
+            Message::ToggleAuditionEnabled => {
+                let enabled = self.state.browser.toggle_audition_enabled();
+                if !enabled {
+                    self.stop_browser_audition();
+                }
+                self.persist_ui_settings();
+                self.state.status_text = if enabled {
+                    "Selection Audition enabled".into()
+                } else {
+                    "Selection Audition disabled; explicit Play remains available".into()
+                };
+            }
+            Message::SetAuditionGain(gain) => {
+                self.state.browser.set_audition_gain(gain);
+                self.send_command(EngineCommand::SetAuditionGain(
+                    self.state.browser.audition_gain,
+                ));
+                self.persist_ui_settings();
+            }
+            Message::EscapePressed => {
+                if self.state.browser.audition_playing || self.state.browser.audition_loading {
+                    self.stop_browser_audition();
+                    self.state.status_text = "Audition stopped".into();
+                } else {
+                    return self.update(Message::View(ViewMsg::CancelEditing));
+                }
             }
             // -- Drag-and-drop from sample browser --
             Message::DropSampleOnArrangement {
@@ -614,15 +648,22 @@ impl App {
                     .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
             Message::LocalSamplePreviewReady(source, Ok(audio)) => {
-                self.state
+                if self
+                    .state
                     .browser
-                    .install_waveform(source, Arc::clone(&audio));
-                self.send_command(EngineCommand::StartPreview(audio));
-                self.state.status_text = "Preview playing".to_string();
+                    .install_audition(source, Arc::clone(&audio))
+                {
+                    self.send_command(EngineCommand::StartAudition(audio));
+                    self.state.status_text = "RAW Audition playing".to_string();
+                }
             }
             Message::LocalSamplePreviewReady(source, Err(err)) => {
+                let is_current = self.state.browser.selected_source.as_ref() == Some(&source);
                 self.state.browser.fail_waveform_load(&source, err.clone());
-                self.state.status_text = format!("Preview error: {err}");
+                if is_current {
+                    self.stop_browser_audition();
+                    self.state.status_text = format!("Audition error: {err}");
+                }
             }
             Message::BrowserWaveformReady(source, Ok(audio)) => {
                 self.state.browser.install_waveform(source, audio);
@@ -1133,7 +1174,7 @@ impl App {
                     rev: entry.rev.clone(),
                 };
                 self.state.browser.select_source(source.clone());
-                self.state.browser.begin_waveform_load(&source);
+                self.state.browser.begin_audition_load(&source);
                 let cache = self.dropbox_cache.clone();
                 self.state.browser.dropbox.preview_in_progress = true;
                 self.state.status_text = format!("Fetching preview: {}", entry.name);
@@ -1149,17 +1190,24 @@ impl App {
             }
             Message::DropboxPreviewReady(source, Ok(audio)) => {
                 self.state.browser.dropbox.preview_in_progress = false;
-                self.state
+                if self
+                    .state
                     .browser
-                    .install_waveform(source, Arc::clone(&audio));
-                self.send_command(EngineCommand::StartPreview(audio));
-                self.state.status_text = "Preview playing".to_string();
+                    .install_audition(source, Arc::clone(&audio))
+                {
+                    self.send_command(EngineCommand::StartAudition(audio));
+                    self.state.status_text = "RAW Audition playing".to_string();
+                }
             }
             Message::DropboxPreviewReady(source, Err(err)) => {
                 self.state.browser.dropbox.preview_in_progress = false;
+                let is_current = self.state.browser.selected_source.as_ref() == Some(&source);
                 self.state.browser.fail_waveform_load(&source, err.clone());
                 self.state.browser.dropbox.last_error = Some(err.clone());
-                self.state.status_text = format!("Preview error: {err}");
+                if is_current {
+                    self.stop_browser_audition();
+                    self.state.status_text = format!("Preview error: {err}");
+                }
             }
             Message::DropboxImportToArrangement(entry) => {
                 return self.handle_dropbox_import_to_arrangement(entry);

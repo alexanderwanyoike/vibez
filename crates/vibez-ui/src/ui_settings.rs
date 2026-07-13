@@ -10,6 +10,10 @@ pub struct UiSettings {
     pub sample_browser_open: bool,
     #[serde(default = "default_sample_browser_width")]
     pub sample_browser_width: f32,
+    #[serde(default = "default_audition_enabled")]
+    pub audition_enabled: bool,
+    #[serde(default = "default_audition_gain")]
+    pub audition_gain: f32,
     /// Automatically detect each dropped sample's BPM and warp it to
     /// the project tempo on import. Off by default; users opt in from
     /// Settings → Warping.
@@ -37,6 +41,8 @@ impl Default for UiSettings {
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
+            audition_enabled: default_audition_enabled(),
+            audition_gain: default_audition_gain(),
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
@@ -79,6 +85,14 @@ fn default_sample_browser_width() -> f32 {
     crate::state::BROWSER_DOCK_DEFAULT_WIDTH
 }
 
+fn default_audition_enabled() -> bool {
+    true
+}
+
+fn default_audition_gain() -> f32 {
+    1.0
+}
+
 fn default_warp_confidence_threshold() -> f32 {
     0.6
 }
@@ -108,6 +122,26 @@ mod tests {
         let json = serde_json::to_string(&settings).unwrap();
         let loaded: UiSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.sample_browser_width, 612.0);
+    }
+
+    #[test]
+    fn old_settings_enable_audition_at_unity_by_default() {
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert!(loaded.audition_enabled);
+        assert_eq!(loaded.audition_gain, 1.0);
+    }
+
+    #[test]
+    fn audition_preferences_roundtrip() {
+        let settings = UiSettings {
+            audition_enabled: false,
+            audition_gain: 0.42,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!loaded.audition_enabled);
+        assert_eq!(loaded.audition_gain, 0.42);
     }
 
     #[test]
