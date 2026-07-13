@@ -9,6 +9,7 @@ use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
+use vibez_project::project_format_v1::SaveObservation;
 use vibez_project::Project;
 
 use crate::state::{AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab};
@@ -156,6 +157,13 @@ pub struct ProjectLoadResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct ProjectSaveResult {
+    pub path: PathBuf,
+    pub project: Project,
+    pub observation: Option<SaveObservation>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     /// Transport domain (playback, tempo, arrangement loop).
     Transport(crate::domains::transport::TransportMsg),
@@ -233,7 +241,7 @@ pub enum Message {
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
-    ProjectSaved(Result<PathBuf, String>),
+    ProjectSaved(Box<Result<ProjectSaveResult, String>>),
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.

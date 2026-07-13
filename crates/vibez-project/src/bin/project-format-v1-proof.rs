@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use vibez_project::project_format_v1_proof::{
-    abort_mid_save, hex_sha256, representative_document, ProofContainer, Provenance, StagedMedia,
+use vibez_project::project_format_v1::{
+    abort_mid_save, hex_sha256, representative_document, ProjectContainer, Provenance, StagedMedia,
 };
 
 const ASSET_BYTES: usize = 32 * 1024 * 1024;
@@ -69,7 +69,7 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
 
     let mut document = representative_document();
     let (mut container, full_save) =
-        ProofContainer::create_from_staged(&container_path, &mut document, &staged)?;
+        ProjectContainer::create_from_staged(&container_path, &mut document, &staged)?;
     assert!(!local_stage.exists() && !remote_stage.exists());
     assert_eq!(container.read_media("local-break")?, local_bytes);
     assert_eq!(container.read_media("remote-vocal")?, remote_bytes);
@@ -93,7 +93,7 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     drop(container);
 
     let reopen_started = Instant::now();
-    let reopened = ProofContainer::open(&container_path)?;
+    let reopened = ProjectContainer::open(&container_path)?;
     let reopened_document = reopened.load_document()?;
     let reopen_elapsed = reopen_started.elapsed();
     assert_eq!(serde_json::to_vec(&reopened_document)?, committed_json);
@@ -113,7 +113,7 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     );
 
     let recovered_started = Instant::now();
-    let recovered = ProofContainer::open(&container_path)?;
+    let recovered = ProjectContainer::open(&container_path)?;
     let recovered_document = recovered.load_document()?;
     let recovery_elapsed = recovered_started.elapsed();
     assert_eq!(serde_json::to_vec(&recovered_document)?, committed_json);
@@ -123,7 +123,7 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     );
     assert_eq!(recovered.read_media("local-break")?, local_bytes);
 
-    let save_as_container = ProofContainer::open(&save_as_path)?;
+    let save_as_container = ProjectContainer::open(&save_as_path)?;
     assert_eq!(
         serde_json::to_vec(&save_as_container.load_document()?)?,
         committed_json

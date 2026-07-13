@@ -398,17 +398,66 @@ impl App {
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let ret_source = MediaSourceRef::LocalFile { path: path.clone() };
                 self.state.status_text = format!("Dropping {name}...");
-                Task::perform(decode_file_async(path), move |result| match result {
-                    Ok(audio) => Message::BrowserSampleDecoded(
-                        target.clone(),
-                        Arc::new(audio),
-                        name.clone(),
-                        ret_source.clone(),
-                    ),
-                    Err(err) => Message::BrowserSampleDecodeError(err),
-                })
+                Task::perform(
+                    decode_and_stage_local_async(path),
+                    move |result| match result {
+                        Ok((audio, source)) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            Arc::new(audio),
+                            name.clone(),
+                            source,
+                        ),
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
+            }
+            MediaSourceRef::StagedProjectMedia {
+                id,
+                file_name,
+                staging_path,
+                source_path,
+            } => {
+                let name = file_name.clone();
+                let retained_source = MediaSourceRef::StagedProjectMedia {
+                    id,
+                    file_name,
+                    staging_path: staging_path.clone(),
+                    source_path,
+                };
+                Task::perform(
+                    decode_file_async(staging_path),
+                    move |result| match result {
+                        Ok(audio) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            Arc::new(audio),
+                            name.clone(),
+                            retained_source.clone(),
+                        ),
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
+            }
+            MediaSourceRef::ProjectMedia { id, file_name } => {
+                let name = file_name.clone();
+                let retained_source = MediaSourceRef::ProjectMedia { id, file_name };
+                let container_path = self.state.project.current_path.clone();
+                Task::perform(
+                    async move {
+                        hydrate_saved_source(container_path.as_ref(), None, &retained_source, &name)
+                            .await
+                            .map(|audio| (audio, retained_source, name))
+                    },
+                    move |result| match result {
+                        Ok((audio, source, name)) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            Arc::new(audio),
+                            name,
+                            source,
+                        ),
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
             }
             MediaSourceRef::DropboxFile {
                 path_lower,
@@ -700,18 +749,19 @@ impl App {
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
             let clip_id = ClipId::new();
-            let source = MediaSourceRef::LocalFile { path: path.clone() };
-
-            return Task::perform(decode_file_async(path), move |result| match result {
-                Ok(audio) => Message::ClipAudioDecoded(
-                    track_id,
-                    clip_id,
-                    Arc::new(audio),
-                    file_name.clone(),
-                    source.clone(),
-                ),
-                Err(e) => Message::ClipDecodeError(track_id, e),
-            });
+            return Task::perform(
+                decode_and_stage_local_async(path),
+                move |result| match result {
+                    Ok((audio, source)) => Message::ClipAudioDecoded(
+                        track_id,
+                        clip_id,
+                        Arc::new(audio),
+                        file_name.clone(),
+                        source,
+                    ),
+                    Err(e) => Message::ClipDecodeError(track_id, e),
+                },
+            );
         }
         Task::none()
     }
@@ -785,18 +835,19 @@ impl App {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
-            let source = MediaSourceRef::LocalFile { path: path.clone() };
-
-            return Task::perform(decode_file_async(path), move |result| match result {
-                Ok(audio) => Message::DrumRackPadSampleDecoded(
-                    track_id,
-                    pad_index,
-                    Arc::new(audio),
-                    file_name.clone(),
-                    source.clone(),
-                ),
-                Err(e) => Message::DrumRackPadDecodeError(track_id, pad_index, e),
-            });
+            return Task::perform(
+                decode_and_stage_local_async(path),
+                move |result| match result {
+                    Ok((audio, source)) => Message::DrumRackPadSampleDecoded(
+                        track_id,
+                        pad_index,
+                        Arc::new(audio),
+                        file_name.clone(),
+                        source,
+                    ),
+                    Err(e) => Message::DrumRackPadDecodeError(track_id, pad_index, e),
+                },
+            );
         }
         Task::none()
     }
@@ -901,21 +952,19 @@ impl App {
                 }),
             );
             if let MediaSourceRef::LocalFile { path } = &entry.source {
-                let source = entry.source.clone();
                 let name = entry.name.clone();
                 self.state.status_text = format!("Loading {name}...");
-                return Task::perform(
-                    decode_file_async(path.clone()),
-                    move |result| match result {
-                        Ok(audio) => Message::BrowserSampleDecoded(
+                return Task::perform(decode_and_stage_local_async(path.clone()), move |result| {
+                    match result {
+                        Ok((audio, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
                             Arc::new(audio),
                             name.clone(),
-                            source.clone(),
+                            source,
                         ),
                         Err(err) => Message::BrowserSampleDecodeError(err),
-                    },
-                );
+                    }
+                });
             }
         }
         Task::none()
@@ -931,21 +980,19 @@ impl App {
             return Task::none();
         };
         if let MediaSourceRef::LocalFile { path } = &entry.source {
-            let source = entry.source.clone();
             let name = entry.name.clone();
             self.state.status_text = format!("Loading {name}...");
-            return Task::perform(
-                decode_file_async(path.clone()),
-                move |result| match result {
-                    Ok(audio) => Message::BrowserSampleDecoded(
+            return Task::perform(decode_and_stage_local_async(path.clone()), move |result| {
+                match result {
+                    Ok((audio, source)) => Message::BrowserSampleDecoded(
                         target.clone(),
                         Arc::new(audio),
                         name.clone(),
-                        source.clone(),
+                        source,
                     ),
                     Err(err) => Message::BrowserSampleDecodeError(err),
-                },
-            );
+                }
+            });
         }
         Task::none()
     }
