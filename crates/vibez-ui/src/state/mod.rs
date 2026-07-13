@@ -20,10 +20,48 @@ pub enum AuditionMode {
     Warp,
 }
 
+impl AuditionMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Raw => "RAW",
+            Self::Warp => "WARP",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuditionImportInput {
     pub mode: AuditionMode,
     pub source_bpm: Option<f64>,
+}
+
+pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingMediaDrag {
+    pub source: MediaSourceRef,
+    pub label: String,
+    pub origin_x: f32,
+    pub origin_y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BrowserDropTarget {
+    ArrangementLane {
+        track_id: TrackId,
+        beat: f64,
+        compatible: bool,
+    },
+    EmptyArrangement {
+        beat: f64,
+    },
+    Sampler {
+        track_id: TrackId,
+    },
+    DrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
 }
 
 /// View domain slice: everything about how the project is being
@@ -316,13 +354,10 @@ pub struct BrowserState {
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
     pub dropbox: DropboxUiState,
+    pub pending_drag: Option<PendingMediaDrag>,
     pub drag_source: Option<MediaSourceRef>,
     pub drag_label: Option<String>,
-    /// Most recent track the cursor has been confirmed over while a drag
-    /// is in flight. Used as the drop target if the release happens on a
-    /// sub-pixel boundary between lanes.
-    pub drag_hover_track: Option<TrackId>,
-    pub drag_hover_beat: f64,
+    pub drag_target: Option<BrowserDropTarget>,
 }
 
 impl Default for BrowserState {
@@ -366,10 +401,10 @@ impl Default for BrowserState {
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
             dropbox: DropboxUiState::default(),
+            pending_drag: None,
             drag_source: None,
             drag_label: None,
-            drag_hover_track: None,
-            drag_hover_beat: 0.0,
+            drag_target: None,
         }
     }
 }
@@ -679,6 +714,80 @@ impl BrowserState {
                         source_bpm: Some(source_bpm),
                     })
             }
+        }
+    }
+
+    pub fn begin_pending_drag(
+        &mut self,
+        source: MediaSourceRef,
+        label: String,
+        origin_x: f32,
+        origin_y: f32,
+    ) {
+        self.cancel_media_drag();
+        self.pending_drag = Some(PendingMediaDrag {
+            source,
+            label,
+            origin_x,
+            origin_y,
+        });
+    }
+
+    pub fn move_pending_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(pending) = self.pending_drag.as_ref() else {
+            return false;
+        };
+        let dx = x - pending.origin_x;
+        let dy = y - pending.origin_y;
+        if dx * dx + dy * dy <= MEDIA_DRAG_THRESHOLD_PX * MEDIA_DRAG_THRESHOLD_PX {
+            return false;
+        }
+        let pending = self.pending_drag.take().expect("pending drag exists");
+        self.drag_source = Some(pending.source);
+        self.drag_label = Some(pending.label);
+        self.drag_target = None;
+        true
+    }
+
+    pub fn cancel_pending_drag(&mut self) {
+        self.pending_drag = None;
+    }
+
+    pub fn cancel_media_drag(&mut self) {
+        self.pending_drag = None;
+        self.drag_source = None;
+        self.drag_label = None;
+        self.drag_target = None;
+    }
+
+    pub fn drag_preview_beats(&self, project_bpm: f64) -> Option<f64> {
+        let source = self.drag_source.as_ref()?;
+        if self.waveform_source.as_ref()? != source {
+            return None;
+        }
+        let audio = self.waveform_audio.as_ref()?;
+        if audio.sample_rate == 0 || audio.num_frames() == 0 {
+            return None;
+        }
+        let seconds = audio.num_frames() as f64 / audio.sample_rate as f64;
+        match self.audition_import_input()? {
+            AuditionImportInput {
+                mode: AuditionMode::Raw,
+                ..
+            } => (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0),
+            AuditionImportInput {
+                mode: AuditionMode::Warp,
+                source_bpm: Some(source_bpm),
+            } if project_bpm > 0.0 => {
+                let target_frames = crate::warp::warp_target_frames(
+                    audio.num_frames(),
+                    audio.sample_rate as f64,
+                    source_bpm,
+                    project_bpm,
+                );
+                Some(target_frames as f64 * project_bpm / (audio.sample_rate as f64 * 60.0))
+            }
+            _ => None,
         }
     }
 

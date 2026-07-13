@@ -147,10 +147,6 @@ impl App {
                 })
             });
         }
-        if let Some((track_id, beat, source)) = action.drop_on_arrangement {
-            let position_samples = self.state.beats_to_samples(beat);
-            return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
-        }
         if let Some(source) = action.load_waveform {
             self.state.browser.begin_waveform_load(&source);
             if let MediaSourceRef::LocalFile { path } = source.clone() {

@@ -12,7 +12,7 @@ use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
 use vibez_engine::commands::{AuditionSync, EngineCommand};
 
-use crate::message::{BrowserImportTarget, Message};
+use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
 use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad, UiTrack};
 
 use super::*;
@@ -223,89 +223,87 @@ impl App {
         id
     }
 
-    pub(super) fn add_audio_clip_to_track(
+    pub(super) fn prepare_browser_sample_import(
         &mut self,
-        track_id: TrackId,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        target: BrowserImportTarget,
+        treatment: crate::state::AuditionImportInput,
+        raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
         name: String,
         source: MediaSourceRef,
     ) -> Task<Message> {
-        let clip_id = ClipId::new();
-        let existing_end = self
-            .state
-            .find_track(track_id)
-            .map(|track| {
-                track
-                    .clips
-                    .iter()
-                    .map(|clip| clip.position.saturating_add(clip.duration))
-                    .max()
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-        let duration = audio.num_frames() as u64;
-
-        self.send_command(EngineCommand::AddClip {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&audio),
-            position: existing_end,
-            source_offset: 0,
-            duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        });
-
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
-                id: clip_id,
-                name: name.clone(),
-                audio: Arc::clone(&audio),
-                source: Some(source),
-                position: existing_end,
-                source_offset: 0,
-                duration,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-
-        self.state.arrangement.selected_track = Some(track_id);
-        self.state.status_text = format!("Added clip: {name}");
-        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
+        let project_bpm = self.state.transport.bpm;
+        self.state.status_text = match treatment.mode {
+            AuditionMode::Raw => format!("Preparing RAW import: {name}"),
+            AuditionMode::Warp => format!("Preparing WARP import: {name}"),
+        };
+        let retained_target = target.clone();
+        Task::perform(
+            prepare_browser_import_audio_async(target, treatment, raw, source, project_bpm),
+            move |result| match result {
+                Ok((audio, original_audio, source)) => Message::BrowserImportPrepared {
+                    target: retained_target.clone(),
+                    payload: PreparedBrowserImport {
+                        treatment,
+                        audio,
+                        original_audio,
+                        name: name.clone(),
+                        source,
+                    },
+                },
+                Err(error) => Message::BrowserSampleDecodeError(error),
+            },
+        )
     }
 
-    pub(super) fn apply_browser_sample_decoded(
+    pub(super) fn apply_browser_import_prepared(
         &mut self,
         target: BrowserImportTarget,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-        name: String,
-        source: MediaSourceRef,
+        payload: PreparedBrowserImport,
     ) -> Task<Message> {
         match target {
             BrowserImportTarget::ArrangementClip(preferred_track) => {
                 let track_id = self.ensure_audio_track_for_import(preferred_track);
-                self.add_audio_clip_to_track(track_id, audio, name, source)
+                let position = self.state.transport.position_samples;
+                self.add_audio_clip_to_track_at(track_id, position, payload)
             }
             BrowserImportTarget::ArrangementClipAt {
                 track_id,
                 position_samples,
-            } => self.add_audio_clip_to_track_at(track_id, position_samples, audio, name, source),
+            } => self.add_audio_clip_to_track_at(track_id, position_samples, payload),
+            BrowserImportTarget::ArrangementNewTrackAt { position_samples } => {
+                let track_id = self.ensure_audio_track_for_import(None);
+                self.add_audio_clip_to_track_at(track_id, position_samples, payload)
+            }
             BrowserImportTarget::Sampler(track_id) => {
-                self.apply_sampler_sample_loaded(track_id, audio, name, source);
+                let PreparedBrowserImport {
+                    treatment,
+                    audio,
+                    name,
+                    source,
+                    ..
+                } = payload;
+                self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
+                self.state.status_text =
+                    format!("Imported '{name}' to Sampler ({})", treatment.mode.label());
                 Task::none()
             }
             BrowserImportTarget::DrumRackPad {
                 track_id,
                 pad_index,
             } => {
-                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+                let PreparedBrowserImport {
+                    treatment,
+                    audio,
+                    name,
+                    source,
+                    ..
+                } = payload;
+                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name.clone(), source);
+                self.state.status_text = format!(
+                    "Imported '{name}' to Drum Rack pad {} ({})",
+                    pad_index + 1,
+                    treatment.mode.label()
+                );
                 Task::none()
             }
         }
@@ -315,10 +313,15 @@ impl App {
         &mut self,
         track_id: TrackId,
         position_samples: u64,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-        name: String,
-        source: MediaSourceRef,
+        payload: PreparedBrowserImport,
     ) -> Task<Message> {
+        let PreparedBrowserImport {
+            treatment,
+            audio,
+            original_audio,
+            name,
+            source,
+        } = payload;
         // Guard: if the target is not an audio track, refuse rather than
         // silently redirecting the drop. Prevents the "clip lands on the
         // wrong lane" surprise.
@@ -339,6 +342,10 @@ impl App {
 
         let clip_id = ClipId::new();
         let duration = audio.num_frames() as u64;
+        let (original_bpm, warped, warped_to_bpm) = match treatment.mode {
+            AuditionMode::Raw => (None, false, None),
+            AuditionMode::Warp => (treatment.source_bpm, true, Some(self.state.transport.bpm)),
+        };
 
         self.send_command(EngineCommand::AddClip {
             track_id,
@@ -363,15 +370,24 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
+                original_bpm,
+                warped,
+                warped_to_bpm,
+                original_audio,
             });
         }
         self.state.arrangement.selected_track = Some(track_id);
-        self.state.status_text = format!("Dropped '{name}' on {track_name}");
-        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
+        let beat = if self.state.transport.sample_rate > 0 && self.state.transport.bpm > 0.0 {
+            position_samples as f64 * self.state.transport.bpm
+                / (self.state.transport.sample_rate as f64 * 60.0)
+        } else {
+            0.0
+        };
+        self.state.status_text = format!(
+            "Imported '{name}' to {track_name} at beat {beat:.2} ({})",
+            treatment.mode.label()
+        );
+        Task::none()
     }
 
     pub(super) fn dispatch_drop_on_arrangement(
@@ -392,6 +408,18 @@ impl App {
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
+        let Some(treatment) = self.state.browser.audition_import_input() else {
+            self.state.status_text =
+                "Confirm a positive source BPM before importing in WARP mode".into();
+            return Task::none();
+        };
+        if treatment.mode == AuditionMode::Warp
+            && self.state.browser.selected_source.as_ref() != Some(&source)
+        {
+            self.state.status_text =
+                "Select this source and confirm its BPM before WARP import".into();
+            return Task::none();
+        }
         match source {
             MediaSourceRef::LocalFile { path } => {
                 let name = path
@@ -404,6 +432,7 @@ impl App {
                     move |result| match result {
                         Ok((audio, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
+                            treatment,
                             Arc::new(audio),
                             name.clone(),
                             source,
@@ -430,6 +459,7 @@ impl App {
                     move |result| match result {
                         Ok(audio) => Message::BrowserSampleDecoded(
                             target.clone(),
+                            treatment,
                             Arc::new(audio),
                             name.clone(),
                             retained_source.clone(),
@@ -451,6 +481,7 @@ impl App {
                     move |result| match result {
                         Ok((audio, source, name)) => Message::BrowserSampleDecoded(
                             target.clone(),
+                            treatment,
                             Arc::new(audio),
                             name,
                             source,
@@ -487,6 +518,7 @@ impl App {
                     move |result| match result {
                         Ok((audio, decoded_name, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
+                            treatment,
                             audio,
                             decoded_name,
                             source,
@@ -804,7 +836,7 @@ impl App {
             track.clips.push(UiClip {
                 id: clip_id,
                 name: name.clone(),
-                audio,
+                audio: Arc::clone(&audio),
                 source: Some(source),
                 position: existing_end,
                 source_offset: 0,
@@ -820,7 +852,7 @@ impl App {
         }
 
         self.state.status_text = format!("Added clip: {name}");
-        Task::none()
+        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
     }
 
     pub(super) fn handle_drum_rack_pad_file_selected(
@@ -901,7 +933,7 @@ impl App {
     ) -> Task<Message> {
         match self.state.browser.drag_source.take() {
             Some(source) => {
-                self.state.browser.drag_label = None;
+                self.state.browser.cancel_media_drag();
                 self.dispatch_drop_for_target(
                     source,
                     BrowserImportTarget::DrumRackPad {
@@ -944,28 +976,21 @@ impl App {
 
     pub(super) fn handle_import_selected_browser_sample_to_arrangement(&mut self) -> Task<Message> {
         if let Some(entry) = self.selected_sample_browser_entry().cloned() {
-            let target = BrowserImportTarget::ArrangementClip(
-                self.state.arrangement.selected_track.filter(|track_id| {
-                    self.state
-                        .find_track(*track_id)
-                        .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
-                }),
-            );
-            if let MediaSourceRef::LocalFile { path } = &entry.source {
-                let name = entry.name.clone();
-                self.state.status_text = format!("Loading {name}...");
-                return Task::perform(decode_and_stage_local_async(path.clone()), move |result| {
-                    match result {
-                        Ok((audio, source)) => Message::BrowserSampleDecoded(
-                            target.clone(),
-                            Arc::new(audio),
-                            name.clone(),
-                            source,
-                        ),
-                        Err(err) => Message::BrowserSampleDecodeError(err),
-                    }
-                });
-            }
+            let position_samples = self.state.transport.position_samples;
+            let selected_audio = self.state.arrangement.selected_track.filter(|track_id| {
+                self.state
+                    .find_track(*track_id)
+                    .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
+            });
+            let target = match selected_audio {
+                Some(track_id) => BrowserImportTarget::ArrangementClipAt {
+                    track_id,
+                    position_samples,
+                },
+                None => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
+            };
+            self.state.status_text = format!("Importing {} at playhead...", entry.name);
+            return self.dispatch_drop_for_target(entry.source, target);
         }
         Task::none()
     }
@@ -979,21 +1004,7 @@ impl App {
                 "Select a sampler or drum rack track to load from the browser".to_string();
             return Task::none();
         };
-        if let MediaSourceRef::LocalFile { path } = &entry.source {
-            let name = entry.name.clone();
-            self.state.status_text = format!("Loading {name}...");
-            return Task::perform(decode_and_stage_local_async(path.clone()), move |result| {
-                match result {
-                    Ok((audio, source)) => Message::BrowserSampleDecoded(
-                        target.clone(),
-                        Arc::new(audio),
-                        name.clone(),
-                        source,
-                    ),
-                    Err(err) => Message::BrowserSampleDecodeError(err),
-                }
-            });
-        }
-        Task::none()
+        self.state.status_text = format!("Loading {}...", entry.name);
+        self.dispatch_drop_for_target(entry.source, target)
     }
 }

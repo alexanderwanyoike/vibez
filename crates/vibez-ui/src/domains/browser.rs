@@ -29,16 +29,33 @@ pub enum BrowserMsg {
     ShowMoreLocalResults,
     SelectSampleBrowserEntry(MediaSourceRef),
     SetSampleBrowserMode(SampleBrowserMode),
-    StartDragSample {
+    BeginPendingDrag {
         source: MediaSourceRef,
         label: String,
+        origin_x: f32,
+        origin_y: f32,
     },
-    /// Fired by a clip canvas whenever the cursor moves while a sample
-    /// drag is in flight and the cursor is inside that lane.
+    PendingDragMoved {
+        x: f32,
+        y: f32,
+    },
     DragHoverTrack {
         track_id: TrackId,
         beat: f64,
+        compatible: bool,
     },
+    DragHoverEmptyArrangement {
+        beat: f64,
+    },
+    DragHoverSampler {
+        track_id: TrackId,
+    },
+    DragHoverDrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
+    ClearDragTarget,
+    CancelDrag(String),
     EndDragSample,
     LocalRootWatchEvent(LocalRootWatchEvent),
     ReconcileLocalRoot {
@@ -67,9 +84,6 @@ pub struct BrowserAction {
     /// router should kick off a root list_folder call if a client is
     /// connected.
     pub expand_dropbox_root: bool,
-    /// A drag was released over a lane: import `source` onto this
-    /// track at this beat.
-    pub drop_on_arrangement: Option<(TrackId, f64, MediaSourceRef)>,
     /// Decode a Local selection for the truthful Audition waveform without
     /// starting playback.
     pub load_waveform: Option<MediaSourceRef>,
@@ -141,31 +155,81 @@ impl BrowserState {
                     action.expand_dropbox_root = true;
                 }
             }
-            BrowserMsg::StartDragSample { source, label } => {
-                action.status = Some(format!("Dragging {label} - drop on a lane or drum pad"));
-                self.drag_source = Some(source);
-                self.drag_label = Some(label);
-                self.drag_hover_track = None;
-                self.drag_hover_beat = 0.0;
+            BrowserMsg::BeginPendingDrag {
+                source,
+                label,
+                origin_x,
+                origin_y,
+            } => {
+                self.begin_pending_drag(source, label, origin_x, origin_y);
             }
-            BrowserMsg::DragHoverTrack { track_id, beat } => {
-                self.drag_hover_track = Some(track_id);
-                self.drag_hover_beat = beat;
+            BrowserMsg::PendingDragMoved { x, y } => {
+                if self.move_pending_drag(x, y) {
+                    let label = self.drag_label.as_deref().unwrap_or("media");
+                    action.status = Some(format!(
+                        "Moving {label} - choose an audio lane, empty Arrange, Sampler, or Drum Rack pad"
+                    ));
+                }
+            }
+            BrowserMsg::DragHoverTrack {
+                track_id,
+                beat,
+                compatible,
+            } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.drag_target = Some(crate::state::BrowserDropTarget::ArrangementLane {
+                    track_id,
+                    beat,
+                    compatible,
+                });
+                action.status = Some(if compatible {
+                    format!("Audio lane at beat {beat:.2}")
+                } else {
+                    "Invalid target: audio cannot be imported to a MIDI/instrument lane".into()
+                });
+            }
+            BrowserMsg::DragHoverEmptyArrangement { beat } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.drag_target = Some(crate::state::BrowserDropTarget::EmptyArrangement { beat });
+                action.status = Some(format!("New audio track at beat {beat:.2}"));
+            }
+            BrowserMsg::DragHoverSampler { track_id } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.drag_target = Some(crate::state::BrowserDropTarget::Sampler { track_id });
+                action.status = Some("Load Sampler sample zone".into());
+            }
+            BrowserMsg::DragHoverDrumRackPad {
+                track_id,
+                pad_index,
+            } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.drag_target = Some(crate::state::BrowserDropTarget::DrumRackPad {
+                    track_id,
+                    pad_index,
+                });
+                action.status = Some(format!("Assign Drum Rack pad {}", pad_index + 1));
+            }
+            BrowserMsg::ClearDragTarget => {
+                self.drag_target = None;
+            }
+            BrowserMsg::CancelDrag(reason) => {
+                self.cancel_media_drag();
+                action.status = Some(reason);
             }
             BrowserMsg::EndDragSample => {
-                if let Some(source) = self.drag_source.take() {
-                    self.drag_label = None;
-                    // If a drop target was hovered recently, route the drop
-                    // there instead of cancelling. Protects against
-                    // sub-pixel release-outside-bounds misses.
-                    if let Some(track_id) = self.drag_hover_track.take() {
-                        let beat = self.drag_hover_beat;
-                        self.drag_hover_beat = 0.0;
-                        action.drop_on_arrangement = Some((track_id, beat, source));
-                        return action;
-                    }
-                    self.drag_hover_beat = 0.0;
+                if self.drag_source.is_some() {
+                    self.cancel_media_drag();
                     action.status = Some("Drag cancelled".to_string());
+                } else {
+                    self.cancel_pending_drag();
                 }
             }
             BrowserMsg::LocalRootWatchEvent(event) => match event {
@@ -474,41 +538,97 @@ mod tests {
     }
 
     #[test]
-    fn end_drag_over_lane_requests_drop() {
+    fn click_motion_stays_pending_until_six_pixel_threshold() {
         let mut b = BrowserState::default();
-        let tid = TrackId::new();
         let source = MediaSourceRef::LocalFile {
             path: PathBuf::from("/tmp/kick.wav"),
         };
-        b.update(BrowserMsg::StartDragSample {
+        b.update(BrowserMsg::BeginPendingDrag {
             source: source.clone(),
             label: "kick.wav".to_string(),
+            origin_x: 10.0,
+            origin_y: 20.0,
         });
-        assert!(b.selected_source.is_none());
-        assert!(!b.audition_loading);
-        assert!(!b.audition_playing);
+        b.update(BrowserMsg::PendingDragMoved { x: 15.9, y: 20.0 });
+        assert!(b.pending_drag.is_some());
+        assert!(b.drag_source.is_none());
+
+        b.update(BrowserMsg::PendingDragMoved { x: 16.0, y: 20.0 });
+        assert!(b.pending_drag.is_some());
+        let action = b.update(BrowserMsg::PendingDragMoved { x: 16.1, y: 20.0 });
+        assert_eq!(b.drag_source, Some(source));
+        assert!(b.pending_drag.is_none());
+        assert!(action.status.unwrap().starts_with("Moving kick.wav"));
+    }
+
+    #[test]
+    fn arrangement_hover_reports_compatible_and_invalid_targets() {
+        let mut b = BrowserState::default();
+        let tid = TrackId::new();
+        b.drag_source = Some(MediaSourceRef::LocalFile {
+            path: PathBuf::from("/tmp/kick.wav"),
+        });
         b.update(BrowserMsg::DragHoverTrack {
             track_id: tid,
             beat: 8.0,
+            compatible: true,
         });
-        let action = b.update(BrowserMsg::EndDragSample);
-        assert_eq!(action.drop_on_arrangement, Some((tid, 8.0, source)));
-        assert!(b.drag_source.is_none());
-        assert!(b.drag_label.is_none());
+        assert_eq!(
+            b.drag_target,
+            Some(crate::state::BrowserDropTarget::ArrangementLane {
+                track_id: tid,
+                beat: 8.0,
+                compatible: true,
+            })
+        );
+        let action = b.update(BrowserMsg::DragHoverTrack {
+            track_id: tid,
+            beat: 8.5,
+            compatible: false,
+        });
+        assert!(action.status.unwrap().starts_with("Invalid target"));
+    }
+
+    #[test]
+    fn drag_preview_reports_exact_raw_and_warp_musical_lengths() {
+        let source = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/tmp/loop.wav"),
+        };
+        let mut browser = BrowserState {
+            drag_source: Some(source.clone()),
+            waveform_source: Some(source.clone()),
+            waveform_audio: Some(std::sync::Arc::new(
+                vibez_core::audio_buffer::DecodedAudio {
+                    channels: vec![vec![0.25; 44_100]],
+                    sample_rate: 44_100,
+                },
+            )),
+            ..BrowserState::default()
+        };
+        assert_eq!(browser.drag_preview_beats(120.0), Some(2.0));
+
+        browser.selected_source = Some(source);
+        browser.audition_mode = crate::state::AuditionMode::Warp;
+        browser.audition_bpm_confirmed = Some(120.0);
+        assert_eq!(browser.drag_preview_beats(60.0), Some(2.0));
     }
 
     #[test]
     fn end_drag_without_target_cancels() {
         let mut b = BrowserState::default();
-        b.update(BrowserMsg::StartDragSample {
+        b.update(BrowserMsg::BeginPendingDrag {
             source: MediaSourceRef::LocalFile {
                 path: PathBuf::from("/tmp/kick.wav"),
             },
             label: "kick.wav".to_string(),
+            origin_x: 0.0,
+            origin_y: 0.0,
         });
+        b.update(BrowserMsg::PendingDragMoved { x: 7.0, y: 0.0 });
         let action = b.update(BrowserMsg::EndDragSample);
-        assert_eq!(action.drop_on_arrangement, None);
         assert_eq!(action.status.as_deref(), Some("Drag cancelled"));
+        assert!(b.drag_source.is_none());
+        assert!(b.drag_target.is_none());
     }
 
     #[test]

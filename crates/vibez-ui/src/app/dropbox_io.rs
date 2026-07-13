@@ -77,12 +77,16 @@ impl App {
         };
         let cache = self.dropbox_cache.clone();
         let target = BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
+        let Some(treatment) = self.state.browser.audition_import_input() else {
+            self.state.status_text = "Confirm source BPM before WARP import".into();
+            return Task::none();
+        };
         self.state.status_text = format!("Importing {}...", entry.name);
         Task::perform(
             fetch_dropbox_sample_async(client, cache, entry),
             move |result| match result {
                 Ok((audio, name, source)) => {
-                    Message::BrowserSampleDecoded(target.clone(), audio, name, source)
+                    Message::BrowserSampleDecoded(target.clone(), treatment, audio, name, source)
                 }
                 Err(err) => Message::BrowserSampleDecodeError(err),
             },
@@ -99,12 +103,16 @@ impl App {
             return Task::none();
         };
         let cache = self.dropbox_cache.clone();
+        let Some(treatment) = self.state.browser.audition_import_input() else {
+            self.state.status_text = "Confirm source BPM before WARP import".into();
+            return Task::none();
+        };
         self.state.status_text = format!("Importing {}...", entry.name);
         Task::perform(
             fetch_dropbox_sample_async(client, cache, entry),
             move |result| match result {
                 Ok((audio, name, source)) => {
-                    Message::BrowserSampleDecoded(target.clone(), audio, name, source)
+                    Message::BrowserSampleDecoded(target.clone(), treatment, audio, name, source)
                 }
                 Err(err) => Message::BrowserSampleDecodeError(err),
             },

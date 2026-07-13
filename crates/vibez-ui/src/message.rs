@@ -12,7 +12,9 @@ use vibez_plugin_host::PluginId;
 use vibez_project::project_format_v1::SaveObservation;
 use vibez_project::Project;
 
-use crate::state::{AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab};
+use crate::state::{
+    AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrumPadParam {
@@ -139,11 +141,23 @@ pub enum BrowserImportTarget {
         track_id: TrackId,
         position_samples: u64,
     },
+    ArrangementNewTrackAt {
+        position_samples: u64,
+    },
     Sampler(TrackId),
     DrumRackPad {
         track_id: TrackId,
         pad_index: usize,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedBrowserImport {
+    pub treatment: AuditionImportInput,
+    pub audio: Arc<DecodedAudio>,
+    pub original_audio: Option<Arc<DecodedAudio>>,
+    pub name: String,
+    pub source: MediaSourceRef,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +283,8 @@ pub enum Message {
     RescanSampleLibrary,
     /// Select a Local source; starts RAW Audition when selection-follow is on.
     ClickLocalBrowserEntry(MediaSourceRef),
+    /// Mouse-down creates a Pending Drag at the globally tracked cursor.
+    BeginPendingBrowserDrag(MediaSourceRef, String),
     /// Explicit Play in the persistent Audition footer.
     PreviewLocalEntry(MediaSourceRef),
     StopBrowserPreview,
@@ -293,6 +309,7 @@ pub enum Message {
         track_id: TrackId,
         position_samples: u64,
     },
+    DropSampleOnEmptyArrangement,
     DropSampleOnDrumPad {
         track_id: TrackId,
         pad_index: usize,
@@ -304,10 +321,15 @@ pub enum Message {
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
         BrowserImportTarget,
+        AuditionImportInput,
         Arc<DecodedAudio>,
         String,
         MediaSourceRef,
     ),
+    BrowserImportPrepared {
+        target: BrowserImportTarget,
+        payload: PreparedBrowserImport,
+    },
     BrowserSampleDecodeError(String),
 
     // Settings

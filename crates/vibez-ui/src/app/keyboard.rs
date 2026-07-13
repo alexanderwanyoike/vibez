@@ -36,6 +36,17 @@ pub(crate) fn global_key_handler(
         return Some(Message::EscapePressed);
     }
 
+    // Enter: the focused Browser selection always means Arrangement Import.
+    // Text inputs capture Enter before this global ignored-event subscription.
+    if !modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.shift()
+        && !modifiers.logo()
+        && matches!(key, iced::keyboard::Key::Named(Named::Enter))
+    {
+        return Some(Message::ImportSelectedBrowserSampleToArrangement);
+    }
+
     // Delete/Backspace: context-resolved in update() (selected notes
     // first, then selected clips) and ignored while renaming.
     if !modifiers.control()
@@ -190,6 +201,17 @@ mod tests {
             wider,
             Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == 40.0
         ));
+    }
+
+    #[test]
+    fn enter_is_always_arrangement_import() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Enter), Modifiers::empty()),
+            Some(Message::ImportSelectedBrowserSampleToArrangement)
+        ));
+        assert!(global_key_handler(Key::Named(Named::Enter), Modifiers::SHIFT).is_none());
     }
 
     #[test]

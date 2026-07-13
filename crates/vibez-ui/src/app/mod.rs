@@ -481,6 +481,91 @@ async fn warp_browser_audition_async(
     .map_err(|error| format!("audition warp task failed: {error}"))?
 }
 
+async fn prepare_browser_import_audio_async(
+    target: crate::message::BrowserImportTarget,
+    treatment: crate::state::AuditionImportInput,
+    raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    source: MediaSourceRef,
+    project_bpm: f64,
+) -> Result<
+    (
+        Arc<vibez_core::audio_buffer::DecodedAudio>,
+        Option<Arc<vibez_core::audio_buffer::DecodedAudio>>,
+        MediaSourceRef,
+    ),
+    String,
+> {
+    if treatment.mode == crate::state::AuditionMode::Raw {
+        return Ok((raw, None, source));
+    }
+    let source_bpm = treatment
+        .source_bpm
+        .filter(|bpm| bpm.is_finite() && *bpm > 0.0)
+        .ok_or_else(|| "Confirm a positive source BPM before WARP import".to_string())?;
+    let frames = raw.num_frames() as u64;
+    let success = crate::warp::warp_clip_async(crate::warp::WarpClipInput {
+        audio: Arc::clone(&raw),
+        fields_frames: frames,
+        source_offset: 0,
+        duration: frames,
+        loop_start: 0,
+        loop_end: frames,
+        clip_bpm: source_bpm,
+        project_bpm,
+    })
+    .await?;
+    let device_target = matches!(
+        target,
+        crate::message::BrowserImportTarget::Sampler(_)
+            | crate::message::BrowserImportTarget::DrumRackPad { .. }
+    );
+    if !device_target {
+        return Ok((success.audio, Some(success.original_audio), source));
+    }
+
+    let rendered = Arc::clone(&success.audio);
+    let staged = tokio::task::spawn_blocking(move || {
+        let (source_path, original_name) = match source {
+            MediaSourceRef::StagedProjectMedia {
+                source_path,
+                file_name,
+                ..
+            } => (source_path, file_name),
+            MediaSourceRef::LocalFile { path } => {
+                let file_name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "warped-import.wav".into());
+                (path, file_name)
+            }
+            _ => return Err("WARP device import requires materialized Local media".to_string()),
+        };
+        let stem = std::path::Path::new(&original_name)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| "sample".into());
+        let file_name = format!("{stem}-warped.wav");
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let temporary = std::env::temp_dir().join(format!(
+            "vibez-warp-import-{}-{nonce}.wav",
+            std::process::id()
+        ));
+        vibez_audio_io::file_io::write_wav_file(&temporary, &rendered)
+            .map_err(|error| error.to_string())?;
+        let content = std::fs::read(&temporary).map_err(|error| error.to_string())?;
+        let _ = std::fs::remove_file(&temporary);
+        vibez_project::project_format_v1::stage_local_content(&source_path, &file_name, &content)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("WARP device staging task failed: {error}"))??;
+    Ok((success.audio, None, staged))
+}
+
 async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpOutcome {
     use crate::message::AutoWarpOutcome;
     let audio_for_detect = Arc::clone(&input.audio);
@@ -865,7 +950,126 @@ mod project_format_v1_tests {
     use super::*;
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::id::ClipId;
-    use vibez_core::track::TrackInfo;
+    use vibez_core::midi::{InstrumentKind, TrackKind};
+    use vibez_core::track::{InstrumentStateInfo, TrackInfo};
+
+    fn one_second_audio() -> Arc<DecodedAudio> {
+        Arc::new(DecodedAudio {
+            channels: vec![vec![0.25; 44_100]],
+            sample_rate: 44_100,
+        })
+    }
+
+    #[tokio::test]
+    async fn warp_arrangement_import_reopens_from_project_media_without_local_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("loop.wav");
+        let project_path = directory.path().join("warp-import.vzp");
+        let raw = one_second_audio();
+        vibez_audio_io::file_io::write_wav_file(&source_path, &raw).unwrap();
+        let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+        let treatment = crate::state::AuditionImportInput {
+            mode: crate::state::AuditionMode::Warp,
+            source_bpm: Some(120.0),
+        };
+        let (warped, original, staged) = prepare_browser_import_audio_async(
+            crate::message::BrowserImportTarget::ArrangementNewTrackAt {
+                position_samples: 0,
+            },
+            treatment,
+            Arc::clone(&raw),
+            source,
+            60.0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(warped.num_frames(), 88_200);
+        assert_eq!(original.unwrap().num_frames(), raw.num_frames());
+
+        let track = TrackInfo::new("Audio");
+        let project = Project {
+            tracks: vec![track.clone()],
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: "loop.wav".into(),
+                position: 0,
+                source_offset: 0,
+                duration: warped.num_frames() as u64,
+                source: Some(staged),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                original_bpm: Some(120.0),
+                warped: true,
+                warped_to_bpm: Some(60.0),
+            }],
+            ..Project::default()
+        };
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+        std::fs::remove_file(source_path).unwrap();
+
+        let loaded = load_project_async(project_path, None).await.unwrap();
+        assert_eq!(loaded.clips[0].audio.num_frames(), warped.num_frames());
+        assert!(matches!(
+            loaded.project.clips[0].source,
+            Some(MediaSourceRef::ProjectMedia { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn warp_sampler_import_bakes_heard_audio_into_project_media() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("device-loop.wav");
+        let project_path = directory.path().join("warp-device.vzp");
+        let raw = one_second_audio();
+        vibez_audio_io::file_io::write_wav_file(&source_path, &raw).unwrap();
+        let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+        let mut track = TrackInfo::new("Sampler");
+        track.kind = TrackKind::Midi;
+        track.instrument = Some(InstrumentKind::Sampler);
+        let (warped, original, staged) = prepare_browser_import_audio_async(
+            crate::message::BrowserImportTarget::Sampler(track.id),
+            crate::state::AuditionImportInput {
+                mode: crate::state::AuditionMode::Warp,
+                source_bpm: Some(120.0),
+            },
+            raw,
+            source,
+            60.0,
+        )
+        .await
+        .unwrap();
+        assert!(original.is_none(), "device media is the baked WARP buffer");
+        track.native_instrument = Some(InstrumentStateInfo::Sampler {
+            params: Vec::new(),
+            source: Some(staged),
+        });
+        let project = Project {
+            tracks: vec![track],
+            ..Project::default()
+        };
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+        std::fs::remove_file(source_path).unwrap();
+
+        let loaded = load_project_async(project_path, None).await.unwrap();
+        assert_eq!(loaded.sampler_samples.len(), 1);
+        assert_eq!(
+            loaded.sampler_samples[0].audio.num_frames(),
+            warped.num_frames()
+        );
+        assert!(matches!(
+            loaded.project.tracks[0]
+                .native_instrument
+                .as_ref()
+                .and_then(|state| match state {
+                    InstrumentStateInfo::Sampler { source, .. } => source.as_ref(),
+                    _ => None,
+                }),
+            Some(MediaSourceRef::ProjectMedia { .. })
+        ));
+    }
 
     #[tokio::test]
     async fn v1_reopen_decodes_embedded_audio_after_source_removal() {

@@ -7,6 +7,7 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
@@ -19,6 +20,7 @@ use crate::Project;
 pub const FORMAT_VERSION: u32 = 1;
 /// ASCII `VZP1`, stored in SQLite's application-id header field.
 pub const APPLICATION_ID: u32 = 0x565a_5031;
+static STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
 
 const SCHEMA: &str = r#"
 CREATE TABLE project_document (
@@ -377,11 +379,22 @@ pub fn detect_project_format(path: &Path) -> Result<ProjectFileFormat, ProjectFo
 /// Project Media identity, so repeated imports reuse the same staged bytes.
 pub fn stage_local_file(path: &Path) -> Result<MediaSourceRef, ProjectFormatError> {
     let content = fs::read(path)?;
-    let id = hex_sha256(&content);
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project-media".to_string());
+    stage_local_content(path, &file_name, &content)
+}
+
+/// Stages Vibez-derived bytes while retaining the authoritative Local source
+/// as provenance. Used when a device import deliberately bakes the heard WARP
+/// treatment into project-owned media without touching Source Storage.
+pub fn stage_local_content(
+    source_path: &Path,
+    file_name: &str,
+    content: &[u8],
+) -> Result<MediaSourceRef, ProjectFormatError> {
+    let id = hex_sha256(content);
     let root = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
@@ -400,15 +413,19 @@ pub fn stage_local_file(path: &Path) -> Result<MediaSourceRef, ProjectFormatErro
         .collect();
     let staging_path = root.join(format!("{id}-{safe_name}"));
     if !staging_path.exists() {
-        let temporary = root.join(format!(".{id}.partial"));
+        let nonce = STAGING_NONCE.fetch_add(1, Ordering::Relaxed);
+        let temporary = root.join(format!(
+            ".{id}-{safe_name}-{}-{nonce}.partial",
+            std::process::id()
+        ));
         fs::write(&temporary, content)?;
         fs::rename(temporary, &staging_path)?;
     }
     Ok(MediaSourceRef::StagedProjectMedia {
         id,
-        file_name,
+        file_name: file_name.to_string(),
         staging_path,
-        source_path: path.to_path_buf(),
+        source_path: source_path.to_path_buf(),
     })
 }
 

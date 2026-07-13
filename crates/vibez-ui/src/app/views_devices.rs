@@ -9,6 +9,7 @@ use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
 use vibez_plugin_host::gui::PluginGuiKey;
 
+use crate::domains::browser::BrowserMsg;
 use crate::icons;
 use crate::message::{DrumPadParam, Message};
 use crate::state::UiTrack;
@@ -678,8 +679,26 @@ impl App {
         let card = Self::device_card(
             column![title, Self::device_body(body.into())].width(Length::Fixed(560.0)),
         );
+        let drop_target = matches!(
+            self.state.browser.drag_target,
+            Some(crate::state::BrowserDropTarget::Sampler { track_id: target }) if target == track_id
+        );
+        let card = container(card).style(move |_theme: &Theme| container::Style {
+            border: iced::Border {
+                color: if drop_target {
+                    th::accent()
+                } else {
+                    iced::Color::TRANSPARENT
+                },
+                width: if drop_target { 2.0 } else { 0.0 },
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
         // The whole card accepts browser drops, like drum pads.
         mouse_area(card)
+            .on_enter(Message::Browser(BrowserMsg::DragHoverSampler { track_id }))
+            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
             .on_release(Message::DropSampleOnSampler { track_id })
             .into()
     }
@@ -707,6 +726,13 @@ impl App {
                 let pad_index = row_index * 4 + col_index;
                 let pad = &track.drum_rack_pads[pad_index];
                 let active = selected_pad == pad_index;
+                let drop_target = matches!(
+                    self.state.browser.drag_target,
+                    Some(crate::state::BrowserDropTarget::DrumRackPad {
+                        track_id: target_track,
+                        pad_index: target_pad,
+                    }) if target_track == track_id && target_pad == pad_index
+                );
                 // Hard-truncated single line: wrapping names change
                 // the tile height and blow the card's height budget
                 // (clipped knobs, dogfood screenshot 2026-07-06).
@@ -743,7 +769,7 @@ impl App {
                 .height(Length::Fixed(30.0))
                 .style(move |_theme: &Theme| container::Style {
                     background: Some(
-                        if active {
+                        if drop_target || active {
                             th::accent_dim()
                         } else {
                             th::bg_dark()
@@ -752,19 +778,26 @@ impl App {
                     ),
                     text_color: Some(if active { th::accent() } else { th::text() }),
                     border: iced::Border {
-                        color: if active {
+                        color: if drop_target {
+                            th::accent()
+                        } else if active {
                             th::accent_dim()
                         } else {
                             th::border()
                         },
-                        width: 1.0,
-                        radius: 4.0.into(),
+                        width: if drop_target { 2.0 } else { 1.0 },
+                        radius: 0.0.into(),
                     },
                     ..Default::default()
                 });
                 // on_release handler selects the pad when no drag is active,
                 // otherwise routes through DropSampleOnDrumPad.
                 let pad_cell: Element<'a, Message> = mouse_area(pad_body)
+                    .on_enter(Message::Browser(BrowserMsg::DragHoverDrumRackPad {
+                        track_id,
+                        pad_index,
+                    }))
+                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
                     .on_release(Message::DropSampleOnDrumPad {
                         track_id,
                         pad_index,

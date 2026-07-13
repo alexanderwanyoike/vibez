@@ -954,10 +954,10 @@ impl App {
             };
             let entry_body = container(table_cells).padding([6, 8]).width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
-                .on_press(Message::Browser(BrowserMsg::StartDragSample {
-                    source: entry.source.clone(),
-                    label: entry.name.clone(),
-                }))
+                .on_press(Message::BeginPendingBrowserDrag(
+                    entry.source.clone(),
+                    entry.name.clone(),
+                ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
             let selection_marker = container(text(""))
@@ -1268,10 +1268,7 @@ impl App {
                     rev: entry.rev.clone(),
                 };
                 let dragger: Element<'_, Message> = mouse_area(row_body)
-                    .on_press(Message::Browser(BrowserMsg::StartDragSample {
-                        source,
-                        label: entry.name.clone(),
-                    }))
+                    .on_press(Message::BeginPendingBrowserDrag(source, entry.name.clone()))
                     .on_release(msg)
                     .into();
                 let selection_marker = container(text(""))

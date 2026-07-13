@@ -75,10 +75,13 @@ impl TrackClipCanvas {
         // True when a sample drag is active and the cursor is hovering this
         // lane. Used to paint a drop indicator.
         let drop_hover = self.sample_drop_active && cursor.position_in(bounds).is_some();
+        let drop_compatible = !self.is_instrument;
 
         // Background
-        let bg_color = if drop_hover {
+        let bg_color = if drop_hover && drop_compatible {
             theme::accent_dim()
+        } else if drop_hover {
+            theme::with_alpha(theme::danger(), 0.16)
         } else if self.selected {
             theme::track_bg_selected()
         } else {
@@ -566,6 +569,11 @@ impl TrackClipCanvas {
         // cursor x + the track name overlaid so the user can verify which
         // lane will receive the drop.
         if drop_hover {
+            let target_color = if drop_compatible {
+                theme::accent()
+            } else {
+                theme::danger()
+            };
             let outline = canvas::Path::rectangle(
                 iced::Point::new(1.0, 1.0),
                 iced::Size::new(w - 2.0, h - 2.0),
@@ -573,12 +581,12 @@ impl TrackClipCanvas {
             frame.stroke(
                 &outline,
                 canvas::Stroke::default()
-                    .with_color(theme::accent())
+                    .with_color(target_color)
                     .with_width(2.0),
             );
             if let Some(local) = cursor.position_in(bounds) {
-                let beat = self.x_to_beat(local.x).max(0.0);
-                let snapped_x = self.beat_to_x(beat.round());
+                let beat = self.snapped_beat(self.x_to_beat(local.x).max(0.0));
+                let snapped_x = self.beat_to_x(beat);
                 if snapped_x >= 0.0 && snapped_x <= w {
                     let drop_line = canvas::Path::line(
                         iced::Point::new(snapped_x, 0.0),
@@ -587,19 +595,46 @@ impl TrackClipCanvas {
                     frame.stroke(
                         &drop_line,
                         canvas::Stroke::default()
-                            .with_color(theme::accent())
+                            .with_color(target_color)
                             .with_width(2.0),
                     );
                 }
+                if drop_compatible {
+                    if let Some(duration_beats) = self.sample_drop_duration_beats {
+                        let preview_width = (duration_beats * self.pixels_per_beat() as f64) as f32;
+                        let visible_width = preview_width.min((w - snapped_x).max(0.0));
+                        if visible_width > 0.0 {
+                            frame.fill_rectangle(
+                                iced::Point::new(snapped_x, 2.0),
+                                iced::Size::new(visible_width, h - 4.0),
+                                theme::with_alpha(theme::accent(), 0.18),
+                            );
+                        }
+                    }
+                }
+                frame.fill_text(canvas::Text {
+                    content: if drop_compatible {
+                        format!("Beat {beat:.2} · {}", self.track_name)
+                    } else {
+                        "INVALID · MIDI/instrument lane".into()
+                    },
+                    position: iced::Point::new(8.0, 8.0),
+                    color: target_color,
+                    size: 13.0.into(),
+                    ..Default::default()
+                });
+                if drop_compatible {
+                    if let Some(detail) = self.sample_drop_detail.as_ref() {
+                        frame.fill_text(canvas::Text {
+                            content: detail.clone(),
+                            position: iced::Point::new(8.0, 28.0),
+                            color: theme::text(),
+                            size: 11.0.into(),
+                            ..Default::default()
+                        });
+                    }
+                }
             }
-            // "Dropping to <track>" label inside the lane.
-            frame.fill_text(canvas::Text {
-                content: format!("Drop on: {}", self.track_name),
-                position: iced::Point::new(8.0, 8.0),
-                color: theme::accent(),
-                size: 14.0.into(),
-                ..Default::default()
-            });
         }
 
         vec![frame.into_geometry()]

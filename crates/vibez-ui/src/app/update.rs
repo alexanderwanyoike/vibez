@@ -97,7 +97,7 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::AddInstrumentTrack)
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
-                | Message::BrowserSampleDecoded(..)
+                | Message::BrowserImportPrepared { .. }
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::MoveAudioClip { .. })
                 | Message::Arrangement(ArrangementMsg::MoveNoteClipPosition { .. })
@@ -233,6 +233,24 @@ impl App {
                     let action = self.state.browser.update(browser_msg);
                     if action.persist_settings {
                         self.persist_ui_settings();
+                    }
+                }
+                let pending_drag_msg = match &msg {
+                    ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = pending_drag_msg {
+                    let action = self.state.browser.update(browser_msg);
+                    if let Some(status) = action.status {
+                        self.state.status_text = status;
                     }
                 }
                 let ctx = crate::domains::view::ViewCtx {
@@ -560,6 +578,11 @@ impl App {
                 }));
             }
             Message::ClickLocalBrowserEntry(source) => {
+                if self.state.browser.drag_source.is_some() {
+                    self.state.browser.cancel_media_drag();
+                    self.state.status_text = "Drag cancelled".into();
+                    return Task::none();
+                }
                 let changed = self.state.browser.select_source(source.clone());
                 if changed {
                     if let MediaSourceRef::LocalFile { path } = source.clone() {
@@ -580,6 +603,15 @@ impl App {
                         );
                     }
                 }
+            }
+            Message::BeginPendingBrowserDrag(source, label) => {
+                let action = self.state.browser.update(BrowserMsg::BeginPendingDrag {
+                    source,
+                    label,
+                    origin_x: self.state.view.cursor_x,
+                    origin_y: self.state.view.cursor_y,
+                });
+                return self.apply_browser_action(action);
             }
             Message::PreviewLocalEntry(source) => {
                 self.state.browser.select_source(source.clone());
@@ -686,9 +718,17 @@ impl App {
                 }
             }
             Message::EscapePressed => {
-                if self.state.browser.audition_playing || self.state.browser.audition_loading {
+                if self.state.browser.audition_playing
+                    || self.state.browser.audition_loading
+                    || self.state.browser.audition_queued
+                {
                     self.stop_browser_audition();
                     self.state.status_text = "Audition stopped".into();
+                } else if self.state.browser.drag_source.is_some()
+                    || self.state.browser.pending_drag.is_some()
+                {
+                    self.state.browser.cancel_media_drag();
+                    self.state.status_text = "Drag cancelled".into();
                 } else {
                     return self.update(Message::View(ViewMsg::CancelEditing));
                 }
@@ -701,8 +741,23 @@ impl App {
                 let Some(source) = self.state.browser.drag_source.take() else {
                     return Task::none();
                 };
-                self.state.browser.drag_label = None;
+                self.state.browser.cancel_media_drag();
                 return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
+            }
+            Message::DropSampleOnEmptyArrangement => {
+                let Some(source) = self.state.browser.drag_source.take() else {
+                    return Task::none();
+                };
+                let beat = match self.state.browser.drag_target.take() {
+                    Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => beat,
+                    _ => self.state.position_beats(),
+                };
+                self.state.browser.cancel_media_drag();
+                let position_samples = self.state.beats_to_samples(beat);
+                return self.dispatch_drop_for_target(
+                    source,
+                    BrowserImportTarget::ArrangementNewTrackAt { position_samples },
+                );
             }
             Message::DropSampleOnDrumPad {
                 track_id,
@@ -714,7 +769,7 @@ impl App {
                 let Some(source) = self.state.browser.drag_source.take() else {
                     return Task::none();
                 };
-                self.state.browser.drag_label = None;
+                self.state.browser.cancel_media_drag();
                 return self
                     .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
@@ -796,8 +851,11 @@ impl App {
             Message::LoadSelectedBrowserSampleToDevice => {
                 return self.handle_load_selected_browser_sample_to_device();
             }
-            Message::BrowserSampleDecoded(target, audio, name, source) => {
-                return self.apply_browser_sample_decoded(target, audio, name, source);
+            Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
+                return self.prepare_browser_sample_import(target, treatment, audio, name, source);
+            }
+            Message::BrowserImportPrepared { target, payload } => {
+                return self.apply_browser_import_prepared(target, payload);
             }
             Message::ClipAutoWarpReady {
                 track_id,
@@ -816,7 +874,7 @@ impl App {
                 return self.apply_arrangement_action(action);
             }
             Message::BrowserSampleDecodeError(err) => {
-                self.state.status_text = format!("Browser load error: {err}");
+                self.state.status_text = format!("Browser import error: {err}");
             }
 
             // -- File menu --

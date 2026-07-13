@@ -1,5 +1,6 @@
 pub mod audio_clip_detail;
 pub mod automation_lane;
+pub mod browser_drag_ghost;
 pub mod browser_waveform;
 pub mod effect_knob;
 pub mod effect_slot;
