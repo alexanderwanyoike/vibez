@@ -12,7 +12,7 @@ use crate::message::Message;
 use crate::state::SettingsTab;
 use crate::theme as th;
 
-use super::views_browser::browser_utility_action_style;
+use super::views_browser_style::browser_utility_action_style;
 use super::*;
 
 impl App {
