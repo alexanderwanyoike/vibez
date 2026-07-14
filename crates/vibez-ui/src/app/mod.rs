@@ -136,6 +136,8 @@ mod media;
 mod plugins;
 mod project_io;
 mod update;
+mod update_media;
+mod update_remote;
 mod views_browser;
 mod views_browser_audition;
 mod views_browser_places;
