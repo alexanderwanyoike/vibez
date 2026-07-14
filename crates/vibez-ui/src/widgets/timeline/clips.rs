@@ -82,6 +82,10 @@ pub struct TrackClipCanvas {
     /// True while a sample is being drag-dropped from the browser.
     /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
     pub sample_drop_active: bool,
+    /// Musical length shown by the placement preview. RAW derives this at the
+    /// project tempo; WARP retains the source's confirmed musical length.
+    pub sample_drop_duration_beats: Option<f64>,
+    pub sample_drop_detail: Option<String>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -114,6 +118,8 @@ impl TrackClipCanvas {
         selection_end_beats: f64,
         time_selection_track: Option<TrackId>,
         sample_drop_active: bool,
+        sample_drop_duration_beats: Option<f64>,
+        sample_drop_detail: Option<String>,
     ) -> Self {
         let clips = track
             .clips
@@ -178,6 +184,8 @@ impl TrackClipCanvas {
             selection_end_beats,
             time_selection_track,
             sample_drop_active,
+            sample_drop_duration_beats,
+            sample_drop_detail,
             track_name: track.name.clone(),
         }
     }
@@ -194,7 +202,7 @@ impl TrackClipCanvas {
         x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
     }
 
-    fn snapped_beat(&self, beat: f64) -> f64 {
+    pub(super) fn snapped_beat(&self, beat: f64) -> f64 {
         self.grid.snap_beat(beat, self.pixels_per_beat())
     }
 
@@ -447,24 +455,6 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                // If a sample drag from the browser is in flight and the
-                // cursor is over this lane, publish a hover update so the
-                // global drop handler can route a release here even if
-                // the release lands on a sub-pixel boundary outside
-                // `cursor.position_in(bounds)`.
-                if self.sample_drop_active {
-                    if let Some(local) = cursor.position_in(bounds) {
-                        let beat = self.snapped_beat(self.x_to_beat(local.x).max(0.0));
-                        return (
-                            canvas::event::Status::Ignored,
-                            Some(Message::Browser(BrowserMsg::DragHoverTrack {
-                                track_id,
-                                beat,
-                            })),
-                        );
-                    }
-                }
-
                 if let Some(ref drag) = state.drag {
                     if let Some(pos) = cursor.position() {
                         let local_x = pos.x - bounds.x;
@@ -646,6 +636,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 // inside this lane on release, emit a drop message.
                 if self.sample_drop_active {
                     if let Some(pos) = cursor.position_in(bounds) {
+                        if self.is_instrument {
+                            state.drag = None;
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::Browser(BrowserMsg::CancelDrag(
+                                    "Invalid target: audio cannot be imported to a MIDI/instrument lane"
+                                        .into(),
+                                ))),
+                            );
+                        }
                         // Snap the drop position to the nearest beat so it
                         // matches the indicator drawn in `draw`.
                         let beat = self.snapped_beat(self.x_to_beat(pos.x).max(0.0));

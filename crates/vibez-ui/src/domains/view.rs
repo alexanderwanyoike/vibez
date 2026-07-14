@@ -363,9 +363,11 @@ mod tests {
 
     #[test]
     fn cancel_editing_clears_all_edit_state() {
-        let mut v = ViewState::default();
-        v.editing_track_name = Some(TrackId::new());
-        v.edit_name_text = "x".to_string();
+        let mut v = ViewState {
+            editing_track_name: Some(TrackId::new()),
+            edit_name_text: "x".to_string(),
+            ..ViewState::default()
+        };
         let action = v.update(ViewMsg::CancelEditing, &[], ViewCtx::default());
         assert_eq!(v.editing_track_name, None);
         assert!(v.edit_name_text.is_empty());

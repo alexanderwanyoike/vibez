@@ -37,9 +37,13 @@ impl App {
         };
         let content: Element<'_, Message> =
             if self.state.view.workspace == Workspace::Arrange && self.state.browser.open {
-                row![self.view_sample_browser_panel(), workspace_content]
-                    .height(Length::FillPortion(5))
-                    .into()
+                row![
+                    self.view_sample_browser_panel(),
+                    self.view_browser_splitter(),
+                    workspace_content
+                ]
+                .height(Length::FillPortion(5))
+                .into()
             } else {
                 workspace_content
             };
@@ -56,6 +60,53 @@ impl App {
         let base_layout: Element<'_, Message> = mouse_area(layout_container)
             .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
+        let base_layout: Element<'_, Message> = if let Some(label) =
+            self.state.browser.drag_label.as_ref()
+        {
+            let mode = match self.state.browser.audition_mode {
+                crate::state::AuditionMode::Raw => "RAW",
+                crate::state::AuditionMode::Warp => "WARP",
+            };
+            let length = self
+                .state
+                .browser
+                .drag_preview_beats(self.state.transport.bpm)
+                .map(|beats| format!(" · {beats:.2} beats"))
+                .unwrap_or_default();
+            let (target, valid) = match self.state.browser.drag_target {
+                Some(crate::state::BrowserDropTarget::ArrangementLane {
+                    beat, compatible, ..
+                }) => (
+                    if compatible {
+                        format!("AUDIO LANE · BEAT {beat:.2}")
+                    } else {
+                        "INVALID · MIDI/INSTRUMENT LANE".into()
+                    },
+                    Some(compatible),
+                ),
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => {
+                    (format!("NEW AUDIO TRACK · BEAT {beat:.2}"), Some(true))
+                }
+                Some(crate::state::BrowserDropTarget::Sampler { .. }) => {
+                    ("LOAD SAMPLER".into(), Some(true))
+                }
+                Some(crate::state::BrowserDropTarget::DrumRackPad { pad_index, .. }) => {
+                    (format!("ASSIGN DRUM PAD {}", pad_index + 1), Some(true))
+                }
+                None => ("CHOOSE A DROP TARGET".into(), None),
+            };
+            let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
+                cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
+                title: format!("{label} · {mode}{length}"),
+                detail: target,
+                valid,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill);
+            stack![base_layout, ghost].into()
+        } else {
+            base_layout
+        };
 
         if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
@@ -266,13 +317,27 @@ impl App {
 
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
         if self.state.arrangement.tracks.is_empty() {
-            let prompt = text("Right-click or Ctrl+T to add a track")
-                .size(16)
-                .color(th::text_dim());
+            let browser_drag_active = self.state.browser.drag_source.is_some();
+            let empty_beat = match self.state.browser.drag_target {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
+                _ => None,
+            };
+            let prompt_text = if browser_drag_active {
+                empty_beat
+                    .map(|beat| format!("DROP → NEW AUDIO TRACK · BEAT {beat:.2}"))
+                    .unwrap_or_else(|| "DROP → NEW AUDIO TRACK".into())
+            } else {
+                "Right-click or Ctrl+T to add a track".into()
+            };
+            let prompt = text(prompt_text).size(16).color(if browser_drag_active {
+                th::accent()
+            } else {
+                th::text_dim()
+            });
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
-            return mouse_area(
+            let mut area = mouse_area(
                 container(centered)
                     .width(Length::Fill)
                     .height(Length::FillPortion(5))
@@ -285,8 +350,24 @@ impl App {
                 x: 400.0,
                 y: 300.0,
                 target: ContextMenuTarget::ArrangementEmpty,
-            }))
-            .into();
+            }));
+            if browser_drag_active {
+                let grid = self.state.view.grid_config();
+                let pixels_per_beat = 20.0 * self.state.view.zoom_level;
+                let scroll = self.state.view.scroll_offset_beats;
+                area = area
+                    .on_move(move |point| {
+                        let beat = grid.snap_beat(
+                            point.x as f64 / pixels_per_beat as f64 + scroll,
+                            pixels_per_beat,
+                        );
+                        Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                            beat: beat.max(0.0),
+                        })
+                    })
+                    .on_release(Message::DropSampleOnEmptyArrangement);
+            }
+            return area.into();
         }
 
         let playhead_beats = self.state.position_beats();
@@ -390,6 +471,20 @@ impl App {
             .map(|t| t.kind.is_midi())
             .collect();
         let total_track_count = self.state.arrangement.tracks.len();
+        let browser_drag_duration = self
+            .state
+            .browser
+            .drag_preview_beats(self.state.transport.bpm);
+        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
+            let mode = match self.state.browser.audition_mode {
+                crate::state::AuditionMode::Raw => "RAW",
+                crate::state::AuditionMode::Warp => "WARP",
+            };
+            match browser_drag_duration {
+                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
+                None => format!("{label} · {mode}"),
+            }
+        });
 
         // Track rows: header widgets + clip canvas
         let mut track_rows = column![].spacing(0);
@@ -456,11 +551,32 @@ impl App {
                 self.state.arrangement.selection_end_beats,
                 self.state.arrangement.time_selection_track,
                 self.state.browser.drag_source.is_some(),
+                browser_drag_duration,
+                browser_drag_detail.clone(),
             );
-            let clip_canvas: Element<'_, Message> = canvas(clip_canvas_widget)
-                .width(Length::Fill)
-                .height(Length::Fixed(70.0))
-                .into();
+            let track_id = track.id;
+            let compatible = !track.kind.is_midi();
+            let grid = self.state.view.grid_config();
+            let pixels_per_beat = 20.0 * zoom_level;
+            let scroll = scroll_offset;
+            let clip_canvas: Element<'_, Message> = mouse_area(
+                canvas(clip_canvas_widget)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(70.0)),
+            )
+            .on_move(move |point| {
+                let beat = grid.snap_beat(
+                    point.x as f64 / pixels_per_beat as f64 + scroll,
+                    pixels_per_beat,
+                );
+                Message::Browser(BrowserMsg::DragHoverTrack {
+                    track_id,
+                    beat: beat.max(0.0),
+                    compatible,
+                })
+            })
+            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .into();
 
             let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
 
@@ -469,6 +585,62 @@ impl App {
             if automation_open {
                 track_rows = self.push_automation_lanes(track_rows, track, track_color);
             }
+        }
+
+        if self.state.browser.drag_source.is_some() {
+            let grid = self.state.view.grid_config();
+            let pixels_per_beat = 20.0 * self.state.view.zoom_level;
+            let scroll = self.state.view.scroll_offset_beats;
+            let empty_beat = match self.state.browser.drag_target {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
+                _ => None,
+            };
+            let label = empty_beat
+                .map(|beat| format!("NEW AUDIO TRACK · BEAT {beat:.2}"))
+                .unwrap_or_else(|| "NEW AUDIO TRACK".into());
+            let header = container(text("+").size(14).color(th::accent()))
+                .width(Length::Fixed(
+                    crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
+                ))
+                .height(Length::Fixed(54.0))
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_surface().into()),
+                    border: iced::Border {
+                        color: th::divider(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                });
+            let zone = mouse_area(
+                container(text(label).size(12).color(th::accent()))
+                    .padding([0, 10])
+                    .width(Length::Fill)
+                    .height(Length::Fixed(54.0))
+                    .align_y(iced::alignment::Vertical::Center)
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::accent_dim().into()),
+                        border: iced::Border {
+                            color: th::accent(),
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+            )
+            .on_move(move |point| {
+                let beat = grid.snap_beat(
+                    point.x as f64 / pixels_per_beat as f64 + scroll,
+                    pixels_per_beat,
+                );
+                Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                    beat: beat.max(0.0),
+                })
+            })
+            .on_release(Message::DropSampleOnEmptyArrangement);
+            track_rows = track_rows.push(row![header, zone].height(Length::Fixed(54.0)));
         }
 
         // ── Returns + master: automation-only channels ──

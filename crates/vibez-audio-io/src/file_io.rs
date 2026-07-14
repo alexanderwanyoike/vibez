@@ -1,7 +1,8 @@
 //! Audio file decoding and resampling.
 //!
-//! Uses [symphonia] for format detection and decoding (WAV, MP3, FLAC, OGG)
-//! and [rubato] for high-quality sinc resampling.
+//! Uses [symphonia] for the exact format matrix documented in
+//! `docs/AUDIO_FORMAT_SUPPORT.md` and [rubato] for high-quality sinc
+//! resampling.
 
 use std::fmt;
 use std::fs::File;
@@ -36,6 +37,8 @@ pub enum FileIoError {
     Decode(symphonia::core::errors::Error),
     /// The audio file contained no decodable frames.
     EmptyAudio,
+    /// The decoder produced audio without required channel/rate metadata.
+    InvalidAudioMetadata(String),
     /// Rubato resampler construction error.
     ResamplerConstruction(rubato::ResamplerConstructionError),
     /// Rubato resampling error.
@@ -50,6 +53,9 @@ impl fmt::Display for FileIoError {
             Self::NoAudioTrack => write!(f, "no audio track found in file"),
             Self::Decode(e) => write!(f, "decode error: {e}"),
             Self::EmptyAudio => write!(f, "audio file contained no decodable frames"),
+            Self::InvalidAudioMetadata(message) => {
+                write!(f, "invalid audio metadata: {message}")
+            }
             Self::ResamplerConstruction(e) => write!(f, "resampler construction error: {e}"),
             Self::Resample(e) => write!(f, "resampling error: {e}"),
         }
@@ -98,8 +104,8 @@ impl From<rubato::ResampleError> for FileIoError {
 
 /// Decode an audio file at `path` into per-channel f32 sample data.
 ///
-/// Supported formats: WAV, MP3, FLAC, OGG (and anything else enabled in the
-/// `symphonia` feature flags for this workspace).
+/// Supported formats are defined by
+/// [`vibez_core::audio_format::SUPPORTED_AUDIO_FORMATS`].
 ///
 /// Returns a [`DecodedAudio`] with per-channel planar sample data.
 pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio, FileIoError> {
@@ -144,17 +150,17 @@ fn decode_media_source(mss: MediaSourceStream, hint: Hint) -> Result<DecodedAudi
     let track_id = track.id;
     let codec_params = track.codec_params.clone();
 
-    // Determine channel count and sample rate from codec parameters.
-    let num_channels = codec_params.channels.map(|ch| ch.count()).unwrap_or(2);
-    let sample_rate = codec_params.sample_rate.unwrap_or(44_100);
-
     // Create the decoder.
     let codecs = symphonia::default::get_codecs();
     let decoder_opts = DecoderOptions::default();
     let mut decoder = codecs.make(&codec_params, &decoder_opts)?;
 
     // Decode all packets into per-channel vectors.
-    let mut channel_data: Vec<Vec<f32>> = vec![Vec::new(); num_channels];
+    let mut channel_data: Vec<Vec<f32>> = codec_params
+        .channels
+        .map(|channels| vec![Vec::new(); channels.count()])
+        .unwrap_or_default();
+    let mut decoded_sample_rate = None;
 
     loop {
         let packet = match format_reader.next_packet() {
@@ -184,6 +190,16 @@ fn decode_media_source(mss: MediaSourceStream, hint: Hint) -> Result<DecodedAudi
         };
 
         let spec = *decoded.spec();
+        if let Some(previous_rate) = decoded_sample_rate {
+            if previous_rate != spec.rate {
+                return Err(FileIoError::InvalidAudioMetadata(format!(
+                    "sample rate changed from {previous_rate} Hz to {} Hz",
+                    spec.rate
+                )));
+            }
+        } else {
+            decoded_sample_rate = Some(spec.rate);
+        }
         let frames = decoded.frames();
         if frames == 0 {
             continue;
@@ -215,6 +231,9 @@ fn decode_media_source(mss: MediaSourceStream, hint: Hint) -> Result<DecodedAudi
     if channel_data.iter().all(|ch| ch.is_empty()) {
         return Err(FileIoError::EmptyAudio);
     }
+    let sample_rate = decoded_sample_rate.ok_or_else(|| {
+        FileIoError::InvalidAudioMetadata("decoded frames had no sample rate".into())
+    })?;
 
     Ok(DecodedAudio {
         channels: channel_data,

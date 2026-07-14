@@ -8,6 +8,14 @@ pub struct UiSettings {
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
+    #[serde(default = "default_sample_browser_width")]
+    pub sample_browser_width: f32,
+    #[serde(default = "default_audition_enabled")]
+    pub audition_enabled: bool,
+    #[serde(default = "default_audition_gain")]
+    pub audition_gain: f32,
+    #[serde(default)]
+    pub audition_loop: bool,
     /// Automatically detect each dropped sample's BPM and warp it to
     /// the project tempo on import. Off by default; users opt in from
     /// Settings → Warping.
@@ -27,6 +35,10 @@ pub struct UiSettings {
     /// the default Charcoal.
     #[serde(default)]
     pub theme: Option<String>,
+    #[serde(default = "default_media_cache_budget_bytes")]
+    pub media_cache_budget_bytes: u64,
+    #[serde(default = "default_media_cache_automatic_eviction")]
+    pub media_cache_automatic_eviction: bool,
 }
 
 impl Default for UiSettings {
@@ -34,10 +46,16 @@ impl Default for UiSettings {
         Self {
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
+            sample_browser_width: default_sample_browser_width(),
+            audition_enabled: default_audition_enabled(),
+            audition_gain: default_audition_gain(),
+            audition_loop: false,
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
             theme: None,
+            media_cache_budget_bytes: default_media_cache_budget_bytes(),
+            media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
         }
     }
 }
@@ -72,6 +90,104 @@ fn default_sample_browser_open() -> bool {
     true
 }
 
+fn default_media_cache_budget_bytes() -> u64 {
+    vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
+}
+
+fn default_media_cache_automatic_eviction() -> bool {
+    true
+}
+
+fn default_sample_browser_width() -> f32 {
+    crate::state::BROWSER_DOCK_DEFAULT_WIDTH
+}
+
+fn default_audition_enabled() -> bool {
+    true
+}
+
+fn default_audition_gain() -> f32 {
+    1.0
+}
+
 fn default_warp_confidence_threshold() -> f32 {
     0.6
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_receive_the_browser_width_default() {
+        let loaded: UiSettings =
+            serde_json::from_str(r#"{"sample_library_roots":[],"sample_browser_open":false}"#)
+                .unwrap();
+        assert!(!loaded.sample_browser_open);
+        assert_eq!(
+            loaded.sample_browser_width,
+            crate::state::BROWSER_DOCK_DEFAULT_WIDTH
+        );
+    }
+
+    #[test]
+    fn browser_width_roundtrips() {
+        let settings = UiSettings {
+            sample_browser_width: 612.0,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: UiSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.sample_browser_width, 612.0);
+    }
+
+    #[test]
+    fn old_settings_enable_audition_at_unity_by_default() {
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert!(loaded.audition_enabled);
+        assert_eq!(loaded.audition_gain, 1.0);
+        assert!(!loaded.audition_loop);
+    }
+
+    #[test]
+    fn audition_preferences_roundtrip() {
+        let settings = UiSettings {
+            audition_enabled: false,
+            audition_gain: 0.42,
+            audition_loop: true,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!loaded.audition_enabled);
+        assert_eq!(loaded.audition_gain, 0.42);
+        assert!(loaded.audition_loop);
+    }
+
+    #[test]
+    fn old_settings_receive_the_twenty_gib_media_cache_policy() {
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert_eq!(
+            loaded.media_cache_budget_bytes,
+            vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
+        );
+        assert!(loaded.media_cache_automatic_eviction);
+    }
+
+    #[test]
+    fn multiple_local_roots_roundtrip_in_ui_configuration() {
+        let roots = vec![
+            PathBuf::from("/samples/drums"),
+            PathBuf::from("/samples/field-recordings"),
+        ];
+        let settings = UiSettings {
+            sample_library_roots: roots.clone(),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: UiSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.sample_library_roots, roots);
+    }
 }

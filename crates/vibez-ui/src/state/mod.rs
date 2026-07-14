@@ -1,14 +1,73 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+mod browser_results;
+mod browser_state;
 mod ui_types;
+pub use browser_results::LocalResults;
+pub use browser_state::*;
 pub use ui_types::*;
 
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
+use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
+
+use crate::remote_provider::RemoteCatalogSnapshot;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuditionMode {
+    #[default]
+    Raw,
+    Warp,
+}
+
+impl AuditionMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Raw => "RAW",
+            Self::Warp => "WARP",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuditionImportInput {
+    pub mode: AuditionMode,
+    pub source_bpm: Option<f64>,
+}
+
+pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingMediaDrag {
+    pub source: MediaSourceRef,
+    pub label: String,
+    pub origin_x: f32,
+    pub origin_y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BrowserDropTarget {
+    ArrangementLane {
+        track_id: TrackId,
+        beat: f64,
+        compatible: bool,
+    },
+    EmptyArrangement {
+        beat: f64,
+    },
+    Sampler {
+        track_id: TrackId,
+    },
+    DrumRackPad {
+        track_id: TrackId,
+        pad_index: usize,
+    },
+}
 
 /// View domain slice: everything about how the project is being
 /// looked at, none of it part of the project itself.
@@ -155,6 +214,10 @@ pub struct ProjectState {
     pub current_path: Option<PathBuf>,
     pub dirty: bool,
     pub history: UndoHistory,
+    /// Clips whose media could not be hydrated at load time. Invisible in
+    /// the arrangement, but serialized back into every save so unavailable
+    /// media stays relinkable instead of silently vanishing.
+    pub unresolved_clips: Vec<vibez_core::track::ClipInfo>,
 }
 
 #[derive(Debug, Default)]
@@ -203,79 +266,6 @@ impl UndoHistory {
         self.undo.clear();
         self.redo.clear();
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SampleBrowserMode {
-    #[default]
-    Local,
-    Dropbox,
-}
-
-/// Browser domain slice: sample library, Dropbox browsing, and
-/// drag-and-drop from the browser into the arrangement.
-#[derive(Debug, Clone)]
-pub struct BrowserState {
-    pub open: bool,
-    pub search: String,
-    pub roots: Vec<PathBuf>,
-    pub entries: Vec<SampleBrowserEntry>,
-    pub root_filter: Option<PathBuf>,
-    pub selected_source: Option<MediaSourceRef>,
-    pub scan_in_progress: bool,
-    pub mode: SampleBrowserMode,
-    pub dropbox: DropboxUiState,
-    pub drag_source: Option<MediaSourceRef>,
-    pub drag_label: Option<String>,
-    /// Most recent track the cursor has been confirmed over while a drag
-    /// is in flight. Used as the drop target if the release happens on a
-    /// sub-pixel boundary between lanes.
-    pub drag_hover_track: Option<TrackId>,
-    pub drag_hover_beat: f64,
-}
-
-impl Default for BrowserState {
-    fn default() -> Self {
-        Self {
-            open: true,
-            search: String::new(),
-            roots: Vec::new(),
-            entries: Vec::new(),
-            root_filter: None,
-            selected_source: None,
-            scan_in_progress: false,
-            mode: SampleBrowserMode::default(),
-            dropbox: DropboxUiState::default(),
-            drag_source: None,
-            drag_label: None,
-            drag_hover_track: None,
-            drag_hover_beat: 0.0,
-        }
-    }
-}
-
-/// UI-side state for the Dropbox browser and Settings tab.
-#[derive(Debug, Default, Clone)]
-pub struct DropboxUiState {
-    pub connected: bool,
-    pub account_email: Option<String>,
-    /// App key entered in settings (may be empty until the user pastes one).
-    pub app_key_input: String,
-    /// Whether any source of app key is present (settings, env, build-time).
-    pub has_app_key: bool,
-    /// An OAuth flow is in progress; Connect button is disabled.
-    pub auth_in_progress: bool,
-    pub last_error: Option<String>,
-    /// Listing cache keyed by Dropbox folder path (`""` for root).
-    pub folders: HashMap<String, Vec<DropboxEntry>>,
-    /// Paths for which a list_folder call is currently in flight.
-    pub listing_in_progress: HashSet<String>,
-    /// Paths expanded in the tree UI.
-    pub expanded: HashSet<String>,
-    /// `path_lower` of the currently-selected Dropbox entry, if any.
-    pub selected_path: Option<String>,
-    /// A preview fetch / playback is in flight.
-    pub preview_in_progress: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

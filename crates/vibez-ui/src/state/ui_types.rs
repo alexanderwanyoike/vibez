@@ -4,6 +4,7 @@ use super::default_drum_rack_pads;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::{EffectType, ParamDescriptor};
@@ -117,6 +118,24 @@ pub struct SampleBrowserEntry {
     pub name: String,
     pub root_path: PathBuf,
     pub relative_path: PathBuf,
+    pub format: String,
+    /// Derived only after the shared decoder validates/materializes the source.
+    pub duration_seconds: Option<f64>,
+    pub channels: Option<usize>,
+    pub sample_rate: Option<u32>,
+    pub file_size: Option<u64>,
+    pub modified: Option<SystemTime>,
+    pub search_text: String,
+}
+
+/// A read-only folder record in the Local Catalog. Roots remain configuration;
+/// these records only describe Source Storage for navigation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SampleBrowserFolder {
+    pub path: PathBuf,
+    pub root_path: PathBuf,
+    pub relative_path: PathBuf,
+    pub name: String,
     pub search_text: String,
 }
 

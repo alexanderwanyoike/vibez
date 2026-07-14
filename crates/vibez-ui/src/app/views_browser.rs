@@ -1,85 +1,164 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
-use std::path::PathBuf;
-
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
-use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
-
 use crate::icons;
-use crate::message::{BrowserImportTarget, Message};
-use crate::state::SampleBrowserEntry;
+use crate::message::Message;
+use crate::state::SampleBrowserMode;
 use crate::theme as th;
 
+use super::views_browser_style::*;
 use super::*;
 
 impl App {
     pub(super) fn view_sample_browser_panel(&self) -> Element<'_, Message> {
-        let tab_bar = {
-            let local_active = matches!(
-                self.state.browser.mode,
-                crate::state::SampleBrowserMode::Local
-            );
-            let dropbox_active = !local_active;
-            let tab_btn = |label: &'static str, active: bool, mode| {
-                button(text(label).size(11).color(if active {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                }))
-                .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(mode)))
-                .padding([4, 12])
-                .style(move |_theme: &Theme, status| {
-                    let bg = if active {
-                        Some(th::accent_dim().into())
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
-                        }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: if active { th::accent() } else { th::text_dim() },
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                })
-            };
-            row![
-                tab_btn(
-                    "Local",
-                    local_active,
-                    crate::state::SampleBrowserMode::Local
-                ),
-                tab_btn(
-                    "Dropbox",
-                    dropbox_active,
-                    crate::state::SampleBrowserMode::Dropbox,
-                ),
-            ]
-            .spacing(0)
+        let width = self
+            .state
+            .browser
+            .effective_dock_width(self.state.view.window_width);
+        let places_width = self
+            .state
+            .browser
+            .places_pane_width(self.state.view.window_width);
+
+        let close = button(icons::icon(icons::X).size(11).color(th::text_dim()))
+            .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
+            .padding([3, 6])
+            .style(browser_icon_button_style);
+
+        let title_row = row![
+            text("BROWSER").size(12).color(th::text()),
+            horizontal_space(),
+            close
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center);
+
+        let search = text_input("Search this location…", &self.state.browser.search)
+            .on_input(|value| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(value)))
+            .size(12)
+            .padding([7, 9])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
+                background: th::bg_dark().into(),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                icon: th::text_dim(),
+                placeholder: th::text_dim(),
+                value: th::text(),
+                selection: th::accent(),
+            });
+
+        let search_context: Element<'_, Message> = match self.state.browser.mode {
+            SampleBrowserMode::Local => {
+                let scope = button(
+                    row![
+                        text("SCOPE").size(9).color(th::text_muted()),
+                        text(self.state.browser.search_scope_label())
+                            .size(9)
+                            .color(th::text())
+                    ]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
+                .padding([3, 0])
+                .style(browser_utility_action_style);
+                let location = self
+                    .state
+                    .browser
+                    .current_folder
+                    .as_ref()
+                    .and_then(|folder| folder.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "All Roots".into());
+                row![
+                    scope,
+                    horizontal_space(),
+                    text(location)
+                        .size(9)
+                        .color(th::text_dim())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
+            SampleBrowserMode::Remote => {
+                let scope_label = match self.state.browser.search_scope {
+                    crate::state::BrowserSearchScope::SelectedFolder => "THIS FOLDER",
+                    crate::state::BrowserSearchScope::Root => "THIS CONNECTION",
+                    crate::state::BrowserSearchScope::Everywhere => "EVERYWHERE",
+                };
+                let location = self
+                    .state
+                    .browser
+                    .remote
+                    .current_path
+                    .rsplit('/')
+                    .find(|part| !part.is_empty())
+                    .unwrap_or("Alex's Dropbox");
+                row![
+                    button(
+                        row![
+                            text("SCOPE").size(9).color(th::text_muted()),
+                            text(scope_label).size(9).color(th::text())
+                        ]
+                        .spacing(5)
+                    )
+                    .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
+                    .padding([3, 0])
+                    .style(browser_utility_action_style),
+                    horizontal_space(),
+                    text(location)
+                        .size(9)
+                        .color(th::text_dim())
+                        .wrapping(iced::widget::text::Wrapping::None)
+                ]
+                .align_y(iced::Alignment::Center)
+                .into()
+            }
         };
 
         let body: Element<'_, Message> = match self.state.browser.mode {
-            crate::state::SampleBrowserMode::Local => self.view_local_sample_browser(),
-            crate::state::SampleBrowserMode::Dropbox => self.view_dropbox_browser(),
+            SampleBrowserMode::Local
+                if !self.state.browser.search.trim().is_empty()
+                    && self.state.browser.search_scope
+                        == crate::state::BrowserSearchScope::Everywhere =>
+            {
+                self.view_remote_browser()
+            }
+            SampleBrowserMode::Local => self.view_local_sample_browser(),
+            SampleBrowserMode::Remote => self.view_remote_browser(),
         };
 
+        let content: Element<'_, Message> = row![
+            container(self.view_browser_places())
+                .width(Length::Fixed(places_width))
+                .height(Length::Fill)
+                .style(browser_places_style),
+            body
+        ]
+        .height(Length::Fill)
+        .into();
+
         container(
-            column![tab_bar, body]
-                .spacing(4)
-                .padding([4, 0])
-                .height(Length::Fill),
+            column![
+                container(column![title_row, search, search_context].spacing(6))
+                    .padding([8, 10])
+                    .style(browser_header_style),
+                content,
+                self.view_browser_audition_footer()
+            ]
+            .height(Length::Fill),
         )
-        .width(Length::Fixed(320.0))
+        .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
@@ -93,678 +172,465 @@ impl App {
         .into()
     }
 
-    pub(super) fn view_local_sample_browser(&self) -> Element<'_, Message> {
-        let title = text("Sample Browser").size(14).color(th::accent());
-        let mut add_root_btn = button(text("Add Root").size(11).color(th::text()))
-            .padding([4, 10])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-        add_root_btn = add_root_btn.on_press(Message::AddSampleLibraryRoot);
-
-        let mut rescan_btn = button(text("Rescan").size(11).color(th::text()))
-            .padding([4, 10])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-        if !self.state.browser.roots.is_empty() && !self.state.browser.scan_in_progress {
-            rescan_btn = rescan_btn.on_press(Message::RescanSampleLibrary);
-        }
-
-        let header = row![title, horizontal_space(), add_root_btn, rescan_btn]
-            .spacing(6)
-            .align_y(iced::Alignment::Center);
-
-        if self.state.browser.roots.is_empty() {
-            let empty = column![
-                header,
-                text("Add a root folder to index your sample library.")
-                    .size(12)
-                    .color(th::text_dim())
-            ]
-            .spacing(10)
-            .padding(10);
-            return container(empty)
-                .width(Length::Fixed(320.0))
+    pub(super) fn view_browser_splitter(&self) -> Element<'_, Message> {
+        mouse_area(
+            container(text(""))
+                .width(Length::Fixed(7.0))
                 .height(Length::Fill)
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_surface().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
+                    background: Some(if self.state.browser.dock_resize_active {
+                        th::accent_dim().into()
+                    } else {
+                        th::divider().into()
+                    }),
                     ..Default::default()
-                })
-                .into();
+                }),
+        )
+        .on_press(Message::Browser(BrowserMsg::BeginDockResize))
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .into()
+    }
+
+    pub(super) fn view_local_sample_browser(&self) -> Element<'_, Message> {
+        if self.state.browser.roots.is_empty() {
+            let add = button(text("Add Local Root").size(11).color(th::text()))
+                .on_press(Message::AddSampleLibraryRoot)
+                .padding([6, 10])
+                .style(browser_transport_button_style);
+            return container(
+                column![
+                    text("RESULTS").size(9).color(th::text_muted()),
+                    text("Your Local Place is empty").size(13).color(th::text()),
+                    text("Choose a folder to begin indexing supported audio.")
+                        .size(11)
+                        .color(th::text_dim()),
+                    add
+                ]
+                .spacing(8)
+                .padding(12),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(browser_results_style)
+            .into();
         }
 
-        let root_label = |path: &PathBuf| {
-            path.file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.display().to_string())
-        };
+        let search_lower = self.state.browser.search.trim().to_lowercase();
+        let searching = !search_lower.is_empty();
+        let current_folder = self.state.browser.current_folder.as_deref();
 
-        let mut roots_col = column![].spacing(4);
-        let all_active = self.state.browser.root_filter.is_none();
-        let mut all_btn = button(text("All Roots").size(11).color(if all_active {
-            th::accent()
-        } else {
-            th::text_dim()
-        }))
-        .padding([4, 8])
-        .style(move |_theme: &Theme, status| {
-            let bg = if all_active {
-                Some(th::accent_dim().into())
-            } else {
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                }
-            };
-            button::Style {
-                background: bg,
-                text_color: if all_active {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                },
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
-        });
-        all_btn = all_btn.on_press(Message::Browser(BrowserMsg::SelectSampleBrowserRoot(None)));
-        roots_col = roots_col.push(all_btn);
-
-        for root in &self.state.browser.roots {
-            let active = self
-                .state
+        let mut root_results: Vec<&std::path::PathBuf> = if !searching && current_folder.is_none() {
+            self.state.browser.roots.iter().collect()
+        } else if searching && self.state.browser.search_scope_path().is_none() {
+            self.state
                 .browser
-                .root_filter
-                .as_ref()
-                .is_some_and(|selected| selected == root);
-            let mut filter_btn = button(text(root_label(root)).size(11).color(if active {
-                th::accent()
-            } else {
-                th::text()
-            }))
-            .padding([4, 8])
+                .roots
+                .iter()
+                .filter(|root| {
+                    root.display()
+                        .to_string()
+                        .to_lowercase()
+                        .contains(&search_lower)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        root_results.sort_by_key(|root| browser_root_name(root).to_lowercase());
+
+        // Filtering and sorting the whole catalog is memoized on the
+        // catalog revision + query + scope, so the per-frame cost here
+        // is bounded by the 200-row window below, not the library size.
+        let local_results = self.state.browser.local_results(&search_lower);
+
+        let selected_source = self.state.browser.selected_source.as_ref();
+        let wide_columns = self
+            .state
+            .browser
+            .results_use_wide_columns(self.state.view.window_width);
+        let table_header: Element<'_, Message> = if wide_columns {
+            container(
+                row![
+                    text("NAME")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fill),
+                    text("BPM")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(36.0)),
+                    text("LENGTH")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(50.0)),
+                    text("STATUS")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(48.0))
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 5.0,
+                right: 12.0,
+                bottom: 5.0,
+                left: 10.0,
+            })
             .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                let bg = if active {
-                    Some(th::accent_dim().into())
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => Some(th::bg_elevated().into()),
-                    }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: if active { th::accent() } else { th::text() },
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
+            .style(browser_table_header_style)
+            .into()
+        } else {
+            container(
+                row![
+                    text("NAME")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fill),
+                    text("STATUS")
+                        .size(9)
+                        .color(th::text_muted())
+                        .width(Length::Fixed(42.0))
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 5.0,
+                right: 12.0,
+                bottom: 5.0,
+                left: 10.0,
+            })
+            .width(Length::Fill)
+            .style(browser_table_header_style)
+            .into()
+        };
+        let total_results =
+            root_results.len() + local_results.folders.len() + local_results.entries.len();
+        let visible_results = self.state.browser.visible_result_count(total_results);
+        let mut remaining = visible_results;
+        let mut entries_col = column![].spacing(1);
+
+        let notice = self
+            .state
+            .browser
+            .current_local_root()
+            .and_then(|root| {
+                self.state
+                    .browser
+                    .root_catalog_message(root)
+                    .map(|message| (root, message))
+            })
+            .or_else(|| {
+                self.state.browser.roots.iter().find_map(|root| {
+                    self.state
+                        .browser
+                        .root_catalog_message(root)
+                        .map(|message| (root, message))
+                })
             });
-            filter_btn = filter_btn.on_press(Message::Browser(
-                BrowserMsg::SelectSampleBrowserRoot(Some(root.clone())),
-            ));
-
-            let remove_btn = button(icons::icon(icons::X).size(10).color(th::danger()))
-                .on_press(Message::Browser(BrowserMsg::RemoveSampleLibraryRoot(
-                    root.clone(),
-                )))
-                .padding([3, 6])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::danger(),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                });
-
-            roots_col = roots_col.push(
-                row![filter_btn, remove_btn]
-                    .spacing(4)
-                    .align_y(iced::Alignment::Center),
+        if let Some((root, message)) = &notice {
+            entries_col = entries_col.push(
+                container(
+                    text(format!("{} · {message}", browser_root_name(root)))
+                        .size(9)
+                        .color(
+                            if matches!(
+                                self.state.browser.root_catalog_label(root),
+                                "STALE" | "WATCH ERR" | "WARN"
+                            ) {
+                                th::danger()
+                            } else {
+                                th::text_dim()
+                            },
+                        )
+                        .wrapping(iced::widget::text::Wrapping::None),
+                )
+                .padding([6, 8]),
             );
         }
 
-        let search = text_input("Search samples...", &self.state.browser.search)
-            .on_input(|s| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(s)))
-            .size(12)
-            .width(Length::Fill);
-
-        let search_lower = self.state.browser.search.to_lowercase();
-        let mut filtered_entries: Vec<&SampleBrowserEntry> = self
-            .state
-            .browser
-            .entries
-            .iter()
-            .filter(|entry| {
+        for root in root_results.into_iter().take(remaining) {
+            entries_col = entries_col
+                .push(self.view_local_folder_result(
+                    browser_root_name(root),
+                    format!("LOCAL ROOT · {}", root.display()),
+                    self.state.browser.root_catalog_label(root).to_string(),
+                    root.clone(),
+                    wide_columns,
+                ))
+                .push(browser_row_divider());
+            remaining = remaining.saturating_sub(1);
+        }
+        for &index in local_results.folders.iter().take(remaining) {
+            let folder = &self.state.browser.folders[index];
+            entries_col = entries_col
+                .push(self.view_local_folder_result(
+                    folder.name.clone(),
+                    browser_folder_context(
+                        &folder.root_path,
+                        &folder.relative_path,
+                        "FOLDER",
+                        None,
+                    ),
+                    "FOLDER".into(),
+                    folder.path.clone(),
+                    wide_columns,
+                ))
+                .push(browser_row_divider());
+            remaining = remaining.saturating_sub(1);
+        }
+        for &index in local_results.entries.iter().take(remaining) {
+            let entry = &self.state.browser.entries[index];
+            let selected = selected_source.is_some_and(|source| &entry.source == source);
+            let cell_color = browser_result_cell_color(selected);
+            let metadata_detail = browser_entry_metadata(entry);
+            let bpm = if selected {
                 self.state
                     .browser
-                    .root_filter
-                    .as_ref()
-                    .is_none_or(|root| &entry.root_path == root)
-            })
-            .filter(|entry| search_lower.is_empty() || entry.search_text.contains(&search_lower))
-            .collect();
-        filtered_entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-
-        let selected_source = self.state.browser.selected_source.as_ref();
-        let selected_entry = self.selected_sample_browser_entry();
-        let selected_target = self.selected_browser_device_target();
-
-        let mut entries_col = column![].spacing(2);
-        for entry in filtered_entries.iter().take(400) {
-            let selected = selected_source.is_some_and(|source| &entry.source == source);
+                    .audition_bpm_confirmed
+                    .or(self.state.browser.audition_bpm_suggestion)
+                    .map(|bpm| format!("{bpm:.0}"))
+                    .unwrap_or_else(|| "—".into())
+            } else {
+                "—".into()
+            };
+            let length = entry
+                .duration_seconds
+                .map(format_browser_duration)
+                .unwrap_or_else(|| "—".into());
+            let source_detail = browser_folder_context(
+                &entry.root_path,
+                &entry.relative_path,
+                &metadata_detail,
+                entry.file_size,
+            );
+            let compact_detail = format!("BPM {bpm} · {length} · {source_detail}");
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
-            let entry_body = container(
-                column![
-                    text(entry.name.as_str()).size(12).color(if selected {
-                        th::accent()
-                    } else {
-                        th::text()
-                    }),
-                    text(entry.relative_path.display().to_string())
+            let name_cell = column![
+                text(entry.name.as_str())
+                    .size(12)
+                    .color(th::text())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(14.0))
+                    .wrapping(iced::widget::text::Wrapping::None),
+                text(if wide_columns {
+                    source_detail
+                } else {
+                    compact_detail
+                })
+                .size(9)
+                .color(cell_color)
+                .width(Length::Fill)
+                .height(Length::Fixed(11.0))
+                .wrapping(iced::widget::text::Wrapping::None)
+            ]
+            .spacing(2)
+            .width(Length::Fill);
+            let table_cells: Element<'_, Message> = if wide_columns {
+                row![
+                    name_cell,
+                    text(bpm)
                         .size(10)
-                        .color(th::text_dim())
+                        .color(cell_color)
+                        .width(Length::Fixed(36.0)),
+                    text(length)
+                        .size(10)
+                        .color(cell_color)
+                        .width(Length::Fixed(50.0)),
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(48.0))
                 ]
-                .spacing(2)
-                .width(Length::Fill),
-            )
-            .padding([6, 8])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(
-                    if selected {
-                        th::accent_dim()
-                    } else {
-                        th::bg_elevated()
-                    }
-                    .into(),
-                ),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                row![
+                    name_cell,
+                    text("LOCAL")
+                        .size(9)
+                        .color(cell_color)
+                        .width(Length::Fixed(42.0))
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center)
+                .into()
+            };
+            let entry_body = container(table_cells).padding([6, 8]).width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
-                .on_press(Message::Browser(BrowserMsg::StartDragSample {
-                    source: entry.source.clone(),
-                    label: entry.name.clone(),
-                }))
+                .on_press(Message::BeginPendingBrowserDrag(
+                    entry.source.clone(),
+                    entry.name.clone(),
+                ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let preview_btn = button(icons::icon(icons::VOLUME_2).size(12).color(th::text_dim()))
-                .on_press(Message::PreviewLocalEntry(entry.source.clone()))
-                .padding([6, 8])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => Some(th::bg_elevated().into()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::accent(),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
+            let selection_marker = container(text(""))
+                .width(Length::Fixed(2.0))
+                .height(Length::Fixed(43.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: selected.then(|| th::accent().into()),
+                    ..Default::default()
                 });
-            entries_col = entries_col.push(
-                row![entry_dragger, preview_btn]
-                    .spacing(4)
+            let flat_row = container(
+                row![selection_marker, entry_dragger]
+                    .spacing(0)
                     .align_y(iced::Alignment::Center),
-            );
+            )
+            .width(Length::Fill)
+            .style(move |_theme: &Theme| container::Style {
+                background: selected.then(|| th::accent_dim().into()),
+                ..Default::default()
+            });
+            entries_col = entries_col.push(flat_row).push(browser_row_divider());
         }
 
-        if filtered_entries.is_empty() {
+        if total_results == 0 && notice.is_none() {
             entries_col = entries_col.push(
                 container(
-                    text("No samples match the current filters")
-                        .size(11)
-                        .color(th::text_dim()),
+                    text(if searching {
+                        "No media or folders match this scope"
+                    } else {
+                        "This location has no child folders or supported media"
+                    })
+                    .size(11)
+                    .color(th::text_dim()),
                 )
                 .padding([8, 4]),
             );
         }
 
-        let count_label = text(format!(
-            "{} shown / {} indexed{}",
-            filtered_entries.len().min(400),
-            self.state.browser.entries.len(),
-            if self.state.browser.scan_in_progress {
-                " (scanning...)"
-            } else {
-                ""
-            }
-        ))
-        .size(10)
-        .color(th::text_dim());
-
-        let selected_text = selected_entry
-            .map(|entry| entry.relative_path.display().to_string())
-            .unwrap_or_else(|| "Select a sample".to_string());
-        let selected_hint = match selected_target {
-            Some(BrowserImportTarget::Sampler(track_id)) => self
-                .state
-                .find_track(track_id)
-                .map(|track| format!("Load to {}", track.name))
-                .unwrap_or_else(|| "Load to sampler".to_string()),
-            Some(BrowserImportTarget::DrumRackPad {
-                track_id,
-                pad_index,
-            }) => self
-                .state
-                .find_track(track_id)
-                .map(|track| format!("Load to {} pad {}", track.name, pad_index + 1))
-                .unwrap_or_else(|| "Load to drum rack".to_string()),
-            _ => "No sampler or drum rack selected".to_string(),
-        };
-
-        let mut add_clip_btn = button(text("Add Clip").size(11).color(th::text()))
-            .padding([6, 10])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-        if selected_entry.is_some() {
-            add_clip_btn = add_clip_btn.on_press(Message::ImportSelectedBrowserSampleToArrangement);
-        }
-
-        let mut load_device_btn = button(text("Load Device").size(11).color(th::text()))
-            .padding([6, 10])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => Some(th::bg_elevated().into()),
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-        if selected_entry.is_some() && selected_target.is_some() {
-            load_device_btn = load_device_btn.on_press(Message::LoadSelectedBrowserSampleToDevice);
-        }
-
-        let footer = column![
-            text(selected_text).size(11).color(th::text()),
-            text(selected_hint).size(10).color(th::text_dim()),
-            row![add_clip_btn, load_device_btn]
-                .spacing(6)
-                .align_y(iced::Alignment::Center)
-        ]
-        .spacing(6);
-
-        column![
-            header,
-            roots_col,
-            search,
-            count_label,
-            scrollable(entries_col).height(Length::Fill).direction(
-                scrollable::Direction::Vertical(scrollable::Scrollbar::default())
-            ),
-            footer
-        ]
-        .spacing(8)
-        .padding(10)
-        .height(Length::Fill)
-        .into()
-    }
-
-    pub(super) fn view_dropbox_browser(&self) -> Element<'_, Message> {
-        let title = text("Dropbox").size(14).color(th::accent());
-
-        if !self.state.browser.dropbox.connected {
-            let hint = if self.state.browser.dropbox.auth_in_progress {
-                "Waiting for browser authorisation..."
-            } else {
-                "Connect in Settings > Dropbox to browse your library."
-            };
-            return column![title, text(hint).size(12).color(th::text_dim())]
-                .spacing(10)
-                .padding(10)
-                .height(Length::Fill)
-                .into();
-        }
-
-        let account = self
-            .state
-            .browser
-            .dropbox
-            .account_email
-            .clone()
-            .unwrap_or_default();
-        let header = column![title, text(account).size(11).color(th::text_dim()),].spacing(2);
-
-        let mut rows: Vec<Element<'_, Message>> = Vec::new();
-        self.render_dropbox_tree(String::new(), 0, &mut rows);
-        if rows.is_empty() {
-            let msg = if self.state.browser.dropbox.listing_in_progress.contains("") {
-                "Listing your Dropbox..."
-            } else {
-                "Empty (or still fetching)."
-            };
-            rows.push(text(msg).size(11).color(th::text_dim()).into());
-        }
-        let mut entries_col = column![].spacing(2);
-        for row in rows {
-            entries_col = entries_col.push(row);
-        }
-
-        let selected_entry = self.selected_dropbox_entry();
-        let selected_label = selected_entry
-            .as_ref()
-            .map(|e| e.path_display.clone())
-            .unwrap_or_else(|| "Select a file".to_string());
-
-        // Preview is triggered by click-to-audition on the tree row itself;
-        // no dedicated button here.
-
-        let add_clip_btn: Element<'_, Message> = {
-            let mut btn = button(text("Add Clip").size(11).color(th::text()))
-                .padding([6, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => Some(th::bg_elevated().into()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text(),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                });
-            if let Some(entry) = selected_entry.as_ref().filter(|e| e.is_supported_audio()) {
-                btn = btn.on_press(Message::DropboxImportToArrangement(entry.clone()));
-            }
-            btn.into()
-        };
-
-        let load_device_btn: Element<'_, Message> = {
-            let mut btn = button(text("Load Device").size(11).color(th::text()))
-                .padding([6, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => Some(th::bg_elevated().into()),
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text(),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                });
-            if let (Some(entry), Some(_)) = (
-                selected_entry.as_ref().filter(|e| e.is_supported_audio()),
-                self.selected_browser_device_target(),
-            ) {
-                btn = btn.on_press(Message::DropboxImportToDevice(entry.clone()));
-            }
-            btn.into()
-        };
-
-        let error_line: Element<'_, Message> =
-            if let Some(err) = self.state.browser.dropbox.last_error.clone() {
-                text(err).size(10).color(th::danger()).into()
-            } else {
-                horizontal_space().width(Length::Shrink).into()
-            };
-
-        let footer = column![
-            text(selected_label).size(11).color(th::text()),
-            row![add_clip_btn, load_device_btn].spacing(6),
-            error_line,
-        ]
-        .spacing(6);
-
-        column![
-            header,
-            scrollable(entries_col).height(Length::Fill).direction(
-                scrollable::Direction::Vertical(scrollable::Scrollbar::default())
-            ),
-            footer,
-        ]
-        .spacing(8)
-        .padding(10)
-        .height(Length::Fill)
-        .into()
-    }
-
-    pub(super) fn render_dropbox_tree(
-        &self,
-        path: String,
-        depth: usize,
-        rows: &mut Vec<Element<'_, Message>>,
-    ) {
-        let Some(entries) = self.state.browser.dropbox.folders.get(&path) else {
-            return;
-        };
-        let mut sorted: Vec<&DropboxEntry> = entries.iter().collect();
-        sorted.sort_by(|a, b| {
-            (!a.is_folder, a.name.to_lowercase()).cmp(&(!b.is_folder, b.name.to_lowercase()))
-        });
-        for entry in sorted {
-            let expanded = self
-                .state
-                .browser
-                .dropbox
-                .expanded
-                .contains(&entry.path_lower);
-            let selected =
-                self.state.browser.dropbox.selected_path.as_deref() == Some(&entry.path_lower);
-
-            let prefix = if entry.is_folder {
-                if expanded {
-                    "v "
-                } else {
-                    "> "
-                }
-            } else if entry.is_supported_audio() {
-                "· "
-            } else {
-                "  "
-            };
-            let indent = "  ".repeat(depth);
-            let label = format!("{indent}{prefix}{}", entry.name);
-            let msg = if entry.is_folder {
-                if expanded {
-                    Message::Browser(BrowserMsg::DropboxCollapseFolder(entry.path_lower.clone()))
-                } else {
-                    Message::DropboxExpandFolder(entry.path_lower.clone())
-                }
-            } else {
-                Message::Browser(BrowserMsg::DropboxSelectEntry(entry.clone()))
-            };
-            if entry.is_supported_audio() {
-                // Audio rows use a container + mouse_area so press events
-                // reach us (iced Button captures ButtonPressed, which would
-                // hide the drag from mouse_area).
-                let text_color = if selected { th::accent() } else { th::text() };
-                let row_body = container(text(label).size(11).color(text_color))
-                    .padding([3, 6])
-                    .width(Length::Fill)
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(
-                            if selected {
-                                th::accent_dim()
-                            } else {
-                                th::bg_elevated()
-                            }
-                            .into(),
-                        ),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    });
-                let source = MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower.clone(),
-                    display_path: entry.path_display.clone(),
-                    rev: entry.rev.clone(),
-                };
-                let dragger: Element<'_, Message> = mouse_area(row_body)
-                    .on_press(Message::Browser(BrowserMsg::StartDragSample {
-                        source,
-                        label: entry.name.clone(),
-                    }))
-                    .on_release(msg)
-                    .into();
-                let speaker = button(icons::icon(icons::VOLUME_2).size(11).color(th::accent()))
-                    .on_press(Message::DropboxPreview(entry.clone()))
-                    .padding([3, 6])
-                    .style(|_theme: &Theme, status| {
-                        let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
-                        };
-                        button::Style {
-                            background: bg,
-                            text_color: th::accent(),
-                            border: iced::Border::default(),
-                            ..Default::default()
-                        }
-                    });
-                rows.push(
-                    row![dragger, speaker]
-                        .spacing(2)
-                        .align_y(iced::Alignment::Center)
-                        .into(),
-                );
-            } else {
-                // Folders + non-audio entries keep the button path since they
-                // don't participate in drag.
-                let btn = button(text(label).size(11).color(if selected {
-                    th::accent()
-                } else if entry.is_folder {
-                    th::text()
-                } else {
-                    th::text_dim()
-                }))
-                .on_press(msg)
-                .padding([3, 6])
+        if self.state.browser.has_more_results(total_results) {
+            let hidden = total_results.saturating_sub(visible_results);
+            entries_col = entries_col.push(browser_row_divider()).push(
+                button(
+                    text(format!(
+                        "SHOW {} MORE",
+                        hidden.min(crate::state::BROWSER_RESULTS_PAGE_SIZE)
+                    ))
+                    .size(9)
+                    .color(th::text_dim()),
+                )
+                .on_press(Message::Browser(BrowserMsg::ShowMoreLocalResults))
+                .padding([7, 8])
                 .width(Length::Fill)
-                .style(move |_theme: &Theme, status| {
-                    let bg = if selected {
-                        Some(th::accent_dim().into())
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => Some(th::bg_elevated().into()),
-                        }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: if selected { th::accent() } else { th::text() },
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                });
-                rows.push(btn.into());
-            }
-
-            if entry.is_folder && expanded {
-                self.render_dropbox_tree(entry.path_lower.clone(), depth + 1, rows);
-            }
+                .style(browser_utility_action_style),
+            );
         }
+
+        let count = if self.state.browser.scan_in_progress {
+            format!("INDEXING… · {}", self.state.browser.entries.len())
+        } else if self.state.browser.scan_error.is_some() {
+            "STALE".into()
+        } else if self.state.browser.scan_warnings.is_empty() {
+            format!("{visible_results} / {total_results}")
+        } else {
+            format!(
+                "{visible_results} / {total_results} · WARN {}",
+                self.state.browser.scan_warnings.len()
+            )
+        };
+
+        container(
+            column![
+                row![
+                    text("RESULTS").size(9).color(th::text_muted()),
+                    horizontal_space(),
+                    text(count).size(9).color(th::text_dim())
+                ]
+                .align_y(iced::Alignment::Center),
+                table_header,
+                scrollable(
+                    container(entries_col)
+                        .width(Length::Fill)
+                        .padding(iced::Padding {
+                            right: 12.0,
+                            ..Default::default()
+                        })
+                )
+                .id(super::media::browser_results_scroll_id(
+                    SampleBrowserMode::Local,
+                ))
+                .height(Length::Fill)
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::default()
+                ))
+            ]
+            .spacing(0)
+            .padding(8)
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(browser_results_style)
+        .into()
+    }
+
+    fn view_local_folder_result(
+        &self,
+        name: String,
+        context: String,
+        status: String,
+        destination: std::path::PathBuf,
+        wide_columns: bool,
+    ) -> Element<'_, Message> {
+        let name_cell = column![
+            text(format!("› {name}"))
+                .size(12)
+                .color(th::text())
+                .width(Length::Fill)
+                .height(Length::Fixed(14.0))
+                .wrapping(iced::widget::text::Wrapping::None),
+            text(context)
+                .size(9)
+                .color(th::text_dim())
+                .width(Length::Fill)
+                .height(Length::Fixed(11.0))
+                .wrapping(iced::widget::text::Wrapping::None)
+        ]
+        .spacing(2)
+        .width(Length::Fill);
+        let cells: Element<'_, Message> = if wide_columns {
+            row![
+                name_cell,
+                text("—")
+                    .size(10)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(36.0)),
+                text("—")
+                    .size(10)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(50.0)),
+                text(status)
+                    .size(9)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(48.0))
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            row![
+                name_cell,
+                text(status)
+                    .size(9)
+                    .color(th::text_dim())
+                    .width(Length::Fixed(42.0))
+            ]
+            .align_y(iced::Alignment::Center)
+            .into()
+        };
+
+        button(container(cells).padding([6, 8]).width(Length::Fill))
+            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
+                destination,
+            ))))
+            .padding(0)
+            .width(Length::Fill)
+            .style(browser_utility_action_style)
+            .into()
     }
 }

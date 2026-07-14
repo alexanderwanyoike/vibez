@@ -9,9 +9,12 @@ use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
+use vibez_project::project_format_v1::SaveObservation;
 use vibez_project::Project;
 
-use crate::state::{SampleBrowserEntry, SettingsTab};
+use crate::state::{
+    AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrumPadParam {
@@ -55,7 +58,18 @@ pub struct LoadedDrumRackPadData {
 #[derive(Debug, Clone)]
 pub struct SampleLibraryScanResult {
     pub entries: Vec<SampleBrowserEntry>,
+    pub folders: Vec<SampleBrowserFolder>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum LocalRootWatchEvent {
+    Changed(Vec<PathBuf>),
+    Watching(Vec<PathBuf>),
+    Failed {
+        roots: Vec<PathBuf>,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +87,15 @@ pub struct BounceOutcome {
 pub struct DropboxConnectOutcome {
     pub info: AccountInfo,
     pub tokens: DropboxTokens,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteMaterializedSample {
+    pub audio: Arc<DecodedAudio>,
+    pub name: String,
+    pub source: MediaSourceRef,
+    pub lease: vibez_dropbox::CacheLease,
+    pub metadata: vibez_dropbox::DerivedMetadata,
 }
 
 /// Successful background result from `quantize_audio_clip_async`.
@@ -127,6 +150,9 @@ pub enum BrowserImportTarget {
         track_id: TrackId,
         position_samples: u64,
     },
+    ArrangementNewTrackAt {
+        position_samples: u64,
+    },
     Sampler(TrackId),
     DrumRackPad {
         track_id: TrackId,
@@ -135,13 +161,32 @@ pub enum BrowserImportTarget {
 }
 
 #[derive(Debug, Clone)]
+pub struct PreparedBrowserImport {
+    pub treatment: AuditionImportInput,
+    pub audio: Arc<DecodedAudio>,
+    pub original_audio: Option<Arc<DecodedAudio>>,
+    pub name: String,
+    pub source: MediaSourceRef,
+}
+
+#[derive(Debug, Clone)]
 pub struct ProjectLoadResult {
     pub path: PathBuf,
     pub project: Project,
     pub clips: Vec<LoadedClipData>,
+    /// Clips whose media could not be hydrated this session. They stay out
+    /// of the arrangement but must survive the next save for relinking.
+    pub unresolved_clips: Vec<ClipInfo>,
     pub sampler_samples: Vec<LoadedSamplerData>,
     pub drum_rack_pad_samples: Vec<LoadedDrumRackPadData>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectSaveResult {
+    pub path: PathBuf,
+    pub project: Project,
+    pub observation: Option<SaveObservation>,
 }
 
 #[derive(Debug, Clone)]
@@ -222,7 +267,7 @@ pub enum Message {
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
-    ProjectSaved(Result<PathBuf, String>),
+    ProjectSaved(Box<Result<ProjectSaveResult, String>>),
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
@@ -248,15 +293,39 @@ pub enum Message {
     AddSampleLibraryRoot,
     SampleLibraryRootSelected(Option<PathBuf>),
     RescanSampleLibrary,
-    /// Click in the Local sample browser: select only, no preview.
+    /// Select a Local source; starts RAW Audition when selection-follow is on.
     ClickLocalBrowserEntry(MediaSourceRef),
-    /// Speaker-icon click on a Local browser row: audition.
+    /// Mouse-down creates a Pending Drag at the globally tracked cursor.
+    BeginPendingBrowserDrag(MediaSourceRef, String),
+    /// Explicit Play in the persistent Audition footer.
     PreviewLocalEntry(MediaSourceRef),
-    LocalSamplePreviewReady(Result<Arc<DecodedAudio>, String>),
+    StopBrowserPreview,
+    ToggleAuditionEnabled,
+    SetAuditionGain(f32),
+    SetAuditionMode(AuditionMode),
+    SetAuditionSync(vibez_engine::commands::AuditionSync),
+    ToggleAuditionLoop,
+    AuditionBpmEditChanged(String),
+    ConfirmAuditionBpm,
+    EscapePressed,
+    /// The `u64` is the audition request generation minted at spawn
+    /// time; stale completions (stopped or superseded requests) are
+    /// dropped instead of starting playback.
+    LocalSamplePreviewReady(MediaSourceRef, u64, Result<Arc<DecodedAudio>, String>),
+    BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
+    BrowserBpmDetected(MediaSourceRef, Option<(f64, f32)>),
+    BrowserAuditionWarpReady {
+        source: MediaSourceRef,
+        generation: u64,
+        source_bpm: f64,
+        project_bpm: f64,
+        result: Result<Arc<DecodedAudio>, String>,
+    },
     DropSampleOnArrangement {
         track_id: TrackId,
         position_samples: u64,
     },
+    DropSampleOnEmptyArrangement,
     DropSampleOnDrumPad {
         track_id: TrackId,
         pad_index: usize,
@@ -265,13 +334,23 @@ pub enum Message {
         track_id: TrackId,
     },
     ImportSelectedBrowserSampleToArrangement,
+    SelectAdjacentBrowserResult(i8),
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
         BrowserImportTarget,
+        AuditionImportInput,
         Arc<DecodedAudio>,
         String,
         MediaSourceRef,
     ),
+    BrowserImportPrepared {
+        target: BrowserImportTarget,
+        /// Import generation at spawn time; a New Project or cancelled
+        /// import bumps the app counter so the prepared clip is dropped
+        /// instead of landing in a reset project.
+        generation: u64,
+        payload: PreparedBrowserImport,
+    },
     BrowserSampleDecodeError(String),
 
     // Settings
@@ -376,13 +455,41 @@ pub enum Message {
     ConnectDropbox,
     DropboxConnected(Result<DropboxConnectOutcome, String>),
     DisconnectDropbox,
-    DropboxExpandFolder(String),
-    DropboxFolderListed {
-        path: String,
-        result: Result<Vec<DropboxEntry>, String>,
+    RefreshRemoteConnection,
+    RemoteCatalogPageFetched {
+        generation: u64,
+        completed_pages: usize,
+        result:
+            Result<crate::remote_provider::RemotePage, crate::remote_provider::RemoteProviderError>,
+    },
+    RemoteCatalogSaved {
+        generation: u64,
+        /// `Some` continues pagination from this checkpoint after a
+        /// successful progress save.
+        next_checkpoint: Option<String>,
+        result: Result<(), String>,
+    },
+    SetMediaCacheBudgetGiB(f32),
+    ToggleMediaCacheAutomaticEviction,
+    ClearMediaCache,
+    MediaCacheMaintenanceComplete(Result<vibez_dropbox::CacheUsage, String>),
+    MediaCacheCleared(Result<(vibez_dropbox::CacheClearReport, vibez_dropbox::CacheUsage), String>),
+    ClickRemoteBrowserEntry(crate::remote_provider::RemoteCatalogEntry),
+    RemoteAuditionReady {
+        request_id: u64,
+        /// Audition request generation minted at spawn time (see
+        /// [`Message::LocalSamplePreviewReady`]).
+        generation: u64,
+        source: MediaSourceRef,
+        result: Result<RemoteMaterializedSample, String>,
+    },
+    RemoteImportReady {
+        request_id: u64,
+        target: BrowserImportTarget,
+        treatment: AuditionImportInput,
+        result: Result<(Arc<DecodedAudio>, String, MediaSourceRef), String>,
     },
     DropboxPreview(DropboxEntry),
-    DropboxPreviewReady(Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),
     DropboxImportToDevice(DropboxEntry),
 }
