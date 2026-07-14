@@ -71,7 +71,9 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     let mut document = representative_document();
     let (mut container, full_save) =
         ProjectContainer::create_from_staged(&container_path, &mut document, &staged)?;
-    assert!(!local_stage.exists() && !remote_stage.exists());
+    // Staging copies are shared with other potential referents, so commit
+    // must leave them in place.
+    assert!(local_stage.exists() && remote_stage.exists());
     assert_eq!(container.read_media("local-break")?, local_bytes);
     assert_eq!(container.read_media("remote-vocal")?, remote_bytes);
     let document_json = serde_json::to_vec(&document)?;
