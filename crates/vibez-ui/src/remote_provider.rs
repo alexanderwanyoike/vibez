@@ -83,6 +83,9 @@ pub struct RemotePage {
 pub enum RemoteProviderErrorKind {
     Authentication,
     Unavailable,
+    /// The provider invalidated our delta checkpoint (Dropbox HTTP 409
+    /// `reset`). The stored cursor is dead; recovery is a full re-listing.
+    CheckpointExpired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +169,11 @@ fn remote_error_from_dropbox(error: DropboxError) -> RemoteProviderError {
             RemoteProviderErrorKind::Authentication
         }
         DropboxError::Api { status: 401, .. } => RemoteProviderErrorKind::Authentication,
+        // `list_folder/continue` answers 409 with a `reset` tag when the
+        // cursor expired; other 409 bodies (e.g. path errors) stay generic.
+        DropboxError::Api { status: 409, body } if body.contains("reset") => {
+            RemoteProviderErrorKind::CheckpointExpired
+        }
         _ => RemoteProviderErrorKind::Unavailable,
     };
     RemoteProviderError {
@@ -341,7 +349,14 @@ impl RemoteCatalogStore {
             .ok_or("remote catalog path has no parent")?;
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("could not create remote catalog folder: {error}"))?;
-        let temporary = self.path.with_extension("json.partial");
+        // Unique per writer so overlapping saves (e.g. a progress save racing
+        // a metadata save) cannot rename each other's half-written temp file.
+        static SAVE_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let temporary = self.path.with_extension(format!(
+            "json.{}-{}.partial",
+            std::process::id(),
+            SAVE_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         let bytes = serde_json::to_vec_pretty(snapshot)
             .map_err(|error| format!("could not encode remote catalog: {error}"))?;
         std::fs::write(&temporary, bytes)
@@ -511,6 +526,24 @@ mod tests {
         });
         assert_eq!(error.kind, RemoteProviderErrorKind::Authentication);
         assert!(error.message.contains("401"));
+    }
+
+    #[test]
+    fn an_expired_delta_cursor_is_distinguished_from_ordinary_unavailability() {
+        let reset = remote_error_from_dropbox(DropboxError::Api {
+            status: 409,
+            body: r#"{"error_summary": "reset/...", "error": {".tag": "reset"}}"#.into(),
+        });
+        assert_eq!(reset.kind, RemoteProviderErrorKind::CheckpointExpired);
+
+        let unrelated_conflict = remote_error_from_dropbox(DropboxError::Api {
+            status: 409,
+            body: r#"{"error_summary": "path/not_found/...", "error": {".tag": "path"}}"#.into(),
+        });
+        assert_eq!(
+            unrelated_conflict.kind,
+            RemoteProviderErrorKind::Unavailable
+        );
     }
 
     #[test]

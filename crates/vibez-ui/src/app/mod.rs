@@ -63,8 +63,16 @@ struct App {
     remote_import_request_id: u64,
     remote_materialization_request_id: u64,
     remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
-    remote_import_in_flight: bool,
+    /// Request id of the active Remote import, if any. Completions for any
+    /// other generation must not clear it or release the queued audition.
+    remote_import_in_flight: Option<u64>,
     pending_remote_audition: Option<DropboxEntry>,
+    /// Bumped on every refresh start and on disconnect, so catalog pages
+    /// fetched for a previous connection are dropped instead of reconciled.
+    remote_catalog_generation: u64,
+    /// Catalog changes accumulated since the last reconcile flush; applied in
+    /// batches so each page does not re-sort the whole catalog in update().
+    remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
@@ -196,6 +204,7 @@ impl App {
             ..Default::default()
         };
         remote_ui_state.rebuild_catalog_children();
+        dropbox_io::seed_remote_availability(&dropbox_cache, &mut remote_ui_state);
 
         let mut state = AppState {
             transport: crate::state::TransportState {
@@ -278,8 +287,10 @@ impl App {
             remote_import_request_id: 0,
             remote_materialization_request_id: 0,
             remote_audition_cache_lease: None,
-            remote_import_in_flight: false,
+            remote_import_in_flight: None,
             pending_remote_audition: None,
+            remote_catalog_generation: 0,
+            remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),
         };
@@ -693,6 +704,22 @@ async fn connect_dropbox_async(
     Ok((info, tokens))
 }
 
+/// Commit downloaded bytes to the Media Cache on a blocking thread; the
+/// write can be multi-MB and must not stall the async executor.
+async fn write_cache_blocking(
+    cache: &DropboxCache,
+    entry: &DropboxEntry,
+    bytes: Vec<u8>,
+) -> Result<PathBuf, String> {
+    let cache = cache.clone();
+    let path_lower = entry.path_lower.clone();
+    let revision = entry.rev.clone();
+    tokio::task::spawn_blocking(move || cache.write(&path_lower, revision.as_deref(), &bytes))
+        .await
+        .map_err(|error| format!("Media Cache write task failed: {error}"))?
+        .map_err(|error| format!("Media Cache write failed: {error}"))
+}
+
 async fn fetch_dropbox_sample_async(
     client: Option<Arc<DropboxClient>>,
     cache: DropboxCache,
@@ -718,9 +745,7 @@ async fn fetch_dropbox_sample_async(
             let bytes = client.download(&entry.path_lower).await.map_err(|error| {
                 format!("Remote materialization failed for {}: {error}", entry.name)
             })?;
-            cache
-                .write(&entry.path_lower, entry.rev.as_deref(), &bytes)
-                .map_err(|error| format!("Media Cache write failed: {error}"))?
+            write_cache_blocking(&cache, &entry, bytes).await?
         }
     };
     let decode_path = local.clone();
@@ -778,9 +803,7 @@ async fn materialize_remote_sample_async(
             let bytes = client.download(&entry.path_lower).await.map_err(|error| {
                 format!("Remote materialization failed for {}: {error}", entry.name)
             })?;
-            cache
-                .write(&entry.path_lower, entry.rev.as_deref(), &bytes)
-                .map_err(|error| format!("Media Cache write failed: {error}"))?
+            write_cache_blocking(&cache, &entry, bytes).await?
         }
     };
 

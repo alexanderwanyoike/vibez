@@ -446,13 +446,23 @@ pub enum Message {
     DisconnectDropbox,
     RefreshRemoteConnection,
     RemoteCatalogPageFetched {
+        generation: u64,
         completed_pages: usize,
         result:
             Result<crate::remote_provider::RemotePage, crate::remote_provider::RemoteProviderError>,
     },
+    RemoteCatalogSaved {
+        generation: u64,
+        /// `Some` continues pagination from this checkpoint after a
+        /// successful progress save.
+        next_checkpoint: Option<String>,
+        result: Result<(), String>,
+    },
     SetMediaCacheBudgetGiB(f32),
     ToggleMediaCacheAutomaticEviction,
     ClearMediaCache,
+    MediaCacheMaintenanceComplete(Result<vibez_dropbox::CacheUsage, String>),
+    MediaCacheCleared(Result<(vibez_dropbox::CacheClearReport, vibez_dropbox::CacheUsage), String>),
     ClickRemoteBrowserEntry(crate::remote_provider::RemoteCatalogEntry),
     RemoteAuditionReady {
         request_id: u64,

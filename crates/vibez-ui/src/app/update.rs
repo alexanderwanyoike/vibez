@@ -636,29 +636,34 @@ impl App {
                         self.remote_materialization_request_id.saturating_add(1);
                 }
                 self.remote_audition_cache_lease = None;
-                let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
                 self.state.browser.remote.preview_in_progress = false;
                 self.stop_browser_audition();
                 self.state.status_text = "Audition stopped".to_string();
+                // Re-enforce the cache budget off the update thread now that
+                // the audition lease is released.
+                return self.media_cache_maintenance_task();
             }
             Message::ToggleAuditionEnabled => {
                 let enabled = self.state.browser.toggle_audition_enabled();
-                if !enabled {
+                let maintenance = if !enabled {
                     if let Some(handle) = self.remote_materialization_abort.take() {
                         handle.abort();
                         self.remote_materialization_request_id =
                             self.remote_materialization_request_id.saturating_add(1);
                     }
                     self.remote_audition_cache_lease = None;
-                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
                     self.stop_browser_audition();
-                }
+                    self.media_cache_maintenance_task()
+                } else {
+                    Task::none()
+                };
                 self.persist_ui_settings();
                 self.state.status_text = if enabled {
                     "Selection Audition enabled".into()
                 } else {
                     "Selection Audition disabled; explicit Play remains available".into()
                 };
+                return maintenance;
             }
             Message::SetAuditionGain(gain) => {
                 self.state.browser.set_audition_gain(gain);
@@ -745,18 +750,19 @@ impl App {
                 {
                     self.stop_browser_audition();
                     self.state.status_text = "Audition stopped".into();
-                } else if self.remote_import_in_flight {
+                } else if self.remote_import_active() {
                     if let Some(handle) = self.remote_import_abort.take() {
                         handle.abort();
                     }
                     self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-                    self.remote_import_in_flight = false;
-                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+                    self.remote_import_in_flight = None;
                     self.state.status_text =
                         "Remote import cancelled; no project media added".into();
+                    let maintenance = self.media_cache_maintenance_task();
                     if let Some(entry) = self.pending_remote_audition.take() {
-                        return self.start_remote_audition(entry, true);
+                        return Task::batch([maintenance, self.start_remote_audition(entry, true)]);
                     }
+                    return maintenance;
                 } else if self.state.browser.drag_source.is_some()
                     || self.state.browser.pending_drag.is_some()
                 {
@@ -904,23 +910,24 @@ impl App {
                 return self.handle_load_selected_browser_sample_to_device();
             }
             Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
-                let was_remote_import = matches!(
+                // The active import's own completion has already cleared
+                // `remote_import_in_flight` (RemoteImportReady). A remote
+                // source decoded while another import is still running (e.g.
+                // a dropped staged copy) must not run its cleanup or release
+                // the queued audition.
+                let remote_import_finished = matches!(
                     &source,
                     MediaSourceRef::DropboxFile { .. }
                         | MediaSourceRef::StagedRemoteProjectMedia { .. }
-                );
-                if was_remote_import {
-                    let usage = self
-                        .dropbox_cache
-                        .set_policy(self.dropbox_cache.policy())
-                        .unwrap_or_default();
-                    self.state.browser.remote.cache_usage_bytes = usage.bytes;
-                    self.state.browser.remote.cache_entries = usage.entries;
-                    self.remote_import_in_flight = false;
-                }
+                ) && !self.remote_import_active();
+                let maintenance = if remote_import_finished {
+                    self.media_cache_maintenance_task()
+                } else {
+                    Task::none()
+                };
                 let import =
                     self.prepare_browser_sample_import(target, treatment, audio, name, source);
-                let pending_audition = if was_remote_import {
+                let pending_audition = if remote_import_finished {
                     self.pending_remote_audition
                         .take()
                         .map(|entry| self.start_remote_audition(entry, true))
@@ -928,7 +935,7 @@ impl App {
                 } else {
                     Task::none()
                 };
-                return Task::batch([import, pending_audition]);
+                return Task::batch([import, pending_audition, maintenance]);
             }
             Message::RemoteImportReady {
                 request_id,
@@ -951,11 +958,15 @@ impl App {
                     return Task::none();
                 }
                 self.remote_import_abort = None;
+                self.remote_import_in_flight = None;
                 return match result {
                     Ok((audio, name, source)) => self.update(Message::BrowserSampleDecoded(
                         target, treatment, audio, name, source,
                     )),
-                    Err(error) => self.update(Message::BrowserSampleDecodeError(error)),
+                    Err(error) => Task::batch([
+                        self.media_cache_maintenance_task(),
+                        self.update(Message::BrowserSampleDecodeError(error)),
+                    ]),
                 };
             }
             Message::BrowserImportPrepared { target, payload } => {
@@ -979,10 +990,10 @@ impl App {
             }
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser import error: {err}");
-                if self.remote_import_in_flight {
-                    self.remote_import_abort = None;
-                    self.remote_import_in_flight = false;
-                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+                // Release the queued audition only when no import is active:
+                // a local decode failure must not preempt a Remote import
+                // that is still downloading.
+                if !self.remote_import_active() {
                     if let Some(entry) = self.pending_remote_audition.take() {
                         return self.start_remote_audition(entry, true);
                     }
@@ -1439,6 +1450,11 @@ impl App {
             }
             Message::DisconnectDropbox => {
                 self.dropbox_client = None;
+                // Invalidate any in-flight refresh so pages fetched for this
+                // (possibly different) account cannot reconcile after a
+                // reconnect.
+                self.remote_catalog_generation = self.remote_catalog_generation.wrapping_add(1);
+                self.remote_catalog_pending.clear();
                 self.dropbox_settings.clear_tokens();
                 let _ = self.dropbox_settings.save();
                 self.state.browser.remote.connected = false;
@@ -1456,137 +1472,209 @@ impl App {
                 return self.handle_remote_catalog_refresh();
             }
             Message::RemoteCatalogPageFetched {
+                generation,
                 completed_pages,
                 result,
-            } => match result {
-                Ok(page) => {
-                    let pages = completed_pages.saturating_add(1);
-                    let has_more = page.has_more;
-                    let next_checkpoint = page.checkpoint.clone();
-                    crate::remote_provider::reconcile_remote_catalog(
-                        &mut self.state.browser.remote.catalog,
-                        &crate::remote_provider::RemoteRefreshResult {
-                            pages: 1,
-                            changes: page.changes,
-                            checkpoint: (!has_more).then_some(page.checkpoint),
-                            error: None,
-                        },
-                    );
-                    self.state.browser.remote.rebuild_catalog_children();
-                    self.state.browser.remote.refresh_pages = pages;
-                    self.state.browser.remote.refresh_items =
-                        self.state.browser.remote.catalog.entries.len();
-                    if !has_more
-                        || pages % super::dropbox_io::REMOTE_CATALOG_SAVE_PAGE_INTERVAL == 0
-                    {
-                        if let Err(error) =
-                            crate::remote_provider::RemoteCatalogStore::for_dropbox()
-                                .save(&self.state.browser.remote.catalog)
+            } => {
+                if generation != self.remote_catalog_generation {
+                    return Task::none();
+                }
+                match result {
+                    Ok(page) => {
+                        let pages = completed_pages.saturating_add(1);
+                        let has_more = page.has_more;
+                        let next_checkpoint = page.checkpoint.clone();
+                        self.remote_catalog_pending.extend(page.changes);
+                        self.state.browser.remote.refresh_pages = pages;
+                        // Reconciling re-sorts the catalog and rebuilds the
+                        // child index, so batch it to save intervals and the
+                        // final page instead of every page.
+                        let save_due = !has_more
+                            || pages % super::dropbox_io::REMOTE_CATALOG_SAVE_PAGE_INTERVAL == 0;
+                        if save_due {
+                            self.flush_remote_catalog_pages(
+                                pages,
+                                (!has_more).then_some(page.checkpoint),
+                            );
+                        }
+                        if has_more {
+                            self.state.status_text = format!(
+                                "Remote catalog: {} items available · fetching page {}…",
+                                self.state.browser.remote.refresh_items,
+                                pages.saturating_add(1)
+                            );
+                            if self.dropbox_client.is_none() {
+                                self.state.browser.remote.catalog_state =
+                                    crate::state::RemoteCatalogState::AuthenticationRequired {
+                                        error:
+                                            "Disconnected during refresh; showing fetched metadata"
+                                                .into(),
+                                    };
+                                return Task::none();
+                            }
+                            if save_due {
+                                // The next page is chained behind the save so
+                                // a persistence failure still stops the
+                                // refresh and only one save runs at a time.
+                                return self.remote_catalog_persist_task(Some(next_checkpoint));
+                            }
+                            if let Some(client) = self.dropbox_client.clone() {
+                                return super::dropbox_io::remote_catalog_page_task(
+                                    client,
+                                    Some(next_checkpoint),
+                                    pages,
+                                    generation,
+                                );
+                            }
+                        } else {
+                            self.state.browser.remote.catalog_state =
+                                crate::state::RemoteCatalogState::Ready;
+                            self.state.status_text = format!(
+                                "Remote catalog refreshed: {} items across {pages} page(s)",
+                                self.state.browser.remote.refresh_items
+                            );
+                            return self.remote_catalog_persist_task(None);
+                        }
+                    }
+                    Err(error) => {
+                        // Keep the pages that did arrive: reconcile them now
+                        // and persist below so a mid-refresh failure cannot
+                        // silently drop reconciled progress.
+                        let flushed = self.flush_remote_catalog_pages(completed_pages, None);
+                        if error.kind
+                            == crate::remote_provider::RemoteProviderErrorKind::CheckpointExpired
                         {
+                            // The provider invalidated our delta cursor; keep
+                            // the browsable catalog but restart the refresh
+                            // as a full listing from scratch.
+                            self.state.browser.remote.catalog.checkpoint = None;
+                            if let Some(client) = self.dropbox_client.clone() {
+                                self.state.browser.remote.refresh_pages = 0;
+                                self.state.status_text = "Remote checkpoint expired; rebuilding \
+                                    the catalog from a full listing…"
+                                    .into();
+                                return Task::batch([
+                                    self.remote_catalog_persist_task(None),
+                                    super::dropbox_io::remote_catalog_page_task(
+                                        client, None, 0, generation,
+                                    ),
+                                ]);
+                            }
+                        }
+                        self.state.browser.remote.catalog_state = if error.kind
+                            == crate::remote_provider::RemoteProviderErrorKind::Authentication
+                        {
+                            crate::state::RemoteCatalogState::AuthenticationRequired {
+                                error: error.message.clone(),
+                            }
+                        } else if completed_pages > 0 {
+                            crate::state::RemoteCatalogState::Partial {
+                                pages: completed_pages,
+                                error: error.message.clone(),
+                            }
+                        } else {
+                            crate::state::RemoteCatalogState::Stale {
+                                error: error.message.clone(),
+                            }
+                        };
+                        self.state.status_text = format!(
+                            "Remote catalog kept {} available items after refresh error: {}",
+                            self.state.browser.remote.catalog.entries.len(),
+                            error.message
+                        );
+                        if flushed {
+                            return self.remote_catalog_persist_task(None);
+                        }
+                    }
+                }
+            }
+            Message::RemoteCatalogSaved {
+                generation,
+                next_checkpoint,
+                result,
+            } => {
+                if generation != self.remote_catalog_generation {
+                    return Task::none();
+                }
+                match result {
+                    Ok(()) => {
+                        if let Some(checkpoint) = next_checkpoint {
+                            if let Some(client) = self.dropbox_client.clone() {
+                                return super::dropbox_io::remote_catalog_page_task(
+                                    client,
+                                    Some(checkpoint),
+                                    self.state.browser.remote.refresh_pages,
+                                    generation,
+                                );
+                            }
+                            self.state.browser.remote.catalog_state =
+                                crate::state::RemoteCatalogState::AuthenticationRequired {
+                                    error: "Disconnected during refresh; showing fetched metadata"
+                                        .into(),
+                                };
+                        }
+                    }
+                    Err(error) => {
+                        if !matches!(
+                            self.state.browser.remote.catalog_state,
+                            crate::state::RemoteCatalogState::AuthenticationRequired { .. }
+                        ) {
                             self.state.browser.remote.catalog_state =
                                 crate::state::RemoteCatalogState::Stale {
                                     error: error.clone(),
                                 };
-                            self.state.status_text =
-                                format!("Remote catalog save failed after page {pages}: {error}");
-                            return Task::none();
                         }
-                    }
-                    if has_more {
-                        self.state.status_text = format!(
-                            "Remote catalog: {} items available · fetching page {}…",
-                            self.state.browser.remote.refresh_items,
-                            pages.saturating_add(1)
-                        );
-                        if let Some(client) = self.dropbox_client.clone() {
-                            return super::dropbox_io::remote_catalog_page_task(
-                                client,
-                                Some(next_checkpoint),
-                                pages,
-                            );
-                        }
-                        self.state.browser.remote.catalog_state =
-                            crate::state::RemoteCatalogState::AuthenticationRequired {
-                                error: "Disconnected during refresh; showing fetched metadata"
-                                    .into(),
-                            };
-                    } else {
-                        self.state.browser.remote.catalog_state =
-                            crate::state::RemoteCatalogState::Ready;
-                        self.state.status_text = format!(
-                            "Remote catalog refreshed: {} items across {pages} page(s)",
-                            self.state.browser.remote.refresh_items
-                        );
+                        self.state.status_text = format!("Remote catalog save failed: {error}");
                     }
                 }
-                Err(error) => {
-                    self.state.browser.remote.catalog_state = if error.kind
-                        == crate::remote_provider::RemoteProviderErrorKind::Authentication
-                    {
-                        crate::state::RemoteCatalogState::AuthenticationRequired {
-                            error: error.message.clone(),
-                        }
-                    } else if completed_pages > 0 {
-                        crate::state::RemoteCatalogState::Partial {
-                            pages: completed_pages,
-                            error: error.message.clone(),
-                        }
-                    } else {
-                        crate::state::RemoteCatalogState::Stale {
-                            error: error.message.clone(),
-                        }
-                    };
-                    self.state.status_text = format!(
-                        "Remote catalog kept {} available items after refresh error: {}",
-                        self.state.browser.remote.catalog.entries.len(),
-                        error.message
-                    );
-                }
-            },
+            }
             Message::SetMediaCacheBudgetGiB(gib) => {
                 let gib = gib.clamp(1.0, 500.0);
                 let bytes = (gib as f64 * 1024.0 * 1024.0 * 1024.0) as u64;
                 self.state.browser.remote.cache_budget_bytes = bytes;
-                match self
-                    .dropbox_cache
-                    .set_policy(vibez_dropbox::MediaCachePolicy {
-                        budget_bytes: bytes,
-                        automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
-                    }) {
-                    Ok(usage) => {
-                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
-                        self.state.browser.remote.cache_entries = usage.entries;
-                        self.state.browser.remote.cache_error = None;
-                    }
-                    Err(error) => {
-                        self.state.browser.remote.cache_error = Some(error.to_string());
-                    }
-                }
                 self.persist_ui_settings();
+                return self.media_cache_policy_task(vibez_dropbox::MediaCachePolicy {
+                    budget_bytes: bytes,
+                    automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
+                });
             }
             Message::ToggleMediaCacheAutomaticEviction => {
                 let enabled = !self.state.browser.remote.cache_automatic_eviction;
                 self.state.browser.remote.cache_automatic_eviction = enabled;
-                match self
-                    .dropbox_cache
-                    .set_policy(vibez_dropbox::MediaCachePolicy {
-                        budget_bytes: self.state.browser.remote.cache_budget_bytes,
-                        automatic_eviction: enabled,
-                    }) {
-                    Ok(usage) => {
-                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
-                        self.state.browser.remote.cache_entries = usage.entries;
-                        self.state.browser.remote.cache_error = None;
-                    }
-                    Err(error) => {
-                        self.state.browser.remote.cache_error = Some(error.to_string());
-                    }
-                }
                 self.persist_ui_settings();
+                return self.media_cache_policy_task(vibez_dropbox::MediaCachePolicy {
+                    budget_bytes: self.state.browser.remote.cache_budget_bytes,
+                    automatic_eviction: enabled,
+                });
             }
-            Message::ClearMediaCache => match self.dropbox_cache.clear() {
-                Ok(report) => {
-                    let usage = self.dropbox_cache.usage().unwrap_or_default();
+            Message::MediaCacheMaintenanceComplete(result) => match result {
+                Ok(usage) => {
+                    self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                    self.state.browser.remote.cache_entries = usage.entries;
+                    self.state.browser.remote.cache_error = None;
+                    self.reseed_remote_availability();
+                }
+                Err(error) => {
+                    self.state.browser.remote.cache_error = Some(error);
+                }
+            },
+            Message::ClearMediaCache => {
+                let cache = self.dropbox_cache.clone();
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let report = cache.clear().map_err(|error| error.to_string())?;
+                            let usage = cache.usage().map_err(|error| error.to_string())?;
+                            Ok((report, usage))
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?
+                    },
+                    Message::MediaCacheCleared,
+                );
+            }
+            Message::MediaCacheCleared(result) => match result {
+                Ok((report, usage)) => {
                     self.state.browser.remote.cache_usage_bytes = usage.bytes;
                     self.state.browser.remote.cache_entries = usage.entries;
                     self.state.browser.remote.cache_error = None;
@@ -1594,9 +1682,10 @@ impl App {
                         "Cleared {} Media Cache item(s); {} active item(s) protected",
                         report.removed_entries, report.protected_entries
                     );
+                    self.reseed_remote_availability();
                 }
                 Err(error) => {
-                    self.state.browser.remote.cache_error = Some(error.to_string());
+                    self.state.browser.remote.cache_error = Some(error.clone());
                     self.state.status_text = format!("Media Cache clear failed: {error}");
                 }
             },
@@ -1661,34 +1750,30 @@ impl App {
                         {
                             entry.derived_metadata = Some(materialized.metadata.clone());
                         }
-                        if let Err(error) =
-                            crate::remote_provider::RemoteCatalogStore::for_dropbox()
-                                .save(&self.state.browser.remote.catalog)
-                        {
-                            self.state.browser.remote.cache_error = Some(error);
-                        }
-                        let usage = self.dropbox_cache.usage().unwrap_or_default();
-                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
-                        self.state.browser.remote.cache_entries = usage.entries;
+                        let persist = self.remote_catalog_persist_task(None);
+                        let maintenance = self.media_cache_maintenance_task();
                         self.remote_audition_cache_lease = Some(materialized.lease);
-                        if self.state.browser.selected_source.as_ref() != Some(&source) {
-                            return Task::none();
-                        }
-                        if self.state.browser.audition_enabled {
-                            if self
-                                .state
-                                .browser
-                                .install_audition(source.clone(), Arc::clone(&materialized.audio))
-                            {
-                                return self.play_browser_mode(source, materialized.audio);
-                            }
-                        } else {
-                            self.state
-                                .browser
-                                .install_waveform(source, materialized.audio);
-                            self.state.status_text =
-                                format!("Cached Remote media: {}", materialized.name);
-                        }
+                        let follow_up =
+                            if self.state.browser.selected_source.as_ref() != Some(&source) {
+                                Task::none()
+                            } else if self.state.browser.audition_enabled {
+                                if self.state.browser.install_audition(
+                                    source.clone(),
+                                    Arc::clone(&materialized.audio),
+                                ) {
+                                    self.play_browser_mode(source, materialized.audio)
+                                } else {
+                                    Task::none()
+                                }
+                            } else {
+                                self.state
+                                    .browser
+                                    .install_waveform(source, materialized.audio);
+                                self.state.status_text =
+                                    format!("Cached Remote media: {}", materialized.name);
+                                Task::none()
+                            };
+                        return Task::batch([persist, maintenance, follow_up]);
                     }
                     Err(error) => {
                         let availability = if error.contains("Reconnect Required") {
