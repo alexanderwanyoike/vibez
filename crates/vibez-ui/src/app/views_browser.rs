@@ -18,6 +18,15 @@ use vibez_engine::commands::AuditionSync;
 
 use super::*;
 
+const REMOTE_CONNECTION_INDENT: f32 = 14.0;
+const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
+const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
+
+fn remote_places_indent(depth: usize) -> f32 {
+    REMOTE_CONNECTION_INDENT
+        + ((depth as f32 + 1.0).min(BROWSER_TREE_MAX_DEPTH) * BROWSER_TREE_INDENT_STEP)
+}
+
 impl App {
     pub(super) fn view_sample_browser_panel(&self) -> Element<'_, Message> {
         let width = self
@@ -348,7 +357,7 @@ impl App {
         .style(move |_theme: &Theme, status| browser_place_button_style(connection_active, status));
         places = places.push(
             row![
-                horizontal_space().width(Length::Fixed(14.0)),
+                horizontal_space().width(Length::Fixed(REMOTE_CONNECTION_INDENT)),
                 text("▾").size(10).color(th::text_muted()),
                 connection,
                 text(self.state.browser.remote.catalog_state.label())
@@ -359,7 +368,7 @@ impl App {
             .align_y(iced::Alignment::Center),
         );
         let mut remote_rows = Vec::new();
-        self.render_remote_places_tree("", 1, &mut remote_rows);
+        self.render_remote_places_tree("", 0, &mut remote_rows);
         for remote_row in remote_rows {
             places = places.push(remote_row);
         }
@@ -546,7 +555,7 @@ impl App {
             .style(move |_theme: &Theme, status| browser_place_button_style(active, status));
             rows.push(
                 row![
-                    horizontal_space().width(Length::Fixed((depth as f32 * 8.0).min(40.0))),
+                    horizontal_space().width(Length::Fixed(remote_places_indent(depth))),
                     toggle,
                     select
                 ]
@@ -2034,6 +2043,19 @@ mod browser_table_tests {
         assert_eq!(
             format_browser_duration(entry.duration_seconds.unwrap()),
             "2:00"
+        );
+    }
+
+    #[test]
+    fn remote_folders_begin_beyond_the_connection_and_nest_by_depth() {
+        assert!(remote_places_indent(0) > REMOTE_CONNECTION_INDENT);
+        assert_eq!(
+            remote_places_indent(1) - remote_places_indent(0),
+            BROWSER_TREE_INDENT_STEP
+        );
+        assert_eq!(
+            remote_places_indent(8),
+            REMOTE_CONNECTION_INDENT + BROWSER_TREE_MAX_DEPTH * BROWSER_TREE_INDENT_STEP
         );
     }
 }
