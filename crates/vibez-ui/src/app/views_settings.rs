@@ -627,7 +627,7 @@ impl App {
         .size(11)
         .color(th::text_dim());
         let budget = slider(1.0..=500.0, budget_gib, Message::SetMediaCacheBudgetGiB)
-            .step(1.0)
+            .step(1.0_f32)
             .width(Length::Fill);
         let eviction_enabled = self.state.browser.remote.cache_automatic_eviction;
         let eviction = button(

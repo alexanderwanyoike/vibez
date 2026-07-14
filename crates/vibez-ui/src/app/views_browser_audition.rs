@@ -197,7 +197,7 @@ impl App {
         .align_y(iced::Alignment::Center);
         let gain = self.state.browser.audition_gain;
         let gain_slider = slider(0.0..=2.0, gain, Message::SetAuditionGain)
-            .step(0.01)
+            .step(0.01_f32)
             .width(Length::Fill)
             .style(|_theme: &Theme, status| iced::widget::slider::Style {
                 rail: iced::widget::slider::Rail {
