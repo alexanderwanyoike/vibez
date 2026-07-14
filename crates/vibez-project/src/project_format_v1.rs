@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
+use vibez_core::track::{InstrumentStateInfo, MediaProvenance, MediaSourceRef, TrackInfo};
 
 use crate::Project;
 
@@ -46,6 +46,8 @@ pub enum Provenance {
     Remote {
         provider: String,
         connection_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connection_name: Option<String>,
         source_id: String,
         source_path: String,
         revision: Option<String>,
@@ -112,6 +114,7 @@ pub enum ProjectFormatError {
     Sql(rusqlite::Error),
     Json(serde_json::Error),
     InvalidContainer(String),
+    InvalidProvenance(String),
     MissingMedia(String),
     ExistingDestination(PathBuf),
 }
@@ -125,6 +128,7 @@ impl std::fmt::Display for ProjectFormatError {
             Self::InvalidContainer(message) => {
                 write!(f, "invalid Project Format V1 container: {message}")
             }
+            Self::InvalidProvenance(message) => write!(f, "invalid media provenance: {message}"),
             Self::MissingMedia(id) => write!(f, "project media {id:?} was not found"),
             Self::ExistingDestination(path) => {
                 write!(f, "Save As destination already exists: {}", path.display())
@@ -395,6 +399,20 @@ pub fn stage_local_content(
     content: &[u8],
 ) -> Result<MediaSourceRef, ProjectFormatError> {
     let id = hex_sha256(content);
+    let staging_path = write_staging_copy(&id, file_name, content)?;
+    Ok(MediaSourceRef::StagedProjectMedia {
+        id,
+        file_name: file_name.to_string(),
+        staging_path,
+        source_path: source_path.to_path_buf(),
+    })
+}
+
+fn write_staging_copy(
+    id: &str,
+    file_name: &str,
+    content: &[u8],
+) -> Result<PathBuf, ProjectFormatError> {
     let root = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
@@ -421,11 +439,39 @@ pub fn stage_local_content(
         fs::write(&temporary, content)?;
         fs::rename(temporary, &staging_path)?;
     }
-    Ok(MediaSourceRef::StagedProjectMedia {
+    Ok(staging_path)
+}
+
+/// Copies a complete Remote materialization into project-owned staging while
+/// retaining only credential-free Source Location identity.
+pub fn stage_remote_file(
+    path: &Path,
+    file_name: &str,
+    provenance: MediaProvenance,
+) -> Result<MediaSourceRef, ProjectFormatError> {
+    let content = fs::read(path)?;
+    stage_remote_content(file_name, &content, provenance)
+}
+
+/// Stages Vibez-derived Remote bytes, used when a WARP device import bakes the
+/// heard treatment before the first project save.
+pub fn stage_remote_content(
+    file_name: &str,
+    content: &[u8],
+    provenance: MediaProvenance,
+) -> Result<MediaSourceRef, ProjectFormatError> {
+    if !matches!(provenance, MediaProvenance::Remote { .. }) {
+        return Err(ProjectFormatError::InvalidProvenance(
+            "Remote staging requires Remote provenance".into(),
+        ));
+    }
+    let id = hex_sha256(content);
+    let staging_path = write_staging_copy(&id, file_name, content)?;
+    Ok(MediaSourceRef::StagedRemoteProjectMedia {
         id,
         file_name: file_name.to_string(),
         staging_path,
-        source_path: source_path.to_path_buf(),
+        provenance: Box::new(provenance),
     })
 }
 
@@ -547,10 +593,21 @@ fn prepare_source(
                 source_path: source_path.clone(),
             },
         ),
+        MediaSourceRef::StagedRemoteProjectMedia {
+            file_name,
+            staging_path,
+            provenance,
+            ..
+        } => (
+            staging_path.clone(),
+            file_name.clone(),
+            project_provenance(provenance),
+        ),
         MediaSourceRef::ProjectMedia { .. } | MediaSourceRef::DropboxFile { .. } => return Ok(()),
     };
     let content = fs::read(&path)?;
     let id = hex_sha256(&content);
+    let retained_provenance = core_provenance(&provenance);
     if !staged_media.iter().any(|item| item.id == id) {
         staged_media.push(StagedMedia {
             id: id.clone(),
@@ -559,8 +616,58 @@ fn prepare_source(
             provenance,
         });
     }
-    *source = MediaSourceRef::ProjectMedia { id, file_name };
+    *source = MediaSourceRef::ProjectMedia {
+        id,
+        file_name,
+        provenance: Some(Box::new(retained_provenance)),
+    };
     Ok(())
+}
+
+fn project_provenance(provenance: &MediaProvenance) -> Provenance {
+    match provenance {
+        MediaProvenance::Local { source_path } => Provenance::Local {
+            source_path: source_path.clone(),
+        },
+        MediaProvenance::Remote {
+            provider,
+            connection_id,
+            connection_name,
+            source_id,
+            source_path,
+            revision,
+        } => Provenance::Remote {
+            provider: provider.clone(),
+            connection_id: connection_id.clone(),
+            connection_name: connection_name.clone(),
+            source_id: source_id.clone(),
+            source_path: source_path.clone(),
+            revision: revision.clone(),
+        },
+    }
+}
+
+fn core_provenance(provenance: &Provenance) -> MediaProvenance {
+    match provenance {
+        Provenance::Local { source_path } => MediaProvenance::Local {
+            source_path: source_path.clone(),
+        },
+        Provenance::Remote {
+            provider,
+            connection_id,
+            connection_name,
+            source_id,
+            source_path,
+            revision,
+        } => MediaProvenance::Remote {
+            provider: provider.clone(),
+            connection_id: connection_id.clone(),
+            connection_name: connection_name.clone(),
+            source_id: source_id.clone(),
+            source_path: source_path.clone(),
+            revision: revision.clone(),
+        },
+    }
 }
 
 /// Starts a real transaction, overwrites the document and a media row, then

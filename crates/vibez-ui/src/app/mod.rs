@@ -59,6 +59,8 @@ struct App {
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
     remote_materialization_abort: Option<iced::task::Handle>,
+    remote_import_abort: Option<iced::task::Handle>,
+    remote_import_request_id: u64,
     remote_materialization_request_id: u64,
     remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
     remote_import_in_flight: bool,
@@ -271,6 +273,8 @@ impl App {
             dropbox_cache,
             dropbox_client,
             remote_materialization_abort: None,
+            remote_import_abort: None,
+            remote_import_request_id: 0,
             remote_materialization_request_id: 0,
             remote_audition_cache_lease: None,
             remote_import_in_flight: false,
@@ -572,21 +576,7 @@ async fn prepare_browser_import_audio_async(
 
     let rendered = Arc::clone(&success.audio);
     let staged = tokio::task::spawn_blocking(move || {
-        let (source_path, original_name) = match source {
-            MediaSourceRef::StagedProjectMedia {
-                source_path,
-                file_name,
-                ..
-            } => (source_path, file_name),
-            MediaSourceRef::LocalFile { path } => {
-                let file_name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "warped-import.wav".into());
-                (path, file_name)
-            }
-            _ => return Err("WARP device import requires materialized Local media".to_string()),
-        };
+        let original_name = source.display_name();
         let stem = std::path::Path::new(&original_name)
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -605,8 +595,43 @@ async fn prepare_browser_import_audio_async(
             .map_err(|error| error.to_string())?;
         let content = std::fs::read(&temporary).map_err(|error| error.to_string())?;
         let _ = std::fs::remove_file(&temporary);
-        vibez_project::project_format_v1::stage_local_content(&source_path, &file_name, &content)
-            .map_err(|error| error.to_string())
+        match source {
+            MediaSourceRef::StagedProjectMedia { source_path, .. }
+            | MediaSourceRef::LocalFile { path: source_path } => {
+                vibez_project::project_format_v1::stage_local_content(
+                    &source_path,
+                    &file_name,
+                    &content,
+                )
+                .map_err(|error| error.to_string())
+            }
+            MediaSourceRef::StagedRemoteProjectMedia { provenance, .. } => match *provenance {
+                vibez_core::track::MediaProvenance::Remote {
+                    provider,
+                    connection_id,
+                    connection_name,
+                    source_id,
+                    source_path,
+                    revision,
+                } => vibez_project::project_format_v1::stage_remote_content(
+                    &file_name,
+                    &content,
+                    vibez_core::track::MediaProvenance::Remote {
+                        provider,
+                        connection_id,
+                        connection_name,
+                        source_id,
+                        source_path,
+                        revision,
+                    },
+                )
+                .map_err(|error| error.to_string()),
+                vibez_core::track::MediaProvenance::Local { .. } => {
+                    Err("Remote staging carried Local provenance".to_string())
+                }
+            },
+            _ => Err("WARP device import requires materialized Project Media".to_string()),
+        }
     })
     .await
     .map_err(|error| format!("WARP device staging task failed: {error}"))??;
@@ -698,16 +723,30 @@ async fn fetch_dropbox_sample_async(
                 .map_err(|error| format!("Media Cache write failed: {error}"))?
         }
     };
+    let decode_path = local.clone();
     let decoded = tokio::task::spawn_blocking(move || {
-        vibez_audio_io::file_io::decode_audio_file(&local).map_err(|e| e.to_string())
+        vibez_audio_io::file_io::decode_audio_file(&decode_path).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("decode task failed: {e}"))??;
-    let source = MediaSourceRef::DropboxFile {
-        path_lower: entry.path_lower.clone(),
-        display_path: entry.path_display.clone(),
-        rev: entry.rev.clone(),
-    };
+    let staging_entry = entry.clone();
+    let source = tokio::task::spawn_blocking(move || {
+        vibez_project::project_format_v1::stage_remote_file(
+            &local,
+            &staging_entry.name,
+            vibez_core::track::MediaProvenance::Remote {
+                provider: crate::remote_provider::DROPBOX_PROVIDER_ID.into(),
+                connection_id: crate::remote_provider::DROPBOX_CONNECTION_ID.into(),
+                connection_name: Some(crate::remote_provider::DROPBOX_CONNECTION_NAME.into()),
+                source_id: staging_entry.path_lower,
+                source_path: staging_entry.path_display,
+                revision: staging_entry.rev,
+            },
+        )
+        .map_err(|error| format!("Remote Project Media staging failed: {error}"))
+    })
+    .await
+    .map_err(|error| format!("Remote Project Media staging task failed: {error}"))??;
     Ok((Arc::new(decoded), entry.name, source))
 }
 
@@ -997,8 +1036,11 @@ async fn hydrate_saved_source(
         MediaSourceRef::LocalFile { path }
         | MediaSourceRef::StagedProjectMedia {
             staging_path: path, ..
+        }
+        | MediaSourceRef::StagedRemoteProjectMedia {
+            staging_path: path, ..
         } => decode_blocking(path.clone()).await,
-        MediaSourceRef::ProjectMedia { id, file_name } => {
+        MediaSourceRef::ProjectMedia { id, file_name, .. } => {
             let container_path = container_path
                 .cloned()
                 .ok_or_else(|| format!("{label} has Project Media without a V1 container"))?;
@@ -1427,6 +1469,118 @@ mod project_format_v1_tests {
             .derived_metadata("/megalodon/source.wav", Some("rev-1"))
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("remote-loop.wav");
+        let project_path = directory.path().join("remote-owned.vzp");
+        let raw = one_second_audio();
+        vibez_audio_io::file_io::write_wav_file(&source_path, &raw).unwrap();
+        let cache = DropboxCache::with_root(directory.path().join("media-cache"));
+        cache
+            .write(
+                "/megalodon/remote-loop.wav",
+                Some("rev-9"),
+                &std::fs::read(&source_path).unwrap(),
+            )
+            .unwrap();
+        let entry = DropboxEntry {
+            path_lower: "/megalodon/remote-loop.wav".into(),
+            path_display: "/Megalodon/Remote Loop.wav".into(),
+            name: "Remote Loop.wav".into(),
+            is_folder: false,
+            rev: Some("rev-9".into()),
+            size: None,
+        };
+        let (decoded, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
+            .await
+            .unwrap();
+        assert!(matches!(
+            staged,
+            MediaSourceRef::StagedRemoteProjectMedia { .. }
+        ));
+        let treatment = crate::state::AuditionImportInput {
+            mode: crate::state::AuditionMode::Warp,
+            source_bpm: Some(120.0),
+        };
+        let (warped, original, staged) = prepare_browser_import_audio_async(
+            crate::message::BrowserImportTarget::ArrangementNewTrackAt {
+                position_samples: 0,
+            },
+            treatment,
+            decoded,
+            staged,
+            60.0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(warped.num_frames(), 88_200);
+        assert_eq!(original.unwrap().num_frames(), raw.num_frames());
+
+        cache.clear().unwrap();
+        std::fs::remove_file(source_path).unwrap();
+        let track = TrackInfo::new("Audio");
+        let project = Project {
+            tracks: vec![track.clone()],
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name,
+                position: 0,
+                source_offset: 0,
+                duration: warped.num_frames() as u64,
+                source: Some(staged),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                original_bpm: Some(120.0),
+                warped: true,
+                warped_to_bpm: Some(60.0),
+            }],
+            ..Project::default()
+        };
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+
+        let reopened = load_project_async(project_path.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(reopened.clips[0].audio.num_frames(), warped.num_frames());
+        assert_audible(Arc::clone(&reopened.clips[0].audio), "Remote WARP reopen");
+        let Some(MediaSourceRef::ProjectMedia {
+            provenance: Some(provenance),
+            ..
+        }) = reopened.project.clips[0].source.as_ref()
+        else {
+            panic!("reopened clip must carry Remote provenance on Project Media");
+        };
+        let vibez_core::track::MediaProvenance::Remote {
+            provider,
+            connection_id,
+            connection_name,
+            source_path,
+            revision,
+            ..
+        } = provenance.as_ref()
+        else {
+            panic!("reopened clip provenance must remain Remote");
+        };
+        assert_eq!(provider, "dropbox");
+        assert_eq!(connection_id, "dropbox-primary");
+        assert_eq!(connection_name.as_deref(), Some("Alex's Dropbox"));
+        assert_eq!(source_path, "/Megalodon/Remote Loop.wav");
+        assert_eq!(revision.as_deref(), Some("rev-9"));
+        let serialized = serde_json::to_string(
+            &vibez_project::project_format_v1::ProjectContainer::open(project_path)
+                .unwrap()
+                .load_document()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!serialized.contains("access_token"));
+        assert!(!serialized.contains("refresh_token"));
     }
 
     #[tokio::test]

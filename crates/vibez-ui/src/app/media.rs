@@ -282,9 +282,15 @@ impl App {
                     source,
                     ..
                 } = payload;
+                let provenance = source.provenance().map(|value| value.display_label());
                 self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
-                self.state.status_text =
-                    format!("Imported '{name}' to Sampler ({})", treatment.mode.label());
+                self.state.status_text = format!(
+                    "Imported '{name}' to Sampler ({}){}",
+                    treatment.mode.label(),
+                    provenance
+                        .map(|value| format!(" · source {value}"))
+                        .unwrap_or_default()
+                );
                 Task::none()
             }
             BrowserImportTarget::DrumRackPad {
@@ -298,11 +304,15 @@ impl App {
                     source,
                     ..
                 } = payload;
+                let provenance = source.provenance().map(|value| value.display_label());
                 self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name.clone(), source);
                 self.state.status_text = format!(
-                    "Imported '{name}' to Drum Rack pad {} ({})",
+                    "Imported '{name}' to Drum Rack pad {} ({}){}",
                     pad_index + 1,
-                    treatment.mode.label()
+                    treatment.mode.label(),
+                    provenance
+                        .map(|value| format!(" · source {value}"))
+                        .unwrap_or_default()
                 );
                 Task::none()
             }
@@ -322,6 +332,7 @@ impl App {
             name,
             source,
         } = payload;
+        let provenance = source.provenance().map(|value| value.display_label());
         // Guard: if the target is not an audio track, refuse rather than
         // silently redirecting the drop. Prevents the "clip lands on the
         // wrong lane" surprise.
@@ -384,8 +395,11 @@ impl App {
             0.0
         };
         self.state.status_text = format!(
-            "Imported '{name}' to {track_name} at beat {beat:.2} ({})",
-            treatment.mode.label()
+            "Imported '{name}' to {track_name} at beat {beat:.2} ({}){}",
+            treatment.mode.label(),
+            provenance
+                .map(|value| format!(" · source {value}"))
+                .unwrap_or_default()
         );
         Task::none()
     }
@@ -468,9 +482,44 @@ impl App {
                     },
                 )
             }
-            MediaSourceRef::ProjectMedia { id, file_name } => {
+            MediaSourceRef::StagedRemoteProjectMedia {
+                id,
+                file_name,
+                staging_path,
+                provenance,
+            } => {
                 let name = file_name.clone();
-                let retained_source = MediaSourceRef::ProjectMedia { id, file_name };
+                let retained_source = MediaSourceRef::StagedRemoteProjectMedia {
+                    id,
+                    file_name,
+                    staging_path: staging_path.clone(),
+                    provenance,
+                };
+                Task::perform(
+                    decode_file_async(staging_path),
+                    move |result| match result {
+                        Ok(audio) => Message::BrowserSampleDecoded(
+                            target.clone(),
+                            treatment,
+                            Arc::new(audio),
+                            name.clone(),
+                            retained_source.clone(),
+                        ),
+                        Err(err) => Message::BrowserSampleDecodeError(err),
+                    },
+                )
+            }
+            MediaSourceRef::ProjectMedia {
+                id,
+                file_name,
+                provenance,
+            } => {
+                let name = file_name.clone();
+                let retained_source = MediaSourceRef::ProjectMedia {
+                    id,
+                    file_name,
+                    provenance,
+                };
                 let container_path = self.state.project.current_path.clone();
                 Task::perform(
                     async move {
@@ -495,15 +544,6 @@ impl App {
                 display_path,
                 rev,
             } => {
-                if let Some(handle) = self.remote_materialization_abort.take() {
-                    handle.abort();
-                    self.remote_materialization_request_id =
-                        self.remote_materialization_request_id.saturating_add(1);
-                }
-                self.remote_audition_cache_lease = None;
-                let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
-                let client = self.dropbox_client.clone();
-                let cache = self.dropbox_cache.clone();
                 let name = display_path
                     .rsplit_once('/')
                     .map(|(_, n)| n.to_string())
@@ -516,21 +556,7 @@ impl App {
                     rev,
                     size: None,
                 };
-                self.remote_import_in_flight = true;
-                self.state.status_text = format!("Dropping {name}...");
-                Task::perform(
-                    fetch_dropbox_sample_async(client, cache, entry),
-                    move |result| match result {
-                        Ok((audio, decoded_name, source)) => Message::BrowserSampleDecoded(
-                            target.clone(),
-                            treatment,
-                            audio,
-                            decoded_name,
-                            source,
-                        ),
-                        Err(err) => Message::BrowserSampleDecodeError(err),
-                    },
-                )
+                self.start_remote_import(entry, target, treatment)
             }
         }
     }
@@ -992,7 +1018,8 @@ impl App {
     }
 
     pub(super) fn handle_import_selected_browser_sample_to_arrangement(&mut self) -> Task<Message> {
-        if let Some(entry) = self.selected_sample_browser_entry().cloned() {
+        if let Some(source) = self.state.browser.selected_source.clone() {
+            let name = source.display_name();
             let position_samples = self.state.transport.position_samples;
             let selected_audio = self.state.arrangement.selected_track.filter(|track_id| {
                 self.state
@@ -1006,14 +1033,14 @@ impl App {
                 },
                 None => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
             };
-            self.state.status_text = format!("Importing {} at playhead...", entry.name);
-            return self.dispatch_drop_for_target(entry.source, target);
+            self.state.status_text = format!("Importing {name} at playhead...");
+            return self.dispatch_drop_for_target(source, target);
         }
         Task::none()
     }
 
     pub(super) fn handle_load_selected_browser_sample_to_device(&mut self) -> Task<Message> {
-        let Some(entry) = self.selected_sample_browser_entry().cloned() else {
+        let Some(source) = self.state.browser.selected_source.clone() else {
             return Task::none();
         };
         let Some(target) = self.selected_browser_device_target() else {
@@ -1021,7 +1048,7 @@ impl App {
                 "Select a sampler or drum rack track to load from the browser".to_string();
             return Task::none();
         };
-        self.state.status_text = format!("Loading {}...", entry.name);
-        self.dispatch_drop_for_target(entry.source, target)
+        self.state.status_text = format!("Loading {}...", source.display_name());
+        self.dispatch_drop_for_target(source, target)
     }
 }

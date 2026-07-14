@@ -60,6 +60,7 @@ fn run_measurement(output_dir: &Path) -> Result<(), Box<dyn Error>> {
             provenance: Provenance::Remote {
                 provider: "dropbox".into(),
                 connection_id: "alex-dropbox".into(),
+                connection_name: Some("Alex's Dropbox".into()),
                 source_id: "id:proof-remote-vocal".into(),
                 source_path: "/Megalodon/Vocals/remote-vocal.wav".into(),
                 revision: Some("proof-rev-1".into()),

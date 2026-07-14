@@ -183,6 +183,11 @@ impl App {
     }
 
     pub(super) fn reset_to_new_project(&mut self) {
+        if let Some(handle) = self.remote_import_abort.take() {
+            handle.abort();
+            self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
+            self.remote_import_in_flight = false;
+        }
         if let Some(handle) = self.remote_materialization_abort.take() {
             handle.abort();
             self.remote_materialization_request_id =
@@ -322,6 +327,7 @@ impl App {
                     file_path: clip.source.as_ref().and_then(|source| match source {
                         MediaSourceRef::LocalFile { path } => Some(path.clone()),
                         MediaSourceRef::StagedProjectMedia { .. }
+                        | MediaSourceRef::StagedRemoteProjectMedia { .. }
                         | MediaSourceRef::ProjectMedia { .. }
                         | MediaSourceRef::DropboxFile { .. } => None,
                     }),
@@ -410,6 +416,7 @@ impl App {
     }
 
     pub(super) fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
+        let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
 
         // Seed the global id counter past every persisted id BEFORE
@@ -791,11 +798,14 @@ impl App {
             self.state.arrangement.tracks.first().map(|track| track.id);
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
+        let provenance_suffix = remote_provenance
+            .map(|label| format!(" · Remote source {label}"))
+            .unwrap_or_default();
         self.state.status_text = if loaded.warnings.is_empty() {
-            format!("Opened {}", loaded.path.display())
+            format!("Opened {}{provenance_suffix}", loaded.path.display())
         } else {
             format!(
-                "Opened {} with {} warning(s)",
+                "Opened {} with {} warning(s){provenance_suffix}",
                 loaded.path.display(),
                 loaded.warnings.len()
             )
@@ -1138,4 +1148,27 @@ impl App {
         self.state.status_text = format!("Exporting to {}...", path.display());
         Task::perform(export_async(request, path), Message::ExportComplete)
     }
+}
+
+fn first_remote_provenance_label(project: &Project) -> Option<String> {
+    let track_sources = project.tracks.iter().flat_map(|track| {
+        let sampler = match &track.native_instrument {
+            Some(InstrumentStateInfo::Sampler { source, .. }) => source.iter().collect::<Vec<_>>(),
+            Some(InstrumentStateInfo::DrumRack { pads }) => {
+                pads.iter().filter_map(|pad| pad.source.as_ref()).collect()
+            }
+            _ => Vec::new(),
+        };
+        sampler
+    });
+    project
+        .clips
+        .iter()
+        .filter_map(|clip| clip.source.as_ref())
+        .chain(track_sources)
+        .filter_map(MediaSourceRef::provenance)
+        .find_map(|provenance| match provenance {
+            vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
+            vibez_core::track::MediaProvenance::Local { .. } => None,
+        })
 }

@@ -454,6 +454,12 @@ pub enum Message {
         source: MediaSourceRef,
         result: Result<RemoteMaterializedSample, String>,
     },
+    RemoteImportReady {
+        request_id: u64,
+        target: BrowserImportTarget,
+        treatment: AuditionImportInput,
+        result: Result<(Arc<DecodedAudio>, String, MediaSourceRef), String>,
+    },
     DropboxPreview(DropboxEntry),
     DropboxImportToArrangement(DropboxEntry),
     DropboxImportToDevice(DropboxEntry),

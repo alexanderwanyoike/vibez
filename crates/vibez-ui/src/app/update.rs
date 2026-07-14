@@ -745,6 +745,18 @@ impl App {
                 {
                     self.stop_browser_audition();
                     self.state.status_text = "Audition stopped".into();
+                } else if self.remote_import_in_flight {
+                    if let Some(handle) = self.remote_import_abort.take() {
+                        handle.abort();
+                    }
+                    self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
+                    self.remote_import_in_flight = false;
+                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+                    self.state.status_text =
+                        "Remote import cancelled; no project media added".into();
+                    if let Some(entry) = self.pending_remote_audition.take() {
+                        return self.start_remote_audition(entry, true);
+                    }
                 } else if self.state.browser.drag_source.is_some()
                     || self.state.browser.pending_drag.is_some()
                 {
@@ -873,7 +885,11 @@ impl App {
                 return self.handle_load_selected_browser_sample_to_device();
             }
             Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
-                let was_remote_import = matches!(&source, MediaSourceRef::DropboxFile { .. });
+                let was_remote_import = matches!(
+                    &source,
+                    MediaSourceRef::DropboxFile { .. }
+                        | MediaSourceRef::StagedRemoteProjectMedia { .. }
+                );
                 if was_remote_import {
                     let usage = self
                         .dropbox_cache
@@ -894,6 +910,34 @@ impl App {
                     Task::none()
                 };
                 return Task::batch([import, pending_audition]);
+            }
+            Message::RemoteImportReady {
+                request_id,
+                target,
+                treatment,
+                result,
+            } => {
+                if !dropbox_io::remote_import_result_is_current(
+                    self.remote_import_request_id,
+                    request_id,
+                ) {
+                    if let Ok((
+                        _,
+                        _,
+                        MediaSourceRef::StagedRemoteProjectMedia { staging_path, .. },
+                    )) = result
+                    {
+                        let _ = std::fs::remove_file(staging_path);
+                    }
+                    return Task::none();
+                }
+                self.remote_import_abort = None;
+                return match result {
+                    Ok((audio, name, source)) => self.update(Message::BrowserSampleDecoded(
+                        target, treatment, audio, name, source,
+                    )),
+                    Err(error) => self.update(Message::BrowserSampleDecodeError(error)),
+                };
             }
             Message::BrowserImportPrepared { target, payload } => {
                 return self.apply_browser_import_prepared(target, payload);
@@ -917,7 +961,9 @@ impl App {
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser import error: {err}");
                 if self.remote_import_in_flight {
+                    self.remote_import_abort = None;
                     self.remote_import_in_flight = false;
+                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
                     if let Some(entry) = self.pending_remote_audition.take() {
                         return self.start_remote_audition(entry, true);
                     }

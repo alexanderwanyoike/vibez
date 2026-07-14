@@ -6,7 +6,8 @@ use vibez_core::id::ClipId;
 use vibez_core::track::{ClipInfo, MediaSourceRef, TrackInfo};
 use vibez_project::project_format_v1::{
     detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
-    ProjectContainer, ProjectFileFormat, Provenance, StagedMedia, APPLICATION_ID, FORMAT_VERSION,
+    stage_remote_file, ProjectContainer, ProjectFileFormat, Provenance, StagedMedia,
+    APPLICATION_ID, FORMAT_VERSION,
 };
 use vibez_project::Project;
 
@@ -23,6 +24,7 @@ fn stage(path: PathBuf, id: &str, seed: u8) -> (StagedMedia, Vec<u8>) {
             provenance: Provenance::Remote {
                 provider: "dropbox".into(),
                 connection_id: "proof-connection".into(),
+                connection_name: None,
                 source_id: format!("id:{id}"),
                 source_path: format!("/Megalodon/{id}.wav"),
                 revision: Some("proof-rev".into()),
@@ -244,4 +246,75 @@ fn unsaved_project_uses_staged_copy_before_first_save() {
             .unwrap(),
         bytes
     );
+}
+
+#[test]
+fn remote_import_becomes_self_contained_project_media_with_safe_provenance() {
+    let directory = tempfile::tempdir().unwrap();
+    let materialized = directory.path().join("remote-cache.wav");
+    let project_path = directory.path().join("remote-owned.vzp");
+    let bytes = b"complete-remote-media".repeat(512);
+    fs::write(&materialized, &bytes).unwrap();
+    let staged = stage_remote_file(
+        &materialized,
+        "Kick.wav",
+        vibez_core::track::MediaProvenance::Remote {
+            provider: "dropbox".into(),
+            connection_id: "dropbox-primary".into(),
+            connection_name: Some("Alex's Dropbox".into()),
+            source_id: "id:megalodon-kick".into(),
+            source_path: "/Megalodon/Kick.wav".into(),
+            revision: Some("rev-7".into()),
+        },
+    )
+    .unwrap();
+    let MediaSourceRef::StagedRemoteProjectMedia { staging_path, .. } = &staged else {
+        panic!("Remote import must leave disposable cache for managed staging");
+    };
+    let staging_path = staging_path.clone();
+    fs::remove_file(&materialized).unwrap();
+
+    let saved = save_project_v1(&project_path, None, project_with_source(staged)).unwrap();
+    assert!(
+        !staging_path.exists(),
+        "transaction consumes Remote staging"
+    );
+    let MediaSourceRef::ProjectMedia {
+        id,
+        provenance: Some(provenance),
+        ..
+    } = saved.project.clips[0].source.as_ref().unwrap()
+    else {
+        panic!("saved Remote import must resolve only to Project Media");
+    };
+    assert_eq!(
+        ProjectContainer::open(&project_path)
+            .unwrap()
+            .read_media(id)
+            .unwrap(),
+        bytes
+    );
+    assert!(matches!(
+        provenance.as_ref(),
+        vibez_core::track::MediaProvenance::Remote {
+            provider,
+            connection_id,
+            source_path,
+            revision: Some(revision),
+            ..
+        } if provider == "dropbox"
+            && connection_id == "dropbox-primary"
+            && source_path == "/Megalodon/Kick.wav"
+            && revision == "rev-7"
+    ));
+
+    let document = ProjectContainer::open(project_path)
+        .unwrap()
+        .load_document()
+        .unwrap();
+    let json = serde_json::to_string(&document).unwrap();
+    assert!(json.contains("/Megalodon/Kick.wav"));
+    assert!(!json.contains("access_token"));
+    assert!(!json.contains("refresh_token"));
+    assert!(!json.contains("secret"));
 }

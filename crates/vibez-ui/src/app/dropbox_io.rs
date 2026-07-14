@@ -15,7 +15,58 @@ fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxE
     *slot = Some(entry);
 }
 
+pub(super) fn remote_import_result_is_current(current: u64, result: u64) -> bool {
+    current == result
+}
+
 impl App {
+    pub(super) fn start_remote_import(
+        &mut self,
+        entry: DropboxEntry,
+        target: BrowserImportTarget,
+        treatment: crate::state::AuditionImportInput,
+    ) -> Task<Message> {
+        if let Some(handle) = self.remote_import_abort.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.remote_materialization_abort.take() {
+            handle.abort();
+            self.remote_materialization_request_id =
+                self.remote_materialization_request_id.saturating_add(1);
+        }
+        self.remote_audition_cache_lease = None;
+        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
+        let request_id = self.remote_import_request_id;
+        self.remote_import_in_flight = true;
+        self.state.browser.remote.availability.insert(
+            entry.path_lower.clone(),
+            if self
+                .dropbox_cache
+                .is_cached(&entry.path_lower, entry.rev.as_deref())
+            {
+                crate::state::RemoteAvailability::Cached
+            } else {
+                crate::state::RemoteAvailability::Fetching
+            },
+        );
+        self.state.status_text = format!("Importing Remote media: {}", entry.name);
+        let client = self.dropbox_client.clone();
+        let cache = self.dropbox_cache.clone();
+        let task = Task::perform(
+            fetch_dropbox_sample_async(client, cache, entry),
+            move |result| Message::RemoteImportReady {
+                request_id,
+                target: target.clone(),
+                treatment,
+                result,
+            },
+        );
+        let (task, handle) = task.abortable();
+        self.remote_import_abort = Some(handle);
+        task
+    }
+
     pub(super) fn handle_connect_dropbox(&mut self) -> Task<Message> {
         let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) else {
             self.state.browser.remote.last_error = Some(
@@ -145,62 +196,24 @@ impl App {
         &mut self,
         entry: DropboxEntry,
     ) -> Task<Message> {
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
-        self.remote_audition_cache_lease = None;
-        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
-        let client = self.dropbox_client.clone();
-        let cache = self.dropbox_cache.clone();
         let target = BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
         let Some(treatment) = self.state.browser.audition_import_input() else {
             self.state.status_text = "Confirm source BPM before WARP import".into();
             return Task::none();
         };
-        self.remote_import_in_flight = true;
-        self.state.status_text = format!("Importing {}...", entry.name);
-        Task::perform(
-            fetch_dropbox_sample_async(client, cache, entry),
-            move |result| match result {
-                Ok((audio, name, source)) => {
-                    Message::BrowserSampleDecoded(target.clone(), treatment, audio, name, source)
-                }
-                Err(err) => Message::BrowserSampleDecodeError(err),
-            },
-        )
+        self.start_remote_import(entry, target, treatment)
     }
 
     pub(super) fn handle_dropbox_import_to_device(&mut self, entry: DropboxEntry) -> Task<Message> {
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
-        self.remote_audition_cache_lease = None;
-        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
-        let client = self.dropbox_client.clone();
         let Some(target) = self.selected_browser_device_target() else {
             self.state.status_text = "Select a Sampler or Drum Pad track first".into();
             return Task::none();
         };
-        let cache = self.dropbox_cache.clone();
         let Some(treatment) = self.state.browser.audition_import_input() else {
             self.state.status_text = "Confirm source BPM before WARP import".into();
             return Task::none();
         };
-        self.remote_import_in_flight = true;
-        self.state.status_text = format!("Importing {}...", entry.name);
-        Task::perform(
-            fetch_dropbox_sample_async(client, cache, entry),
-            move |result| match result {
-                Ok((audio, name, source)) => {
-                    Message::BrowserSampleDecoded(target.clone(), treatment, audio, name, source)
-                }
-                Err(err) => Message::BrowserSampleDecodeError(err),
-            },
-        )
+        self.start_remote_import(entry, target, treatment)
     }
 }
 
@@ -237,5 +250,12 @@ mod tests {
             pending.as_ref().map(|entry| entry.path_lower.as_str()),
             Some("/winner.wav")
         );
+    }
+
+    #[test]
+    fn cancelled_or_superseded_remote_import_results_cannot_create_project_media() {
+        assert!(remote_import_result_is_current(7, 7));
+        assert!(!remote_import_result_is_current(8, 7));
+        assert!(!remote_import_result_is_current(9, 7));
     }
 }
