@@ -3,6 +3,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::browser::BrowserMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
@@ -30,9 +31,34 @@ pub(crate) fn global_key_handler(
         return Some(Message::Transport(TransportMsg::TogglePlayback));
     }
 
-    // Escape: cancel editing
+    // Escape: the router stops Audition first, then falls back to cancel editing.
     if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
-        return Some(Message::View(ViewMsg::CancelEditing));
+        return Some(Message::EscapePressed);
+    }
+
+    // Plain Up/Down moves the Active Source Entry through Browser Results.
+    // Text inputs consume these before the global ignored-event subscription.
+    if modifiers.is_empty() {
+        match key {
+            iced::keyboard::Key::Named(Named::ArrowUp) => {
+                return Some(Message::SelectAdjacentBrowserResult(-1));
+            }
+            iced::keyboard::Key::Named(Named::ArrowDown) => {
+                return Some(Message::SelectAdjacentBrowserResult(1));
+            }
+            _ => {}
+        }
+    }
+
+    // Enter: the focused Browser selection always means Arrangement Import.
+    // Text inputs capture Enter before this global ignored-event subscription.
+    if !modifiers.control()
+        && !modifiers.alt()
+        && !modifiers.shift()
+        && !modifiers.logo()
+        && matches!(key, iced::keyboard::Key::Named(Named::Enter))
+    {
+        return Some(Message::ImportSelectedBrowserSampleToArrangement);
     }
 
     // Delete/Backspace: context-resolved in update() (selected notes
@@ -53,6 +79,19 @@ pub(crate) fn global_key_handler(
         && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
     {
         return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
+    }
+
+    // Alt+Left / Alt+Right: resize the Browser without permanent header chrome.
+    if modifiers.alt() && !modifiers.control() && !modifiers.shift() && !modifiers.logo() {
+        match key {
+            iced::keyboard::Key::Named(Named::ArrowLeft) => {
+                return Some(Message::Browser(BrowserMsg::NudgeDockWidth(-40.0)));
+            }
+            iced::keyboard::Key::Named(Named::ArrowRight) => {
+                return Some(Message::Browser(BrowserMsg::NudgeDockWidth(40.0)));
+            }
+            _ => {}
+        }
     }
 
     if modifiers.command() {
@@ -159,5 +198,65 @@ mod tests {
                     )
             ));
         }
+    }
+
+    #[test]
+    fn alt_arrows_resize_the_browser_without_header_buttons() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        let narrower = global_key_handler(Key::Named(Named::ArrowLeft), Modifiers::ALT);
+        let wider = global_key_handler(Key::Named(Named::ArrowRight), Modifiers::ALT);
+
+        assert!(matches!(
+            narrower,
+            Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == -40.0
+        ));
+        assert!(matches!(
+            wider,
+            Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == 40.0
+        ));
+    }
+
+    #[test]
+    fn enter_is_always_arrangement_import() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Enter), Modifiers::empty()),
+            Some(Message::ImportSelectedBrowserSampleToArrangement)
+        ));
+        assert!(global_key_handler(Key::Named(Named::Enter), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn plain_arrows_navigate_browser_results_without_stealing_track_reorder() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::empty()),
+            Some(Message::SelectAdjacentBrowserResult(-1))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowDown), Modifiers::empty()),
+            Some(Message::SelectAdjacentBrowserResult(1))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::CTRL),
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
+        ));
+    }
+
+    #[test]
+    fn space_is_transport_and_escape_routes_through_audition_priority() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Space), Modifiers::empty()),
+            Some(Message::Transport(TransportMsg::TogglePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
+            Some(Message::EscapePressed)
+        ));
     }
 }

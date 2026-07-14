@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::{Subscription, Task, Theme};
@@ -24,7 +24,7 @@ use vibez_project::Project;
 use crate::icons;
 use crate::message::{
     LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message, ProjectLoadResult,
-    SampleLibraryScanResult,
+    ProjectSaveResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::AppState;
@@ -58,6 +58,25 @@ struct App {
     dropbox_settings: DropboxSettings,
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
+    remote_materialization_abort: Option<iced::task::Handle>,
+    remote_import_abort: Option<iced::task::Handle>,
+    remote_import_request_id: u64,
+    remote_materialization_request_id: u64,
+    remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
+    /// Request id of the active Remote import, if any. Completions for any
+    /// other generation must not clear it or release the queued audition.
+    remote_import_in_flight: Option<u64>,
+    pending_remote_audition: Option<DropboxEntry>,
+    /// Generation for the whole Browser import pipeline (local and
+    /// remote). Bumped on cancellation and project reset so an
+    /// in-flight WARP preparation cannot land a clip afterwards.
+    browser_import_generation: u64,
+    /// Bumped on every refresh start and on disconnect, so catalog pages
+    /// fetched for a previous connection are dropped instead of reconciled.
+    remote_catalog_generation: u64,
+    /// Catalog changes accumulated since the last reconcile flush; applied in
+    /// batches so each page does not re-sort the whole catalog in update().
+    remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
@@ -87,6 +106,7 @@ pub fn run() -> iced::Result {
             #[allow(unused_mut)]
             let mut settings = iced::window::Settings {
                 icon,
+                min_size: Some(iced::Size::new(900.0, 600.0)),
                 ..Default::default()
             };
             // WM_CLASS / app_id: lets docks and taskbars match the
@@ -104,23 +124,37 @@ pub fn run() -> iced::Result {
 }
 
 mod actions;
+mod async_helpers;
 mod audio_tasks;
 mod bounce;
 mod keyboard;
+mod local_watcher;
 
+use async_helpers::*;
 pub(crate) use audio_tasks::*;
 pub(crate) use keyboard::*;
 mod dropbox_io;
 mod media;
+mod media_import;
 mod plugins;
 mod project_io;
+mod project_replay;
 mod update;
+mod update_media;
+mod update_remote;
 mod views_browser;
+mod views_browser_audition;
+mod views_browser_places;
+mod views_browser_remote;
+mod views_browser_style;
 mod views_detail;
 mod views_devices;
 mod views_overlays;
 mod views_settings;
 mod views_shell;
+
+#[cfg(test)]
+mod project_format_v1_tests;
 
 impl App {
     fn new() -> (Self, Task<Message>) {
@@ -143,7 +177,11 @@ impl App {
         };
 
         let dropbox_settings = DropboxSettings::load();
-        let dropbox_cache = DropboxCache::new();
+        let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
+            budget_bytes: ui_settings.media_cache_budget_bytes,
+            automatic_eviction: ui_settings.media_cache_automatic_eviction,
+        });
+        let cache_usage = dropbox_cache.usage().unwrap_or_default();
         let resolved_key = load_app_key_with_env_override(&dropbox_settings);
         let dropbox_client = match (&resolved_key, &dropbox_settings.tokens) {
             (Some(key), Some(tokens)) => {
@@ -151,13 +189,39 @@ impl App {
             }
             _ => None,
         };
-        let dropbox_ui_state = crate::state::DropboxUiState {
+        let catalog_store = crate::remote_provider::RemoteCatalogStore::for_dropbox();
+        let (remote_catalog, mut remote_catalog_state) = match catalog_store.load() {
+            Ok(catalog) => (catalog, crate::state::RemoteCatalogState::Ready),
+            Err(error) => (
+                crate::remote_provider::RemoteCatalogSnapshot::default(),
+                crate::state::RemoteCatalogState::Stale { error },
+            ),
+        };
+        if dropbox_client.is_none()
+            && matches!(
+                remote_catalog_state,
+                crate::state::RemoteCatalogState::Ready
+            )
+        {
+            remote_catalog_state = crate::state::RemoteCatalogState::AuthenticationRequired {
+                error: "Sign in to refresh; showing the last saved Remote catalog".into(),
+            };
+        }
+        let mut remote_ui_state = crate::state::RemoteUiState {
             connected: dropbox_client.is_some(),
             account_email: dropbox_settings.account_email.clone(),
             app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
             has_app_key: resolved_key.is_some(),
+            catalog: remote_catalog,
+            catalog_state: remote_catalog_state,
+            cache_usage_bytes: cache_usage.bytes,
+            cache_entries: cache_usage.entries,
+            cache_budget_bytes: ui_settings.media_cache_budget_bytes,
+            cache_automatic_eviction: ui_settings.media_cache_automatic_eviction,
             ..Default::default()
         };
+        remote_ui_state.rebuild_catalog_children();
+        dropbox_io::seed_remote_availability(&dropbox_cache, &mut remote_ui_state);
 
         let mut state = AppState {
             transport: crate::state::TransportState {
@@ -168,8 +232,15 @@ impl App {
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             browser: crate::state::BrowserState {
                 open: ui_settings.sample_browser_open,
+                dock_width: ui_settings.sample_browser_width.clamp(
+                    crate::state::BROWSER_DOCK_MIN_WIDTH,
+                    crate::state::BROWSER_DOCK_MAX_WIDTH,
+                ),
+                audition_enabled: ui_settings.audition_enabled,
+                audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
+                audition_loop: ui_settings.audition_loop,
                 roots: ui_settings.sample_library_roots,
-                dropbox: dropbox_ui_state,
+                remote: remote_ui_state,
                 ..Default::default()
             },
             ..Default::default()
@@ -228,26 +299,59 @@ impl App {
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
+            remote_materialization_abort: None,
+            remote_import_abort: None,
+            remote_import_request_id: 0,
+            remote_materialization_request_id: 0,
+            remote_audition_cache_lease: None,
+            remote_import_in_flight: None,
+            pending_remote_audition: None,
+            browser_import_generation: 0,
+            remote_catalog_generation: 0,
+            remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),
         };
 
         // Inform the engine of the actual sample rate
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
+        app.send_command(EngineCommand::SetAuditionGain(
+            app.state.browser.audition_gain,
+        ));
+        app.send_command(EngineCommand::SetAuditionLoop(
+            app.state.browser.audition_loop,
+        ));
 
         // Console model: the master bus carries its channel EQ from
         // the first frame.
         app.ensure_master_eq();
 
-        let startup_task = if app.state.browser.roots.is_empty() {
-            Task::none()
+        let roots = app.state.browser.roots.clone();
+        let local_startup_task = Task::batch(roots.into_iter().map(|root| {
+            let revision = app.state.browser.begin_root_scan(&root, false);
+            Task::perform(scan_sample_root_async(root.clone()), move |result| {
+                Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                    root: root.clone(),
+                    revision,
+                    result,
+                })
+            })
+        }));
+        let remote_startup_task = if app.dropbox_client.is_some() {
+            Task::done(Message::RefreshRemoteConnection)
         } else {
-            app.state.browser.scan_in_progress = true;
-            Task::perform(
-                scan_sample_library_async(app.state.browser.roots.clone()),
-                |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-            )
+            Task::none()
         };
+
+        // Staged Project Media copies are content-addressed and shared, so
+        // saves and aborted imports never delete them eagerly; this sweep
+        // is the cache policy that reclaims entries old enough that no
+        // live session can still reference them.
+        std::thread::spawn(|| {
+            vibez_project::project_format_v1::sweep_stale_staging(std::time::Duration::from_secs(
+                7 * 24 * 60 * 60,
+            ));
+        });
 
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
@@ -259,7 +363,10 @@ impl App {
             .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
             .unwrap_or_else(Task::none);
 
-        (app, Task::batch([startup_task, open_task]))
+        (
+            app,
+            Task::batch([local_startup_task, remote_startup_task, open_task]),
+        )
     }
 
     /// Find a theme by name: built-ins first, then the scanned user
@@ -348,6 +455,7 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(UI_TICK_MS)).map(|_| Message::Tick),
+            local_watcher::subscription(self.state.browser.roots.clone()),
             iced::keyboard::on_key_press(global_key_handler),
             iced::event::listen_with(|event, _status, _id| match event {
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
@@ -363,420 +471,4 @@ impl App {
             }),
         ])
     }
-}
-
-async fn decode_local_for_preview_async(
-    path: PathBuf,
-) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
-    let audio = decode_file_async(path).await?;
-    Ok(Arc::new(audio))
-}
-
-async fn decode_file_async(
-    path: PathBuf,
-) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    tokio::task::spawn_blocking(move || {
-        file_io::decode_audio_file(&path).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("decode task failed: {e}"))?
-}
-
-async fn save_project_async(path: PathBuf, project: Project) -> Result<PathBuf, String> {
-    tokio::task::spawn_blocking(move || {
-        let save_path = path;
-        project
-            .save_to_file(&save_path)
-            .map(|_| save_path)
-            .map_err(|err| err.to_string())
-    })
-    .await
-    .map_err(|err| format!("save task failed: {err}"))?
-}
-
-async fn quantize_audio_clip_async(
-    input: QuantizeInput,
-) -> Result<crate::message::AudioQuantizeSuccess, String> {
-    tokio::task::spawn_blocking(move || compute_audio_quantize(input))
-        .await
-        .map_err(|e| format!("quantize task failed: {e}"))?
-}
-
-async fn detect_clip_bpm_async(
-    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-    sample_rate: u32,
-) -> Option<vibez_core::onset::BpmEstimate> {
-    tokio::task::spawn_blocking(move || vibez_core::onset::detect_bpm(&audio, sample_rate))
-        .await
-        .unwrap_or(None)
-}
-
-async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message::AutoWarpOutcome {
-    use crate::message::AutoWarpOutcome;
-    let audio_for_detect = Arc::clone(&input.audio);
-    let sample_rate = input.sample_rate;
-    let estimate = tokio::task::spawn_blocking(move || {
-        vibez_core::onset::detect_bpm(&audio_for_detect, sample_rate)
-    })
-    .await
-    .unwrap_or(None);
-    let Some(est) = estimate else {
-        return AutoWarpOutcome::NotDetected;
-    };
-    if est.confidence < input.confidence_threshold || est.bpm <= 0.0 {
-        return AutoWarpOutcome::DetectedOnly {
-            bpm: est.bpm,
-            confidence: est.confidence,
-        };
-    }
-    let num_frames = input.audio.num_frames();
-    let warp_input = crate::warp::WarpClipInput {
-        audio: input.audio,
-        fields_frames: num_frames as u64,
-        source_offset: 0,
-        duration: num_frames as u64,
-        loop_start: 0,
-        loop_end: 0,
-        clip_bpm: est.bpm,
-        project_bpm: input.project_bpm,
-    };
-    match crate::warp::warp_clip_async(warp_input).await {
-        Ok(success) => AutoWarpOutcome::Warped {
-            confidence: est.confidence,
-            success,
-        },
-        Err(_) => AutoWarpOutcome::DetectedOnly {
-            bpm: est.bpm,
-            confidence: est.confidence,
-        },
-    }
-}
-
-async fn connect_dropbox_async(
-    app_key: String,
-) -> Result<(vibez_dropbox::AccountInfo, vibez_dropbox::Tokens), String> {
-    let opener: Arc<dyn vibez_dropbox::BrowserOpener> =
-        Arc::new(vibez_dropbox::SystemBrowserOpener);
-    let tokens = vibez_dropbox::run_oauth_flow(&app_key, opener)
-        .await
-        .map_err(|e| e.to_string())?;
-    let client = DropboxClient::new(app_key, tokens);
-    let info = client.current_account().await.map_err(|e| e.to_string())?;
-    let tokens = client.tokens().await;
-    Ok((info, tokens))
-}
-
-async fn list_dropbox_folder_async(
-    client: Arc<DropboxClient>,
-    path: String,
-) -> Result<(String, Vec<DropboxEntry>), String> {
-    let entries = client.list_folder(&path).await.map_err(|e| e.to_string())?;
-    Ok((path, entries))
-}
-
-async fn fetch_dropbox_sample_async(
-    client: Arc<DropboxClient>,
-    cache: DropboxCache,
-    entry: DropboxEntry,
-) -> Result<
-    (
-        Arc<vibez_core::audio_buffer::DecodedAudio>,
-        String,
-        MediaSourceRef,
-    ),
-    String,
-> {
-    let local = client
-        .download_to_cache(&entry, &cache)
-        .await
-        .map_err(|e| e.to_string())?;
-    let decoded = tokio::task::spawn_blocking(move || {
-        vibez_audio_io::file_io::decode_audio_file(&local).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("decode task failed: {e}"))??;
-    let source = MediaSourceRef::DropboxFile {
-        path_lower: entry.path_lower.clone(),
-        display_path: entry.path_display.clone(),
-        rev: entry.rev.clone(),
-    };
-    Ok((Arc::new(decoded), entry.name, source))
-}
-
-async fn export_async(
-    request: vibez_engine::render::BounceRequest,
-    wav_path: PathBuf,
-) -> Result<PathBuf, String> {
-    tokio::task::spawn_blocking(move || {
-        let result = vibez_engine::render::render_offline(&request);
-        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
-            .map_err(|e| format!("WAV write error: {e}"))?;
-        Ok(wav_path)
-    })
-    .await
-    .map_err(|err| format!("export task failed: {err}"))?
-}
-
-async fn bounce_async(
-    request: vibez_engine::render::BounceRequest,
-    wav_path: PathBuf,
-    clip_name: String,
-    insert_position_samples: u64,
-) -> Result<crate::message::BounceOutcome, String> {
-    tokio::task::spawn_blocking(move || {
-        let result = vibez_engine::render::render_offline(&request);
-        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
-            .map_err(|e| format!("WAV write error: {e}"))?;
-        Ok(crate::message::BounceOutcome {
-            audio: Arc::new(result.audio),
-            source: MediaSourceRef::LocalFile {
-                path: wav_path.clone(),
-            },
-            path: wav_path,
-            clip_name,
-            insert_position_samples,
-            warnings: result.warnings,
-        })
-    })
-    .await
-    .map_err(|err| format!("bounce task failed: {err}"))?
-}
-
-/// Finish a decoded clip for project load. The project file stores
-/// the raw source reference, but a warped clip's geometry (duration /
-/// offsets / loop bounds) is saved in warped-sample units, so the
-/// deterministic stretch is re-applied here; otherwise every warped
-/// clip reloads at its raw tempo and the whole project plays out of
-/// sync. The stretch runs on a blocking thread (WSOLA over a whole
-/// clip is CPU-heavy).
-async fn finish_loaded_clip(
-    info: ClipInfo,
-    raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
-) -> LoadedClipData {
-    if info.warped {
-        if let (Some(clip_bpm), Some(warped_to_bpm)) = (info.original_bpm, info.warped_to_bpm) {
-            let stretch_src = Arc::clone(&raw);
-            let warped = tokio::task::spawn_blocking(move || {
-                crate::warp::rewarp_for_load(&stretch_src, clip_bpm, warped_to_bpm)
-            })
-            .await
-            .unwrap_or(None);
-            if let Some(warped) = warped {
-                return LoadedClipData {
-                    info,
-                    audio: warped,
-                    original_audio: Some(raw),
-                };
-            }
-        }
-    }
-    LoadedClipData {
-        info,
-        audio: raw,
-        original_audio: None,
-    }
-}
-
-async fn load_project_async(
-    path: PathBuf,
-    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
-) -> Result<ProjectLoadResult, String> {
-    let load_path = path.clone();
-    let project = tokio::task::spawn_blocking(move || {
-        Project::load_from_file(&load_path).map_err(|err| err.to_string())
-    })
-    .await
-    .map_err(|err| format!("load task failed: {err}"))??;
-
-    let mut clips = Vec::new();
-    let mut sampler_samples = Vec::new();
-    let mut drum_rack_pad_samples = Vec::new();
-    let mut warnings = Vec::new();
-
-    for clip in &project.clips {
-        match clip.resolved_source().cloned() {
-            Some(MediaSourceRef::LocalFile { path: clip_path }) => {
-                match decode_blocking(clip_path).await {
-                    Ok(audio) => {
-                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
-                    }
-                    Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
-                }
-            }
-            Some(source @ MediaSourceRef::DropboxFile { .. }) => {
-                match hydrate_dropbox_source(dropbox.as_ref(), &source, &clip.name).await {
-                    Ok(audio) => {
-                        clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await)
-                    }
-                    Err(err) => warnings.push(err),
-                }
-            }
-            None => warnings.push(format!(
-                "Skipped clip '{}' (missing source reference)",
-                clip.name
-            )),
-        }
-    }
-
-    for track in &project.tracks {
-        if let Some(native) = &track.native_instrument {
-            match native {
-                InstrumentStateInfo::Sampler {
-                    source: Some(source),
-                    ..
-                } => match source {
-                    MediaSourceRef::LocalFile { path: sample_path } => {
-                        match decode_blocking(sample_path.clone()).await {
-                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                track_id: track.id,
-                                source: source.clone(),
-                                audio: Arc::new(audio),
-                                name: source.display_name(),
-                            }),
-                            Err(err) => warnings.push(format!(
-                                "Skipped sampler source on '{}' ({})",
-                                track.name, err
-                            )),
-                        }
-                    }
-                    MediaSourceRef::DropboxFile { .. } => {
-                        match hydrate_dropbox_source(dropbox.as_ref(), source, &track.name).await {
-                            Ok(audio) => sampler_samples.push(LoadedSamplerData {
-                                track_id: track.id,
-                                source: source.clone(),
-                                audio: Arc::new(audio),
-                                name: source.display_name(),
-                            }),
-                            Err(err) => warnings.push(err),
-                        }
-                    }
-                },
-                InstrumentStateInfo::DrumRack { pads } => {
-                    for (pad_index, pad) in pads.iter().enumerate() {
-                        let Some(source) = &pad.source else {
-                            continue;
-                        };
-                        let label = format!("drum pad {} on '{}'", pad_index + 1, track.name);
-                        match source {
-                            MediaSourceRef::LocalFile { path: sample_path } => {
-                                match decode_blocking(sample_path.clone()).await {
-                                    Ok(audio) => {
-                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
-                                            track_id: track.id,
-                                            pad_index,
-                                            source: source.clone(),
-                                            audio: Arc::new(audio),
-                                            name: source.display_name(),
-                                            state: pad.clone(),
-                                        })
-                                    }
-                                    Err(err) => warnings.push(format!("Skipped {label} ({err})")),
-                                }
-                            }
-                            MediaSourceRef::DropboxFile { .. } => {
-                                match hydrate_dropbox_source(dropbox.as_ref(), source, &label).await
-                                {
-                                    Ok(audio) => {
-                                        drum_rack_pad_samples.push(LoadedDrumRackPadData {
-                                            track_id: track.id,
-                                            pad_index,
-                                            source: source.clone(),
-                                            audio: Arc::new(audio),
-                                            name: source.display_name(),
-                                            state: pad.clone(),
-                                        })
-                                    }
-                                    Err(err) => warnings.push(err),
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    Ok(ProjectLoadResult {
-        path,
-        project,
-        clips,
-        sampler_samples,
-        drum_rack_pad_samples,
-        warnings,
-    })
-}
-
-async fn decode_blocking(path: PathBuf) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    tokio::task::spawn_blocking(move || {
-        file_io::decode_audio_file(&path).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("decode task failed: {e}"))?
-}
-
-async fn hydrate_dropbox_source(
-    dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
-    source: &MediaSourceRef,
-    label: &str,
-) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    let MediaSourceRef::DropboxFile {
-        path_lower,
-        display_path,
-        rev,
-    } = source
-    else {
-        return Err(format!(
-            "Skipped '{label}' (expected Dropbox source reference)"
-        ));
-    };
-    let Some((client, cache)) = dropbox else {
-        return Err(format!(
-            "Skipped '{label}' (not connected to Dropbox - reconnect in Settings)"
-        ));
-    };
-    let file_name = display_path
-        .rsplit_once('/')
-        .map(|(_, n)| n.to_string())
-        .unwrap_or_else(|| display_path.clone());
-    let entry = DropboxEntry {
-        path_lower: path_lower.clone(),
-        path_display: display_path.clone(),
-        name: file_name,
-        is_folder: false,
-        rev: rev.clone(),
-        size: None,
-    };
-    let local_path = client
-        .download_to_cache(&entry, cache)
-        .await
-        .map_err(|e| format!("Skipped '{label}' ({e})"))?;
-    decode_blocking(local_path)
-        .await
-        .map_err(|e| format!("Skipped '{label}' ({e})"))
-}
-
-async fn scan_sample_library_async(roots: Vec<PathBuf>) -> Result<SampleLibraryScanResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let mut entries = Vec::new();
-        let mut warnings = Vec::new();
-
-        for root in roots {
-            if !root.exists() {
-                warnings.push(format!("Missing root: {}", root.display()));
-                continue;
-            }
-            scan_root_into(&root, &root, &mut entries, &mut warnings);
-        }
-
-        entries.sort_by(|a, b| {
-            a.relative_path
-                .cmp(&b.relative_path)
-                .then_with(|| a.name.cmp(&b.name))
-        });
-
-        Ok(SampleLibraryScanResult { entries, warnings })
-    })
-    .await
-    .map_err(|err| format!("scan task failed: {err}"))?
 }

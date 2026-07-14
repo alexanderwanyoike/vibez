@@ -9,7 +9,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::message::Message;
 use crate::plugin_window::PluginWindowEvent;
-use crate::state::{ArrangementSelection, DetailPanelTab, UiEffect};
+use crate::state::{ArrangementSelection, AuditionMode, DetailPanelTab, UiEffect};
 
 use super::*;
 
@@ -117,12 +117,40 @@ impl App {
         if action.persist_settings {
             self.persist_ui_settings();
         }
-        if action.expand_dropbox_root && self.dropbox_client.is_some() {
-            return self.update(Message::DropboxExpandFolder(String::new()));
+        if !action.debounce_root_scans.is_empty() {
+            return Task::batch(
+                action
+                    .debounce_root_scans
+                    .into_iter()
+                    .map(|(root, revision)| {
+                        Task::perform(
+                            async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+                                (root, revision)
+                            },
+                            |(root, revision)| {
+                                Message::Browser(BrowserMsg::ReconcileLocalRoot { root, revision })
+                            },
+                        )
+                    }),
+            );
         }
-        if let Some((track_id, beat, source)) = action.drop_on_arrangement {
-            let position_samples = self.state.beats_to_samples(beat);
-            return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
+        if let Some((root, revision)) = action.scan_root {
+            return Task::perform(scan_sample_root_async(root.clone()), move |result| {
+                Message::Browser(BrowserMsg::LocalRootCatalogReconciled {
+                    root: root.clone(),
+                    revision,
+                    result,
+                })
+            });
+        }
+        if let Some(source) = action.load_waveform {
+            self.state.browser.begin_waveform_load(&source);
+            if let MediaSourceRef::LocalFile { path } = source.clone() {
+                return Task::perform(decode_local_for_preview_async(path), move |result| {
+                    Message::BrowserWaveformReady(source.clone(), result)
+                });
+            }
         }
         Task::none()
     }
@@ -384,6 +412,29 @@ impl App {
                     }
                     EngineEvent::PlaybackStarted => {
                         self.state.transport.playing = true;
+                    }
+                    EngineEvent::AuditionStopped => {
+                        self.state.browser.stop_audition_state();
+                        if matches!(
+                            self.state.status_text.as_str(),
+                            "RAW Audition playing" | "WARP Audition playing"
+                        ) {
+                            self.state.status_text = "Audition finished".into();
+                        }
+                    }
+                    EngineEvent::AuditionQueued => {
+                        self.state.browser.audition_loading = false;
+                        self.state.browser.audition_playing = false;
+                        self.state.browser.audition_queued = true;
+                    }
+                    EngineEvent::AuditionStarted => {
+                        self.state.browser.audition_loading = false;
+                        self.state.browser.audition_queued = false;
+                        self.state.browser.audition_playing = true;
+                        self.state.status_text = match self.state.browser.audition_mode {
+                            AuditionMode::Raw => "RAW Audition playing".into(),
+                            AuditionMode::Warp => "WARP Audition playing".into(),
+                        };
                     }
                     EngineEvent::TrackMeter {
                         track_id,

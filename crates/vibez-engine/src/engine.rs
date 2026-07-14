@@ -9,7 +9,7 @@ use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
 use vibez_instruments::create_instrument;
 
-use crate::commands::EngineCommand;
+use crate::commands::{AuditionSync, EngineCommand};
 use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
@@ -58,8 +58,8 @@ pub struct AudioEngine {
     /// Consumer side, parked here until the UI takes it before the
     /// engine moves to the audio thread.
     spectrum_rx: Option<Consumer<f32>>,
-    /// One-shot sample preview, bypasses transport and soloed/muted state.
-    preview: Option<PreviewVoice>,
+    /// One-shot Browser audition after project master processing.
+    audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
@@ -69,12 +69,108 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
 }
 
-/// Dedicated single-voice preview channel used by the sample browser.
-/// Plays `audio` start-to-end irrespective of transport state and is
-/// interrupted whenever a new preview starts.
-struct PreviewVoice {
+/// How many replaced voices can fade out simultaneously. With tiny
+/// audio buffers a retrigger can arrive before the previous ~5ms fade
+/// finishes; a couple of fixed slots absorb the overlap without
+/// clicking or allocating on the audio thread.
+const AUDITION_OUTGOING_VOICES: usize = 3;
+
+/// Dedicated Browser signal path mixed after project master processing.
+struct AuditionBus {
+    active: Option<AuditionVoice>,
+    outgoing: [Option<AuditionVoice>; AUDITION_OUTGOING_VOICES],
+    queued: Option<QueuedAudition>,
+    gain: f32,
+}
+
+struct AuditionVoice {
     audio: Arc<DecodedAudio>,
     position: u64,
+    fade_in_frames: usize,
+    fade_out_remaining: Option<usize>,
+    looped: bool,
+}
+
+struct QueuedAudition {
+    audio: Arc<DecodedAudio>,
+    target_position: u64,
+    looped: bool,
+}
+
+impl AuditionBus {
+    fn new() -> Self {
+        Self {
+            active: None,
+            outgoing: std::array::from_fn(|_| None),
+            queued: None,
+            gain: 1.0,
+        }
+    }
+
+    fn start(&mut self, audio: Arc<DecodedAudio>, fade_frames: usize, looped: bool) {
+        self.queued = None;
+        self.stop_active(fade_frames);
+        self.active = Some(AuditionVoice {
+            audio,
+            position: 0,
+            fade_in_frames: fade_frames,
+            fade_out_remaining: None,
+            looped,
+        });
+    }
+
+    fn queue(
+        &mut self,
+        audio: Arc<DecodedAudio>,
+        target_position: u64,
+        fade_frames: usize,
+        looped: bool,
+    ) {
+        self.stop_active(fade_frames);
+        self.queued = Some(QueuedAudition {
+            audio,
+            target_position,
+            looped,
+        });
+    }
+
+    fn stop(&mut self, fade_frames: usize) {
+        self.queued = None;
+        self.stop_active(fade_frames);
+    }
+
+    fn stop_active(&mut self, fade_frames: usize) {
+        if let Some(mut active) = self.active.take() {
+            if active.position > 0 {
+                active.fade_out_remaining = Some(fade_frames);
+                // Prefer a free slot; when a rapid retrigger burst has
+                // every slot fading, replace the voice closest to done
+                // (the smallest possible click).
+                let slot = self
+                    .outgoing
+                    .iter_mut()
+                    .min_by_key(|slot| {
+                        slot.as_ref()
+                            .map_or(0, |voice| voice.fade_out_remaining.unwrap_or(0))
+                    })
+                    .expect("outgoing slots are non-empty");
+                *slot = Some(active);
+            }
+        }
+    }
+
+    fn has_outgoing(&self) -> bool {
+        self.outgoing.iter().any(Option::is_some)
+    }
+
+    fn set_looped(&mut self, looped: bool) {
+        if let Some(active) = self.active.as_mut() {
+            active.looped = looped;
+        }
+        if let Some(queued) = self.queued.as_mut() {
+            queued.looped = looped;
+        }
+    }
 }
 
 impl AudioEngine {
@@ -97,7 +193,7 @@ impl AudioEngine {
             spectrum_track: None,
             spectrum_tx,
             spectrum_rx: Some(spectrum_rx),
-            preview: None,
+            audition: AuditionBus::new(),
             sample_rate: 44100,
             cmd_rx,
             event_tx,
@@ -243,8 +339,8 @@ impl AudioEngine {
             push_spectrum(&mut self.spectrum_tx, output, channels);
         }
 
-        // ---- 4.5 Preview channel (bypasses transport) -------------------
-        self.process_preview(output, frames, channels);
+        // ---- 4.5 Audition Bus (post-master, outside project graph) ------
+        self.process_audition(output, frames, channels);
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
@@ -523,41 +619,51 @@ impl AudioEngine {
         }
     }
 
-    /// Render the preview voice into the output buffer on top of whatever
-    /// the main graph produced. Bypasses transport, solo, and mute; a
-    /// `StartPreview` command during playback simply overlays the preview.
-    fn process_preview(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let Some(preview) = self.preview.as_mut() else {
-            return;
-        };
-        let audio_channels = preview.audio.num_channels();
-        let audio_frames = preview.audio.num_frames();
-        if audio_channels == 0 || audio_frames == 0 {
-            self.preview = None;
-            return;
-        }
-
-        let start = preview.position as usize;
-        let mut consumed = 0usize;
-        for frame in 0..frames {
-            let source = start + frame;
-            if source >= audio_frames {
-                break;
+    fn process_audition(&mut self, output: &mut [f32], frames: usize, channels: usize) {
+        let mut had_voice = self.audition.active.is_some() || self.audition.has_outgoing();
+        let mut start_offset = 0;
+        let queued_ready = self.audition.queued.as_ref().is_some_and(|queued| {
+            if !self.transport.is_playing() {
+                return true;
             }
-            for ch in 0..channels {
-                let sample = if ch < audio_channels {
-                    preview.audio.sample(ch, source)
-                } else {
-                    preview.audio.sample(audio_channels - 1, source)
-                };
-                output[frame * channels + ch] += sample;
+            let block_start = self.transport.position();
+            queued.target_position < block_start.saturating_add(frames as u64)
+        });
+        if queued_ready {
+            let queued = self.audition.queued.take().expect("queued audition exists");
+            if self.transport.is_playing() {
+                start_offset = queued
+                    .target_position
+                    .saturating_sub(self.transport.position())
+                    .min(frames as u64) as usize;
             }
-            consumed += 1;
+            self.audition.start(
+                queued.audio,
+                audition_fade_frames(self.sample_rate),
+                queued.looped,
+            );
+            had_voice = true;
+            let _ = self.event_tx.push(EngineEvent::AuditionStarted);
         }
-
-        preview.position = preview.position.saturating_add(consumed as u64);
-        if preview.position as usize >= audio_frames {
-            self.preview = None;
+        let gain = self.audition.gain;
+        for slot in self.audition.outgoing.iter_mut() {
+            if slot.as_mut().is_some_and(|voice| {
+                render_audition_voice(voice, output, frames, channels, gain, 0)
+            }) {
+                *slot = None;
+            }
+        }
+        if self.audition.active.as_mut().is_some_and(|voice| {
+            render_audition_voice(voice, output, frames, channels, gain, start_offset)
+        }) {
+            self.audition.active = None;
+        }
+        if had_voice
+            && self.audition.active.is_none()
+            && !self.audition.has_outgoing()
+            && self.audition.queued.is_none()
+        {
+            let _ = self.event_tx.push(EngineEvent::AuditionStopped);
         }
     }
 
@@ -583,577 +689,6 @@ impl AudioEngine {
                         0.0
                     };
                     output[frame * channels + ch] = sample;
-                }
-            }
-        }
-    }
-
-    /// Drain all pending commands from the ring buffer without blocking.
-    fn drain_commands(&mut self) {
-        while let Ok(cmd) = self.cmd_rx.pop() {
-            match cmd {
-                EngineCommand::Play => {
-                    self.transport.play();
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
-                }
-                EngineCommand::Stop => {
-                    self.transport.stop();
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
-                }
-                EngineCommand::Seek(pos) => {
-                    self.transport.seek(pos);
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                }
-                EngineCommand::SetBpm(bpm) => {
-                    self.transport.set_bpm(bpm);
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::LoadAudio(audio) => {
-                    let len = audio.num_frames() as u64;
-                    self.audio = Some(audio);
-                    self.transport.set_audio_length(Some(len));
-                }
-                EngineCommand::UnloadAudio => {
-                    self.audio = None;
-                    self.transport.set_audio_length(None);
-                    self.transport.stop();
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
-                }
-                // -- Multi-track commands --
-                EngineCommand::AddTrack(id, _name) => {
-                    self.tracks.push(EngineTrack::new(id));
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::RemoveTrack(id) => {
-                    if let Some(pos) = self.tracks.iter().position(|t| t.id == id) {
-                        let mut track = self.tracks.remove(pos);
-                        for slot in track.effects.drain(..) {
-                            self.dispose_effect(slot.effect);
-                        }
-                        if let Some(instrument) = track.instrument.take() {
-                            self.dispose_instrument(instrument);
-                        }
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::ReorderTracks(order) => {
-                    self.tracks.sort_by_key(|t| {
-                        order
-                            .iter()
-                            .position(|id| *id == t.id)
-                            .unwrap_or(usize::MAX)
-                    });
-                }
-                EngineCommand::AddClip {
-                    track_id,
-                    clip_id,
-                    audio,
-                    position,
-                    source_offset,
-                    duration,
-                    loop_enabled,
-                    loop_start,
-                    loop_end,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.clips.push(EngineClip {
-                            id: clip_id,
-                            audio,
-                            position,
-                            source_offset,
-                            duration,
-                            loop_enabled,
-                            loop_start,
-                            loop_end,
-                        });
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::RemoveClip(track_id, clip_id) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.clips.retain(|c| c.id != clip_id);
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::ReplaceClipAudio {
-                    track_id,
-                    clip_id,
-                    audio,
-                    duration,
-                    source_offset,
-                    loop_start,
-                    loop_end,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.audio = audio;
-                            clip.duration = duration;
-                            clip.source_offset = source_offset;
-                            clip.loop_start = loop_start;
-                            clip.loop_end = loop_end;
-                        }
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::MoveClip {
-                    track_id,
-                    clip_id,
-                    new_position,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.position = new_position;
-                        }
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::SetTrackGain(id, gain) => {
-                    if let Some(track) = self.channel_mut(id) {
-                        track.gain = gain;
-                    }
-                }
-                EngineCommand::SetAutomationLane { track_id, lane } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        match track.automation.iter_mut().find(|l| l.id == lane.id) {
-                            Some(existing) => *existing = lane,
-                            None => track.automation.push(lane),
-                        }
-                    }
-                }
-                EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        track.automation.retain(|l| l.id != lane_id);
-                    }
-                }
-                EngineCommand::SetTrackPan(id, pan) => {
-                    if let Some(track) = self.channel_mut(id) {
-                        track.pan = pan.clamp(0.0, 1.0);
-                    }
-                }
-                EngineCommand::SetTrackMute(id, mute) => {
-                    if let Some(track) = self.channel_mut(id) {
-                        track.mute = mute;
-                    }
-                }
-
-                // -- Busses --
-                EngineCommand::AddBus(id, _name) => {
-                    self.buses.push(EngineTrack::new(id));
-                }
-                EngineCommand::RemoveBus(id) => {
-                    if let Some(pos) = self.buses.iter().position(|b| b.id == id) {
-                        let mut bus = self.buses.remove(pos);
-                        for slot in bus.effects.drain(..) {
-                            self.dispose_effect(slot.effect);
-                        }
-                    }
-                    for track in &mut self.tracks {
-                        track.sends.retain(|(bus_id, _)| *bus_id != id);
-                        track.automation.retain(|lane| {
-                            lane.target
-                                != vibez_core::automation::AutomationTarget::Send { bus_id: id }
-                        });
-                    }
-                }
-                EngineCommand::SetSend {
-                    track_id,
-                    bus_id,
-                    amount,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        let amount = amount.clamp(0.0, 1.0);
-                        match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                            Some(send) => send.1 = amount,
-                            None => track.sends.push((bus_id, amount)),
-                        }
-                    }
-                }
-                EngineCommand::SetTrackSolo(id, solo) => {
-                    if let Some(channel) = self.channel_mut(id) {
-                        channel.solo = solo;
-                    }
-                }
-
-                // -- Infrastructure --
-                EngineCommand::SetSampleRate(sr) => {
-                    self.sample_rate = sr;
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::SetSpectrumTap(target) => {
-                    self.spectrum_track = target;
-                }
-
-                // -- Effects --
-                EngineCommand::AddEffect {
-                    track_id,
-                    effect_id,
-                    effect_type,
-                    position,
-                } => {
-                    let effect = create_effect(effect_type, self.sample_rate as f32);
-                    if let Some(track) = self.channel_mut(track_id) {
-                        let slot = EffectSlot {
-                            id: effect_id,
-                            effect,
-                            bypass: false,
-                        };
-                        if let Some(pos) = position {
-                            let idx = pos.min(track.effects.len());
-                            track.effects.insert(idx, slot);
-                        } else {
-                            track.effects.push(slot);
-                        }
-                    }
-                }
-                EngineCommand::RemoveEffect(track_id, effect_id) => {
-                    let removed = self.channel_mut(track_id).and_then(|track| {
-                        track
-                            .effects
-                            .iter()
-                            .position(|e| e.id == effect_id)
-                            .map(|pos| track.effects.remove(pos))
-                    });
-                    if let Some(slot) = removed {
-                        self.dispose_effect(slot.effect);
-                    }
-                }
-                EngineCommand::SetEffectParam {
-                    track_id,
-                    effect_id,
-                    param_index,
-                    value,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
-                            slot.effect.set_param(param_index, value);
-                        }
-                    }
-                }
-                EngineCommand::SetEffectBypass {
-                    track_id,
-                    effect_id,
-                    bypass,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
-                            slot.bypass = bypass;
-                        }
-                    }
-                }
-                EngineCommand::MoveEffect {
-                    track_id,
-                    effect_id,
-                    new_index,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        if let Some(old_idx) = track.effects.iter().position(|e| e.id == effect_id)
-                        {
-                            let slot = track.effects.remove(old_idx);
-                            let idx = new_index.min(track.effects.len());
-                            track.effects.insert(idx, slot);
-                        }
-                    }
-                }
-
-                // -- Instrument tracks --
-                EngineCommand::AddInstrumentTrack(id, _name, kind) => {
-                    let mut track = EngineTrack::new(id);
-                    track.instrument = Some(create_instrument(kind, self.sample_rate as f32));
-                    self.tracks.push(track);
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::AddMidiTrack(id, _name) => {
-                    self.tracks.push(EngineTrack::new(id));
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::SetTrackInstrument(track_id, kind) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        let old = track
-                            .instrument
-                            .replace(create_instrument(kind, self.sample_rate as f32));
-                        if let Some(old) = old {
-                            self.dispose_instrument(old);
-                        }
-                    }
-                }
-                EngineCommand::RemoveTrackInstrument(track_id) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.take() {
-                            self.dispose_instrument(instrument);
-                        }
-                    }
-                }
-                EngineCommand::SetNoteClipDuration {
-                    track_id,
-                    clip_id,
-                    duration_beats,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.duration_beats = duration_beats;
-                        }
-                        track.flush_notes();
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::AddNoteClip {
-                    track_id,
-                    clip_id,
-                    position_beats,
-                    duration_beats,
-                    loop_enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.note_clips.push(EngineNoteClip {
-                            id: clip_id,
-                            position_beats,
-                            duration_beats,
-                            notes: Vec::new(),
-                            loop_enabled,
-                            loop_start_beats,
-                            loop_end_beats,
-                        });
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::RemoveNoteClip(track_id, clip_id) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.note_clips.retain(|c| c.id != clip_id);
-                        // Sounding notes get their note-offs from the
-                        // clip's schedule; without the clip they hang
-                        // forever.
-                        track.flush_notes();
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::MoveNoteClip {
-                    track_id,
-                    clip_id,
-                    new_position_beats,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.position_beats = new_position_beats;
-                        }
-                    }
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::AddNote {
-                    track_id,
-                    clip_id,
-                    note,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.notes.push(note);
-                        }
-                    }
-                }
-                EngineCommand::RemoveNote {
-                    track_id,
-                    clip_id,
-                    note_index,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            if note_index < clip.notes.len() {
-                                clip.notes.remove(note_index);
-                            }
-                        }
-                        track.flush_notes();
-                    }
-                }
-                EngineCommand::EditNote {
-                    track_id,
-                    clip_id,
-                    note_index,
-                    note,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            if note_index < clip.notes.len() {
-                                clip.notes[note_index] = note;
-                            }
-                        }
-                        track.flush_notes();
-                    }
-                }
-                EngineCommand::SetInstrumentParam {
-                    track_id,
-                    param_index,
-                    value,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(ref mut instrument) = track.instrument {
-                            instrument.set_param(param_index, value);
-                        }
-                    }
-                }
-                EngineCommand::LoadSamplerSample {
-                    track_id,
-                    sample,
-                    sample_name,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(ref mut instrument) = track.instrument {
-                            instrument.load_sample(sample, sample_name);
-                        }
-                    }
-                }
-                EngineCommand::LoadDrumRackPadSample {
-                    track_id,
-                    pad_index,
-                    sample,
-                    sample_name,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(ref mut instrument) = track.instrument {
-                            instrument.load_drum_pad_sample(pad_index, sample, sample_name);
-                        }
-                    }
-                }
-                EngineCommand::ClearDrumRackPad {
-                    track_id,
-                    pad_index,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(ref mut instrument) = track.instrument {
-                            instrument.clear_drum_pad(pad_index);
-                        }
-                    }
-                }
-                EngineCommand::SetDrumRackPadState {
-                    track_id,
-                    pad_index,
-                    state,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(ref mut instrument) = track.instrument {
-                            instrument.set_drum_pad_state(pad_index, state);
-                        }
-                    }
-                }
-
-                // -- Clip looping --
-                EngineCommand::SetArrangementLoop(enabled) => {
-                    self.transport.set_loop_enabled(enabled);
-                }
-                EngineCommand::SetArrangementLoopRegion { start, end } => {
-                    self.transport.set_loop_region(start, end);
-                }
-                EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start,
-                    loop_end,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.loop_enabled = enabled;
-                            clip.loop_start = loop_start;
-                            clip.loop_end = loop_end;
-                        }
-                    }
-                }
-                EngineCommand::SetNoteClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.loop_enabled = enabled;
-                            clip.loop_start_beats = loop_start_beats;
-                            clip.loop_end_beats = loop_end_beats;
-                        }
-                        track.flush_notes();
-                    }
-                }
-
-                // -- Preview --
-                EngineCommand::StartPreview(audio) => {
-                    self.preview = Some(PreviewVoice { audio, position: 0 });
-                }
-                EngineCommand::StopPreview => {
-                    self.preview = None;
-                }
-
-                // -- External MIDI input --
-                EngineCommand::ExternalNoteOn {
-                    track_id,
-                    pitch,
-                    velocity,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            instrument.note_on(pitch, velocity);
-                        }
-                    }
-                }
-                EngineCommand::ExternalNoteOff { track_id, pitch } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            instrument.note_off(pitch);
-                        }
-                    }
-                }
-
-                // -- External plugins --
-                EngineCommand::AddPluginEffect {
-                    track_id,
-                    effect_id,
-                    effect,
-                    position,
-                } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        let slot = EffectSlot {
-                            id: effect_id,
-                            effect,
-                            bypass: false,
-                        };
-                        if let Some(pos) = position {
-                            let idx = pos.min(track.effects.len());
-                            track.effects.insert(idx, slot);
-                        } else {
-                            track.effects.push(slot);
-                        }
-                    }
-                }
-                EngineCommand::AuditionNote {
-                    track_id,
-                    pitch,
-                    velocity,
-                    on,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(instrument) = track.instrument.as_mut() {
-                            if on {
-                                instrument.note_on(pitch, velocity);
-                            } else {
-                                instrument.note_off(pitch);
-                            }
-                        }
-                    }
-                }
-                EngineCommand::SetPluginInstrument {
-                    track_id,
-                    instrument,
-                } => {
-                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(old) = track.instrument.replace(instrument) {
-                            self.dispose_instrument(old);
-                        }
-                    }
                 }
             }
         }
@@ -1293,6 +828,93 @@ impl AudioEngine {
     }
 }
 
+const AUDITION_FADE_MS: usize = 5;
+
+fn audition_fade_frames(sample_rate: u32) -> usize {
+    ((sample_rate as usize * AUDITION_FADE_MS) / 1_000).max(1)
+}
+
+fn next_audition_boundary(position: u64, bpm: f64, sample_rate: u32, beats: u64) -> u64 {
+    if bpm <= 0.0 || sample_rate == 0 {
+        return position;
+    }
+    let boundary_frames = sample_rate as f64 * 60.0 / bpm * beats.max(1) as f64;
+    let boundary_index = (position as f64 / boundary_frames).floor() + 1.0;
+    (boundary_index * boundary_frames).round() as u64
+}
+
+/// Mix one RAW audition voice. Returns true once its source or fade is done.
+fn render_audition_voice(
+    voice: &mut AuditionVoice,
+    output: &mut [f32],
+    frames: usize,
+    channels: usize,
+    bus_gain: f32,
+    output_frame_offset: usize,
+) -> bool {
+    let audio_channels = voice.audio.num_channels();
+    let audio_frames = voice.audio.num_frames();
+    if audio_channels == 0 || audio_frames == 0 || channels == 0 {
+        return true;
+    }
+
+    let render_frames = frames.saturating_sub(output_frame_offset);
+    for frame in 0..render_frames {
+        let mut source = voice.position as usize;
+        if source >= audio_frames {
+            if !voice.looped {
+                return true;
+            }
+            let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
+            source = crossfade_frames;
+            voice.position = source as u64;
+        }
+        let attack = if source < voice.fade_in_frames {
+            (source + 1) as f32 / voice.fade_in_frames as f32
+        } else {
+            1.0
+        };
+        let remaining_source = audio_frames.saturating_sub(source + 1);
+        let natural_release = if voice.looped {
+            1.0
+        } else {
+            (remaining_source as f32 / voice.fade_in_frames as f32).clamp(0.0, 1.0)
+        };
+        let commanded_release = match voice.fade_out_remaining {
+            Some(remaining) => {
+                let envelope = remaining.saturating_sub(1) as f32 / voice.fade_in_frames as f32;
+                voice.fade_out_remaining = Some(remaining.saturating_sub(1));
+                envelope
+            }
+            None => 1.0,
+        };
+        let envelope = attack.min(natural_release) * commanded_release * bus_gain;
+        let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
+        let crossfade_offset = source.saturating_sub(audio_frames - crossfade_frames);
+        for ch in 0..channels {
+            let source_channel = ch.min(audio_channels - 1);
+            let sample = if voice.looped
+                && crossfade_frames > 0
+                && source >= audio_frames - crossfade_frames
+            {
+                let head_gain = crossfade_offset as f32 / crossfade_frames as f32;
+                let tail_gain = 1.0 - head_gain;
+                voice.audio.sample(source_channel, source) * tail_gain
+                    + voice.audio.sample(source_channel, crossfade_offset) * head_gain
+            } else {
+                voice.audio.sample(source_channel, source)
+            };
+            output[(output_frame_offset + frame) * channels + ch] += sample * envelope;
+        }
+        voice.position = voice.position.saturating_add(1);
+        if voice.fade_out_remaining == Some(0) {
+            return true;
+        }
+    }
+
+    !voice.looped && voice.position as usize >= audio_frames
+}
+
 /// Stream a block to the UI spectrum analyser as mono samples.
 /// Lock-free and allocation-free; drops samples when the ring is
 /// full (the UI drains at 60 fps, so sustained overflow just means
@@ -1308,6 +930,9 @@ fn push_spectrum(tx: &mut Producer<f32>, buffer: &[f32], channels: usize) {
         }
     }
 }
+
+#[path = "engine_drain_commands.rs"]
+mod drain_commands;
 
 #[cfg(test)]
 #[path = "engine_tests.rs"]

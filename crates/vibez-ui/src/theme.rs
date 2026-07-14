@@ -273,10 +273,20 @@ impl Default for ThemePalette {
 static CURRENT: LazyLock<RwLock<ThemePalette>> =
     LazyLock::new(|| RwLock::new(ThemePalette::charcoal()));
 
+static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Swap the active theme; the next frame repaints everything.
 #[allow(dead_code)] // wired up by the Appearance settings
 pub fn set_theme(palette: ThemePalette) {
     *CURRENT.write().unwrap() = palette;
+    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Monotonic palette generation. Canvases that cache geometry fold
+/// this into their fingerprints so a theme swap invalidates colors
+/// baked into the cache.
+pub fn epoch() -> u64 {
+    EPOCH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Snapshot of the whole current palette (theme save, swatches).

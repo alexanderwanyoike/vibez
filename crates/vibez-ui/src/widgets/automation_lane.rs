@@ -350,7 +350,23 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             None
         };
 
-        let Some(pos) = cursor.position_in(bounds) else {
+        // During an active drag, keep tracking when the cursor leaves
+        // the lane by clamping the absolute position into bounds, so
+        // point/curve/erase drags don't stall at the lane edge.
+        let dragging =
+            state.drag.is_some() || state.curve_drag.is_some() || state.erase_drag.is_some();
+        let clamped_fallback = || {
+            if !dragging {
+                return None;
+            }
+            cursor.position().map(|abs| {
+                Point::new(
+                    (abs.x - bounds.x).clamp(0.0, bounds.width),
+                    (abs.y - bounds.y).clamp(0.0, bounds.height),
+                )
+            })
+        };
+        let Some(pos) = cursor.position_in(bounds).or_else(clamped_fallback) else {
             if let canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
                 if let Some(msg) = commit_release(state) {
                     return (canvas::event::Status::Captured, Some(msg));

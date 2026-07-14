@@ -7,6 +7,7 @@ use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
 use crate::message::{DrumPadParam, Message};
 use crate::theme;
+use crate::widgets::drag::ValueDrag;
 use vibez_core::id::{EffectId, TrackId};
 
 /// 270-degree arc sweep matching DAW standards.
@@ -218,8 +219,7 @@ pub fn format_value(value: f32, unit: &str) -> String {
 /// State for mouse interaction.
 #[derive(Debug, Default)]
 pub struct EffectKnobState {
-    dragging: bool,
-    last_y: f32,
+    drag: ValueDrag,
     shift_held: bool,
     last_click: Option<Instant>,
 }
@@ -240,7 +240,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
         let h = bounds.height;
         let center = iced::Point::new(w / 2.0, h / 2.0);
         let radius = (w.min(h) / 2.0 - 3.0).max(6.0);
-        let engaged = state.dragging || cursor.is_over(bounds);
+        let engaged = state.drag.is_active() || cursor.is_over(bounds);
 
         // Geometry: the value arc rides outside the body with clear
         // air between every element; overlapping strokes at nearly
@@ -322,7 +322,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging {
+        if state.drag.is_active() {
             mouse::Interaction::Grabbing
         } else if cursor.is_over(bounds) {
             mouse::Interaction::Grab
@@ -362,44 +362,30 @@ impl canvas::Program<Message> for EffectKnobWidget {
                     }
                     state.last_click = Some(now);
 
-                    state.dragging = true;
-                    if let Some(pos) = cursor.position() {
-                        state.last_y = pos.y;
-                    }
+                    state.drag.grab(cursor, bounds, self.normalized());
                     return (canvas::event::Status::Captured, None);
                 }
             }
 
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.dragging {
-                    state.dragging = false;
+                if state.drag.release() {
                     return (canvas::event::Status::Captured, None);
                 }
             }
 
-            // Drag: vertical movement adjusts value
+            // Drag: vertical movement adjusts value (up = positive).
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if state.dragging {
-                    if let Some(pos) = cursor.position() {
-                        let delta = state.last_y - pos.y; // up = positive
-                        state.last_y = pos.y;
-
-                        let sensitivity = if state.shift_held {
-                            BASE_SENSITIVITY / FINE_DIVISOR
-                        } else {
-                            BASE_SENSITIVITY
-                        };
-
-                        let norm = self.normalized();
-                        let new_norm = (norm + delta * sensitivity).clamp(0.0, 1.0);
-                        let new_value = self.denormalize(new_norm);
-
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(self.set_value_message(new_value)),
-                        );
-                    }
+                let sensitivity = if state.shift_held {
+                    BASE_SENSITIVITY / FINE_DIVISOR
+                } else {
+                    BASE_SENSITIVITY
+                };
+                if let Some(norm) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(self.set_value_message(self.denormalize(norm))),
+                    );
                 }
             }
 

@@ -42,23 +42,32 @@ pub struct DropboxEntry {
     pub size: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropboxListItem {
+    Entry(DropboxEntry),
+    Deleted { path_lower: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropboxListPage {
+    pub items: Vec<DropboxListItem>,
+    pub cursor: String,
+    pub has_more: bool,
+}
+
 impl DropboxEntry {
     pub fn file_extension(&self) -> Option<&str> {
         self.name.rsplit_once('.').map(|(_, ext)| ext)
     }
 
-    /// True if the file extension is one vibez recognises as audio.
+    /// True when the shared Vibez decoder contract advertises this extension.
     pub fn is_supported_audio(&self) -> bool {
         if self.is_folder {
             return false;
         }
-        match self.file_extension() {
-            Some(ext) => matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "wav" | "wave" | "mp3" | "flac" | "ogg" | "aac" | "m4a" | "aif" | "aiff"
-            ),
-            None => false,
-        }
+        self.file_extension()
+            .and_then(vibez_core::audio_format::audio_format_for_extension)
+            .is_some()
     }
 }
 
@@ -106,6 +115,14 @@ mod tests {
             size: Some(1024),
         };
         assert!(entry.is_supported_audio());
+
+        let m4a = DropboxEntry {
+            name: "Idea.M4A".into(),
+            path_lower: "/idea.m4a".into(),
+            path_display: "/Idea.M4A".into(),
+            ..entry.clone()
+        };
+        assert!(m4a.is_supported_audio());
     }
 
     #[test]
@@ -119,6 +136,14 @@ mod tests {
             size: None,
         };
         assert!(!entry.is_supported_audio());
+
+        let raw_aac = DropboxEntry {
+            name: "unsupported.aac".into(),
+            path_lower: "/unsupported.aac".into(),
+            path_display: "/unsupported.aac".into(),
+            ..entry.clone()
+        };
+        assert!(!raw_aac.is_supported_audio());
     }
 
     #[test]

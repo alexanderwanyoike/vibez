@@ -1,24 +1,19 @@
 //! The message router: one exhaustive match, bodies delegated to
 //! domain updates and topic-module handlers.
 
-use std::sync::Arc;
-
 use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
-use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
-use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::{load_app_key_with_env_override, DropboxClient};
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrument_bg};
 
-use crate::message::{BrowserImportTarget, Message};
+use crate::message::Message;
 
 use super::*;
 
@@ -97,7 +92,7 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::AddInstrumentTrack)
                 | Message::SamplerSampleDecoded(..)
                 | Message::DrumRackPadSampleDecoded(..)
-                | Message::BrowserSampleDecoded(..)
+                | Message::BrowserImportPrepared { .. }
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::MoveAudioClip { .. })
                 | Message::Arrangement(ArrangementMsg::MoveNoteClipPosition { .. })
@@ -220,6 +215,43 @@ impl App {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {
                     self.state.project.file_menu_open = false;
                 }
+                let browser_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::ResizeDock(
+                            self.state
+                                .browser
+                                .dock_drag_width(*x, self.state.view.window_width),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::EndDockResize)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = browser_resize {
+                    let action = self.state.browser.update(browser_msg);
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let pending_drag_msg = match &msg {
+                    ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = pending_drag_msg {
+                    let action = self.state.browser.update(browser_msg);
+                    if let Some(status) = action.status {
+                        self.state.status_text = status;
+                    }
+                }
                 let ctx = crate::domains::view::ViewCtx {
                     total_beats: self.state.total_beats(),
                 };
@@ -251,366 +283,6 @@ impl App {
 
             // -- Snap grid --
 
-            // -- Engine events --
-            Message::Tick => {
-                return self.handle_tick();
-            }
-            Message::EngineMetering { peak_l, peak_r } => {
-                self.state.peak_l = peak_l;
-                self.state.peak_r = peak_r;
-            }
-
-            // -- Multi-track messages --
-            Message::DeleteKeyPressed => {
-                // Never delete anything while a text field is being
-                // edited; backspace belongs to the text there.
-                if self.state.view.editing_track_name.is_some()
-                    || self.state.view.editing_clip_name.is_some()
-                {
-                    return Task::none();
-                }
-                // Priority 1: a selected automation point.
-                if self.state.automation_ui.selected.is_some() {
-                    return self.update(Message::Automation(
-                        crate::domains::automation::AutomationMsg::DeleteSelectedPoint,
-                    ));
-                }
-                // Priority 2: selected notes in the open piano roll.
-                if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
-                    let has_selection = self
-                        .state
-                        .find_track(track_id)
-                        .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
-                        .is_some_and(|c| !c.selected_notes.is_empty());
-                    if has_selection {
-                        return self.update(Message::PianoRoll(PianoRollMsg::RemoveSelectedNotes(
-                            track_id, clip_id,
-                        )));
-                    }
-                }
-                // Priority 3: selected arrangement clips.
-                if !self.state.arrangement.selected_clips.is_empty() {
-                    return self.update(Message::Arrangement(ArrangementMsg::DeleteSelectedClip));
-                }
-            }
-            Message::AddClipToTrack(track_id) => {
-                return self.handle_add_clip_to_track(track_id);
-            }
-            Message::ClipFileSelected(track_id, path) => {
-                return self.handle_clip_file_selected(track_id, path);
-            }
-            Message::ClipAudioDecoded(track_id, clip_id, audio, name, source) => {
-                return self.handle_clip_audio_decoded(track_id, clip_id, audio, name, source);
-            }
-            Message::ClipDecodeError(_, err) => {
-                self.state.status_text = format!("Error: {err}");
-            }
-
-            // -- Effects --
-
-            // -- Instrument tracks --
-
-            // -- Sampler --
-            Message::LoadSamplerSample(track_id) => {
-                return Task::perform(
-                    async {
-                        let handle = rfd::AsyncFileDialog::new()
-                            .set_title("Load Sample")
-                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
-                            .pick_file()
-                            .await;
-                        handle.map(|h| h.path().to_path_buf())
-                    },
-                    move |path| Message::SamplerFileSelected(track_id, path),
-                );
-            }
-            Message::SamplerFileSelected(track_id, path) => {
-                if let Some(path) = path {
-                    let file_name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    self.state.status_text = format!("Loading {file_name}...");
-                    let source = MediaSourceRef::LocalFile { path: path.clone() };
-
-                    return Task::perform(decode_file_async(path), move |result| match result {
-                        Ok(audio) => Message::SamplerSampleDecoded(
-                            track_id,
-                            Arc::new(audio),
-                            file_name.clone(),
-                            source.clone(),
-                        ),
-                        Err(e) => Message::SamplerDecodeError(track_id, e),
-                    });
-                }
-            }
-            Message::SamplerSampleDecoded(track_id, audio, name, source) => {
-                self.apply_sampler_sample_loaded(track_id, audio, name, source);
-            }
-            Message::SamplerDecodeError(track_id, err) => {
-                self.state.arrangement.selected_track = Some(track_id);
-                self.state.status_text = format!("Sample load error: {err}");
-            }
-            Message::LoadDrumRackPadSample(track_id, pad_index) => {
-                return Task::perform(
-                    async {
-                        let handle = rfd::AsyncFileDialog::new()
-                            .set_title("Load Drum Pad Sample")
-                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg"])
-                            .pick_file()
-                            .await;
-                        handle.map(|h| h.path().to_path_buf())
-                    },
-                    move |path| Message::DrumRackPadFileSelected(track_id, pad_index, path),
-                );
-            }
-            Message::DrumRackPadFileSelected(track_id, pad_index, path) => {
-                return self.handle_drum_rack_pad_file_selected(track_id, pad_index, path);
-            }
-            Message::DrumRackPadSampleDecoded(track_id, pad_index, audio, name, source) => {
-                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
-            }
-            Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
-                return self.handle_drum_rack_pad_decode_error(track_id, _pad_index, err);
-            }
-
-            // -- Clip looping --
-
-            // -- Piano roll / note clips --
-
-            // -- Clip operations --
-
-            // -- Piano roll scroll --
-
-            // ── Arrangement clip interaction ──
-
-            // -- Split (Ctrl+E) --
-            // If time selection is active → split all clips at region boundaries.
-            // Otherwise → split selected clips at the playhead.
-
-            // -- Join selected clips (Ctrl+J) --
-
-            // -- Arrangement loop --
-            // -- Time selection + context menu --
-
-            // -- Clip creation from region --
-
-            // -- Track reordering --
-
-            // -- Renaming --
-
-            // -- MIDI track (no auto-synth) --
-
-            // -- Instrument attach/detach --
-
-            // -- Pattern halve --
-
-            // -- Edit mode --
-
-            // -- Device context menu --
-
-            // -- Sample browser --
-            Message::ToggleAutoWarpOnImport => {
-                self.state.auto_warp_on_import = !self.state.auto_warp_on_import;
-                self.persist_ui_settings();
-            }
-            Message::SetWarpConfidenceThreshold(v) => {
-                self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
-                self.persist_ui_settings();
-            }
-            Message::RescanMidiInputs => {
-                match vibez_audio_io::midi_input::list_midi_input_ports() {
-                    Ok(ports) => {
-                        self.midi_input_ports = ports;
-                        self.state.status_text =
-                            format!("Found {} MIDI input port(s)", self.midi_input_ports.len());
-                    }
-                    Err(err) => {
-                        self.midi_input_ports.clear();
-                        self.state.status_text = format!("MIDI scan error: {err}");
-                    }
-                }
-            }
-            Message::OpenMidiInput(name) => {
-                match vibez_audio_io::midi_input::open_midi_input(&name) {
-                    Ok(handle) => {
-                        self.state.status_text = format!("MIDI input: {}", handle.port_name);
-                        self.midi_input = Some(handle);
-                        self.persist_ui_settings();
-                    }
-                    Err(err) => {
-                        self.state.status_text = format!("MIDI open error: {err}");
-                    }
-                }
-            }
-            Message::CloseMidiInput => {
-                self.midi_input = None;
-                self.persist_ui_settings();
-                self.state.status_text = "MIDI input disconnected".to_string();
-            }
-            Message::SelectTheme(name) => {
-                if let Some(palette) = self.resolve_theme(&name) {
-                    th::set_theme(palette);
-                    self.state.current_theme_name = name.clone();
-                    self.persist_ui_settings();
-                    self.state.status_text = format!("Theme: {name}");
-                } else {
-                    self.state.status_text = format!("Theme {name:?} not found");
-                }
-            }
-            Message::RescanThemes => {
-                let (themes, warnings) = crate::themes::scan_user_themes();
-                let count = themes.len();
-                self.state.user_themes = themes;
-                self.state.status_text = if warnings.is_empty() {
-                    format!("{count} user theme(s) found")
-                } else {
-                    format!("{count} user theme(s), {} skipped", warnings.len())
-                };
-                for warning in warnings {
-                    eprintln!("vibez: theme scan: {warning}");
-                }
-            }
-            Message::ThemeSaveNameChanged(name) => {
-                self.state.theme_save_name = name;
-            }
-            Message::SaveCurrentTheme => {
-                let name = self.state.theme_save_name.trim().to_string();
-                if name.is_empty() {
-                    self.state.status_text = "Name the theme before saving".to_string();
-                    return Task::none();
-                }
-                let mut palette = th::current();
-                palette.name = name.clone();
-                match crate::themes::save_user_theme(&palette) {
-                    Ok(path) => {
-                        let (themes, _) = crate::themes::scan_user_themes();
-                        self.state.user_themes = themes;
-                        self.state.current_theme_name = name;
-                        self.state.theme_save_name.clear();
-                        self.persist_ui_settings();
-                        self.state.status_text = format!("Theme saved to {}", path.display());
-                    }
-                    Err(err) => {
-                        self.state.status_text = format!("Theme save error: {err}");
-                    }
-                }
-            }
-            Message::RewarpAllClips => {
-                return self.handle_rewarp_all_clips();
-            }
-            Message::AddSampleLibraryRoot => {
-                return Task::perform(
-                    async {
-                        let handle = rfd::AsyncFileDialog::new()
-                            .set_title("Add Sample Library Root")
-                            .pick_folder()
-                            .await;
-                        handle.map(|folder| folder.path().to_path_buf())
-                    },
-                    Message::SampleLibraryRootSelected,
-                );
-            }
-            Message::SampleLibraryRootSelected(path) => {
-                if let Some(path) = path {
-                    if !self.state.browser.roots.iter().any(|root| root == &path) {
-                        self.state.browser.roots.push(path.clone());
-                        self.state.browser.roots.sort();
-                        self.persist_ui_settings();
-                    }
-                    self.state.browser.scan_in_progress = true;
-                    self.state.status_text = format!("Scanning {}...", path.display());
-                    return Task::perform(
-                        scan_sample_library_async(self.state.browser.roots.clone()),
-                        |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-                    );
-                }
-            }
-            Message::RescanSampleLibrary => {
-                self.state.browser.scan_in_progress = true;
-                self.state.status_text = "Rescanning sample library...".to_string();
-                return Task::perform(
-                    scan_sample_library_async(self.state.browser.roots.clone()),
-                    |r| Message::Browser(BrowserMsg::SampleLibraryScanned(r)),
-                );
-            }
-            Message::ClickLocalBrowserEntry(source) => {
-                // Previously auto-previewed on click; now click only
-                // selects. Preview fires via the speaker icon (see
-                // `Message::PreviewLocalEntry`).
-                self.state.browser.selected_source = Some(source);
-            }
-            Message::PreviewLocalEntry(source) => {
-                self.state.browser.selected_source = Some(source.clone());
-                if let MediaSourceRef::LocalFile { path } = source {
-                    self.state.status_text = "Previewing...".to_string();
-                    return Task::perform(
-                        decode_local_for_preview_async(path),
-                        Message::LocalSamplePreviewReady,
-                    );
-                }
-            }
-            // -- Drag-and-drop from sample browser --
-            Message::DropSampleOnArrangement {
-                track_id,
-                position_samples,
-            } => {
-                let Some(source) = self.state.browser.drag_source.take() else {
-                    return Task::none();
-                };
-                self.state.browser.drag_label = None;
-                return self.dispatch_drop_on_arrangement(track_id, position_samples, source);
-            }
-            Message::DropSampleOnDrumPad {
-                track_id,
-                pad_index,
-            } => {
-                return self.handle_drop_sample_on_drum_pad(track_id, pad_index);
-            }
-            Message::DropSampleOnSampler { track_id } => {
-                let Some(source) = self.state.browser.drag_source.take() else {
-                    return Task::none();
-                };
-                self.state.browser.drag_label = None;
-                return self
-                    .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
-            }
-            Message::LocalSamplePreviewReady(Ok(audio)) => {
-                self.send_command(EngineCommand::StartPreview(audio));
-                self.state.status_text = "Preview playing".to_string();
-            }
-            Message::LocalSamplePreviewReady(Err(err)) => {
-                self.state.status_text = format!("Preview error: {err}");
-            }
-            Message::ImportSelectedBrowserSampleToArrangement => {
-                return self.handle_import_selected_browser_sample_to_arrangement();
-            }
-            Message::LoadSelectedBrowserSampleToDevice => {
-                return self.handle_load_selected_browser_sample_to_device();
-            }
-            Message::BrowserSampleDecoded(target, audio, name, source) => {
-                return self.apply_browser_sample_decoded(target, audio, name, source);
-            }
-            Message::ClipAutoWarpReady {
-                track_id,
-                clip_id,
-                outcome,
-            } => {
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state.arrangement.apply_auto_warp_outcome(
-                        &mut engine,
-                        track_id,
-                        clip_id,
-                        outcome,
-                    )
-                };
-                return self.apply_arrangement_action(action);
-            }
-            Message::BrowserSampleDecodeError(err) => {
-                self.state.status_text = format!("Browser load error: {err}");
-            }
-
             // -- File menu --
             Message::NewProject => {
                 self.state.project.file_menu_open = false;
@@ -632,9 +304,12 @@ impl App {
             }
             Message::SaveProject => {
                 self.state.project.file_menu_open = false;
-                let project = self.project_from_state();
+                let project = self.project_for_save();
                 if let Some(path) = self.state.project.current_path.clone() {
-                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                    return Task::perform(
+                        save_project_async(path.clone(), Some(path), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
                 }
                 return self.update(Message::SaveProjectAs);
             }
@@ -645,7 +320,7 @@ impl App {
                         let handle = rfd::AsyncFileDialog::new()
                             .set_title("Save Vibez Project")
                             .set_file_name("Untitled.vzp")
-                            .add_filter("Vibez Project", &["vzp", "vibez"])
+                            .add_filter("Vibez Project Format V1", &["vzp"])
                             .save_file()
                             .await;
                         handle.map(|file| file.path().to_path_buf())
@@ -667,11 +342,17 @@ impl App {
             }
             Message::ProjectSavePathSelected(path) => {
                 if let Some(mut path) = path {
-                    if path.extension().is_none() {
+                    if !path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"))
+                    {
                         path.set_extension("vzp");
                     }
-                    let project = self.project_from_state();
-                    return Task::perform(save_project_async(path, project), Message::ProjectSaved);
+                    let project = self.project_for_save();
+                    return Task::perform(
+                        save_project_async(path, self.state.project.current_path.clone(), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
                 }
             }
             Message::ProjectLoaded(result) => match *result {
@@ -682,11 +363,12 @@ impl App {
                     self.state.status_text = format!("Project load error: {err}");
                 }
             },
-            Message::ProjectSaved(result) => match result {
-                Ok(path) => {
-                    self.state.project.current_path = Some(path.clone());
+            Message::ProjectSaved(result) => match *result {
+                Ok(saved) => {
+                    self.apply_saved_project_sources(&saved.project);
+                    self.state.project.current_path = Some(saved.path.clone());
                     self.state.project.dirty = false;
-                    self.state.status_text = format!("Saved {}", path.display());
+                    self.state.status_text = format!("Saved {}", saved.path.display());
                 }
                 Err(err) => {
                     self.state.status_text = format!("Project save error: {err}");
@@ -1012,89 +694,240 @@ impl App {
                 self.state.status_text = format!("Export error: {err}");
             }
 
-            // -- Sample browser mode --
-
-            // -- Dropbox --
-            Message::SaveDropboxAppKey => {
-                let value = self.state.browser.dropbox.app_key_input.trim().to_string();
-                self.dropbox_settings.app_key = if value.is_empty() { None } else { Some(value) };
-                if let Err(err) = self.dropbox_settings.save() {
-                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
-                }
-                self.state.browser.dropbox.has_app_key =
-                    load_app_key_with_env_override(&self.dropbox_settings).is_some();
-                self.state.status_text = "Dropbox app key saved".to_string();
+            // -- Engine events --
+            Message::Tick => {
+                return self.handle_tick();
             }
+            Message::EngineMetering { peak_l, peak_r } => {
+                self.state.peak_l = peak_l;
+                self.state.peak_r = peak_r;
+            }
+
+            // -- Multi-track messages --
+            Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
+            Message::AddClipToTrack(track_id) => {
+                return self.handle_add_clip_to_track(track_id);
+            }
+            Message::ClipFileSelected(track_id, path) => {
+                return self.handle_clip_file_selected(track_id, path);
+            }
+            Message::ClipAudioDecoded(track_id, clip_id, audio, name, source) => {
+                return self.handle_clip_audio_decoded(track_id, clip_id, audio, name, source);
+            }
+            Message::ClipDecodeError(_, err) => {
+                self.state.status_text = format!("Error: {err}");
+            }
+
+            // -- Sampler / drum rack --
+            Message::LoadSamplerSample(track_id) => return self.on_load_sampler_sample(track_id),
+            Message::SamplerFileSelected(track_id, path) => {
+                return self.on_sampler_file_selected(track_id, path)
+            }
+            Message::SamplerSampleDecoded(track_id, audio, name, source) => {
+                self.apply_sampler_sample_loaded(track_id, audio, name, source);
+            }
+            Message::SamplerDecodeError(track_id, err) => {
+                self.state.arrangement.selected_track = Some(track_id);
+                self.state.status_text = format!("Sample load error: {err}");
+            }
+            Message::LoadDrumRackPadSample(track_id, pad_index) => {
+                return self.on_load_drum_rack_pad_sample(track_id, pad_index)
+            }
+            Message::DrumRackPadFileSelected(track_id, pad_index, path) => {
+                return self.handle_drum_rack_pad_file_selected(track_id, pad_index, path);
+            }
+            Message::DrumRackPadSampleDecoded(track_id, pad_index, audio, name, source) => {
+                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+            }
+            Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
+                return self.handle_drum_rack_pad_decode_error(track_id, _pad_index, err);
+            }
+
+            // -- Sample browser --
+            Message::ToggleAutoWarpOnImport => {
+                self.state.auto_warp_on_import = !self.state.auto_warp_on_import;
+                self.persist_ui_settings();
+            }
+            Message::SetWarpConfidenceThreshold(v) => {
+                self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
+                self.persist_ui_settings();
+            }
+            Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
+            Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
+            Message::CloseMidiInput => {
+                self.midi_input = None;
+                self.persist_ui_settings();
+                self.state.status_text = "MIDI input disconnected".to_string();
+            }
+            Message::SelectTheme(name) => return self.on_select_theme(name),
+            Message::RescanThemes => return self.on_rescan_themes(),
+            Message::ThemeSaveNameChanged(name) => {
+                self.state.theme_save_name = name;
+            }
+            Message::SaveCurrentTheme => return self.on_save_current_theme(),
+            Message::RewarpAllClips => {
+                return self.handle_rewarp_all_clips();
+            }
+            Message::AddSampleLibraryRoot => return self.on_add_sample_library_root(),
+            Message::SampleLibraryRootSelected(path) => {
+                return self.on_sample_library_root_selected(path)
+            }
+            Message::RescanSampleLibrary => return self.on_rescan_sample_library(),
+            Message::ClickLocalBrowserEntry(source) => {
+                return self.on_click_local_browser_entry(source)
+            }
+            Message::BeginPendingBrowserDrag(source, label) => {
+                let action = self.state.browser.update(BrowserMsg::BeginPendingDrag {
+                    source,
+                    label,
+                    origin_x: self.state.view.cursor_x,
+                    origin_y: self.state.view.cursor_y,
+                });
+                return self.apply_browser_action(action);
+            }
+            Message::PreviewLocalEntry(source) => return self.on_preview_local_entry(source),
+            Message::StopBrowserPreview => return self.on_stop_browser_preview(),
+            Message::ToggleAuditionEnabled => return self.on_toggle_audition_enabled(),
+            Message::SetAuditionGain(gain) => {
+                self.state.browser.set_audition_gain(gain);
+                self.send_command(EngineCommand::SetAuditionGain(
+                    self.state.browser.audition_gain,
+                ));
+                self.persist_ui_settings();
+            }
+            Message::SetAuditionMode(mode) => return self.on_set_audition_mode(mode),
+            Message::SetAuditionSync(sync) => return self.on_set_audition_sync(sync),
+            Message::ToggleAuditionLoop => return self.on_toggle_audition_loop(),
+            Message::AuditionBpmEditChanged(value) => {
+                return self.on_audition_bpm_edit_changed(value)
+            }
+            Message::ConfirmAuditionBpm => return self.on_confirm_audition_bpm(),
+            Message::EscapePressed => return self.on_escape_pressed(),
+
+            // -- Drag-and-drop from sample browser --
+            Message::DropSampleOnArrangement {
+                track_id,
+                position_samples,
+            } => return self.on_drop_sample_on_arrangement(track_id, position_samples),
+            Message::DropSampleOnEmptyArrangement => {
+                return self.on_drop_sample_on_empty_arrangement()
+            }
+            Message::DropSampleOnDrumPad {
+                track_id,
+                pad_index,
+            } => {
+                return self.handle_drop_sample_on_drum_pad(track_id, pad_index);
+            }
+            Message::DropSampleOnSampler { track_id } => {
+                return self.on_drop_sample_on_sampler(track_id)
+            }
+            Message::LocalSamplePreviewReady(source, generation, Ok(audio)) => {
+                return self.on_local_sample_preview_ready(source, generation, audio)
+            }
+            Message::LocalSamplePreviewReady(source, generation, Err(err)) => {
+                return self.on_local_sample_preview_failed(source, generation, err)
+            }
+            Message::BrowserWaveformReady(source, Ok(audio)) => {
+                return self.on_browser_waveform_ready(source, audio)
+            }
+            Message::BrowserWaveformReady(source, Err(err)) => {
+                self.state.browser.fail_waveform_load(&source, err);
+            }
+            Message::BrowserBpmDetected(source, estimate) => {
+                return self.on_browser_bpm_detected(source, estimate)
+            }
+            Message::BrowserAuditionWarpReady {
+                source,
+                generation,
+                source_bpm,
+                project_bpm,
+                result,
+            } => {
+                return self.on_browser_audition_warp_ready(
+                    source,
+                    generation,
+                    source_bpm,
+                    project_bpm,
+                    result,
+                )
+            }
+            Message::ImportSelectedBrowserSampleToArrangement => {
+                return self.handle_import_selected_browser_sample_to_arrangement();
+            }
+            Message::SelectAdjacentBrowserResult(direction) => {
+                return self.select_adjacent_browser_result(direction);
+            }
+            Message::LoadSelectedBrowserSampleToDevice => {
+                return self.handle_load_selected_browser_sample_to_device();
+            }
+            Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
+                return self.on_browser_sample_decoded(target, treatment, audio, name, source)
+            }
+            Message::RemoteImportReady {
+                request_id,
+                target,
+                treatment,
+                result,
+            } => return self.on_remote_import_ready(request_id, target, treatment, result),
+            Message::BrowserImportPrepared {
+                target,
+                generation,
+                payload,
+            } => return self.on_browser_import_prepared(target, generation, payload),
+            Message::ClipAutoWarpReady {
+                track_id,
+                clip_id,
+                outcome,
+            } => return self.on_clip_auto_warp_ready(track_id, clip_id, outcome),
+            Message::BrowserSampleDecodeError(err) => {
+                return self.on_browser_sample_decode_error(err)
+            }
+
+            // -- Dropbox / remote catalog --
+            Message::SaveDropboxAppKey => return self.on_save_dropbox_app_key(),
             Message::ConnectDropbox => {
                 return self.handle_connect_dropbox();
             }
-            Message::DropboxConnected(Ok(outcome)) => {
-                self.state.browser.dropbox.auth_in_progress = false;
-                if let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) {
-                    let client = DropboxClient::new(app_key, outcome.tokens.clone());
-                    self.dropbox_client = Some(Arc::new(client));
-                }
-                self.dropbox_settings.tokens = Some(outcome.tokens.clone());
-                self.dropbox_settings.account_email = Some(outcome.info.email.clone());
-                if let Err(err) = self.dropbox_settings.save() {
-                    self.state.browser.dropbox.last_error = Some(format!("save settings: {err}"));
-                }
-                self.state.browser.dropbox.connected = true;
-                self.state.browser.dropbox.account_email = Some(outcome.info.email.clone());
-                self.state.status_text = format!("Dropbox connected: {}", outcome.info.email);
-            }
+            Message::DropboxConnected(Ok(outcome)) => return self.on_dropbox_connected(outcome),
             Message::DropboxConnected(Err(err)) => {
-                self.state.browser.dropbox.auth_in_progress = false;
-                self.state.browser.dropbox.last_error = Some(err.clone());
+                self.state.browser.remote.auth_in_progress = false;
+                self.state.browser.remote.last_error = Some(err.clone());
                 self.state.status_text = format!("Dropbox connect failed: {err}");
             }
-            Message::DisconnectDropbox => {
-                self.dropbox_client = None;
-                self.dropbox_settings.clear_tokens();
-                let _ = self.dropbox_settings.save();
-                self.state.browser.dropbox = crate::state::DropboxUiState {
-                    app_key_input: self.state.browser.dropbox.app_key_input.clone(),
-                    has_app_key: self.state.browser.dropbox.has_app_key,
-                    ..Default::default()
-                };
-                self.state.status_text = "Dropbox disconnected".to_string();
+            Message::DisconnectDropbox => return self.on_disconnect_dropbox(),
+            Message::RefreshRemoteConnection => {
+                return self.handle_remote_catalog_refresh();
             }
-            Message::DropboxExpandFolder(path) => {
-                return self.handle_dropbox_expand_folder(path);
+            Message::RemoteCatalogPageFetched {
+                generation,
+                completed_pages,
+                result,
+            } => return self.on_remote_catalog_page_fetched(generation, completed_pages, result),
+            Message::RemoteCatalogSaved {
+                generation,
+                next_checkpoint,
+                result,
+            } => return self.on_remote_catalog_saved(generation, next_checkpoint, result),
+            Message::SetMediaCacheBudgetGiB(gib) => return self.on_set_media_cache_budget(gib),
+            Message::ToggleMediaCacheAutomaticEviction => {
+                return self.on_toggle_media_cache_automatic_eviction()
             }
-            Message::DropboxFolderListed { path, result } => {
-                self.state.browser.dropbox.listing_in_progress.remove(&path);
-                match result {
-                    Ok(entries) => {
-                        self.state.browser.dropbox.folders.insert(path, entries);
-                    }
-                    Err(err) => {
-                        self.state.browser.dropbox.last_error = Some(err.clone());
-                        self.state.status_text = format!("Dropbox error: {err}");
-                    }
-                }
+            Message::MediaCacheMaintenanceComplete(result) => {
+                return self.on_media_cache_maintenance_complete(result)
             }
+            Message::ClearMediaCache => return self.on_clear_media_cache(),
+            Message::MediaCacheCleared(result) => return self.on_media_cache_cleared(result),
+            Message::ClickRemoteBrowserEntry(entry) => {
+                return self.on_click_remote_browser_entry(entry)
+            }
+            Message::RemoteAuditionReady {
+                request_id,
+                generation,
+                source,
+                result,
+            } => return self.on_remote_audition_ready(request_id, generation, source, result),
             Message::DropboxPreview(entry) => {
-                let Some(client) = self.dropbox_client.clone() else {
-                    self.state.browser.dropbox.last_error = Some("Not connected to Dropbox".into());
-                    return Task::none();
-                };
-                let cache = self.dropbox_cache.clone();
-                self.state.browser.dropbox.preview_in_progress = true;
-                self.state.status_text = format!("Fetching preview: {}", entry.name);
-                return Task::perform(fetch_dropbox_sample_async(client, cache, entry), |result| {
-                    Message::DropboxPreviewReady(result.map(|(audio, _, _)| audio))
-                });
-            }
-            Message::DropboxPreviewReady(Ok(audio)) => {
-                self.state.browser.dropbox.preview_in_progress = false;
-                self.send_command(EngineCommand::StartPreview(audio));
-                self.state.status_text = "Preview playing".to_string();
-            }
-            Message::DropboxPreviewReady(Err(err)) => {
-                self.state.browser.dropbox.preview_in_progress = false;
-                self.state.browser.dropbox.last_error = Some(err.clone());
-                self.state.status_text = format!("Preview error: {err}");
+                return self.start_remote_audition(entry, false);
             }
             Message::DropboxImportToArrangement(entry) => {
                 return self.handle_dropbox_import_to_arrangement(entry);

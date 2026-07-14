@@ -32,14 +32,6 @@ const WSOLA_SEARCH: isize = 256;
 
 // Ratio router.
 const RATIO_PASSTHROUGH_EPS: f64 = 0.005;
-/// Stretch ratios this close to unity use plain resampling instead of
-/// a phase vocoder: the resulting pitch shift is under one semitone
-/// (inaudible on drums, barely audible on melodic material) and the
-/// time domain stays bit-exact, so transients cannot smear. This is
-/// the classic tempo-match case (e.g. a 135 BPM loop into a 138 BPM
-/// project) that produced audible artifacts under WSOLA.
-const RESAMPLE_BAND_MIN: f64 = 0.94;
-const RESAMPLE_BAND_MAX: f64 = 1.06;
 /// Signalsmith Stretch stays musical over a far wider range than the
 /// old hand-rolled WSOLA did.
 const RATIO_MIN: f64 = 0.25;
@@ -84,11 +76,6 @@ pub fn pitch_preserving_stretch(audio: &DecodedAudio, target_frames: usize) -> D
 
     if (ratio - 1.0).abs() < RATIO_PASSTHROUGH_EPS {
         return resize_clone(audio, target_frames);
-    }
-
-    // Near-unity ratios: plain resample beats any stretcher.
-    if (RESAMPLE_BAND_MIN..=RESAMPLE_BAND_MAX).contains(&ratio) {
-        return stretch_to(audio, target_frames);
     }
 
     if !(RATIO_MIN..=RATIO_MAX).contains(&ratio) || src_frames < WSOLA_FRAME * 2 {
@@ -662,9 +649,8 @@ mod stretch_quality_tests {
     }
 
     #[test]
-    fn near_unity_ratio_uses_exact_length_resample() {
-        // 2.2% stretch (the 135->138 BPM dogfood case) must resample:
-        // output length exact and content dense (no silent tail).
+    fn near_unity_warp_preserves_pitch_and_exact_length() {
+        // Even a subtle 135->138 tempo match is WARP, not REPITCH.
         let audio = sine(440.0, 1.0, 44_100);
         let target = (44_100.0 * 1.022) as usize;
         let out = pitch_preserving_stretch(&audio, target);
@@ -673,6 +659,11 @@ mod stretch_quality_tests {
         assert!(
             tail.iter().any(|s| s.abs() > 0.1),
             "tail must contain signal"
+        );
+        let measured = zero_crossings(&out.channels[0]) as f32 / (target as f32 / 44_100.0);
+        assert!(
+            (measured - 440.0).abs() < 4.0,
+            "near-unity WARP detuned to {measured} Hz"
         );
     }
 
