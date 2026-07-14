@@ -174,6 +174,9 @@ pub struct ProjectLoadResult {
     pub path: PathBuf,
     pub project: Project,
     pub clips: Vec<LoadedClipData>,
+    /// Clips whose media could not be hydrated this session. They stay out
+    /// of the arrangement but must survive the next save for relinking.
+    pub unresolved_clips: Vec<ClipInfo>,
     pub sampler_samples: Vec<LoadedSamplerData>,
     pub drum_rack_pad_samples: Vec<LoadedDrumRackPadData>,
     pub warnings: Vec<String>,

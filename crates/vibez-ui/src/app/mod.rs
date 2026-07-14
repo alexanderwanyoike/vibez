@@ -314,6 +314,16 @@ impl App {
             Task::none()
         };
 
+        // Staged Project Media copies are content-addressed and shared, so
+        // saves and aborted imports never delete them eagerly; this sweep
+        // is the cache policy that reclaims entries old enough that no
+        // live session can still reference them.
+        std::thread::spawn(|| {
+            vibez_project::project_format_v1::sweep_stale_staging(std::time::Duration::from_secs(
+                7 * 24 * 60 * 60,
+            ));
+        });
+
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
         // us). Legacy `.vibez` files load the same way.
@@ -455,9 +465,25 @@ async fn decode_and_stage_local_async(
     path: PathBuf,
 ) -> Result<(vibez_core::audio_buffer::DecodedAudio, MediaSourceRef), String> {
     tokio::task::spawn_blocking(move || {
-        let audio = file_io::decode_audio_file(&path).map_err(|error| error.to_string())?;
-        let source = vibez_project::project_format_v1::stage_local_file(&path)
-            .map_err(|error| error.to_string())?;
+        // One read feeds both the decoder and the staging copy, so the
+        // engine can never play different bytes than the project commits
+        // (the file could be replaced between two independent reads).
+        let content = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let extension = path
+            .extension()
+            .map(|value| value.to_string_lossy().into_owned());
+        let audio = file_io::decode_audio_cursor(
+            std::io::Cursor::new(content.clone()),
+            extension.as_deref(),
+        )
+        .map_err(|error| error.to_string())?;
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "project-media".to_string());
+        let source =
+            vibez_project::project_format_v1::stage_local_content(&path, &file_name, &content)
+                .map_err(|error| error.to_string())?;
         Ok((audio, source))
     })
     .await
@@ -488,6 +514,11 @@ async fn save_project_async(
                 observation: Some(saved.observation),
             })
         } else {
+            // Legacy JSON has no Project Media table; transient staging
+            // references must resolve back to durable Source Storage
+            // identity or they dangle once the staging cache is swept.
+            let mut project = project;
+            vibez_project::project_format_v1::strip_staged_sources(&mut project);
             project
                 .save_to_file(&path)
                 .map_err(|error| error.to_string())?;
@@ -936,6 +967,7 @@ async fn load_project_async(
     .map_err(|err| format!("load task failed: {err}"))??;
 
     let mut clips = Vec::new();
+    let mut unresolved_clips = Vec::new();
     let mut sampler_samples = Vec::new();
     let mut drum_rack_pad_samples = Vec::new();
     let mut warnings = Vec::new();
@@ -951,7 +983,16 @@ async fn load_project_async(
             .await
             {
                 Ok(audio) => clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await),
-                Err(err) => warnings.push(format!("Skipped clip '{}' ({})", clip.name, err)),
+                Err(err) => {
+                    // The clip cannot play this session, but dropping it
+                    // would also drop its source reference from the next
+                    // save. Keep it so the media stays relinkable.
+                    warnings.push(format!(
+                        "Clip '{}' unavailable, kept for relink ({})",
+                        clip.name, err
+                    ));
+                    unresolved_clips.push(clip.clone());
+                }
             },
             None => warnings.push(format!(
                 "Skipped clip '{}' (missing source reference)",
@@ -1020,6 +1061,7 @@ async fn load_project_async(
         path,
         project,
         clips,
+        unresolved_clips,
         sampler_samples,
         drum_rack_pad_samples,
         warnings,
@@ -1426,6 +1468,55 @@ mod project_format_v1_tests {
             Some(MediaSourceRef::ProjectMedia { .. })
         ));
         assert_eq!(loaded.project.tracks[0].id, track.id);
+    }
+
+    #[tokio::test]
+    async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let project_path = directory.path().join("relink.vzp");
+        let track = TrackInfo::new("Audio");
+        let clip_id = ClipId::new();
+        let project = Project {
+            tracks: vec![track.clone()],
+            clips: vec![ClipInfo {
+                id: clip_id,
+                track_id: track.id,
+                name: "Remote clip".into(),
+                position: 0,
+                source_offset: 0,
+                duration: 128,
+                source: Some(MediaSourceRef::DropboxFile {
+                    path_lower: "/megalodon/pad.wav".into(),
+                    display_path: "/Megalodon/Pad.wav".into(),
+                    rev: Some("rev-1".into()),
+                }),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 128,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..Project::default()
+        };
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+
+        // Without a Dropbox connection the clip cannot hydrate, but its
+        // source reference must survive for relink instead of being
+        // silently dropped from the next save.
+        let loaded = load_project_async(project_path, None).await.unwrap();
+        assert!(loaded.clips.is_empty());
+        assert_eq!(loaded.unresolved_clips.len(), 1);
+        assert_eq!(loaded.unresolved_clips[0].id, clip_id);
+        assert!(matches!(
+            loaded.unresolved_clips[0].source,
+            Some(MediaSourceRef::DropboxFile { .. })
+        ));
+        assert!(loaded
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("kept for relink")));
     }
 
     #[tokio::test]

@@ -64,6 +64,7 @@ impl App {
         self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
+        self.state.project.unresolved_clips.clear();
         self.state.view.editing_track_name = None;
         self.state.view.editing_clip_name = None;
         self.state.view.edit_name_text.clear();
@@ -389,6 +390,18 @@ impl App {
         }
     }
 
+    /// The full document a save must persist: the editable arrangement
+    /// plus clips whose media was unavailable at load time. Bounce and
+    /// export use [`Self::project_from_state`] directly, since unresolved
+    /// clips have no audio to render.
+    pub(super) fn project_for_save(&self) -> Project {
+        let mut project = self.project_from_state();
+        project
+            .clips
+            .extend(self.state.project.unresolved_clips.iter().cloned());
+        project
+    }
+
     pub(super) fn apply_saved_project_sources(&mut self, project: &Project) {
         for saved_clip in &project.clips {
             if let Some(track) = self.state.find_track_mut(saved_clip.track_id) {
@@ -418,6 +431,7 @@ impl App {
     pub(super) fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
+        self.state.project.unresolved_clips = loaded.unresolved_clips;
 
         // Seed the global id counter past every persisted id BEFORE
         // anything new is created: loaded ids come from a previous

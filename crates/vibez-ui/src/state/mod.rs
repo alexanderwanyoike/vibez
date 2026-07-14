@@ -210,6 +210,10 @@ pub struct ProjectState {
     pub current_path: Option<PathBuf>,
     pub dirty: bool,
     pub history: UndoHistory,
+    /// Clips whose media could not be hydrated at load time. Invisible in
+    /// the arrangement, but serialized back into every save so unavailable
+    /// media stays relinkable instead of silently vanishing.
+    pub unresolved_clips: Vec<vibez_core::track::ClipInfo>,
 }
 
 #[derive(Debug, Default)]
