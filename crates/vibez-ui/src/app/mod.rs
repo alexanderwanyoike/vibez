@@ -135,6 +135,7 @@ pub(crate) use audio_tasks::*;
 pub(crate) use keyboard::*;
 mod dropbox_io;
 mod media;
+mod media_import;
 mod plugins;
 mod project_io;
 mod update;
