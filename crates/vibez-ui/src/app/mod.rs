@@ -308,7 +308,6 @@ impl App {
             })
         }));
         let remote_startup_task = if app.dropbox_client.is_some() {
-            app.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Refreshing;
             Task::done(Message::RefreshRemoteConnection)
         } else {
             Task::none()

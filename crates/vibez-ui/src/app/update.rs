@@ -837,23 +837,39 @@ impl App {
                 self.state.browser.fail_waveform_load(&source, err);
             }
             Message::BrowserBpmDetected(source, estimate) => {
-                if self.state.browser.install_bpm_suggestion(source, estimate)
-                    && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
-                    && self.state.browser.audition_bpm_confirmed.is_none()
+                let source_for_warp = source.clone();
+                if self.state.browser.install_bpm_suggestion(
+                    source,
+                    estimate,
+                    self.state.warp_confidence_threshold,
+                ) && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
                 {
-                    self.state.status_text = match estimate {
-                        Some((bpm, confidence))
-                            if confidence < self.state.warp_confidence_threshold =>
-                        {
-                            format!(
+                    if let Some(source_bpm) = self.state.browser.audition_bpm_confirmed {
+                        let project_bpm = self.state.transport.bpm;
+                        self.state.status_text = format!(
+                            "Detected {source_bpm:.1} source BPM; WARP targets project {project_bpm:.1} BPM"
+                        );
+                        if self.state.browser.audition_enabled {
+                            if let Some(raw) = self.state.browser.waveform_audio.clone() {
+                                self.stop_browser_audition();
+                                return self.prepare_browser_warp(source_for_warp, raw, source_bpm);
+                            }
+                        }
+                    } else {
+                        self.state.status_text = match estimate {
+                            Some((bpm, confidence))
+                                if confidence < self.state.warp_confidence_threshold =>
+                            {
+                                format!(
                                 "Low-confidence suggestion {bpm:.1} BPM; confirm or edit for WARP"
                             )
-                        }
-                        Some((bpm, _)) => {
-                            format!("Suggested {bpm:.1} BPM; confirm for WARP")
-                        }
-                        None => "No BPM detected; enter a positive source BPM for WARP".into(),
-                    };
+                            }
+                            Some((bpm, _)) => {
+                                format!("Suggested {bpm:.1} BPM; confirm for WARP")
+                            }
+                            None => "No BPM detected; enter a positive source BPM for WARP".into(),
+                        };
+                    }
                 }
             }
             Message::BrowserAuditionWarpReady {
@@ -1439,47 +1455,93 @@ impl App {
             Message::RefreshRemoteConnection => {
                 return self.handle_remote_catalog_refresh();
             }
-            Message::RemoteCatalogRefreshed(result) => {
-                crate::remote_provider::reconcile_remote_catalog(
-                    &mut self.state.browser.remote.catalog,
-                    &result,
-                );
-                let save_error = crate::remote_provider::RemoteCatalogStore::for_dropbox()
-                    .save(&self.state.browser.remote.catalog)
-                    .err();
-                self.state.browser.remote.catalog_state = match (&result.error, save_error) {
-                    (Some(error), _)
-                        if error.kind
-                            == crate::remote_provider::RemoteProviderErrorKind::Authentication =>
+            Message::RemoteCatalogPageFetched {
+                completed_pages,
+                result,
+            } => match result {
+                Ok(page) => {
+                    let pages = completed_pages.saturating_add(1);
+                    let has_more = page.has_more;
+                    let next_checkpoint = page.checkpoint.clone();
+                    crate::remote_provider::reconcile_remote_catalog(
+                        &mut self.state.browser.remote.catalog,
+                        &crate::remote_provider::RemoteRefreshResult {
+                            pages: 1,
+                            changes: page.changes,
+                            checkpoint: (!has_more).then_some(page.checkpoint),
+                            error: None,
+                        },
+                    );
+                    self.state.browser.remote.refresh_pages = pages;
+                    self.state.browser.remote.refresh_items =
+                        self.state.browser.remote.catalog.entries.len();
+                    if !has_more
+                        || pages % super::dropbox_io::REMOTE_CATALOG_SAVE_PAGE_INTERVAL == 0
+                    {
+                        if let Err(error) =
+                            crate::remote_provider::RemoteCatalogStore::for_dropbox()
+                                .save(&self.state.browser.remote.catalog)
+                        {
+                            self.state.browser.remote.catalog_state =
+                                crate::state::RemoteCatalogState::Stale {
+                                    error: error.clone(),
+                                };
+                            self.state.status_text =
+                                format!("Remote catalog save failed after page {pages}: {error}");
+                            return Task::none();
+                        }
+                    }
+                    if has_more {
+                        self.state.status_text = format!(
+                            "Remote catalog: {} items available · fetching page {}…",
+                            self.state.browser.remote.refresh_items,
+                            pages.saturating_add(1)
+                        );
+                        if let Some(client) = self.dropbox_client.clone() {
+                            return super::dropbox_io::remote_catalog_page_task(
+                                client,
+                                Some(next_checkpoint),
+                                pages,
+                            );
+                        }
+                        self.state.browser.remote.catalog_state =
+                            crate::state::RemoteCatalogState::AuthenticationRequired {
+                                error: "Disconnected during refresh; showing fetched metadata"
+                                    .into(),
+                            };
+                    } else {
+                        self.state.browser.remote.catalog_state =
+                            crate::state::RemoteCatalogState::Ready;
+                        self.state.status_text = format!(
+                            "Remote catalog refreshed: {} items across {pages} page(s)",
+                            self.state.browser.remote.refresh_items
+                        );
+                    }
+                }
+                Err(error) => {
+                    self.state.browser.remote.catalog_state = if error.kind
+                        == crate::remote_provider::RemoteProviderErrorKind::Authentication
                     {
                         crate::state::RemoteCatalogState::AuthenticationRequired {
                             error: error.message.clone(),
                         }
-                    }
-                    (Some(error), _) if result.pages > 0 => {
+                    } else if completed_pages > 0 {
                         crate::state::RemoteCatalogState::Partial {
-                            pages: result.pages,
+                            pages: completed_pages,
                             error: error.message.clone(),
                         }
-                    }
-                    (Some(error), _) => crate::state::RemoteCatalogState::Stale {
-                        error: error.message.clone(),
-                    },
-                    (None, Some(error)) => crate::state::RemoteCatalogState::Stale { error },
-                    (None, None) => crate::state::RemoteCatalogState::Ready,
-                };
-                let item_count = self.state.browser.remote.catalog.entries.len();
-                self.state.status_text = match result.error {
-                    None => format!(
-                        "Remote catalog refreshed: {item_count} items across {} page(s)",
-                        result.pages
-                    ),
-                    Some(error) => format!(
-                        "Remote catalog kept {} items after refresh error: {}",
-                        item_count, error.message
-                    ),
-                };
-            }
+                    } else {
+                        crate::state::RemoteCatalogState::Stale {
+                            error: error.message.clone(),
+                        }
+                    };
+                    self.state.status_text = format!(
+                        "Remote catalog kept {} available items after refresh error: {}",
+                        self.state.browser.remote.catalog.entries.len(),
+                        error.message
+                    );
+                }
+            },
             Message::SetMediaCacheBudgetGiB(gib) => {
                 let gib = gib.clamp(1.0, 500.0);
                 let bytes = (gib as f64 * 1024.0 * 1024.0 * 1024.0) as u64;

@@ -646,14 +646,36 @@ impl App {
             .padding([3, 5])
             .width(Length::Fixed(if compact { 54.0 } else { 62.0 }))
             .style(browser_compact_input_style);
-        let confirm_bpm = button(text(if compact { "SET" } else { "CONFIRM" }).size(9))
+        let confirm_bpm = button(text(if compact { "USE" } else { "USE SOURCE" }).size(9))
             .on_press(Message::ConfirmAuditionBpm)
             .padding([3, 5])
             .style(browser_utility_action_style);
+        let automatic_bpm = self
+            .state
+            .browser
+            .audition_bpm_suggestion
+            .zip(self.state.browser.audition_bpm_confidence)
+            .is_some_and(|(suggestion, confidence)| {
+                confidence >= self.state.warp_confidence_threshold
+                    && self.state.browser.audition_bpm_confirmed == Some(suggestion)
+            });
+        let bpm_controls: Element<'_, Message> = if automatic_bpm {
+            text("AUTO").size(9).color(th::accent()).into()
+        } else {
+            row![bpm_input, confirm_bpm]
+                .spacing(4)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
+        let project_bpm = self.state.transport.bpm;
         let bpm_state = if self.state.browser.audition_bpm_detecting {
-            "DETECTING".to_string()
+            format!("DETECTING SOURCE → {project_bpm:.0}")
         } else if let Some(confirmed) = self.state.browser.audition_bpm_confirmed {
-            format!("CONFIRMED {confirmed:.1}")
+            if compact {
+                format!("{confirmed:.1} → {project_bpm:.0}")
+            } else {
+                format!("SOURCE {confirmed:.1} → PROJECT {project_bpm:.0}")
+            }
         } else if let Some(suggestion) = self.state.browser.audition_bpm_suggestion {
             let low = self
                 .state
@@ -661,12 +683,12 @@ impl App {
                 .audition_bpm_confidence
                 .is_some_and(|confidence| confidence < self.state.warp_confidence_threshold);
             if low {
-                format!("SUGGEST {suggestion:.1} · LOW")
+                format!("LOW {suggestion:.1} → PROJECT {project_bpm:.0}")
             } else {
-                format!("SUGGEST {suggestion:.1}")
+                format!("SOURCE {suggestion:.1} → PROJECT {project_bpm:.0}")
             }
         } else {
-            "MANUAL FOR WARP".to_string()
+            format!("SOURCE NEEDED → PROJECT {project_bpm:.0}")
         };
 
         let waveform: Element<'_, Message> = container(
@@ -779,9 +801,10 @@ impl App {
             .spacing(3)
             .align_y(iced::Alignment::Center),
             row![
-                text("BPM").size(9).color(th::text_muted()),
-                bpm_input,
-                confirm_bpm,
+                text(if compact { "SRC" } else { "SOURCE BPM" })
+                    .size(9)
+                    .color(th::text_muted()),
+                bpm_controls,
                 text(bpm_state)
                     .size(9)
                     .color(if self.state.browser.audition_bpm_confirmed.is_some() {
@@ -1196,6 +1219,9 @@ impl App {
                             ..Default::default()
                         })
                 )
+                .id(super::media::browser_results_scroll_id(
+                    SampleBrowserMode::Local,
+                ))
                 .height(Length::Fill)
                 .direction(scrollable::Direction::Vertical(
                     scrollable::Scrollbar::default()
@@ -1338,6 +1364,16 @@ impl App {
         results.truncate(remote_visible);
         local_everywhere.truncate(visible_results.saturating_sub(remote_visible));
         let wide_columns = browser.results_use_wide_columns(self.state.view.window_width);
+        let catalog_label = if remote.catalog_state == crate::state::RemoteCatalogState::Refreshing
+        {
+            if browser.effective_dock_width(self.state.view.window_width) < 360.0 {
+                format!("REF {}P", remote.refresh_pages)
+            } else {
+                format!("REFRESHING {}P", remote.refresh_pages)
+            }
+        } else {
+            remote.catalog_state.label().to_string()
+        };
         let table_header: Element<'_, Message> = if wide_columns {
             row![
                 text("NAME")
@@ -1675,7 +1711,7 @@ impl App {
                     horizontal_space(),
                     text(format!(
                         "{} · {visible_results}/{total_results}",
-                        remote.catalog_state.label()
+                        catalog_label
                     ))
                     .size(9)
                     .color(state_color),
@@ -1692,6 +1728,9 @@ impl App {
                             ..Default::default()
                         })
                 )
+                .id(super::media::browser_results_scroll_id(
+                    SampleBrowserMode::Remote,
+                ))
                 .height(Length::Fill)
                 .direction(scrollable::Direction::Vertical(
                     scrollable::Scrollbar::default()

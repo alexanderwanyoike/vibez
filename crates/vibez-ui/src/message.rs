@@ -445,7 +445,11 @@ pub enum Message {
     DropboxConnected(Result<DropboxConnectOutcome, String>),
     DisconnectDropbox,
     RefreshRemoteConnection,
-    RemoteCatalogRefreshed(crate::remote_provider::RemoteRefreshResult),
+    RemoteCatalogPageFetched {
+        completed_pages: usize,
+        result:
+            Result<crate::remote_provider::RemotePage, crate::remote_provider::RemoteProviderError>,
+    },
     SetMediaCacheBudgetGiB(f32),
     ToggleMediaCacheAutomaticEviction,
     ClearMediaCache,

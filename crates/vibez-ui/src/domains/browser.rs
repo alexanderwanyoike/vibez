@@ -526,8 +526,9 @@ mod tests {
         browser.audition_mode = crate::state::AuditionMode::Warp;
         assert!(browser.audition_import_input().is_none());
 
-        assert!(browser.install_bpm_suggestion(first, Some((127.8, 0.42))));
+        assert!(browser.install_bpm_suggestion(first, Some((127.8, 0.42)), 0.6));
         assert_eq!(browser.audition_bpm_edit, "127.8");
+        assert!(browser.audition_bpm_confirmed.is_none());
         assert_eq!(browser.confirm_audition_bpm().unwrap(), 127.8);
         let input = browser.audition_import_input().unwrap();
         assert_eq!(input.mode, crate::state::AuditionMode::Warp);
@@ -538,6 +539,23 @@ mod tests {
         assert!(browser.audition_import_input().is_none());
         browser.audition_bpm_edit = "0".into();
         assert!(browser.confirm_audition_bpm().is_err());
+    }
+
+    #[test]
+    fn trustworthy_detected_source_bpm_is_ready_without_manual_entry() {
+        let source = MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/loop.wav"),
+        };
+        let mut browser = BrowserState::default();
+        browser.select_source(source.clone());
+        browser.audition_mode = crate::state::AuditionMode::Warp;
+
+        assert!(browser.install_bpm_suggestion(source, Some((124.0, 0.91)), 0.6));
+        assert_eq!(browser.audition_bpm_confirmed, Some(124.0));
+        assert_eq!(
+            browser.audition_import_input().unwrap().source_bpm,
+            Some(124.0)
+        );
     }
 
     #[test]

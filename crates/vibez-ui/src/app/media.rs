@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use iced::widget::scrollable;
 use iced::Task;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -30,9 +31,32 @@ fn adjacent_result_index(length: usize, current: Option<usize>, direction: i8) -
     })
 }
 
+fn browser_results_scroll_offset(row_index: usize, visible_rows: usize) -> f32 {
+    if visible_rows <= 1 {
+        0.0
+    } else {
+        row_index.min(visible_rows - 1) as f32 / (visible_rows - 1) as f32
+    }
+}
+
+pub(super) fn browser_results_scroll_id(mode: crate::state::SampleBrowserMode) -> scrollable::Id {
+    let id = match mode {
+        crate::state::SampleBrowserMode::Local => "browser-local-results",
+        crate::state::SampleBrowserMode::Remote => "browser-remote-results",
+    };
+    scrollable::Id::new(id)
+}
+
+struct BrowserNavigableResult {
+    source: MediaSourceRef,
+    remote: Option<crate::remote_provider::RemoteCatalogEntry>,
+    row_index: usize,
+    visible_rows: usize,
+}
+
 #[cfg(test)]
 mod browser_keyboard_navigation_tests {
-    use super::adjacent_result_index;
+    use super::{adjacent_result_index, browser_results_scroll_offset};
 
     #[test]
     fn adjacent_result_navigation_selects_edges_and_clamps() {
@@ -42,6 +66,14 @@ mod browser_keyboard_navigation_tests {
         assert_eq!(adjacent_result_index(3, Some(1), 1), Some(2));
         assert_eq!(adjacent_result_index(3, Some(2), 1), Some(2));
         assert_eq!(adjacent_result_index(3, Some(0), -1), Some(0));
+    }
+
+    #[test]
+    fn keyboard_selection_maps_to_the_results_scroll_range() {
+        assert_eq!(browser_results_scroll_offset(0, 1), 0.0);
+        assert_eq!(browser_results_scroll_offset(0, 100), 0.0);
+        assert!((browser_results_scroll_offset(50, 100) - 0.505).abs() < 0.001);
+        assert_eq!(browser_results_scroll_offset(99, 100), 1.0);
     }
 }
 
@@ -53,10 +85,8 @@ impl App {
         let browser = &self.state.browser;
         let query = browser.search.trim().to_ascii_lowercase();
         let searching = !query.is_empty();
-        let results: Vec<(
-            MediaSourceRef,
-            Option<crate::remote_provider::RemoteCatalogEntry>,
-        )> = match browser.mode {
+        let mode = browser.mode;
+        let results: Vec<BrowserNavigableResult> = match mode {
             crate::state::SampleBrowserMode::Local => {
                 let root_results = if !searching && browser.current_folder.is_none() {
                     browser.roots.len()
@@ -86,10 +116,19 @@ impl App {
                     (left.name.to_lowercase(), &left.relative_path)
                         .cmp(&(right.name.to_lowercase(), &right.relative_path))
                 });
+                let prefix_rows =
+                    (root_results + folder_results).min(browser.results_visible_limit);
+                let entries: Vec<_> = entries.into_iter().take(media_limit).collect();
+                let visible_rows = prefix_rows + entries.len();
                 entries
                     .into_iter()
-                    .take(media_limit)
-                    .map(|entry| (entry.source.clone(), None))
+                    .enumerate()
+                    .map(|(index, entry)| BrowserNavigableResult {
+                        source: entry.source.clone(),
+                        remote: None,
+                        row_index: prefix_rows + index,
+                        visible_rows,
+                    })
                     .collect()
             }
             crate::state::SampleBrowserMode::Remote => {
@@ -134,18 +173,20 @@ impl App {
                 let mut combined: Vec<_> = remote
                     .into_iter()
                     .take(remote_visible)
-                    .filter(|entry| !entry.is_folder)
-                    .map(|entry| {
-                        (
-                            MediaSourceRef::DropboxFile {
-                                path_lower: entry.provider_item_id.clone(),
-                                display_path: entry.path.clone(),
-                                rev: entry.revision.clone(),
-                            },
-                            Some(entry),
-                        )
+                    .enumerate()
+                    .filter(|(_, entry)| !entry.is_folder)
+                    .map(|(row_index, entry)| BrowserNavigableResult {
+                        source: MediaSourceRef::DropboxFile {
+                            path_lower: entry.provider_item_id.clone(),
+                            display_path: entry.path.clone(),
+                            rev: entry.revision.clone(),
+                        },
+                        remote: Some(entry),
+                        row_index,
+                        visible_rows: 0,
                     })
                     .collect();
+                let mut local_visible = 0;
                 if searching && browser.search_scope == crate::state::BrowserSearchScope::Everywhere
                 {
                     let mut local: Vec<_> = browser
@@ -161,13 +202,24 @@ impl App {
                         })
                         .collect();
                     local.sort_by_key(|entry| entry.name.to_ascii_lowercase());
-                    combined.extend(
-                        local
-                            .into_iter()
-                            .take(browser.results_visible_limit - remote_visible)
-                            .map(|entry| (entry.source.clone(), None)),
-                    );
+                    let local: Vec<_> = local
+                        .into_iter()
+                        .take(browser.results_visible_limit - remote_visible)
+                        .collect();
+                    local_visible = local.len();
+                    combined.extend(local.into_iter().enumerate().map(|(index, entry)| {
+                        BrowserNavigableResult {
+                            source: entry.source.clone(),
+                            remote: None,
+                            row_index: remote_visible + index,
+                            visible_rows: 0,
+                        }
+                    }));
                 }
+                let visible_rows = remote_visible + local_visible;
+                combined
+                    .iter_mut()
+                    .for_each(|entry| entry.visible_rows = visible_rows);
                 combined
             }
         };
@@ -178,13 +230,21 @@ impl App {
         let current = browser
             .selected_source
             .as_ref()
-            .and_then(|selected| results.iter().position(|(source, _)| source == selected));
+            .and_then(|selected| results.iter().position(|entry| &entry.source == selected));
         let index = adjacent_result_index(results.len(), current, direction).unwrap();
-        let (source, remote) = results.into_iter().nth(index).unwrap();
-        match remote {
+        let result = results.into_iter().nth(index).unwrap();
+        let selection = match result.remote {
             Some(entry) => self.update(Message::ClickRemoteBrowserEntry(entry)),
-            None => self.update(Message::ClickLocalBrowserEntry(source)),
-        }
+            None => self.update(Message::ClickLocalBrowserEntry(result.source)),
+        };
+        let scroll = scrollable::snap_to(
+            browser_results_scroll_id(mode),
+            scrollable::RelativeOffset {
+                x: 0.0,
+                y: browser_results_scroll_offset(result.row_index, result.visible_rows),
+            },
+        );
+        Task::batch([selection, scroll])
     }
 
     pub(super) fn stop_browser_audition(&mut self) {

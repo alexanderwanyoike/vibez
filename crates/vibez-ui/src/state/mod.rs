@@ -679,6 +679,7 @@ impl BrowserState {
         &mut self,
         source: MediaSourceRef,
         estimate: Option<(f64, f32)>,
+        auto_confirm_threshold: f32,
     ) -> bool {
         if self.selected_source.as_ref() != Some(&source) {
             return false;
@@ -687,6 +688,13 @@ impl BrowserState {
         self.audition_bpm_detecting = false;
         self.audition_bpm_suggestion = estimate.map(|value| value.0);
         self.audition_bpm_confidence = estimate.map(|value| value.1);
+        self.audition_bpm_confirmed = estimate
+            .filter(|(bpm, confidence)| {
+                bpm.is_finite()
+                    && *bpm > 0.0
+                    && *confidence >= auto_confirm_threshold.clamp(0.0, 1.0)
+            })
+            .map(|(bpm, _)| bpm);
         if self.audition_bpm_edit.is_empty() {
             self.audition_bpm_edit = estimate
                 .map(|value| format!("{:.1}", value.0))
@@ -966,6 +974,9 @@ pub struct RemoteUiState {
     pub last_error: Option<String>,
     pub catalog: RemoteCatalogSnapshot,
     pub catalog_state: RemoteCatalogState,
+    /// Pages and entries applied during the current progressive Catalog Refresh.
+    pub refresh_pages: usize,
+    pub refresh_items: usize,
     /// Current provider folder (`""` means the connection root).
     pub current_path: String,
     /// Paths expanded beneath the connection in Places.
@@ -993,6 +1004,8 @@ impl Default for RemoteUiState {
             last_error: None,
             catalog: RemoteCatalogSnapshot::default(),
             catalog_state: RemoteCatalogState::default(),
+            refresh_pages: 0,
+            refresh_items: 0,
             current_path: String::new(),
             expanded: HashSet::new(),
             selected_path: None,

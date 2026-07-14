@@ -2,7 +2,7 @@
 
 use iced::Task;
 
-use vibez_dropbox::{load_app_key_with_env_override, DropboxEntry};
+use vibez_dropbox::{load_app_key_with_env_override, DropboxClient, DropboxEntry};
 
 use crate::message::{BrowserImportTarget, Message};
 
@@ -10,6 +10,7 @@ use super::*;
 
 pub(super) const REMOTE_SELECTION_DEBOUNCE: std::time::Duration =
     std::time::Duration::from_millis(200);
+pub(super) const REMOTE_CATALOG_SAVE_PAGE_INTERVAL: usize = 10;
 
 fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxEntry) {
     *slot = Some(entry);
@@ -17,6 +18,24 @@ fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxE
 
 pub(super) fn remote_import_result_is_current(current: u64, result: u64) -> bool {
     current == result
+}
+
+pub(super) fn remote_catalog_page_task(
+    client: Arc<DropboxClient>,
+    checkpoint: Option<String>,
+    completed_pages: usize,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            let provider = crate::remote_provider::DropboxRemoteProvider::new((*client).clone());
+            crate::remote_provider::fetch_remote_catalog_page(&provider, checkpoint.as_deref())
+                .await
+        },
+        move |result| Message::RemoteCatalogPageFetched {
+            completed_pages,
+            result,
+        },
+    )
 }
 
 impl App {
@@ -90,6 +109,9 @@ impl App {
     }
 
     pub(super) fn handle_remote_catalog_refresh(&mut self) -> Task<Message> {
+        if self.state.browser.remote.catalog_state == crate::state::RemoteCatalogState::Refreshing {
+            return Task::none();
+        }
         let Some(client) = self.dropbox_client.clone() else {
             self.state.browser.remote.catalog_state =
                 crate::state::RemoteCatalogState::AuthenticationRequired {
@@ -98,16 +120,11 @@ impl App {
             return Task::none();
         };
         self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Refreshing;
+        self.state.browser.remote.refresh_pages = 0;
+        self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
+        self.state.status_text = "Refreshing Remote catalog…".into();
         let checkpoint = self.state.browser.remote.catalog.checkpoint.clone();
-        Task::perform(
-            async move {
-                let provider =
-                    crate::remote_provider::DropboxRemoteProvider::new((*client).clone());
-                crate::remote_provider::refresh_remote_catalog(&provider, checkpoint.as_deref())
-                    .await
-            },
-            Message::RemoteCatalogRefreshed,
-        )
+        remote_catalog_page_task(client, checkpoint, 0)
     }
 
     pub(super) fn start_remote_audition(

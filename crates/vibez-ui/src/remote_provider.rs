@@ -9,6 +9,7 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use vibez_dropbox::{DerivedMetadata, DropboxClient, DropboxError, DropboxListItem};
@@ -16,6 +17,7 @@ use vibez_dropbox::{DerivedMetadata, DropboxClient, DropboxError, DropboxListIte
 pub const DROPBOX_PROVIDER_ID: &str = "dropbox";
 pub const DROPBOX_CONNECTION_ID: &str = "dropbox-primary";
 pub const DROPBOX_CONNECTION_NAME: &str = "Alex's Dropbox";
+const REMOTE_CATALOG_PAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteCatalogEntry {
@@ -187,9 +189,46 @@ pub struct RemoteRefreshResult {
     pub error: Option<RemoteProviderError>,
 }
 
+#[cfg(test)]
 pub async fn refresh_remote_catalog<P: RemoteProvider>(
     provider: &P,
     checkpoint: Option<&str>,
+) -> RemoteRefreshResult {
+    refresh_remote_catalog_with_page_timeout(provider, checkpoint, REMOTE_CATALOG_PAGE_TIMEOUT)
+        .await
+}
+
+pub async fn fetch_remote_catalog_page<P: RemoteProvider>(
+    provider: &P,
+    checkpoint: Option<&str>,
+) -> Result<RemotePage, RemoteProviderError> {
+    debug_assert_eq!(provider.provider_id(), DROPBOX_PROVIDER_ID);
+    debug_assert_eq!(provider.connection_id(), DROPBOX_CONNECTION_ID);
+    fetch_remote_catalog_page_with_timeout(provider, checkpoint, REMOTE_CATALOG_PAGE_TIMEOUT).await
+}
+
+async fn fetch_remote_catalog_page_with_timeout<P: RemoteProvider>(
+    provider: &P,
+    checkpoint: Option<&str>,
+    page_timeout: Duration,
+) -> Result<RemotePage, RemoteProviderError> {
+    match tokio::time::timeout(page_timeout, provider.fetch_metadata_page(checkpoint)).await {
+        Ok(result) => result,
+        Err(_) => Err(RemoteProviderError {
+            kind: RemoteProviderErrorKind::Unavailable,
+            message: format!(
+                "Remote catalog page timed out after {} second(s); retry Refresh",
+                page_timeout.as_secs_f32()
+            ),
+        }),
+    }
+}
+
+#[cfg(test)]
+async fn refresh_remote_catalog_with_page_timeout<P: RemoteProvider>(
+    provider: &P,
+    checkpoint: Option<&str>,
+    page_timeout: Duration,
 ) -> RemoteRefreshResult {
     debug_assert_eq!(provider.provider_id(), DROPBOX_PROVIDER_ID);
     debug_assert_eq!(provider.connection_id(), DROPBOX_CONNECTION_ID);
@@ -197,7 +236,9 @@ pub async fn refresh_remote_catalog<P: RemoteProvider>(
     let mut pages = 0;
     let mut changes = Vec::new();
     loop {
-        match provider.fetch_metadata_page(cursor.as_deref()).await {
+        match fetch_remote_catalog_page_with_timeout(provider, cursor.as_deref(), page_timeout)
+            .await
+        {
             Ok(page) => {
                 pages += 1;
                 changes.extend(page.changes);
@@ -227,6 +268,8 @@ pub fn reconcile_remote_catalog(
     snapshot: &mut RemoteCatalogSnapshot,
     result: &RemoteRefreshResult,
 ) {
+    debug_assert!(result.pages > 0 || result.changes.is_empty());
+    debug_assert!(result.error.is_none() || result.checkpoint.is_none());
     let mut entries: HashMap<String, RemoteCatalogEntry> = snapshot
         .entries
         .drain(..)
@@ -324,6 +367,25 @@ mod tests {
         pages: Mutex<VecDeque<Result<RemotePage, RemoteProviderError>>>,
     }
 
+    struct HangingProvider;
+
+    impl RemoteProvider for HangingProvider {
+        fn provider_id(&self) -> &'static str {
+            DROPBOX_PROVIDER_ID
+        }
+
+        fn connection_id(&self) -> &str {
+            DROPBOX_CONNECTION_ID
+        }
+
+        fn fetch_metadata_page<'a>(
+            &'a self,
+            _checkpoint: Option<&'a str>,
+        ) -> RemoteProviderFuture<'a> {
+            Box::pin(std::future::pending())
+        }
+    }
+
     impl RemoteProvider for FakeProvider {
         fn provider_id(&self) -> &'static str {
             DROPBOX_PROVIDER_ID
@@ -377,6 +439,20 @@ mod tests {
         assert_eq!(result.changes.len(), 2);
         assert_eq!(result.checkpoint.as_deref(), Some("complete"));
         assert!(result.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_hung_provider_page_becomes_a_recoverable_refresh_failure() {
+        let result = refresh_remote_catalog_with_page_timeout(
+            &HangingProvider,
+            None,
+            std::time::Duration::from_millis(10),
+        )
+        .await;
+        assert_eq!(result.pages, 0);
+        let error = result.error.expect("hung refresh should fail visibly");
+        assert_eq!(error.kind, RemoteProviderErrorKind::Unavailable);
+        assert!(error.message.contains("timed out"));
     }
 
     #[tokio::test]
