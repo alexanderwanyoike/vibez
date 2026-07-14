@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod browser_results;
 mod ui_types;
+pub use browser_results::LocalResults;
 pub use ui_types::*;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -320,6 +322,10 @@ pub struct BrowserState {
     pub roots: Vec<PathBuf>,
     pub entries: Vec<SampleBrowserEntry>,
     pub folders: Vec<SampleBrowserFolder>,
+    /// Bumped whenever `entries`/`folders` change so memoized result
+    /// lists (see [`Self::local_results`]) know to recompute.
+    pub catalog_revision: u64,
+    pub(crate) local_results_cache: std::cell::RefCell<LocalResults>,
     /// Absolute Local Source Storage folder currently shown in Results. `None`
     /// is the All Roots location.
     pub current_folder: Option<PathBuf>,
@@ -371,6 +377,8 @@ impl Default for BrowserState {
             roots: Vec::new(),
             entries: Vec::new(),
             folders: Vec::new(),
+            catalog_revision: 0,
+            local_results_cache: std::cell::RefCell::new(LocalResults::default()),
             current_folder: None,
             expanded_local_folders: HashSet::new(),
             search_scope: BrowserSearchScope::default(),
@@ -463,13 +471,17 @@ impl BrowserState {
     }
 
     pub fn refresh_scan_diagnostics(&mut self) {
-        self.scan_in_progress = self
-            .root_catalog_states
-            .values()
-            .any(LocalRootCatalogState::is_busy);
-        self.scan_warnings = self
-            .root_catalog_states
-            .values()
+        // Roll up per-root states in configured-root order so the
+        // global label and surfaced error are deterministic (the
+        // backing map iterates in arbitrary order).
+        let states: Vec<&LocalRootCatalogState> = self
+            .roots
+            .iter()
+            .filter_map(|root| self.root_catalog_states.get(root))
+            .collect();
+        self.scan_in_progress = states.iter().any(|state| state.is_busy());
+        self.scan_warnings = states
+            .iter()
             .filter_map(|state| match state {
                 LocalRootCatalogState::Ready { warnings } => Some(warnings.as_slice()),
                 _ => None,
@@ -477,17 +489,20 @@ impl BrowserState {
             .flatten()
             .cloned()
             .collect();
-        self.scan_error = self
-            .root_catalog_states
-            .values()
-            .find_map(|state| match state {
-                LocalRootCatalogState::Stale { error } => Some(error.clone()),
-                _ => None,
-            });
+        self.scan_error = states.iter().find_map(|state| match state {
+            LocalRootCatalogState::Stale { error } => Some(error.clone()),
+            _ => None,
+        });
     }
 
     pub fn reset_results_window(&mut self) {
         self.results_visible_limit = BROWSER_RESULTS_PAGE_SIZE;
+    }
+
+    /// Record that `entries`/`folders` changed, invalidating any
+    /// memoized result lists.
+    pub fn bump_catalog_revision(&mut self) {
+        self.catalog_revision = self.catalog_revision.wrapping_add(1);
     }
 
     pub fn select_local_folder(&mut self, folder: Option<PathBuf>) {
@@ -854,6 +869,14 @@ impl BrowserState {
 
     pub fn set_dock_width(&mut self, width: f32) {
         self.dock_width = width.clamp(BROWSER_DOCK_MIN_WIDTH, BROWSER_DOCK_MAX_WIDTH);
+    }
+
+    /// Width a live splitter drag should store: unlike a preference
+    /// restored from settings, a drag also respects the window cap
+    /// applied by [`Self::effective_dock_width`], so the handle keeps
+    /// tracking the cursor instead of freezing at the yield point.
+    pub fn dock_drag_width(&self, cursor_x: f32, window_width: f32) -> f32 {
+        cursor_x.min(window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
     }
 
     pub fn effective_dock_width(&self, window_width: f32) -> f32 {

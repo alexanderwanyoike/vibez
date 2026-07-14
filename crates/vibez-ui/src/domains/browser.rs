@@ -261,6 +261,13 @@ impl BrowserState {
                 if !self.root_refresh_is_current(&root, revision) {
                     return action;
                 }
+                // Watcher-driven refreshes (Updating) happen behind the
+                // user's back; they must not collapse an expanded
+                // results window the way user-initiated scans do.
+                let from_watcher = matches!(
+                    self.root_catalog_states.get(&root),
+                    Some(LocalRootCatalogState::Updating)
+                );
                 match result {
                     Ok(scan) => {
                         self.entries.retain(|entry| entry.root_path != root);
@@ -277,6 +284,7 @@ impl BrowserState {
                                 .cmp(&b.root_path)
                                 .then_with(|| a.relative_path.cmp(&b.relative_path))
                         });
+                        self.bump_catalog_revision();
                         let warning_count = scan.warnings.len();
                         self.root_catalog_states.insert(
                             root.clone(),
@@ -284,7 +292,9 @@ impl BrowserState {
                                 warnings: scan.warnings,
                             },
                         );
-                        self.reset_results_window();
+                        if !from_watcher {
+                            self.reset_results_window();
+                        }
                         let current_exists = self.current_folder.as_ref().is_none_or(|current| {
                             self.roots.iter().any(|root| root == current)
                                 || self.folders.iter().any(|folder| &folder.path == current)
@@ -343,6 +353,7 @@ impl BrowserState {
                 }
                 self.entries.retain(|entry| entry.root_path != path);
                 self.folders.retain(|folder| folder.root_path != path);
+                self.bump_catalog_revision();
                 self.expanded_local_folders
                     .retain(|folder| !folder.starts_with(&path));
                 self.root_catalog_states.remove(&path);
@@ -439,6 +450,22 @@ mod tests {
         assert_eq!(browser.effective_dock_width(900.0), 340.0);
         assert_eq!(browser.dock_width, 620.0);
         assert!((browser.places_pane_width(900.0) - 124.0).abs() < f32::EPSILON * 100.0);
+    }
+
+    #[test]
+    fn splitter_drag_tracks_the_cursor_at_the_narrow_window_yield_point() {
+        let mut browser = BrowserState::default();
+        let window = 900.0;
+
+        // Dragging past the yield point stores the width the layout
+        // can actually render, so the handle stays under the cursor.
+        browser.set_dock_width(browser.dock_drag_width(620.0, window));
+        assert_eq!(browser.dock_width, browser.effective_dock_width(window));
+        assert_eq!(browser.dock_width, 340.0);
+
+        // A wide window leaves drags untouched within the static range.
+        browser.set_dock_width(browser.dock_drag_width(620.0, 1_500.0));
+        assert_eq!(browser.dock_width, 620.0);
     }
 
     #[test]
@@ -776,8 +803,10 @@ mod tests {
 
     #[test]
     fn remote_search_edits_are_catalog_only_and_request_no_provider_effect() {
-        let mut browser = BrowserState::default();
-        browser.mode = SampleBrowserMode::Remote;
+        let mut browser = BrowserState {
+            mode: SampleBrowserMode::Remote,
+            ..BrowserState::default()
+        };
         let action = browser.update(BrowserMsg::SampleBrowserSearchChanged("kick".into()));
         assert_eq!(browser.search, "kick");
         assert_eq!(action, BrowserAction::default());
@@ -884,6 +913,82 @@ mod tests {
             revision: second_revision,
         });
         assert_eq!(current.scan_root, Some((root, second_revision)));
+    }
+
+    #[test]
+    fn watcher_reconciles_preserve_an_expanded_results_window() {
+        let root = PathBuf::from("/samples");
+        let mut browser = BrowserState {
+            roots: vec![root.clone()],
+            ..BrowserState::default()
+        };
+        browser.update(BrowserMsg::ShowMoreLocalResults);
+        let expanded = browser.results_visible_limit;
+        assert!(expanded > crate::state::BROWSER_RESULTS_PAGE_SIZE);
+        let empty_scan = || crate::message::SampleLibraryScanResult {
+            entries: Vec::new(),
+            folders: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        // Background filesystem activity must not collapse the list
+        // the user expanded.
+        let revision = browser.begin_root_scan(&root, true);
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root: root.clone(),
+            revision,
+            result: Ok(empty_scan()),
+        });
+        assert_eq!(browser.results_visible_limit, expanded);
+
+        // User-initiated scans still reset the window.
+        let revision = browser.begin_root_scan(&root, false);
+        browser.update(BrowserMsg::LocalRootCatalogReconciled {
+            root,
+            revision,
+            result: Ok(empty_scan()),
+        });
+        assert_eq!(
+            browser.results_visible_limit,
+            crate::state::BROWSER_RESULTS_PAGE_SIZE
+        );
+    }
+
+    #[test]
+    fn scan_diagnostics_roll_up_deterministically_in_configured_root_order() {
+        let first = PathBuf::from("/a-samples");
+        let second = PathBuf::from("/b-samples");
+        let mut browser = BrowserState {
+            roots: vec![first.clone(), second.clone()],
+            ..BrowserState::default()
+        };
+        browser.root_catalog_states.insert(
+            second.clone(),
+            crate::state::LocalRootCatalogState::Stale {
+                error: "second offline".into(),
+            },
+        );
+        browser.root_catalog_states.insert(
+            first.clone(),
+            crate::state::LocalRootCatalogState::Stale {
+                error: "first offline".into(),
+            },
+        );
+
+        // Regardless of map iteration order, the first configured
+        // stale root is surfaced.
+        browser.refresh_scan_diagnostics();
+        assert_eq!(browser.scan_error.as_deref(), Some("first offline"));
+
+        browser.root_catalog_states.insert(
+            first,
+            crate::state::LocalRootCatalogState::Ready {
+                warnings: vec!["unreadable folder".into()],
+            },
+        );
+        browser.refresh_scan_diagnostics();
+        assert_eq!(browser.scan_error.as_deref(), Some("second offline"));
+        assert_eq!(browser.scan_warnings, vec!["unreadable folder"]);
     }
 
     #[test]
