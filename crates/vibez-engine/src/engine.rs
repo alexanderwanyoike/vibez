@@ -69,10 +69,16 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
 }
 
+/// How many replaced voices can fade out simultaneously. With tiny
+/// audio buffers a retrigger can arrive before the previous ~5ms fade
+/// finishes; a couple of fixed slots absorb the overlap without
+/// clicking or allocating on the audio thread.
+const AUDITION_OUTGOING_VOICES: usize = 3;
+
 /// Dedicated Browser signal path mixed after project master processing.
 struct AuditionBus {
     active: Option<AuditionVoice>,
-    outgoing: Option<AuditionVoice>,
+    outgoing: [Option<AuditionVoice>; AUDITION_OUTGOING_VOICES],
     queued: Option<QueuedAudition>,
     gain: f32,
 }
@@ -95,7 +101,7 @@ impl AuditionBus {
     fn new() -> Self {
         Self {
             active: None,
-            outgoing: None,
+            outgoing: std::array::from_fn(|_| None),
             queued: None,
             gain: 1.0,
         }
@@ -103,12 +109,7 @@ impl AuditionBus {
 
     fn start(&mut self, audio: Arc<DecodedAudio>, fade_frames: usize, looped: bool) {
         self.queued = None;
-        if let Some(mut active) = self.active.take() {
-            if active.position > 0 {
-                active.fade_out_remaining = Some(fade_frames);
-                self.outgoing = Some(active);
-            }
-        }
+        self.stop_active(fade_frames);
         self.active = Some(AuditionVoice {
             audio,
             position: 0,
@@ -142,9 +143,24 @@ impl AuditionBus {
         if let Some(mut active) = self.active.take() {
             if active.position > 0 {
                 active.fade_out_remaining = Some(fade_frames);
-                self.outgoing = Some(active);
+                // Prefer a free slot; when a rapid retrigger burst has
+                // every slot fading, replace the voice closest to done
+                // (the smallest possible click).
+                let slot = self
+                    .outgoing
+                    .iter_mut()
+                    .min_by_key(|slot| {
+                        slot.as_ref()
+                            .map_or(0, |voice| voice.fade_out_remaining.unwrap_or(0))
+                    })
+                    .expect("outgoing slots are non-empty");
+                *slot = Some(active);
             }
         }
+    }
+
+    fn has_outgoing(&self) -> bool {
+        self.outgoing.iter().any(Option::is_some)
     }
 
     fn set_looped(&mut self, looped: bool) {
@@ -604,7 +620,7 @@ impl AudioEngine {
     }
 
     fn process_audition(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let mut had_voice = self.audition.active.is_some() || self.audition.outgoing.is_some();
+        let mut had_voice = self.audition.active.is_some() || self.audition.has_outgoing();
         let mut start_offset = 0;
         let queued_ready = self.audition.queued.as_ref().is_some_and(|queued| {
             if !self.transport.is_playing() {
@@ -630,13 +646,12 @@ impl AudioEngine {
             let _ = self.event_tx.push(EngineEvent::AuditionStarted);
         }
         let gain = self.audition.gain;
-        if self
-            .audition
-            .outgoing
-            .as_mut()
-            .is_some_and(|voice| render_audition_voice(voice, output, frames, channels, gain, 0))
-        {
-            self.audition.outgoing = None;
+        for slot in self.audition.outgoing.iter_mut() {
+            if slot.as_mut().is_some_and(|voice| {
+                render_audition_voice(voice, output, frames, channels, gain, 0)
+            }) {
+                *slot = None;
+            }
         }
         if self.audition.active.as_mut().is_some_and(|voice| {
             render_audition_voice(voice, output, frames, channels, gain, start_offset)
@@ -645,7 +660,7 @@ impl AudioEngine {
         }
         if had_voice
             && self.audition.active.is_none()
-            && self.audition.outgoing.is_none()
+            && !self.audition.has_outgoing()
             && self.audition.queued.is_none()
         {
             let _ = self.event_tx.push(EngineEvent::AuditionStopped);
@@ -1194,7 +1209,17 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::StopAudition => {
+                    // A queued-only audition has no voice to fade, so
+                    // process_audition would never emit a terminal
+                    // event; emit it here or a buffered AuditionQueued
+                    // polled after the stop leaves the UI stuck QUEUED.
+                    let queued_only = self.audition.queued.is_some()
+                        && self.audition.active.is_none()
+                        && !self.audition.has_outgoing();
                     self.audition.stop(audition_fade_frames(self.sample_rate));
+                    if queued_only {
+                        let _ = self.event_tx.push(EngineEvent::AuditionStopped);
+                    }
                 }
                 EngineCommand::SetAuditionGain(gain) => {
                     self.audition.gain = gain.clamp(0.0, 2.0);

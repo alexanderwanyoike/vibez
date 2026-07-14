@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 
+/// Shared log of `(is_note_on, pitch)` events seen by the spy.
+type NoteEventLog = Arc<Mutex<Vec<(bool, u8)>>>;
+
 /// Instrument that records every note event it receives.
 struct SpyInstrument {
-    events: Arc<Mutex<Vec<(bool, u8)>>>,
+    events: NoteEventLog,
 }
 
 impl vibez_instruments::Instrument for SpyInstrument {
@@ -39,7 +42,7 @@ impl vibez_instruments::Instrument for SpyInstrument {
 fn engine_with_held_note() -> (
     AudioEngine,
     rtrb::Producer<EngineCommand>,
-    Arc<Mutex<Vec<(bool, u8)>>>,
+    NoteEventLog,
     TrackId,
 ) {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();

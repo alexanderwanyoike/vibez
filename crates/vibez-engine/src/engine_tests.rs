@@ -976,6 +976,35 @@ fn newer_audition_crossfades_over_the_previous_source() {
 }
 
 #[test]
+fn rapid_retriggers_with_tiny_buffers_keep_fading_voices_without_clicking() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+
+    // 64-frame blocks are far shorter than the ~220-frame fade, so
+    // every retrigger overlaps the previous voice's fade-out.
+    let mut previous_tail = 0.0f32;
+    for retrigger in 0..4 {
+        cmd_tx
+            .push(start_audition(make_constant_audio(4_096, 0.5)))
+            .unwrap();
+        let mut buf = vec![0.0f32; 64 * 2];
+        engine.process(&mut buf, 2);
+        if retrigger > 0 {
+            assert!(
+                (buf[0] - previous_tail).abs() < 0.05,
+                "retrigger {retrigger} must not click: jumped from {previous_tail} to {}",
+                buf[0]
+            );
+        }
+        previous_tail = buf[64 * 2 - 2];
+    }
+
+    // Once retriggering stops, all fades resolve to the lone voice.
+    let mut buf = vec![0.0f32; 4_096];
+    engine.process(&mut buf, 2);
+    assert!((buf[2_000] - 0.5).abs() < 0.01);
+}
+
+#[test]
 fn audition_gain_is_independent_and_bypasses_project_master_gain() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let audio = make_constant_audio(4_096, 0.8);
@@ -1066,6 +1095,50 @@ fn queued_audition_starts_immediately_if_transport_stops_before_boundary() {
 
     assert!(started.iter().any(|sample| sample.abs() > 0.3));
     assert!(!engine.transport().is_playing());
+}
+
+#[test]
+fn stopping_a_queued_only_audition_emits_a_terminal_event() {
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
+    cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            sync: AuditionSync::Bar,
+            looped: false,
+        })
+        .unwrap();
+
+    let mut queued = vec![0.0f32; 256];
+    engine.process(&mut queued, 2);
+    assert!(queued.iter().all(|sample| sample.abs() < f32::EPSILON));
+
+    // Stopping while the audition is queued (no voice fading) must
+    // still emit AuditionStopped, otherwise a buffered AuditionQueued
+    // polled after the stop leaves the UI stuck showing QUEUED.
+    cmd_tx.push(EngineCommand::StopAudition).unwrap();
+    let mut buf = vec![0.0f32; 90_000];
+    engine.process(&mut buf, 2);
+    assert!(buf.iter().all(|sample| sample.abs() < f32::EPSILON));
+
+    let mut events = Vec::new();
+    while let Ok(event) = event_rx.pop() {
+        events.push(event);
+    }
+    let queued_at = events
+        .iter()
+        .position(|event| matches!(event, EngineEvent::AuditionQueued))
+        .expect("audition must report queued");
+    let stopped_at = events
+        .iter()
+        .position(|event| matches!(event, EngineEvent::AuditionStopped))
+        .expect("stopping a queued audition must emit a terminal event");
+    assert!(stopped_at > queued_at);
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, EngineEvent::AuditionStarted)));
 }
 
 #[test]
