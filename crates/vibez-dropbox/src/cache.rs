@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
@@ -153,18 +154,14 @@ impl DropboxCache {
     }
 
     pub fn policy(&self) -> MediaCachePolicy {
-        self.runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .policy
+        self.lock_runtime().policy
     }
 
     pub fn set_policy(&self, policy: MediaCachePolicy) -> std::io::Result<CacheUsage> {
-        self.runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .policy = policy;
-        self.enforce_budget()
+        let mut runtime = self.lock_runtime();
+        runtime.policy = policy;
+        let mut index = self.load_index()?;
+        self.enforce_budget_locked(&runtime, &mut index)
     }
 
     pub fn path_for(&self, path_lower: &str, revision: Option<&str>) -> PathBuf {
@@ -177,6 +174,23 @@ impl DropboxCache {
         self.path_for(path_lower, revision).is_file()
     }
 
+    /// Identities (path_lower, revision) whose materialized bytes are present
+    /// on disk. Lets the UI seed availability once instead of stat-ing every
+    /// visible row per frame.
+    pub fn cached_identities(&self) -> Vec<(String, Option<String>)> {
+        let _runtime = self.lock_runtime();
+        let index = self.load_index().unwrap_or_default();
+        index
+            .entries
+            .values()
+            .filter(|record| {
+                self.path_for(&record.path_lower, record.revision.as_deref())
+                    .is_file()
+            })
+            .map(|record| (record.path_lower.clone(), record.revision.clone()))
+            .collect()
+    }
+
     /// Return cached bytes' path and persist an LRU touch.
     pub fn lookup(
         &self,
@@ -187,6 +201,7 @@ impl DropboxCache {
         if !path.is_file() {
             return Ok(None);
         }
+        let _runtime = self.lock_runtime();
         let mut index = self.load_index().unwrap_or_default();
         let key = cache_key(path_lower, revision);
         let size = path.metadata()?.len();
@@ -208,9 +223,7 @@ impl DropboxCache {
     pub fn protect(&self, path_lower: &str, revision: Option<&str>) -> CacheLease {
         let key = cache_key(path_lower, revision);
         *self
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .lock_runtime()
             .protected
             .entry(key.clone())
             .or_insert(0) += 1;
@@ -237,6 +250,7 @@ impl DropboxCache {
         std::fs::write(&temporary, bytes)?;
         std::fs::rename(&temporary, &target)?;
 
+        let runtime = self.lock_runtime();
         let mut index = self.load_index()?;
         let sequence = next_sequence(&mut index);
         let key = cache_key(path_lower, revision);
@@ -256,7 +270,7 @@ impl DropboxCache {
             },
         );
         self.save_index(&index)?;
-        self.enforce_budget()?;
+        self.enforce_budget_locked(&runtime, &mut index)?;
         Ok(target)
     }
 
@@ -272,6 +286,7 @@ impl DropboxCache {
                 "Derived Metadata revision does not match the cache entry",
             ));
         }
+        let _runtime = self.lock_runtime();
         let mut index = self.load_index()?;
         let key = cache_key(path_lower, revision);
         let record = index.entries.get_mut(&key).ok_or_else(|| {
@@ -286,6 +301,7 @@ impl DropboxCache {
         path_lower: &str,
         revision: Option<&str>,
     ) -> std::io::Result<Option<DerivedMetadata>> {
+        let _runtime = self.lock_runtime();
         let index = self.load_index()?;
         Ok(index
             .entries
@@ -295,6 +311,7 @@ impl DropboxCache {
     }
 
     pub fn usage(&self) -> std::io::Result<CacheUsage> {
+        let _runtime = self.lock_runtime();
         let index = self.load_index()?;
         Ok(CacheUsage {
             bytes: index.entries.values().map(|record| record.size_bytes).sum(),
@@ -303,16 +320,11 @@ impl DropboxCache {
     }
 
     pub fn clear(&self) -> std::io::Result<CacheClearReport> {
-        let protected = self
-            .runtime
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .protected
-            .clone();
+        let runtime = self.lock_runtime();
         let mut index = self.load_index().unwrap_or_default();
         let mut report = CacheClearReport::default();
         index.entries.retain(|key, record| {
-            if protected.contains_key(key) {
+            if runtime.protected.contains_key(key) {
                 report.protected_entries += 1;
                 return true;
             }
@@ -351,21 +363,29 @@ impl DropboxCache {
         Ok(report)
     }
 
-    fn enforce_budget(&self) -> std::io::Result<CacheUsage> {
-        let runtime = self
-            .runtime
+    /// Serialize every index read-modify-write behind the runtime mutex, so
+    /// concurrent cache operations cannot lose each other's updates.
+    fn lock_runtime(&self) -> MutexGuard<'_, RuntimeState> {
+        self.runtime
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Evict least-recently-used unprotected entries until within budget.
+    /// The caller must hold the runtime lock; the index is persisted only
+    /// when something was evicted.
+    fn enforce_budget_locked(
+        &self,
+        runtime: &RuntimeState,
+        index: &mut CacheIndex,
+    ) -> std::io::Result<CacheUsage> {
         let policy = runtime.policy;
-        let protected = runtime.protected.clone();
-        drop(runtime);
-        let mut index = self.load_index()?;
         let mut usage: u64 = index.entries.values().map(|record| record.size_bytes).sum();
         if policy.automatic_eviction && usage > policy.budget_bytes {
             let mut candidates: Vec<(String, u64)> = index
                 .entries
                 .iter()
-                .filter(|(key, _)| !protected.contains_key(*key))
+                .filter(|(key, _)| !runtime.protected.contains_key(*key))
                 .map(|(key, record)| (key.clone(), record.last_access_sequence))
                 .collect();
             candidates.sort_by_key(|(_, sequence)| *sequence);
@@ -387,7 +407,7 @@ impl DropboxCache {
                     }
                 }
             }
-            self.save_index(&index)?;
+            self.save_index(index)?;
         }
         Ok(CacheUsage {
             bytes: usage,
@@ -405,9 +425,16 @@ impl DropboxCache {
     }
 
     fn save_index(&self, index: &CacheIndex) -> std::io::Result<()> {
+        static SAVE_NONCE: AtomicU64 = AtomicU64::new(0);
         self.ensure_dir()?;
         let target = self.root.join(INDEX_FILE);
-        let temporary = self.root.join("index.json.partial");
+        // Unique per writer: another process saving concurrently must not
+        // rename our half-written temp file out from under us.
+        let temporary = self.root.join(format!(
+            "index.json.{}-{}.partial",
+            std::process::id(),
+            SAVE_NONCE.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(
             &temporary,
             serde_json::to_vec_pretty(index).map_err(std::io::Error::other)?,
@@ -427,11 +454,26 @@ fn next_sequence(index: &mut CacheIndex) -> u64 {
     index.access_sequence
 }
 
+/// Human-readable sanitized prefix plus a hash of the exact identity.
+/// `sanitize_path` is lossy (many characters collapse to '_'), so the hash
+/// keeps distinct provider paths from colliding on one cache slot. Keys from
+/// before the hash suffix no longer resolve; those entries simply re-download
+/// once and the orphaned files age out via LRU eviction or Clear.
 fn cache_key(path_lower: &str, revision: Option<&str>) -> String {
+    use sha2::{Digest, Sha256};
+    let revision = revision.unwrap_or("norev");
+    let mut hasher = Sha256::new();
+    hasher.update(path_lower.as_bytes());
+    hasher.update([0]);
+    hasher.update(revision.as_bytes());
+    let identity: String = hasher.finalize()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     format!(
-        "{}__{}",
+        "{}__{}-{identity}",
         sanitize_path(path_lower),
-        sanitize_path(revision.unwrap_or("norev"))
+        sanitize_path(revision)
     )
 }
 
@@ -585,7 +627,10 @@ mod tests {
         let first = cache(&dir, 1_000);
         let path = first.write("/kick.wav", Some("abc"), b"hello").unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"hello");
-        assert!(!dir.path().join("kick.wav__abc.materializing").exists());
+        assert!(!first
+            .path_for("/kick.wav", Some("abc"))
+            .with_extension("materializing")
+            .exists());
         let reopened = cache(&dir, 1_000);
         assert_eq!(
             reopened.usage().unwrap(),
@@ -595,5 +640,57 @@ mod tests {
             }
         );
         assert!(reopened.lookup("/kick.wav", Some("abc")).unwrap().is_some());
+    }
+
+    #[test]
+    fn distinct_identities_that_sanitize_alike_get_distinct_cache_keys() {
+        assert_ne!(
+            cache_key("/packs/a_b/kick.wav", Some("1")),
+            cache_key("/packs/a/b/kick.wav", Some("1"))
+        );
+        assert_ne!(
+            cache_key("/kick 01.wav", None),
+            cache_key("/kick_01.wav", None)
+        );
+    }
+
+    #[test]
+    fn concurrent_writers_lose_no_index_updates() {
+        let dir = TempDir::new().unwrap();
+        let cache = cache(&dir, 1_000_000);
+        let writers: Vec<_> = (0..8)
+            .map(|writer| {
+                let cache = cache.clone();
+                std::thread::spawn(move || {
+                    for item in 0..5 {
+                        cache
+                            .write(
+                                &format!("/pack-{writer}/kick-{item}.wav"),
+                                Some("1"),
+                                b"data",
+                            )
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        assert_eq!(cache.usage().unwrap().entries, 40);
+        assert_eq!(cache.cached_identities().len(), 40);
+    }
+
+    #[test]
+    fn cached_identities_reports_only_entries_whose_bytes_exist() {
+        let dir = TempDir::new().unwrap();
+        let cache = cache(&dir, 1_000);
+        cache.write("/kick.wav", Some("1"), b"kick").unwrap();
+        cache.write("/snare.wav", Some("1"), b"snare").unwrap();
+        std::fs::remove_file(cache.path_for("/snare.wav", Some("1"))).unwrap();
+        assert_eq!(
+            cache.cached_identities(),
+            vec![("/kick.wav".to_string(), Some("1".to_string()))]
+        );
     }
 }
