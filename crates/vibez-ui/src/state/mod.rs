@@ -979,8 +979,15 @@ pub struct RemoteUiState {
     pub refresh_items: usize,
     /// Current provider folder (`""` means the connection root).
     pub current_path: String,
+    /// Whether the Remote place reveals its configured connections.
+    pub place_expanded: bool,
+    /// Whether the Dropbox connection reveals its folder tree.
+    pub connection_expanded: bool,
     /// Paths expanded beneath the connection in Places.
     pub expanded: HashSet<String>,
+    /// Derived catalog lookup used by Places and ordinary folder navigation.
+    /// Values are indexes into `catalog.entries`, sorted folder-first by name.
+    pub catalog_children: HashMap<String, Vec<usize>>,
     /// Provider item identity of the current Remote selection.
     pub selected_path: Option<String>,
     /// A preview fetch / playback is in flight.
@@ -1007,7 +1014,10 @@ impl Default for RemoteUiState {
             refresh_pages: 0,
             refresh_items: 0,
             current_path: String::new(),
+            place_expanded: true,
+            connection_expanded: true,
             expanded: HashSet::new(),
+            catalog_children: HashMap::new(),
             selected_path: None,
             preview_in_progress: false,
             availability: HashMap::new(),
@@ -1017,6 +1027,45 @@ impl Default for RemoteUiState {
             cache_automatic_eviction: true,
             cache_error: None,
         }
+    }
+}
+
+impl RemoteUiState {
+    /// Rebuild the parent/children lookup after the catalog is loaded or
+    /// reconciled. UI redraws can then navigate one folder without rescanning
+    /// the complete provider catalog.
+    pub fn rebuild_catalog_children(&mut self) {
+        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, entry) in self.catalog.entries.iter().enumerate() {
+            children
+                .entry(entry.parent_path.clone())
+                .or_default()
+                .push(index);
+        }
+        for indexes in children.values_mut() {
+            indexes.sort_by(|left, right| {
+                let left = &self.catalog.entries[*left];
+                let right = &self.catalog.entries[*right];
+                (
+                    !left.is_folder,
+                    left.name.to_ascii_lowercase(),
+                    &left.provider_item_id,
+                )
+                    .cmp(&(
+                        !right.is_folder,
+                        right.name.to_ascii_lowercase(),
+                        &right.provider_item_id,
+                    ))
+            });
+        }
+        self.catalog_children = children;
+    }
+
+    pub fn catalog_child_indices(&self, parent: &str) -> &[usize] {
+        self.catalog_children
+            .get(parent)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 }
 

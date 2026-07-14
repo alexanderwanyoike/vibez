@@ -182,7 +182,7 @@ impl App {
                 error: "Sign in to refresh; showing the last saved Remote catalog".into(),
             };
         }
-        let remote_ui_state = crate::state::RemoteUiState {
+        let mut remote_ui_state = crate::state::RemoteUiState {
             connected: dropbox_client.is_some(),
             account_email: dropbox_settings.account_email.clone(),
             app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
@@ -195,6 +195,7 @@ impl App {
             cache_automatic_eviction: ui_settings.media_cache_automatic_eviction,
             ..Default::default()
         };
+        remote_ui_state.rebuild_catalog_children();
 
         let mut state = AppState {
             transport: crate::state::TransportState {

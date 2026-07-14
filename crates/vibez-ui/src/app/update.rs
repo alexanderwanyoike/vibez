@@ -1472,6 +1472,7 @@ impl App {
                             error: None,
                         },
                     );
+                    self.state.browser.remote.rebuild_catalog_children();
                     self.state.browser.remote.refresh_pages = pages;
                     self.state.browser.remote.refresh_items =
                         self.state.browser.remote.catalog.entries.len();

@@ -333,44 +333,92 @@ impl App {
             places = places.push(local_row);
         }
 
-        places = places.push(place_button(
-            "Remote",
-            remote_active,
-            SampleBrowserMode::Remote,
-        ));
-        let connection_active = remote_active && self.state.browser.remote.current_path.is_empty();
-        let connection = button(
-            text(self.state.browser.remote.catalog.connection_name.as_str())
+        let remote = &self.state.browser.remote;
+        let remote_toggle = button(
+            text(if remote.place_expanded { "▾" } else { "▸" })
                 .size(10)
-                .color(if connection_active {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                })
-                .wrapping(iced::widget::text::Wrapping::None),
+                .color(th::text_muted()),
         )
-        .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
-            String::new(),
+        .on_press(Message::Browser(BrowserMsg::ToggleRemotePlace))
+        .padding([3, 2])
+        .style(browser_utility_action_style);
+        let remote_select = button(
+            row![
+                container(text("")).width(Length::Fixed(1.0)),
+                text("Remote")
+                    .size(10)
+                    .color(if remote_active {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    })
+                    .wrapping(iced::widget::text::Wrapping::None)
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::Browser(BrowserMsg::SetSampleBrowserMode(
+            SampleBrowserMode::Remote,
         )))
         .padding([4, 2])
         .width(Length::Fill)
-        .style(move |_theme: &Theme, status| browser_place_button_style(connection_active, status));
+        .style(move |_theme: &Theme, status| browser_place_button_style(remote_active, status));
         places = places.push(
-            row![
-                horizontal_space().width(Length::Fixed(REMOTE_CONNECTION_INDENT)),
-                text("▾").size(10).color(th::text_muted()),
-                connection,
-                text(self.state.browser.remote.catalog_state.label())
-                    .size(8)
-                    .color(th::text_muted())
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center),
+            row![remote_toggle, remote_select]
+                .spacing(1)
+                .align_y(iced::Alignment::Center),
         );
-        let mut remote_rows = Vec::new();
-        self.render_remote_places_tree("", 0, &mut remote_rows);
-        for remote_row in remote_rows {
-            places = places.push(remote_row);
+        if remote.place_expanded {
+            let connection_active = remote_active && remote.current_path.is_empty();
+            let connection_toggle = button(
+                text(if remote.connection_expanded {
+                    "▾"
+                } else {
+                    "▸"
+                })
+                .size(10)
+                .color(th::text_muted()),
+            )
+            .on_press(Message::Browser(BrowserMsg::ToggleRemoteConnection))
+            .padding([3, 2])
+            .style(browser_utility_action_style);
+            let connection = button(
+                text(remote.catalog.connection_name.as_str())
+                    .size(10)
+                    .color(if connection_active {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    })
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::Browser(BrowserMsg::SelectRemoteFolder(
+                String::new(),
+            )))
+            .padding([4, 2])
+            .width(Length::Fill)
+            .style(move |_theme: &Theme, status| {
+                browser_place_button_style(connection_active, status)
+            });
+            places = places.push(
+                row![
+                    horizontal_space().width(Length::Fixed(REMOTE_CONNECTION_INDENT)),
+                    connection_toggle,
+                    connection,
+                    text(remote.catalog_state.label())
+                        .size(8)
+                        .color(th::text_muted())
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center),
+            );
+            if remote.connection_expanded {
+                let mut remote_rows = Vec::new();
+                self.render_remote_places_tree("", 0, &mut remote_rows);
+                for remote_row in remote_rows {
+                    places = places.push(remote_row);
+                }
+            }
         }
 
         let add = button(
@@ -496,17 +544,12 @@ impl App {
         depth: usize,
         rows: &mut Vec<Element<'a, Message>>,
     ) {
-        let mut children: Vec<_> = self
-            .state
-            .browser
-            .remote
-            .catalog
-            .entries
-            .iter()
-            .filter(|entry| entry.is_folder && entry.parent_path == parent)
-            .collect();
-        children.sort_by_key(|entry| entry.name.to_ascii_lowercase());
-        for folder in children {
+        let remote = &self.state.browser.remote;
+        for &index in remote.catalog_child_indices(parent) {
+            let folder = &remote.catalog.entries[index];
+            if !folder.is_folder {
+                continue;
+            }
             let expanded = self
                 .state
                 .browser
@@ -515,14 +558,10 @@ impl App {
                 .contains(&folder.provider_item_id);
             let active = self.state.browser.mode == SampleBrowserMode::Remote
                 && self.state.browser.remote.current_path == folder.provider_item_id;
-            let has_children = self
-                .state
-                .browser
-                .remote
-                .catalog
-                .entries
+            let has_children = remote
+                .catalog_child_indices(&folder.provider_item_id)
                 .iter()
-                .any(|entry| entry.is_folder && entry.parent_path == folder.provider_item_id);
+                .any(|&child| remote.catalog.entries[child].is_folder);
             let toggle: Element<'a, Message> = if has_children {
                 button(
                     text(if expanded { "▾" } else { "▸" })
@@ -1325,13 +1364,13 @@ impl App {
                     .strip_prefix(current)
                     .is_some_and(|rest| rest.starts_with('/'))
         };
-        let mut results: Vec<&crate::remote_provider::RemoteCatalogEntry> = remote
-            .catalog
-            .entries
-            .iter()
-            .filter(|entry| entry.is_folder || entry.is_supported_audio())
-            .filter(|entry| {
-                if searching {
+        let mut results: Vec<&crate::remote_provider::RemoteCatalogEntry> = if searching {
+            remote
+                .catalog
+                .entries
+                .iter()
+                .filter(|entry| entry.is_folder || entry.is_supported_audio())
+                .filter(|entry| {
                     let in_scope = match browser.search_scope {
                         crate::state::BrowserSearchScope::SelectedFolder => in_current_tree(entry),
                         crate::state::BrowserSearchScope::Root
@@ -1340,15 +1379,22 @@ impl App {
                     in_scope
                         && (entry.name.to_ascii_lowercase().contains(&query)
                             || entry.path.to_ascii_lowercase().contains(&query))
-                } else {
-                    entry.parent_path == current
-                }
-            })
-            .collect();
-        results.sort_by(|left, right| {
-            (!left.is_folder, left.name.to_ascii_lowercase())
-                .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
-        });
+                })
+                .collect()
+        } else {
+            remote
+                .catalog_child_indices(current)
+                .iter()
+                .filter_map(|&index| remote.catalog.entries.get(index))
+                .filter(|entry| entry.is_folder || entry.is_supported_audio())
+                .collect()
+        };
+        if searching {
+            results.sort_by(|left, right| {
+                (!left.is_folder, left.name.to_ascii_lowercase())
+                    .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
+            });
+        }
         let mut local_everywhere: Vec<&SampleBrowserEntry> =
             if searching && browser.search_scope == crate::state::BrowserSearchScope::Everywhere {
                 browser

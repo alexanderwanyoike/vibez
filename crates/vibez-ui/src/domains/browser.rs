@@ -67,6 +67,8 @@ pub enum BrowserMsg {
         result: Result<SampleLibraryScanResult, String>,
     },
     RemoveSampleLibraryRoot(PathBuf),
+    ToggleRemotePlace,
+    ToggleRemoteConnection,
     SelectRemoteFolder(String),
     ToggleRemoteFolder(String),
     SelectRemoteEntry(RemoteCatalogEntry),
@@ -361,6 +363,12 @@ impl BrowserState {
                 }
                 action.persist_settings = true;
                 action.status = Some("Removed sample root".to_string());
+            }
+            BrowserMsg::ToggleRemotePlace => {
+                self.remote.place_expanded = !self.remote.place_expanded;
+            }
+            BrowserMsg::ToggleRemoteConnection => {
+                self.remote.connection_expanded = !self.remote.connection_expanded;
             }
             BrowserMsg::SelectRemoteFolder(path) => {
                 self.remote.current_path = path;
@@ -684,6 +692,59 @@ mod tests {
             browser.search_scope,
             crate::state::BrowserSearchScope::SelectedFolder
         );
+    }
+
+    #[test]
+    fn remote_place_and_connection_collapse_without_losing_navigation_state() {
+        let mut browser = BrowserState::default();
+        browser.remote.current_path = "/megalodon/drums".into();
+        browser.remote.expanded.insert("/megalodon".into());
+
+        browser.update(BrowserMsg::ToggleRemoteConnection);
+        browser.update(BrowserMsg::ToggleRemotePlace);
+
+        assert!(!browser.remote.connection_expanded);
+        assert!(!browser.remote.place_expanded);
+        assert_eq!(browser.remote.current_path, "/megalodon/drums");
+        assert!(browser.remote.expanded.contains("/megalodon"));
+
+        browser.update(BrowserMsg::ToggleRemotePlace);
+        browser.update(BrowserMsg::ToggleRemoteConnection);
+        assert!(browser.remote.place_expanded);
+        assert!(browser.remote.connection_expanded);
+    }
+
+    #[test]
+    fn remote_catalog_children_are_indexed_folder_first_per_parent() {
+        let entry = |id: &str, parent: &str, name: &str, is_folder: bool| RemoteCatalogEntry {
+            provider_item_id: id.into(),
+            path: id.into(),
+            parent_path: parent.into(),
+            name: name.into(),
+            is_folder,
+            revision: None,
+            size: None,
+            derived_metadata: None,
+        };
+        let mut browser = BrowserState::default();
+        browser.remote.catalog.entries = vec![
+            entry("/z.wav", "", "z.wav", false),
+            entry("/beats", "", "Beats", true),
+            entry("/a.wav", "", "a.wav", false),
+            entry("/beats/kick.wav", "/beats", "kick.wav", false),
+        ];
+
+        browser.remote.rebuild_catalog_children();
+
+        let root_names: Vec<_> = browser
+            .remote
+            .catalog_child_indices("")
+            .iter()
+            .map(|&index| browser.remote.catalog.entries[index].name.as_str())
+            .collect();
+        assert_eq!(root_names, ["Beats", "a.wav", "z.wav"]);
+        assert_eq!(browser.remote.catalog_child_indices("/beats").len(), 1);
+        assert!(browser.remote.catalog_child_indices("/missing").is_empty());
     }
 
     #[test]

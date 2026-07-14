@@ -141,14 +141,14 @@ impl App {
                             .strip_prefix(current)
                             .is_some_and(|rest| rest.starts_with('/'))
                 };
-                let mut remote: Vec<_> = browser
-                    .remote
-                    .catalog
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.is_folder || entry.is_supported_audio())
-                    .filter(|entry| {
-                        if searching {
+                let mut remote: Vec<_> = if searching {
+                    browser
+                        .remote
+                        .catalog
+                        .entries
+                        .iter()
+                        .filter(|entry| entry.is_folder || entry.is_supported_audio())
+                        .filter(|entry| {
                             let in_scope = match browser.search_scope {
                                 crate::state::BrowserSearchScope::SelectedFolder => {
                                     in_current_tree(entry)
@@ -159,16 +159,25 @@ impl App {
                             in_scope
                                 && (entry.name.to_ascii_lowercase().contains(&query)
                                     || entry.path.to_ascii_lowercase().contains(&query))
-                        } else {
-                            entry.parent_path == current
-                        }
-                    })
-                    .cloned()
-                    .collect();
-                remote.sort_by(|left, right| {
-                    (!left.is_folder, left.name.to_ascii_lowercase())
-                        .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
-                });
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    browser
+                        .remote
+                        .catalog_child_indices(current)
+                        .iter()
+                        .filter_map(|&index| browser.remote.catalog.entries.get(index))
+                        .filter(|entry| entry.is_folder || entry.is_supported_audio())
+                        .cloned()
+                        .collect()
+                };
+                if searching {
+                    remote.sort_by(|left, right| {
+                        (!left.is_folder, left.name.to_ascii_lowercase())
+                            .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
+                    });
+                }
                 let remote_visible = remote.len().min(browser.results_visible_limit);
                 let mut combined: Vec<_> = remote
                     .into_iter()
