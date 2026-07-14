@@ -35,6 +35,10 @@ pub struct UiSettings {
     /// the default Charcoal.
     #[serde(default)]
     pub theme: Option<String>,
+    #[serde(default = "default_media_cache_budget_bytes")]
+    pub media_cache_budget_bytes: u64,
+    #[serde(default = "default_media_cache_automatic_eviction")]
+    pub media_cache_automatic_eviction: bool,
 }
 
 impl Default for UiSettings {
@@ -50,6 +54,8 @@ impl Default for UiSettings {
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
             theme: None,
+            media_cache_budget_bytes: default_media_cache_budget_bytes(),
+            media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
         }
     }
 }
@@ -81,6 +87,14 @@ impl UiSettings {
 }
 
 fn default_sample_browser_open() -> bool {
+    true
+}
+
+fn default_media_cache_budget_bytes() -> u64 {
+    vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
+}
+
+fn default_media_cache_automatic_eviction() -> bool {
     true
 }
 
@@ -148,6 +162,16 @@ mod tests {
         assert!(!loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 0.42);
         assert!(loaded.audition_loop);
+    }
+
+    #[test]
+    fn old_settings_receive_the_twenty_gib_media_cache_policy() {
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert_eq!(
+            loaded.media_cache_budget_bytes,
+            vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
+        );
+        assert!(loaded.media_cache_automatic_eviction);
     }
 
     #[test]

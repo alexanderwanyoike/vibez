@@ -679,6 +679,7 @@ mod tests {
             is_folder: false,
             revision: Some("rev-7".into()),
             size: Some(2048),
+            derived_metadata: None,
         }));
         assert_eq!(
             browser.selected_source,

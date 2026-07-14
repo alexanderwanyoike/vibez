@@ -16,7 +16,10 @@ pub mod settings;
 pub mod types;
 
 pub use api::DropboxClient;
-pub use cache::DropboxCache;
+pub use cache::{
+    CacheClearReport, CacheLease, CacheUsage, DerivedMetadata, DropboxCache, MediaCachePolicy,
+    DEFAULT_MEDIA_CACHE_BUDGET_BYTES,
+};
 pub use oauth::{run_flow as run_oauth_flow, BrowserOpener, SystemBrowserOpener};
 pub use settings::{load_app_key_with_env_override, DropboxSettings};
 pub use types::{

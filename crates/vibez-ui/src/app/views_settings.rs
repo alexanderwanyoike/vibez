@@ -12,6 +12,7 @@ use crate::message::Message;
 use crate::state::SettingsTab;
 use crate::theme as th;
 
+use super::views_browser::browser_utility_action_style;
 use super::*;
 
 impl App {
@@ -616,6 +617,48 @@ impl App {
                 horizontal_space().width(Length::Shrink).into()
             };
 
+        let budget_gib =
+            self.state.browser.remote.cache_budget_bytes as f32 / (1024.0 * 1024.0 * 1024.0);
+        let cache_usage = text(format!(
+            "{} across {} item(s)",
+            format_settings_bytes(self.state.browser.remote.cache_usage_bytes),
+            self.state.browser.remote.cache_entries
+        ))
+        .size(11)
+        .color(th::text_dim());
+        let budget = slider(1.0..=500.0, budget_gib, Message::SetMediaCacheBudgetGiB)
+            .step(1.0)
+            .width(Length::Fill);
+        let eviction_enabled = self.state.browser.remote.cache_automatic_eviction;
+        let eviction = button(
+            text(if eviction_enabled {
+                "LRU EVICTION ON"
+            } else {
+                "LRU EVICTION OFF"
+            })
+            .size(10)
+            .color(if eviction_enabled {
+                th::accent()
+            } else {
+                th::text_dim()
+            }),
+        )
+        .on_press(Message::ToggleMediaCacheAutomaticEviction)
+        .padding([5, 8])
+        .style(browser_utility_action_style);
+        let clear = button(text("CLEAR CACHE").size(10).color(th::text_dim()))
+            .on_press(Message::ClearMediaCache)
+            .padding([5, 8])
+            .style(browser_utility_action_style);
+        let cache_error: Element<'_, Message> = self
+            .state
+            .browser
+            .remote
+            .cache_error
+            .as_ref()
+            .map(|error| text(error).size(10).color(th::danger()).into())
+            .unwrap_or_else(|| horizontal_space().width(Length::Shrink).into());
+
         column![
             title,
             hint,
@@ -625,6 +668,20 @@ impl App {
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             error_line,
+            text("MEDIA CACHE").size(10).color(th::text_muted()),
+            row![
+                cache_usage,
+                horizontal_space(),
+                text(format!("{budget_gib:.0} GiB budget"))
+                    .size(11)
+                    .color(th::text_dim())
+            ]
+            .align_y(iced::Alignment::Center),
+            budget,
+            row![eviction, clear]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            cache_error,
         ]
         .spacing(10)
         .into()
@@ -920,5 +977,18 @@ impl App {
         column![title, hint, list, divider(), save_row]
             .spacing(10)
             .into()
+    }
+}
+
+fn format_settings_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    const KIB: f64 = 1024.0;
+    if bytes as f64 >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB)
+    } else if bytes as f64 >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB)
+    } else {
+        format!("{:.1} KiB", bytes as f64 / KIB)
     }
 }

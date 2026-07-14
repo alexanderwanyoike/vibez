@@ -8,6 +8,13 @@ use crate::message::{BrowserImportTarget, Message};
 
 use super::*;
 
+pub(super) const REMOTE_SELECTION_DEBOUNCE: std::time::Duration =
+    std::time::Duration::from_millis(200);
+
+fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxEntry) {
+    *slot = Some(entry);
+}
+
 impl App {
     pub(super) fn handle_connect_dropbox(&mut self) -> Task<Message> {
         let Some(app_key) = load_app_key_with_env_override(&self.dropbox_settings) else {
@@ -52,20 +59,107 @@ impl App {
         )
     }
 
+    pub(super) fn start_remote_audition(
+        &mut self,
+        entry: DropboxEntry,
+        debounce: bool,
+    ) -> Task<Message> {
+        let source = vibez_core::track::MediaSourceRef::DropboxFile {
+            path_lower: entry.path_lower.clone(),
+            display_path: entry.path_display.clone(),
+            rev: entry.rev.clone(),
+        };
+        self.state.browser.select_source(source.clone());
+        if self.remote_import_in_flight {
+            queue_latest_remote_audition(&mut self.pending_remote_audition, entry);
+            self.state.status_text = "Remote Audition queued behind active import".into();
+            return Task::none();
+        }
+        if let Some(handle) = self.remote_materialization_abort.take() {
+            handle.abort();
+        }
+        self.remote_audition_cache_lease = None;
+        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        self.remote_materialization_request_id =
+            self.remote_materialization_request_id.saturating_add(1);
+        let request_id = self.remote_materialization_request_id;
+        let cached = self
+            .dropbox_cache
+            .is_cached(&entry.path_lower, entry.rev.as_deref());
+        if !cached && self.dropbox_client.is_none() {
+            self.state.browser.remote.preview_in_progress = false;
+            self.state.browser.remote.availability.insert(
+                entry.path_lower,
+                crate::state::RemoteAvailability::ReconnectRequired,
+            );
+            self.state.status_text =
+                "Reconnect Required · this Remote item is not in Media Cache".into();
+            self.state
+                .browser
+                .fail_waveform_load(&source, "Reconnect Required · uncached Remote media".into());
+            return Task::none();
+        }
+
+        if self.state.browser.audition_enabled {
+            self.state.browser.begin_audition_load(&source);
+        } else {
+            self.state.browser.begin_waveform_load(&source);
+        }
+        self.state.browser.remote.preview_in_progress = !cached;
+        self.state.browser.remote.availability.insert(
+            entry.path_lower.clone(),
+            if cached {
+                crate::state::RemoteAvailability::Cached
+            } else {
+                crate::state::RemoteAvailability::Fetching
+            },
+        );
+        self.state.status_text = if cached {
+            format!("Preparing cached Audition: {}", entry.name)
+        } else {
+            format!("Fetching Remote media: {}", entry.name)
+        };
+        let lease = self
+            .dropbox_cache
+            .protect(&entry.path_lower, entry.rev.as_deref());
+        let task = Task::perform(
+            materialize_remote_sample_async(
+                self.dropbox_client.clone(),
+                self.dropbox_cache.clone(),
+                entry,
+                lease,
+                debounce,
+            ),
+            move |result| Message::RemoteAuditionReady {
+                request_id,
+                source: source.clone(),
+                result,
+            },
+        );
+        let (task, handle) = task.abortable();
+        self.remote_materialization_abort = Some(handle);
+        task
+    }
+
     pub(super) fn handle_dropbox_import_to_arrangement(
         &mut self,
         entry: DropboxEntry,
     ) -> Task<Message> {
-        let Some(client) = self.dropbox_client.clone() else {
-            self.state.browser.remote.last_error = Some("Not connected to Dropbox".into());
-            return Task::none();
-        };
+        if let Some(handle) = self.remote_materialization_abort.take() {
+            handle.abort();
+            self.remote_materialization_request_id =
+                self.remote_materialization_request_id.saturating_add(1);
+        }
+        self.remote_audition_cache_lease = None;
+        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        let client = self.dropbox_client.clone();
         let cache = self.dropbox_cache.clone();
         let target = BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
         let Some(treatment) = self.state.browser.audition_import_input() else {
             self.state.status_text = "Confirm source BPM before WARP import".into();
             return Task::none();
         };
+        self.remote_import_in_flight = true;
         self.state.status_text = format!("Importing {}...", entry.name);
         Task::perform(
             fetch_dropbox_sample_async(client, cache, entry),
@@ -79,10 +173,14 @@ impl App {
     }
 
     pub(super) fn handle_dropbox_import_to_device(&mut self, entry: DropboxEntry) -> Task<Message> {
-        let Some(client) = self.dropbox_client.clone() else {
-            self.state.browser.remote.last_error = Some("Not connected to Dropbox".into());
-            return Task::none();
-        };
+        if let Some(handle) = self.remote_materialization_abort.take() {
+            handle.abort();
+            self.remote_materialization_request_id =
+                self.remote_materialization_request_id.saturating_add(1);
+        }
+        self.remote_audition_cache_lease = None;
+        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        let client = self.dropbox_client.clone();
         let Some(target) = self.selected_browser_device_target() else {
             self.state.status_text = "Select a Sampler or Drum Pad track first".into();
             return Task::none();
@@ -92,6 +190,7 @@ impl App {
             self.state.status_text = "Confirm source BPM before WARP import".into();
             return Task::none();
         };
+        self.remote_import_in_flight = true;
         self.state.status_text = format!("Importing {}...", entry.name);
         Task::perform(
             fetch_dropbox_sample_async(client, cache, entry),
@@ -102,5 +201,41 @@ impl App {
                 Err(err) => Message::BrowserSampleDecodeError(err),
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(path: &str) -> DropboxEntry {
+        DropboxEntry {
+            path_lower: path.into(),
+            path_display: path.into(),
+            name: path.rsplit('/').next().unwrap().into(),
+            is_folder: false,
+            rev: Some("1".into()),
+            size: None,
+        }
+    }
+
+    #[test]
+    fn remote_selection_debounce_is_exactly_two_hundred_milliseconds() {
+        assert_eq!(
+            REMOTE_SELECTION_DEBOUNCE,
+            std::time::Duration::from_millis(200)
+        );
+    }
+
+    #[test]
+    fn import_priority_defers_audition_and_retains_only_latest_selection() {
+        let mut pending = None;
+        queue_latest_remote_audition(&mut pending, entry("/one.wav"));
+        queue_latest_remote_audition(&mut pending, entry("/two.wav"));
+        queue_latest_remote_audition(&mut pending, entry("/winner.wav"));
+        assert_eq!(
+            pending.as_ref().map(|entry| entry.path_lower.as_str()),
+            Some("/winner.wav")
+        );
     }
 }

@@ -183,6 +183,13 @@ impl App {
     }
 
     pub(super) fn reset_to_new_project(&mut self) {
+        if let Some(handle) = self.remote_materialization_abort.take() {
+            handle.abort();
+            self.remote_materialization_request_id =
+                self.remote_materialization_request_id.saturating_add(1);
+        }
+        self.remote_audition_cache_lease = None;
+        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
         self.clear_project_runtime();
         self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
@@ -206,6 +213,8 @@ impl App {
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
             theme: Some(self.state.current_theme_name.clone()),
+            media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
+            media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");

@@ -89,6 +89,15 @@ pub struct DropboxConnectOutcome {
     pub tokens: DropboxTokens,
 }
 
+#[derive(Debug, Clone)]
+pub struct RemoteMaterializedSample {
+    pub audio: Arc<DecodedAudio>,
+    pub name: String,
+    pub source: MediaSourceRef,
+    pub lease: vibez_dropbox::CacheLease,
+    pub metadata: vibez_dropbox::DerivedMetadata,
+}
+
 /// Successful background result from `quantize_audio_clip_async`.
 #[derive(Debug, Clone)]
 pub struct AudioQuantizeSuccess {
@@ -436,8 +445,16 @@ pub enum Message {
     DisconnectDropbox,
     RefreshRemoteConnection,
     RemoteCatalogRefreshed(crate::remote_provider::RemoteRefreshResult),
+    SetMediaCacheBudgetGiB(f32),
+    ToggleMediaCacheAutomaticEviction,
+    ClearMediaCache,
+    ClickRemoteBrowserEntry(crate::remote_provider::RemoteCatalogEntry),
+    RemoteAuditionReady {
+        request_id: u64,
+        source: MediaSourceRef,
+        result: Result<RemoteMaterializedSample, String>,
+    },
     DropboxPreview(DropboxEntry),
-    DropboxPreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     DropboxImportToArrangement(DropboxEntry),
     DropboxImportToDevice(DropboxEntry),
 }

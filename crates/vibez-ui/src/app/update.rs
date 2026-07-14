@@ -630,12 +630,27 @@ impl App {
                 }
             }
             Message::StopBrowserPreview => {
+                if let Some(handle) = self.remote_materialization_abort.take() {
+                    handle.abort();
+                    self.remote_materialization_request_id =
+                        self.remote_materialization_request_id.saturating_add(1);
+                }
+                self.remote_audition_cache_lease = None;
+                let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+                self.state.browser.remote.preview_in_progress = false;
                 self.stop_browser_audition();
                 self.state.status_text = "Audition stopped".to_string();
             }
             Message::ToggleAuditionEnabled => {
                 let enabled = self.state.browser.toggle_audition_enabled();
                 if !enabled {
+                    if let Some(handle) = self.remote_materialization_abort.take() {
+                        handle.abort();
+                        self.remote_materialization_request_id =
+                            self.remote_materialization_request_id.saturating_add(1);
+                    }
+                    self.remote_audition_cache_lease = None;
+                    let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
                     self.stop_browser_audition();
                 }
                 self.persist_ui_settings();
@@ -858,7 +873,27 @@ impl App {
                 return self.handle_load_selected_browser_sample_to_device();
             }
             Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
-                return self.prepare_browser_sample_import(target, treatment, audio, name, source);
+                let was_remote_import = matches!(&source, MediaSourceRef::DropboxFile { .. });
+                if was_remote_import {
+                    let usage = self
+                        .dropbox_cache
+                        .set_policy(self.dropbox_cache.policy())
+                        .unwrap_or_default();
+                    self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                    self.state.browser.remote.cache_entries = usage.entries;
+                    self.remote_import_in_flight = false;
+                }
+                let import =
+                    self.prepare_browser_sample_import(target, treatment, audio, name, source);
+                let pending_audition = if was_remote_import {
+                    self.pending_remote_audition
+                        .take()
+                        .map(|entry| self.start_remote_audition(entry, true))
+                        .unwrap_or_else(Task::none)
+                } else {
+                    Task::none()
+                };
+                return Task::batch([import, pending_audition]);
             }
             Message::BrowserImportPrepared { target, payload } => {
                 return self.apply_browser_import_prepared(target, payload);
@@ -881,6 +916,12 @@ impl App {
             }
             Message::BrowserSampleDecodeError(err) => {
                 self.state.status_text = format!("Browser import error: {err}");
+                if self.remote_import_in_flight {
+                    self.remote_import_in_flight = false;
+                    if let Some(entry) = self.pending_remote_audition.take() {
+                        return self.start_remote_audition(entry, true);
+                    }
+                }
             }
 
             // -- File menu --
@@ -1390,50 +1431,177 @@ impl App {
                     ),
                 };
             }
-            Message::DropboxPreview(entry) => {
-                let Some(client) = self.dropbox_client.clone() else {
-                    self.state.browser.remote.last_error = Some("Not connected to Dropbox".into());
+            Message::SetMediaCacheBudgetGiB(gib) => {
+                let gib = gib.clamp(1.0, 500.0);
+                let bytes = (gib as f64 * 1024.0 * 1024.0 * 1024.0) as u64;
+                self.state.browser.remote.cache_budget_bytes = bytes;
+                match self
+                    .dropbox_cache
+                    .set_policy(vibez_dropbox::MediaCachePolicy {
+                        budget_bytes: bytes,
+                        automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
+                    }) {
+                    Ok(usage) => {
+                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                        self.state.browser.remote.cache_entries = usage.entries;
+                        self.state.browser.remote.cache_error = None;
+                    }
+                    Err(error) => {
+                        self.state.browser.remote.cache_error = Some(error.to_string());
+                    }
+                }
+                self.persist_ui_settings();
+            }
+            Message::ToggleMediaCacheAutomaticEviction => {
+                let enabled = !self.state.browser.remote.cache_automatic_eviction;
+                self.state.browser.remote.cache_automatic_eviction = enabled;
+                match self
+                    .dropbox_cache
+                    .set_policy(vibez_dropbox::MediaCachePolicy {
+                        budget_bytes: self.state.browser.remote.cache_budget_bytes,
+                        automatic_eviction: enabled,
+                    }) {
+                    Ok(usage) => {
+                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                        self.state.browser.remote.cache_entries = usage.entries;
+                        self.state.browser.remote.cache_error = None;
+                    }
+                    Err(error) => {
+                        self.state.browser.remote.cache_error = Some(error.to_string());
+                    }
+                }
+                self.persist_ui_settings();
+            }
+            Message::ClearMediaCache => match self.dropbox_cache.clear() {
+                Ok(report) => {
+                    let usage = self.dropbox_cache.usage().unwrap_or_default();
+                    self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                    self.state.browser.remote.cache_entries = usage.entries;
+                    self.state.browser.remote.cache_error = None;
+                    self.state.status_text = format!(
+                        "Cleared {} Media Cache item(s); {} active item(s) protected",
+                        report.removed_entries, report.protected_entries
+                    );
+                }
+                Err(error) => {
+                    self.state.browser.remote.cache_error = Some(error.to_string());
+                    self.state.status_text = format!("Media Cache clear failed: {error}");
+                }
+            },
+            Message::ClickRemoteBrowserEntry(entry) => {
+                if self.state.browser.drag_source.is_some() {
+                    self.state.browser.cancel_media_drag();
+                    self.state.status_text = "Drag cancelled".into();
                     return Task::none();
-                };
+                }
                 let source = MediaSourceRef::DropboxFile {
-                    path_lower: entry.path_lower.clone(),
-                    display_path: entry.path_display.clone(),
-                    rev: entry.rev.clone(),
+                    path_lower: entry.provider_item_id.clone(),
+                    display_path: entry.path.clone(),
+                    rev: entry.revision.clone(),
                 };
-                self.state.browser.select_source(source.clone());
-                self.state.browser.begin_audition_load(&source);
-                let cache = self.dropbox_cache.clone();
-                self.state.browser.remote.preview_in_progress = true;
-                self.state.status_text = format!("Fetching preview: {}", entry.name);
-                return Task::perform(
-                    fetch_dropbox_sample_async(client, cache, entry),
-                    move |result| {
-                        Message::DropboxPreviewReady(
-                            source.clone(),
-                            result.map(|(audio, _, _)| audio),
-                        )
-                    },
-                );
-            }
-            Message::DropboxPreviewReady(source, Ok(audio)) => {
-                self.state.browser.remote.preview_in_progress = false;
-                if self
-                    .state
+                let changed = self.state.browser.selected_source.as_ref() != Some(&source);
+                self.state
                     .browser
-                    .install_audition(source.clone(), Arc::clone(&audio))
-                {
-                    return self.play_browser_mode(source, audio);
+                    .update(BrowserMsg::SelectRemoteEntry(entry.clone()));
+                if changed {
+                    return self.start_remote_audition(
+                        DropboxEntry {
+                            path_lower: entry.provider_item_id,
+                            path_display: entry.path,
+                            name: entry.name,
+                            is_folder: false,
+                            rev: entry.revision,
+                            size: entry.size,
+                        },
+                        true,
+                    );
                 }
             }
-            Message::DropboxPreviewReady(source, Err(err)) => {
-                self.state.browser.remote.preview_in_progress = false;
-                let is_current = self.state.browser.selected_source.as_ref() == Some(&source);
-                self.state.browser.fail_waveform_load(&source, err.clone());
-                self.state.browser.remote.last_error = Some(err.clone());
-                if is_current {
-                    self.stop_browser_audition();
-                    self.state.status_text = format!("Preview error: {err}");
+            Message::RemoteAuditionReady {
+                request_id,
+                source,
+                result,
+            } => {
+                if request_id != self.remote_materialization_request_id {
+                    return Task::none();
                 }
+                self.remote_materialization_abort = None;
+                self.state.browser.remote.preview_in_progress = false;
+                let path_lower = match &source {
+                    MediaSourceRef::DropboxFile { path_lower, .. } => path_lower.clone(),
+                    _ => return Task::none(),
+                };
+                match result {
+                    Ok(materialized) => {
+                        self.state
+                            .browser
+                            .remote
+                            .availability
+                            .insert(path_lower.clone(), crate::state::RemoteAvailability::Cached);
+                        if let Some(entry) = self
+                            .state
+                            .browser
+                            .remote
+                            .catalog
+                            .entries
+                            .iter_mut()
+                            .find(|entry| entry.provider_item_id == path_lower)
+                        {
+                            entry.derived_metadata = Some(materialized.metadata.clone());
+                        }
+                        if let Err(error) =
+                            crate::remote_provider::RemoteCatalogStore::for_dropbox()
+                                .save(&self.state.browser.remote.catalog)
+                        {
+                            self.state.browser.remote.cache_error = Some(error);
+                        }
+                        let usage = self.dropbox_cache.usage().unwrap_or_default();
+                        self.state.browser.remote.cache_usage_bytes = usage.bytes;
+                        self.state.browser.remote.cache_entries = usage.entries;
+                        self.remote_audition_cache_lease = Some(materialized.lease);
+                        if self.state.browser.selected_source.as_ref() != Some(&source) {
+                            return Task::none();
+                        }
+                        if self.state.browser.audition_enabled {
+                            if self
+                                .state
+                                .browser
+                                .install_audition(source.clone(), Arc::clone(&materialized.audio))
+                            {
+                                return self.play_browser_mode(source, materialized.audio);
+                            }
+                        } else {
+                            self.state
+                                .browser
+                                .install_waveform(source, materialized.audio);
+                            self.state.status_text =
+                                format!("Cached Remote media: {}", materialized.name);
+                        }
+                    }
+                    Err(error) => {
+                        let availability = if error.contains("Reconnect Required") {
+                            crate::state::RemoteAvailability::ReconnectRequired
+                        } else {
+                            crate::state::RemoteAvailability::Unavailable {
+                                error: error.clone(),
+                            }
+                        };
+                        self.state
+                            .browser
+                            .remote
+                            .availability
+                            .insert(path_lower, availability);
+                        self.state
+                            .browser
+                            .fail_waveform_load(&source, error.clone());
+                        self.state.browser.remote.last_error = Some(error.clone());
+                        self.stop_browser_audition();
+                        self.state.status_text = format!("Remote Audition unavailable: {error}");
+                    }
+                }
+            }
+            Message::DropboxPreview(entry) => {
+                return self.start_remote_audition(entry, false);
             }
             Message::DropboxImportToArrangement(entry) => {
                 return self.handle_dropbox_import_to_arrangement(entry);

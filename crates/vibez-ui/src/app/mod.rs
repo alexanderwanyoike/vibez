@@ -58,6 +58,11 @@ struct App {
     dropbox_settings: DropboxSettings,
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
+    remote_materialization_abort: Option<iced::task::Handle>,
+    remote_materialization_request_id: u64,
+    remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
+    remote_import_in_flight: bool,
+    pending_remote_audition: Option<DropboxEntry>,
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
@@ -145,7 +150,11 @@ impl App {
         };
 
         let dropbox_settings = DropboxSettings::load();
-        let dropbox_cache = DropboxCache::new();
+        let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
+            budget_bytes: ui_settings.media_cache_budget_bytes,
+            automatic_eviction: ui_settings.media_cache_automatic_eviction,
+        });
+        let cache_usage = dropbox_cache.usage().unwrap_or_default();
         let resolved_key = load_app_key_with_env_override(&dropbox_settings);
         let dropbox_client = match (&resolved_key, &dropbox_settings.tokens) {
             (Some(key), Some(tokens)) => {
@@ -178,6 +187,10 @@ impl App {
             has_app_key: resolved_key.is_some(),
             catalog: remote_catalog,
             catalog_state: remote_catalog_state,
+            cache_usage_bytes: cache_usage.bytes,
+            cache_entries: cache_usage.entries,
+            cache_budget_bytes: ui_settings.media_cache_budget_bytes,
+            cache_automatic_eviction: ui_settings.media_cache_automatic_eviction,
             ..Default::default()
         };
 
@@ -257,6 +270,11 @@ impl App {
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
+            remote_materialization_abort: None,
+            remote_materialization_request_id: 0,
+            remote_audition_cache_lease: None,
+            remote_import_in_flight: false,
+            pending_remote_audition: None,
             midi_input,
             midi_input_ports: Vec::new(),
         };
@@ -651,7 +669,7 @@ async fn connect_dropbox_async(
 }
 
 async fn fetch_dropbox_sample_async(
-    client: Arc<DropboxClient>,
+    client: Option<Arc<DropboxClient>>,
     cache: DropboxCache,
     entry: DropboxEntry,
 ) -> Result<
@@ -662,10 +680,24 @@ async fn fetch_dropbox_sample_async(
     ),
     String,
 > {
-    let local = client
-        .download_to_cache(&entry, &cache)
-        .await
-        .map_err(|e| e.to_string())?;
+    let _lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
+    let local = match cache
+        .lookup(&entry.path_lower, entry.rev.as_deref())
+        .map_err(|error| format!("Media Cache lookup failed: {error}"))?
+    {
+        Some(path) => path,
+        None => {
+            let client = client.ok_or_else(|| {
+                "Reconnect Required · uncached Remote media cannot be imported".to_string()
+            })?;
+            let bytes = client.download(&entry.path_lower).await.map_err(|error| {
+                format!("Remote materialization failed for {}: {error}", entry.name)
+            })?;
+            cache
+                .write(&entry.path_lower, entry.rev.as_deref(), &bytes)
+                .map_err(|error| format!("Media Cache write failed: {error}"))?
+        }
+    };
     let decoded = tokio::task::spawn_blocking(move || {
         vibez_audio_io::file_io::decode_audio_file(&local).map_err(|e| e.to_string())
     })
@@ -677,6 +709,89 @@ async fn fetch_dropbox_sample_async(
         rev: entry.rev.clone(),
     };
     Ok((Arc::new(decoded), entry.name, source))
+}
+
+async fn materialize_remote_sample_async(
+    client: Option<Arc<DropboxClient>>,
+    cache: DropboxCache,
+    entry: DropboxEntry,
+    lease: vibez_dropbox::CacheLease,
+    debounce: bool,
+) -> Result<crate::message::RemoteMaterializedSample, String> {
+    if debounce
+        && cache
+            .lookup(&entry.path_lower, entry.rev.as_deref())
+            .map_err(|error| format!("Media Cache lookup failed: {error}"))?
+            .is_none()
+    {
+        tokio::time::sleep(dropbox_io::REMOTE_SELECTION_DEBOUNCE).await;
+    }
+
+    let local = match cache
+        .lookup(&entry.path_lower, entry.rev.as_deref())
+        .map_err(|error| format!("Media Cache lookup failed: {error}"))?
+    {
+        Some(path) => path,
+        None => {
+            let client = client.ok_or_else(|| {
+                "Reconnect Required · uncached Remote media cannot be materialized".to_string()
+            })?;
+            let bytes = client.download(&entry.path_lower).await.map_err(|error| {
+                format!("Remote materialization failed for {}: {error}", entry.name)
+            })?;
+            cache
+                .write(&entry.path_lower, entry.rev.as_deref(), &bytes)
+                .map_err(|error| format!("Media Cache write failed: {error}"))?
+        }
+    };
+
+    let revision = entry.rev.clone();
+    let (decoded, metadata) = tokio::task::spawn_blocking(move || {
+        let decoded = vibez_audio_io::file_io::decode_audio_file(&local)
+            .map_err(|error| error.to_string())?;
+        let estimate = vibez_core::onset::detect_bpm(&decoded, decoded.sample_rate);
+        let bucket_count = 64usize;
+        let frames_per_bucket = decoded.num_frames().max(1).div_ceil(bucket_count);
+        let waveform_peaks = (0..bucket_count)
+            .map(|bucket| {
+                let start = bucket * frames_per_bucket;
+                let end = (start + frames_per_bucket).min(decoded.num_frames());
+                (0..decoded.num_channels())
+                    .map(|channel| {
+                        let (min, max) = decoded.peak_in_range(channel, start, end);
+                        min.abs().max(max.abs())
+                    })
+                    .fold(0.0_f32, f32::max)
+            })
+            .collect();
+        let metadata = vibez_dropbox::DerivedMetadata {
+            provider_revision: revision,
+            duration_seconds: decoded.duration_seconds(),
+            channels: decoded.num_channels().try_into().unwrap_or(u16::MAX),
+            sample_rate: decoded.sample_rate,
+            bpm: estimate.map(|value| value.bpm),
+            bpm_confidence: estimate.map(|value| value.confidence),
+            waveform_peaks,
+        };
+        Ok::<_, String>((Arc::new(decoded), metadata))
+    })
+    .await
+    .map_err(|error| format!("decode task failed: {error}"))??;
+    cache
+        .store_derived_metadata(&entry.path_lower, entry.rev.as_deref(), metadata.clone())
+        .map_err(|error| format!("Derived Metadata save failed: {error}"))?;
+    let source = MediaSourceRef::DropboxFile {
+        path_lower: entry.path_lower,
+        display_path: entry.path_display,
+        rev: entry.rev,
+    };
+    Ok(crate::message::RemoteMaterializedSample {
+        audio: decoded,
+        name: entry.name,
+        source,
+        lease,
+        metadata,
+    })
 }
 
 async fn export_async(
@@ -1269,5 +1384,91 @@ mod project_format_v1_tests {
             Some(MediaSourceRef::ProjectMedia { .. })
         ));
         assert_eq!(loaded.project.tracks[0].id, track.id);
+    }
+
+    #[tokio::test]
+    async fn cached_remote_media_materializes_without_a_client_and_persists_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.wav");
+        let audio = DecodedAudio {
+            channels: vec![vec![0.0, 0.5, -0.5, 0.25]],
+            sample_rate: 44_100,
+        };
+        vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
+        let cache = DropboxCache::with_root(directory.path().join("media-cache"));
+        cache
+            .write(
+                "/megalodon/source.wav",
+                Some("rev-1"),
+                &std::fs::read(source_path).unwrap(),
+            )
+            .unwrap();
+        let entry = DropboxEntry {
+            path_lower: "/megalodon/source.wav".into(),
+            path_display: "/Megalodon/Source.wav".into(),
+            name: "Source.wav".into(),
+            is_folder: false,
+            rev: Some("rev-1".into()),
+            size: None,
+        };
+        let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
+        let materialized =
+            materialize_remote_sample_async(None, cache.clone(), entry, lease, false)
+                .await
+                .unwrap();
+        assert_eq!(materialized.audio.num_frames(), audio.num_frames());
+        assert_eq!(
+            materialized.metadata.provider_revision.as_deref(),
+            Some("rev-1")
+        );
+        assert_eq!(materialized.metadata.channels, 1);
+        assert_eq!(materialized.metadata.sample_rate, 44_100);
+        assert!(cache
+            .derived_metadata("/megalodon/source.wav", Some("rev-1"))
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_debounced_uncached_request_before_200ms_materializes_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = DropboxCache::with_root(directory.path().join("media-cache"));
+        let entry = DropboxEntry {
+            path_lower: "/megalodon/transient.wav".into(),
+            path_display: "/Megalodon/Transient.wav".into(),
+            name: "Transient.wav".into(),
+            is_folder: false,
+            rev: Some("rev-1".into()),
+            size: None,
+        };
+        let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
+        let future = materialize_remote_sample_async(None, cache.clone(), entry, lease, true);
+        tokio::pin!(future);
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
+            result = &mut future => panic!("debounced request completed early: {result:?}"),
+        }
+        drop(future);
+        assert!(!cache.is_cached("/megalodon/transient.wav", Some("rev-1")));
+        assert_eq!(cache.usage().unwrap(), vibez_dropbox::CacheUsage::default());
+    }
+
+    #[tokio::test]
+    async fn uncached_degraded_materialization_requires_explicit_reconnect() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = DropboxCache::with_root(directory.path().join("media-cache"));
+        let entry = DropboxEntry {
+            path_lower: "/megalodon/uncached.wav".into(),
+            path_display: "/Megalodon/Uncached.wav".into(),
+            name: "Uncached.wav".into(),
+            is_folder: false,
+            rev: Some("rev-1".into()),
+            size: None,
+        };
+        let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
+        let error = materialize_remote_sample_async(None, cache, entry, lease, false)
+            .await
+            .unwrap_err();
+        assert!(error.contains("Reconnect Required"));
     }
 }

@@ -495,10 +495,14 @@ impl App {
                 display_path,
                 rev,
             } => {
-                let Some(client) = self.dropbox_client.clone() else {
-                    self.state.status_text = "Not connected to Dropbox for this drop".to_string();
-                    return Task::none();
-                };
+                if let Some(handle) = self.remote_materialization_abort.take() {
+                    handle.abort();
+                    self.remote_materialization_request_id =
+                        self.remote_materialization_request_id.saturating_add(1);
+                }
+                self.remote_audition_cache_lease = None;
+                let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+                let client = self.dropbox_client.clone();
                 let cache = self.dropbox_cache.clone();
                 let name = display_path
                     .rsplit_once('/')
@@ -512,6 +516,7 @@ impl App {
                     rev,
                     size: None,
                 };
+                self.remote_import_in_flight = true;
                 self.state.status_text = format!("Dropping {name}...");
                 Task::perform(
                     fetch_dropbox_sample_async(client, cache, entry),

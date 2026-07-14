@@ -11,13 +11,13 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
-use vibez_dropbox::{DropboxClient, DropboxError, DropboxListItem};
+use vibez_dropbox::{DerivedMetadata, DropboxClient, DropboxError, DropboxListItem};
 
 pub const DROPBOX_PROVIDER_ID: &str = "dropbox";
 pub const DROPBOX_CONNECTION_ID: &str = "dropbox-primary";
 pub const DROPBOX_CONNECTION_NAME: &str = "Alex's Dropbox";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteCatalogEntry {
     pub provider_item_id: String,
     pub path: String,
@@ -26,6 +26,8 @@ pub struct RemoteCatalogEntry {
     pub is_folder: bool,
     pub revision: Option<String>,
     pub size: Option<u64>,
+    #[serde(default)]
+    pub derived_metadata: Option<DerivedMetadata>,
 }
 
 impl RemoteCatalogEntry {
@@ -41,7 +43,7 @@ impl RemoteCatalogEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteCatalogSnapshot {
     pub provider_id: String,
     pub connection_id: String,
@@ -62,13 +64,13 @@ impl Default for RemoteCatalogSnapshot {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RemoteChange {
-    Upsert(RemoteCatalogEntry),
+    Upsert(Box<RemoteCatalogEntry>),
     Delete { provider_item_id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RemotePage {
     pub changes: Vec<RemoteChange>,
     pub checkpoint: String,
@@ -131,7 +133,7 @@ impl RemoteProvider for DropboxRemoteProvider {
                 .map(|item| match item {
                     DropboxListItem::Entry(entry) => {
                         let parent_path = parent_remote_path(&entry.path_lower);
-                        RemoteChange::Upsert(RemoteCatalogEntry {
+                        RemoteChange::Upsert(Box::new(RemoteCatalogEntry {
                             provider_item_id: entry.path_lower,
                             path: entry.path_display,
                             parent_path,
@@ -139,7 +141,8 @@ impl RemoteProvider for DropboxRemoteProvider {
                             is_folder: entry.is_folder,
                             revision: entry.rev,
                             size: entry.size,
-                        })
+                            derived_metadata: None,
+                        }))
                     }
                     DropboxListItem::Deleted { path_lower } => RemoteChange::Delete {
                         provider_item_id: path_lower,
@@ -232,7 +235,13 @@ pub fn reconcile_remote_catalog(
     for change in &result.changes {
         match change {
             RemoteChange::Upsert(entry) => {
-                entries.insert(entry.provider_item_id.clone(), entry.clone());
+                let entry = entry.as_ref();
+                let mut refreshed = entry.clone();
+                refreshed.derived_metadata = entries
+                    .get(&entry.provider_item_id)
+                    .filter(|current| current.revision == entry.revision)
+                    .and_then(|current| current.derived_metadata.clone());
+                entries.insert(entry.provider_item_id.clone(), refreshed);
             }
             RemoteChange::Delete { provider_item_id } => {
                 entries.remove(provider_item_id);
@@ -341,6 +350,7 @@ mod tests {
             is_folder: false,
             revision: Some("1".into()),
             size: Some(42),
+            derived_metadata: None,
         }
     }
 
@@ -349,12 +359,14 @@ mod tests {
         let provider = FakeProvider {
             pages: Mutex::new(VecDeque::from([
                 Ok(RemotePage {
-                    changes: vec![RemoteChange::Upsert(entry("/Megalodon/Kick.wav"))],
+                    changes: vec![RemoteChange::Upsert(Box::new(entry("/Megalodon/Kick.wav")))],
                     checkpoint: "page-1".into(),
                     has_more: true,
                 }),
                 Ok(RemotePage {
-                    changes: vec![RemoteChange::Upsert(entry("/Megalodon/Snare.wav"))],
+                    changes: vec![RemoteChange::Upsert(Box::new(entry(
+                        "/Megalodon/Snare.wav",
+                    )))],
                     checkpoint: "complete".into(),
                     has_more: false,
                 }),
@@ -372,7 +384,7 @@ mod tests {
         let provider = FakeProvider {
             pages: Mutex::new(VecDeque::from([
                 Ok(RemotePage {
-                    changes: vec![RemoteChange::Upsert(entry("/new.wav"))],
+                    changes: vec![RemoteChange::Upsert(Box::new(entry("/new.wav")))],
                     checkpoint: "unsafe".into(),
                     has_more: true,
                 }),
@@ -437,7 +449,7 @@ mod tests {
                 RemoteChange::Delete {
                     provider_item_id: "/old.wav".into(),
                 },
-                RemoteChange::Upsert(entry("/new.wav")),
+                RemoteChange::Upsert(Box::new(entry("/new.wav"))),
             ],
             checkpoint: Some("next".into()),
             error: None,
@@ -459,7 +471,10 @@ mod tests {
             &mut snapshot,
             &RemoteRefreshResult {
                 pages: 1,
-                changes: vec![RemoteChange::Upsert(first), RemoteChange::Upsert(second)],
+                changes: vec![
+                    RemoteChange::Upsert(Box::new(first)),
+                    RemoteChange::Upsert(Box::new(second)),
+                ],
                 checkpoint: Some("complete".into()),
                 error: None,
             },
@@ -469,6 +484,46 @@ mod tests {
             snapshot.entries[0].provider_item_id,
             snapshot.entries[1].provider_item_id
         );
+    }
+
+    #[test]
+    fn refresh_preserves_derived_metadata_only_for_the_same_provider_revision() {
+        let mut existing = entry("/Megalodon/Kick.wav");
+        existing.derived_metadata = Some(DerivedMetadata {
+            provider_revision: Some("1".into()),
+            duration_seconds: 2.0,
+            channels: 2,
+            sample_rate: 48_000,
+            ..DerivedMetadata::default()
+        });
+        let mut snapshot = RemoteCatalogSnapshot {
+            entries: vec![existing],
+            ..RemoteCatalogSnapshot::default()
+        };
+        let same_revision = entry("/Megalodon/Kick.wav");
+        reconcile_remote_catalog(
+            &mut snapshot,
+            &RemoteRefreshResult {
+                pages: 1,
+                changes: vec![RemoteChange::Upsert(Box::new(same_revision))],
+                checkpoint: Some("same".into()),
+                error: None,
+            },
+        );
+        assert!(snapshot.entries[0].derived_metadata.is_some());
+
+        let mut changed_revision = entry("/Megalodon/Kick.wav");
+        changed_revision.revision = Some("2".into());
+        reconcile_remote_catalog(
+            &mut snapshot,
+            &RemoteRefreshResult {
+                pages: 1,
+                changes: vec![RemoteChange::Upsert(Box::new(changed_revision))],
+                checkpoint: Some("changed".into()),
+                error: None,
+            },
+        );
+        assert!(snapshot.entries[0].derived_metadata.is_none());
     }
 
     #[test]

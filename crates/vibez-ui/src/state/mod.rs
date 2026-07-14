@@ -886,6 +886,27 @@ pub enum RemoteCatalogState {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteAvailability {
+    RemoteOnly,
+    Cached,
+    Fetching,
+    ReconnectRequired,
+    Unavailable { error: String },
+}
+
+impl RemoteAvailability {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::RemoteOnly => "REMOTE",
+            Self::Cached => "CACHED",
+            Self::Fetching => "FETCH",
+            Self::ReconnectRequired => "RETRY",
+            Self::Unavailable { .. } => "ERROR",
+        }
+    }
+}
+
 impl RemoteCatalogState {
     pub fn label(&self) -> &'static str {
         match self {
@@ -932,7 +953,7 @@ mod remote_catalog_state_tests {
 
 /// Provider-neutral Browser state for Remote Connections. Dropbox V1 auth
 /// fields remain here because Dropbox is the sole shipped adapter.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct RemoteUiState {
     pub connected: bool,
     pub account_email: Option<String>,
@@ -953,6 +974,37 @@ pub struct RemoteUiState {
     pub selected_path: Option<String>,
     /// A preview fetch / playback is in flight.
     pub preview_in_progress: bool,
+    pub availability: HashMap<String, RemoteAvailability>,
+    pub cache_usage_bytes: u64,
+    pub cache_entries: usize,
+    pub cache_budget_bytes: u64,
+    pub cache_automatic_eviction: bool,
+    pub cache_error: Option<String>,
+}
+
+impl Default for RemoteUiState {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            account_email: None,
+            app_key_input: String::new(),
+            has_app_key: false,
+            auth_in_progress: false,
+            last_error: None,
+            catalog: RemoteCatalogSnapshot::default(),
+            catalog_state: RemoteCatalogState::default(),
+            current_path: String::new(),
+            expanded: HashSet::new(),
+            selected_path: None,
+            preview_in_progress: false,
+            availability: HashMap::new(),
+            cache_usage_bytes: 0,
+            cache_entries: 0,
+            cache_budget_bytes: vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES,
+            cache_automatic_eviction: true,
+            cache_error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

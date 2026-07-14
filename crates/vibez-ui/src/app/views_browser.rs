@@ -1383,11 +1383,64 @@ impl App {
         for entry in results {
             let selected = remote.selected_path.as_deref() == Some(&entry.provider_item_id);
             let cell_color = if selected { th::text() } else { th::text_dim() };
-            let context = if entry.parent_path.is_empty() {
+            let mut context = if entry.parent_path.is_empty() {
                 remote.catalog.connection_name.clone()
             } else {
                 format!("{} · {}", remote.catalog.connection_name, entry.parent_path)
             };
+            let metadata = entry.derived_metadata.as_ref().filter(|metadata| {
+                metadata.provider_revision.as_deref() == entry.revision.as_deref()
+            });
+            if let Some(metadata) = metadata {
+                let channels = match metadata.channels {
+                    1 => "MONO".into(),
+                    2 => "STEREO".into(),
+                    channels => format!("{channels} CH"),
+                };
+                context = format!("{channels} · {} HZ · {context}", metadata.sample_rate);
+            }
+            let availability = if entry.is_folder {
+                crate::state::RemoteAvailability::RemoteOnly
+            } else {
+                match remote.availability.get(&entry.provider_item_id) {
+                    Some(crate::state::RemoteAvailability::Fetching) => {
+                        crate::state::RemoteAvailability::Fetching
+                    }
+                    Some(crate::state::RemoteAvailability::Unavailable { error }) => {
+                        crate::state::RemoteAvailability::Unavailable {
+                            error: error.clone(),
+                        }
+                    }
+                    _ if self
+                        .dropbox_cache
+                        .is_cached(&entry.provider_item_id, entry.revision.as_deref()) =>
+                    {
+                        crate::state::RemoteAvailability::Cached
+                    }
+                    _ if remote.connected => crate::state::RemoteAvailability::RemoteOnly,
+                    _ => crate::state::RemoteAvailability::ReconnectRequired,
+                }
+            };
+            let availability_color = match &availability {
+                crate::state::RemoteAvailability::Fetching => th::accent(),
+                crate::state::RemoteAvailability::ReconnectRequired
+                | crate::state::RemoteAvailability::Unavailable { .. } => th::danger(),
+                crate::state::RemoteAvailability::RemoteOnly
+                | crate::state::RemoteAvailability::Cached => cell_color,
+            };
+            if matches!(
+                availability,
+                crate::state::RemoteAvailability::ReconnectRequired
+            ) {
+                context = format!("RECONNECT REQUIRED · {context}");
+            }
+            let bpm = metadata
+                .and_then(|metadata| metadata.bpm)
+                .map(|bpm| format!("{bpm:.0}"))
+                .unwrap_or_else(|| "—".into());
+            let length = metadata
+                .map(|metadata| format_browser_duration(metadata.duration_seconds))
+                .unwrap_or_else(|| "—".into());
             let name_cell = column![
                 text(if entry.is_folder {
                     format!("› {}", entry.name)
@@ -1411,17 +1464,17 @@ impl App {
             let cells: Element<'_, Message> = if wide_columns {
                 row![
                     name_cell,
-                    text("—")
+                    text(bpm)
                         .size(10)
                         .color(cell_color)
                         .width(Length::Fixed(36.0)),
-                    text("—")
+                    text(length)
                         .size(10)
                         .color(cell_color)
                         .width(Length::Fixed(50.0)),
-                    text("REMOTE")
+                    text(availability.label())
                         .size(9)
-                        .color(cell_color)
+                        .color(availability_color)
                         .width(Length::Fixed(48.0))
                 ]
                 .spacing(4)
@@ -1430,9 +1483,9 @@ impl App {
             } else {
                 row![
                     name_cell,
-                    text("REMOTE")
+                    text(availability.label())
                         .size(9)
-                        .color(cell_color)
+                        .color(availability_color)
                         .width(Length::Fixed(42.0))
                 ]
                 .align_y(iced::Alignment::Center)
@@ -1443,7 +1496,7 @@ impl App {
                     entry.provider_item_id.clone(),
                 ))
             } else {
-                Message::Browser(BrowserMsg::SelectRemoteEntry((*entry).clone()))
+                Message::ClickRemoteBrowserEntry((*entry).clone())
             };
             let body = container(cells).padding([6, 8]).width(Length::Fill);
             let interactive: Element<'_, Message> = if entry.is_folder {
@@ -1771,7 +1824,10 @@ fn browser_place_button_style(active: bool, status: button::Status) -> button::S
     }
 }
 
-fn browser_utility_action_style(_theme: &Theme, status: button::Status) -> button::Style {
+pub(super) fn browser_utility_action_style(
+    _theme: &Theme,
+    status: button::Status,
+) -> button::Style {
     button::Style {
         background: matches!(status, button::Status::Hovered | button::Status::Pressed)
             .then(|| th::bg_hover().into()),
