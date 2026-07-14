@@ -81,7 +81,7 @@ fn main() {
         unsafe {
             let vtbl = *(ctrl as *const *const *const std::ffi::c_void);
             let create_view: CreateViewFn = std::mem::transmute(*vtbl.add(17));
-            let view = create_view(ctrl, b"editor\0".as_ptr());
+            let view = create_view(ctrl, c"editor".as_ptr().cast());
             println!("createView(\"editor\") -> {view:p}");
             if !view.is_null() {
                 type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
