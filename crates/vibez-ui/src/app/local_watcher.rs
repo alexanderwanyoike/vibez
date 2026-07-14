@@ -357,11 +357,16 @@ mod tests {
     }
 
     fn wait_for_path(receiver: &mpsc::Receiver<notify::Result<notify::Event>>, expected: &Path) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // Generous deadline: inotify delivers in milliseconds, but the
+        // FSEvents and ReadDirectoryChanges backends on loaded CI
+        // runners can take many seconds. A pass never waits this long.
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let event = receiver.recv_timeout(remaining).unwrap().unwrap();
-            if event.paths.iter().any(|path| path == expected) {
+            let Ok(event) = receiver.recv_timeout(remaining) else {
+                break;
+            };
+            if event.unwrap().paths.iter().any(|path| path == expected) {
                 return;
             }
         }
