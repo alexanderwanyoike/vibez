@@ -121,10 +121,15 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
-                if let Some(pos) = cursor.position_in(bounds) {
-                    state.dragging = true;
-                    state.last_x = pos.x;
-                    return (canvas::event::Status::Captured, None);
+                // Gate the grab on the widget, but track the drag in
+                // absolute coordinates so it keeps working when the
+                // cursor leaves this thin strip mid-drag.
+                if cursor.is_over(bounds) {
+                    if let Some(pos) = cursor.position() {
+                        state.dragging = true;
+                        state.last_x = pos.x;
+                        return (canvas::event::Status::Captured, None);
+                    }
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
@@ -134,7 +139,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
-                if let Some(pos) = cursor.position_in(bounds) {
+                if let Some(pos) = cursor.position() {
                     let delta = pos.x - state.last_x;
                     state.last_x = pos.x;
 
@@ -152,6 +157,69 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         }
 
         (canvas::event::Status::Ignored, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::arrangement::ArrangementMsg;
+    use iced::widget::canvas::Program;
+    use iced::{Point, Size};
+
+    fn press(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
+        (
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            mouse::Cursor::Available(cursor_at),
+        )
+    }
+
+    fn drag(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
+        (
+            canvas::Event::Mouse(mouse::Event::CursorMoved {
+                position: cursor_at,
+            }),
+            mouse::Cursor::Available(cursor_at),
+        )
+    }
+
+    fn gain_of(message: Option<Message>) -> Option<f32> {
+        match message {
+            Some(Message::Arrangement(ArrangementMsg::SetTrackGain(_, gain))) => Some(gain),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn vertical_fader_keeps_tracking_when_cursor_leaves_bounds() {
+        let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let mut state = FaderState::default();
+
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+
+        // Drag upward while the cursor has drifted left of the strip.
+        let (event, cursor) = drag(Point::new(60.0, 130.0));
+        let (_, message) = widget.update(&mut state, event, bounds, cursor);
+        let gain = gain_of(message).expect("drag outside bounds must keep tracking");
+        assert!(gain > 1.0, "upward drag should raise gain, got {gain}");
+    }
+
+    #[test]
+    fn horizontal_fader_keeps_tracking_when_cursor_leaves_bounds() {
+        let widget = HorizontalFaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(108.0, 16.0));
+        let mut state = HorizontalFaderState::default();
+
+        let (event, cursor) = press(Point::new(150.0, 108.0));
+        widget.update(&mut state, event, bounds, cursor);
+
+        // Drag right while the cursor has drifted below the strip.
+        let (event, cursor) = drag(Point::new(170.0, 140.0));
+        let (_, message) = widget.update(&mut state, event, bounds, cursor);
+        let gain = gain_of(message).expect("drag outside bounds must keep tracking");
+        assert!(gain > 1.0, "rightward drag should raise gain, got {gain}");
     }
 }
 
@@ -270,10 +338,15 @@ impl canvas::Program<Message> for FaderWidget {
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
-                if let Some(pos) = cursor.position_in(bounds) {
-                    state.dragging = true;
-                    state.last_y = pos.y;
-                    return (canvas::event::Status::Captured, None);
+                // Gate the grab on the widget, but track the drag in
+                // absolute coordinates so it keeps working when the
+                // cursor leaves this thin strip mid-drag.
+                if cursor.is_over(bounds) {
+                    if let Some(pos) = cursor.position() {
+                        state.dragging = true;
+                        state.last_y = pos.y;
+                        return (canvas::event::Status::Captured, None);
+                    }
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
@@ -283,7 +356,7 @@ impl canvas::Program<Message> for FaderWidget {
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
-                if let Some(pos) = cursor.position_in(bounds) {
+                if let Some(pos) = cursor.position() {
                     let delta = state.last_y - pos.y;
                     state.last_y = pos.y;
 
