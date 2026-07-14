@@ -73,10 +73,14 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
 
             // Draw loop boundary markers if looping
             if looping {
+                // The clip's source offset can sit past the loop points
+                // (e.g. a trimmed clip start); saturate so markers clamp
+                // to the left edge instead of underflowing.
+                let source_offset = self.source_offset as usize;
                 let loop_start_px =
-                    (loop_start - self.source_offset as usize) as f32 / num_frames as f32 * w;
+                    loop_start.saturating_sub(source_offset) as f32 / num_frames as f32 * w;
                 // The loop region repeats — show a subtle vertical line at each loop boundary
-                let mut boundary = loop_end - self.source_offset as usize;
+                let mut boundary = loop_end.saturating_sub(source_offset);
                 while boundary < num_frames {
                     let bx = boundary as f32 / num_frames as f32 * w;
                     let line =
