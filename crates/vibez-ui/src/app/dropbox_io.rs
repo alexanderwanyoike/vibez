@@ -168,11 +168,12 @@ impl App {
             return Task::none();
         }
 
-        if self.state.browser.audition_enabled {
-            self.state.browser.begin_audition_load(&source);
+        let generation = if self.state.browser.audition_enabled {
+            self.state.browser.begin_audition_load(&source)
         } else {
             self.state.browser.begin_waveform_load(&source);
-        }
+            self.state.browser.audition_generation
+        };
         self.state.browser.remote.preview_in_progress = !cached;
         self.state.browser.remote.availability.insert(
             entry.path_lower.clone(),
@@ -200,6 +201,7 @@ impl App {
             ),
             move |result| Message::RemoteAuditionReady {
                 request_id,
+                generation,
                 source: source.clone(),
                 result,
             },

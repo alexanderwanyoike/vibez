@@ -54,29 +54,6 @@ struct BrowserNavigableResult {
     visible_rows: usize,
 }
 
-#[cfg(test)]
-mod browser_keyboard_navigation_tests {
-    use super::{adjacent_result_index, browser_results_scroll_offset};
-
-    #[test]
-    fn adjacent_result_navigation_selects_edges_and_clamps() {
-        assert_eq!(adjacent_result_index(0, None, 1), None);
-        assert_eq!(adjacent_result_index(3, None, 1), Some(0));
-        assert_eq!(adjacent_result_index(3, None, -1), Some(2));
-        assert_eq!(adjacent_result_index(3, Some(1), 1), Some(2));
-        assert_eq!(adjacent_result_index(3, Some(2), 1), Some(2));
-        assert_eq!(adjacent_result_index(3, Some(0), -1), Some(0));
-    }
-
-    #[test]
-    fn keyboard_selection_maps_to_the_results_scroll_range() {
-        assert_eq!(browser_results_scroll_offset(0, 1), 0.0);
-        assert_eq!(browser_results_scroll_offset(0, 100), 0.0);
-        assert!((browser_results_scroll_offset(50, 100) - 0.505).abs() < 0.001);
-        assert_eq!(browser_results_scroll_offset(99, 100), 1.0);
-    }
-}
-
 impl App {
     pub(super) fn select_adjacent_browser_result(&mut self, direction: i8) -> Task<Message> {
         if !self.state.browser.open || direction == 0 {
@@ -258,12 +235,15 @@ impl App {
 
     pub(super) fn stop_browser_audition(&mut self) {
         self.send_command(EngineCommand::StopAudition);
-        self.state.browser.stop_audition_state();
+        self.state.browser.cancel_audition_requests();
     }
 
     pub(super) fn start_browser_audition(&mut self, audio: Arc<DecodedAudio>) {
         let queued =
             self.state.transport.playing && self.state.browser.audition_sync != AuditionSync::Off;
+        // Retain a UI-side clone (never cleared on stop) so the engine
+        // voice can never drop the final Arc inside the RT callback.
+        self.state.browser.audition_audio = Some(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,
             sync: self.state.browser.audition_sync,
@@ -305,12 +285,13 @@ impl App {
         source_bpm: f64,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
-        self.state.browser.begin_audition_load(&source);
+        let generation = self.state.browser.begin_audition_load(&source);
         self.state.status_text = format!("Preparing WARP at {source_bpm:.1} BPM...");
         Task::perform(
             warp_browser_audition_async(raw, source_bpm, project_bpm),
             move |result| Message::BrowserAuditionWarpReady {
                 source: source.clone(),
+                generation,
                 source_bpm,
                 project_bpm,
                 result,
@@ -475,11 +456,13 @@ impl App {
             AuditionMode::Warp => format!("Preparing WARP import: {name}"),
         };
         let retained_target = target.clone();
+        let generation = self.browser_import_generation;
         Task::perform(
             prepare_browser_import_audio_async(target, treatment, raw, source, project_bpm),
             move |result| match result {
                 Ok((audio, original_audio, source)) => Message::BrowserImportPrepared {
                     target: retained_target.clone(),
+                    generation,
                     payload: PreparedBrowserImport {
                         treatment,
                         audio,
@@ -1288,5 +1271,28 @@ impl App {
         };
         self.state.status_text = format!("Loading {}...", source.display_name());
         self.dispatch_drop_for_target(source, target)
+    }
+}
+
+#[cfg(test)]
+mod browser_keyboard_navigation_tests {
+    use super::{adjacent_result_index, browser_results_scroll_offset};
+
+    #[test]
+    fn adjacent_result_navigation_selects_edges_and_clamps() {
+        assert_eq!(adjacent_result_index(0, None, 1), None);
+        assert_eq!(adjacent_result_index(3, None, 1), Some(0));
+        assert_eq!(adjacent_result_index(3, None, -1), Some(2));
+        assert_eq!(adjacent_result_index(3, Some(1), 1), Some(2));
+        assert_eq!(adjacent_result_index(3, Some(2), 1), Some(2));
+        assert_eq!(adjacent_result_index(3, Some(0), -1), Some(0));
+    }
+
+    #[test]
+    fn keyboard_selection_maps_to_the_results_scroll_range() {
+        assert_eq!(browser_results_scroll_offset(0, 1), 0.0);
+        assert_eq!(browser_results_scroll_offset(0, 100), 0.0);
+        assert!((browser_results_scroll_offset(50, 100) - 0.505).abs() < 0.001);
+        assert_eq!(browser_results_scroll_offset(99, 100), 1.0);
     }
 }

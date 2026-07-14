@@ -274,6 +274,9 @@ pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
 pub const BROWSER_PLACES_MIN_WIDTH: f32 = 124.0;
 pub const BROWSER_PLACES_MAX_WIDTH: f32 = 176.0;
 pub const BROWSER_RESULTS_PAGE_SIZE: usize = 200;
+/// Sane DAW range for a manually confirmed audition source BPM.
+pub const AUDITION_BPM_MIN: f64 = 20.0;
+pub const AUDITION_BPM_MAX: f64 = 999.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserSearchScope {
@@ -343,6 +346,16 @@ pub struct BrowserState {
     pub audition_loading: bool,
     pub audition_playing: bool,
     pub audition_queued: bool,
+    /// Monotonic token minted by [`Self::begin_audition_load`] and
+    /// invalidated by [`Self::cancel_audition_requests`]; async decode
+    /// and WARP completions carry it so stale results never start
+    /// playback after the user stopped or superseded the request.
+    pub audition_generation: u64,
+    /// UI-retained clone of the audio last handed to the engine's
+    /// Audition Bus. The engine voice must never hold the final
+    /// reference: dropping it inside the RT callback would free on
+    /// the audio thread and violate the allocation-free invariant.
+    pub audition_audio: Option<Arc<DecodedAudio>>,
     pub audition_mode: AuditionMode,
     pub audition_sync: AuditionSync,
     pub audition_loop: bool,
@@ -390,6 +403,8 @@ impl Default for BrowserState {
             audition_loading: false,
             audition_playing: false,
             audition_queued: false,
+            audition_generation: 0,
+            audition_audio: None,
             audition_mode: AuditionMode::default(),
             audition_sync: AuditionSync::Off,
             audition_loop: false,
@@ -627,14 +642,37 @@ impl BrowserState {
         }
     }
 
-    pub fn begin_audition_load(&mut self, source: &MediaSourceRef) {
+    /// Mint a fresh audition request token; any older in-flight decode
+    /// or WARP preparation becomes stale.
+    pub fn begin_audition_load(&mut self, source: &MediaSourceRef) -> u64 {
         self.begin_waveform_load(source);
         if self.selected_source.as_ref() == Some(source) {
             self.audition_loading = true;
         }
+        self.audition_generation = self.audition_generation.wrapping_add(1);
+        self.audition_generation
     }
 
-    pub fn install_audition(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {
+    pub fn audition_request_is_current(&self, generation: u64) -> bool {
+        self.audition_generation == generation
+    }
+
+    /// Explicit user cancellation: clears audition state and
+    /// invalidates every in-flight audition request token.
+    pub fn cancel_audition_requests(&mut self) {
+        self.audition_generation = self.audition_generation.wrapping_add(1);
+        self.stop_audition_state();
+    }
+
+    pub fn install_audition(
+        &mut self,
+        generation: u64,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
+    ) -> bool {
+        if !self.audition_request_is_current(generation) {
+            return false;
+        }
         if !self.install_waveform(source, audio) {
             return false;
         }
@@ -688,13 +726,17 @@ impl BrowserState {
         self.audition_bpm_detecting = false;
         self.audition_bpm_suggestion = estimate.map(|value| value.0);
         self.audition_bpm_confidence = estimate.map(|value| value.1);
-        self.audition_bpm_confirmed = estimate
-            .filter(|(bpm, confidence)| {
-                bpm.is_finite()
-                    && *bpm > 0.0
-                    && *confidence >= auto_confirm_threshold.clamp(0.0, 1.0)
-            })
-            .map(|(bpm, _)| bpm);
+        // A BPM the user confirmed while detection was in flight wins
+        // over the late estimate; only auto-confirm into an empty slot.
+        if self.audition_bpm_confirmed.is_none() {
+            self.audition_bpm_confirmed = estimate
+                .filter(|(bpm, confidence)| {
+                    bpm.is_finite()
+                        && *bpm > 0.0
+                        && *confidence >= auto_confirm_threshold.clamp(0.0, 1.0)
+                })
+                .map(|(bpm, _)| bpm);
+        }
         if self.audition_bpm_edit.is_empty() {
             self.audition_bpm_edit = estimate
                 .map(|value| format!("{:.1}", value.0))
@@ -708,9 +750,11 @@ impl BrowserState {
             .audition_bpm_edit
             .trim()
             .parse::<f64>()
-            .map_err(|_| "Enter a positive source BPM")?;
-        if !bpm.is_finite() || bpm <= 0.0 {
-            return Err("Enter a positive source BPM");
+            .map_err(|_| "Enter a source BPM between 20 and 999")?;
+        // An unbounded BPM would request an effectively unbounded WARP
+        // allocation; keep manual entry inside a sane DAW range.
+        if !bpm.is_finite() || !(AUDITION_BPM_MIN..=AUDITION_BPM_MAX).contains(&bpm) {
+            return Err("Enter a source BPM between 20 and 999");
         }
         self.audition_bpm_confirmed = Some(bpm);
         Ok(bpm)

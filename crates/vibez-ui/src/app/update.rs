@@ -593,12 +593,16 @@ impl App {
                 if changed {
                     if let MediaSourceRef::LocalFile { path } = source.clone() {
                         if self.state.browser.audition_enabled {
-                            self.state.browser.begin_audition_load(&source);
+                            let generation = self.state.browser.begin_audition_load(&source);
                             self.state.status_text = "Preparing Audition...".to_string();
                             return Task::perform(
                                 decode_local_for_preview_async(path),
                                 move |result| {
-                                    Message::LocalSamplePreviewReady(source.clone(), result)
+                                    Message::LocalSamplePreviewReady(
+                                        source.clone(),
+                                        generation,
+                                        result,
+                                    )
                                 },
                             );
                         }
@@ -621,11 +625,11 @@ impl App {
             }
             Message::PreviewLocalEntry(source) => {
                 self.state.browser.select_source(source.clone());
-                self.state.browser.begin_audition_load(&source);
+                let generation = self.state.browser.begin_audition_load(&source);
                 if let MediaSourceRef::LocalFile { path } = source.clone() {
                     self.state.status_text = "Preparing Audition...".to_string();
                     return Task::perform(decode_local_for_preview_async(path), move |result| {
-                        Message::LocalSamplePreviewReady(source.clone(), result)
+                        Message::LocalSamplePreviewReady(source.clone(), generation, result)
                     });
                 }
             }
@@ -750,6 +754,7 @@ impl App {
                         handle.abort();
                     }
                     self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
+                    self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
                     self.remote_import_in_flight = false;
                     let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
                     self.state.status_text =
@@ -806,18 +811,19 @@ impl App {
                 return self
                     .dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id));
             }
-            Message::LocalSamplePreviewReady(source, Ok(audio)) => {
+            Message::LocalSamplePreviewReady(source, generation, Ok(audio)) => {
                 if self
                     .state
                     .browser
-                    .install_audition(source, Arc::clone(&audio))
+                    .install_audition(generation, source, Arc::clone(&audio))
                 {
                     let source = self.state.browser.selected_source.clone().unwrap();
                     return self.play_browser_mode(source, audio);
                 }
             }
-            Message::LocalSamplePreviewReady(source, Err(err)) => {
-                let is_current = self.state.browser.selected_source.as_ref() == Some(&source);
+            Message::LocalSamplePreviewReady(source, generation, Err(err)) => {
+                let is_current = self.state.browser.selected_source.as_ref() == Some(&source)
+                    && self.state.browser.audition_request_is_current(generation);
                 self.state.browser.fail_waveform_load(&source, err.clone());
                 if is_current {
                     self.stop_browser_audition();
@@ -838,11 +844,16 @@ impl App {
             }
             Message::BrowserBpmDetected(source, estimate) => {
                 let source_for_warp = source.clone();
+                // A BPM the user confirmed while detection was running
+                // already drives the audition; the late estimate must
+                // not restart it or rewrite the status line.
+                let already_confirmed = self.state.browser.audition_bpm_confirmed.is_some();
                 if self.state.browser.install_bpm_suggestion(
                     source,
                     estimate,
                     self.state.warp_confidence_threshold,
                 ) && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
+                    && !already_confirmed
                 {
                     if let Some(source_bpm) = self.state.browser.audition_bpm_confirmed {
                         let project_bpm = self.state.transport.bpm;
@@ -874,11 +885,13 @@ impl App {
             }
             Message::BrowserAuditionWarpReady {
                 source,
+                generation,
                 source_bpm,
                 project_bpm,
                 result,
             } => {
-                let current = self.state.browser.selected_source.as_ref() == Some(&source)
+                let current = self.state.browser.audition_request_is_current(generation)
+                    && self.state.browser.selected_source.as_ref() == Some(&source)
                     && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
                     && self.state.browser.audition_bpm_confirmed == Some(source_bpm)
                     && (self.state.transport.bpm - project_bpm).abs() < f64::EPSILON;
@@ -958,7 +971,14 @@ impl App {
                     Err(error) => self.update(Message::BrowserSampleDecodeError(error)),
                 };
             }
-            Message::BrowserImportPrepared { target, payload } => {
+            Message::BrowserImportPrepared {
+                target,
+                generation,
+                payload,
+            } => {
+                if generation != self.browser_import_generation {
+                    return Task::none();
+                }
                 return self.apply_browser_import_prepared(target, payload);
             }
             Message::ClipAutoWarpReady {
@@ -1631,6 +1651,7 @@ impl App {
             }
             Message::RemoteAuditionReady {
                 request_id,
+                generation,
                 source,
                 result,
             } => {
@@ -1675,11 +1696,11 @@ impl App {
                             return Task::none();
                         }
                         if self.state.browser.audition_enabled {
-                            if self
-                                .state
-                                .browser
-                                .install_audition(source.clone(), Arc::clone(&materialized.audio))
-                            {
+                            if self.state.browser.install_audition(
+                                generation,
+                                source.clone(),
+                                Arc::clone(&materialized.audio),
+                            ) {
                                 return self.play_browser_mode(source, materialized.audio);
                             }
                         } else {

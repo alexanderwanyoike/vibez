@@ -65,6 +65,10 @@ struct App {
     remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
     remote_import_in_flight: bool,
     pending_remote_audition: Option<DropboxEntry>,
+    /// Generation for the whole Browser import pipeline (local and
+    /// remote). Bumped on cancellation and project reset so an
+    /// in-flight WARP preparation cannot land a clip afterwards.
+    browser_import_generation: u64,
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
@@ -280,6 +284,7 @@ impl App {
             remote_audition_cache_lease: None,
             remote_import_in_flight: false,
             pending_remote_audition: None,
+            browser_import_generation: 0,
             midi_input,
             midi_input_ports: Vec::new(),
         };
@@ -1195,8 +1200,10 @@ mod project_format_v1_tests {
                 entries: catalog.entries,
                 ..crate::state::BrowserState::default()
             };
-            browser.select_source(source);
+            browser.select_source(source.clone());
+            let generation = browser.begin_audition_load(&source);
             assert!(browser.install_audition(
+                generation,
                 browser.selected_source.clone().unwrap(),
                 Arc::clone(&audition)
             ));
@@ -1602,7 +1609,6 @@ mod project_format_v1_tests {
             _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
             result = &mut future => panic!("debounced request completed early: {result:?}"),
         }
-        drop(future);
         assert!(!cache.is_cached("/megalodon/transient.wav", Some("rev-1")));
         assert_eq!(cache.usage().unwrap(), vibez_dropbox::CacheUsage::default());
     }

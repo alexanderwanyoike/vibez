@@ -305,11 +305,15 @@ pub enum Message {
     AuditionBpmEditChanged(String),
     ConfirmAuditionBpm,
     EscapePressed,
-    LocalSamplePreviewReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
+    /// The `u64` is the audition request generation minted at spawn
+    /// time; stale completions (stopped or superseded requests) are
+    /// dropped instead of starting playback.
+    LocalSamplePreviewReady(MediaSourceRef, u64, Result<Arc<DecodedAudio>, String>),
     BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
     BrowserBpmDetected(MediaSourceRef, Option<(f64, f32)>),
     BrowserAuditionWarpReady {
         source: MediaSourceRef,
+        generation: u64,
         source_bpm: f64,
         project_bpm: f64,
         result: Result<Arc<DecodedAudio>, String>,
@@ -338,6 +342,10 @@ pub enum Message {
     ),
     BrowserImportPrepared {
         target: BrowserImportTarget,
+        /// Import generation at spawn time; a New Project or cancelled
+        /// import bumps the app counter so the prepared clip is dropped
+        /// instead of landing in a reset project.
+        generation: u64,
         payload: PreparedBrowserImport,
     },
     BrowserSampleDecodeError(String),
@@ -456,6 +464,9 @@ pub enum Message {
     ClickRemoteBrowserEntry(crate::remote_provider::RemoteCatalogEntry),
     RemoteAuditionReady {
         request_id: u64,
+        /// Audition request generation minted at spawn time (see
+        /// [`Message::LocalSamplePreviewReady`]).
+        generation: u64,
         source: MediaSourceRef,
         result: Result<RemoteMaterializedSample, String>,
     },

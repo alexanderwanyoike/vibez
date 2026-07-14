@@ -23,6 +23,9 @@ use super::*;
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
+        // Invalidate any Browser import still preparing (e.g. in its
+        // WARP stage) so it cannot add a clip to the reset project.
+        self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
         self.stop_browser_audition();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
