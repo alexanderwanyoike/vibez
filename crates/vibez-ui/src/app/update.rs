@@ -8,6 +8,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
+use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrument_bg};
@@ -693,7 +694,247 @@ impl App {
                 self.state.status_text = format!("Export error: {err}");
             }
 
-            other => return self.update_media(other),
+            // -- Engine events --
+            Message::Tick => {
+                return self.handle_tick();
+            }
+            Message::EngineMetering { peak_l, peak_r } => {
+                self.state.peak_l = peak_l;
+                self.state.peak_r = peak_r;
+            }
+
+            // -- Multi-track messages --
+            Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
+            Message::AddClipToTrack(track_id) => {
+                return self.handle_add_clip_to_track(track_id);
+            }
+            Message::ClipFileSelected(track_id, path) => {
+                return self.handle_clip_file_selected(track_id, path);
+            }
+            Message::ClipAudioDecoded(track_id, clip_id, audio, name, source) => {
+                return self.handle_clip_audio_decoded(track_id, clip_id, audio, name, source);
+            }
+            Message::ClipDecodeError(_, err) => {
+                self.state.status_text = format!("Error: {err}");
+            }
+
+            // -- Sampler / drum rack --
+            Message::LoadSamplerSample(track_id) => return self.on_load_sampler_sample(track_id),
+            Message::SamplerFileSelected(track_id, path) => {
+                return self.on_sampler_file_selected(track_id, path)
+            }
+            Message::SamplerSampleDecoded(track_id, audio, name, source) => {
+                self.apply_sampler_sample_loaded(track_id, audio, name, source);
+            }
+            Message::SamplerDecodeError(track_id, err) => {
+                self.state.arrangement.selected_track = Some(track_id);
+                self.state.status_text = format!("Sample load error: {err}");
+            }
+            Message::LoadDrumRackPadSample(track_id, pad_index) => {
+                return self.on_load_drum_rack_pad_sample(track_id, pad_index)
+            }
+            Message::DrumRackPadFileSelected(track_id, pad_index, path) => {
+                return self.handle_drum_rack_pad_file_selected(track_id, pad_index, path);
+            }
+            Message::DrumRackPadSampleDecoded(track_id, pad_index, audio, name, source) => {
+                self.apply_drum_rack_pad_loaded(track_id, pad_index, audio, name, source);
+            }
+            Message::DrumRackPadDecodeError(track_id, _pad_index, err) => {
+                return self.handle_drum_rack_pad_decode_error(track_id, _pad_index, err);
+            }
+
+            // -- Sample browser --
+            Message::ToggleAutoWarpOnImport => {
+                self.state.auto_warp_on_import = !self.state.auto_warp_on_import;
+                self.persist_ui_settings();
+            }
+            Message::SetWarpConfidenceThreshold(v) => {
+                self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
+                self.persist_ui_settings();
+            }
+            Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
+            Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
+            Message::CloseMidiInput => {
+                self.midi_input = None;
+                self.persist_ui_settings();
+                self.state.status_text = "MIDI input disconnected".to_string();
+            }
+            Message::SelectTheme(name) => return self.on_select_theme(name),
+            Message::RescanThemes => return self.on_rescan_themes(),
+            Message::ThemeSaveNameChanged(name) => {
+                self.state.theme_save_name = name;
+            }
+            Message::SaveCurrentTheme => return self.on_save_current_theme(),
+            Message::RewarpAllClips => {
+                return self.handle_rewarp_all_clips();
+            }
+            Message::AddSampleLibraryRoot => return self.on_add_sample_library_root(),
+            Message::SampleLibraryRootSelected(path) => {
+                return self.on_sample_library_root_selected(path)
+            }
+            Message::RescanSampleLibrary => return self.on_rescan_sample_library(),
+            Message::ClickLocalBrowserEntry(source) => {
+                return self.on_click_local_browser_entry(source)
+            }
+            Message::BeginPendingBrowserDrag(source, label) => {
+                let action = self.state.browser.update(BrowserMsg::BeginPendingDrag {
+                    source,
+                    label,
+                    origin_x: self.state.view.cursor_x,
+                    origin_y: self.state.view.cursor_y,
+                });
+                return self.apply_browser_action(action);
+            }
+            Message::PreviewLocalEntry(source) => return self.on_preview_local_entry(source),
+            Message::StopBrowserPreview => return self.on_stop_browser_preview(),
+            Message::ToggleAuditionEnabled => return self.on_toggle_audition_enabled(),
+            Message::SetAuditionGain(gain) => {
+                self.state.browser.set_audition_gain(gain);
+                self.send_command(EngineCommand::SetAuditionGain(
+                    self.state.browser.audition_gain,
+                ));
+                self.persist_ui_settings();
+            }
+            Message::SetAuditionMode(mode) => return self.on_set_audition_mode(mode),
+            Message::SetAuditionSync(sync) => return self.on_set_audition_sync(sync),
+            Message::ToggleAuditionLoop => return self.on_toggle_audition_loop(),
+            Message::AuditionBpmEditChanged(value) => {
+                return self.on_audition_bpm_edit_changed(value)
+            }
+            Message::ConfirmAuditionBpm => return self.on_confirm_audition_bpm(),
+            Message::EscapePressed => return self.on_escape_pressed(),
+
+            // -- Drag-and-drop from sample browser --
+            Message::DropSampleOnArrangement {
+                track_id,
+                position_samples,
+            } => return self.on_drop_sample_on_arrangement(track_id, position_samples),
+            Message::DropSampleOnEmptyArrangement => {
+                return self.on_drop_sample_on_empty_arrangement()
+            }
+            Message::DropSampleOnDrumPad {
+                track_id,
+                pad_index,
+            } => {
+                return self.handle_drop_sample_on_drum_pad(track_id, pad_index);
+            }
+            Message::DropSampleOnSampler { track_id } => {
+                return self.on_drop_sample_on_sampler(track_id)
+            }
+            Message::LocalSamplePreviewReady(source, generation, Ok(audio)) => {
+                return self.on_local_sample_preview_ready(source, generation, audio)
+            }
+            Message::LocalSamplePreviewReady(source, generation, Err(err)) => {
+                return self.on_local_sample_preview_failed(source, generation, err)
+            }
+            Message::BrowserWaveformReady(source, Ok(audio)) => {
+                return self.on_browser_waveform_ready(source, audio)
+            }
+            Message::BrowserWaveformReady(source, Err(err)) => {
+                self.state.browser.fail_waveform_load(&source, err);
+            }
+            Message::BrowserBpmDetected(source, estimate) => {
+                return self.on_browser_bpm_detected(source, estimate)
+            }
+            Message::BrowserAuditionWarpReady {
+                source,
+                generation,
+                source_bpm,
+                project_bpm,
+                result,
+            } => {
+                return self.on_browser_audition_warp_ready(
+                    source,
+                    generation,
+                    source_bpm,
+                    project_bpm,
+                    result,
+                )
+            }
+            Message::ImportSelectedBrowserSampleToArrangement => {
+                return self.handle_import_selected_browser_sample_to_arrangement();
+            }
+            Message::SelectAdjacentBrowserResult(direction) => {
+                return self.select_adjacent_browser_result(direction);
+            }
+            Message::LoadSelectedBrowserSampleToDevice => {
+                return self.handle_load_selected_browser_sample_to_device();
+            }
+            Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
+                return self.on_browser_sample_decoded(target, treatment, audio, name, source)
+            }
+            Message::RemoteImportReady {
+                request_id,
+                target,
+                treatment,
+                result,
+            } => return self.on_remote_import_ready(request_id, target, treatment, result),
+            Message::BrowserImportPrepared {
+                target,
+                generation,
+                payload,
+            } => return self.on_browser_import_prepared(target, generation, payload),
+            Message::ClipAutoWarpReady {
+                track_id,
+                clip_id,
+                outcome,
+            } => return self.on_clip_auto_warp_ready(track_id, clip_id, outcome),
+            Message::BrowserSampleDecodeError(err) => {
+                return self.on_browser_sample_decode_error(err)
+            }
+
+            // -- Dropbox / remote catalog --
+            Message::SaveDropboxAppKey => return self.on_save_dropbox_app_key(),
+            Message::ConnectDropbox => {
+                return self.handle_connect_dropbox();
+            }
+            Message::DropboxConnected(Ok(outcome)) => return self.on_dropbox_connected(outcome),
+            Message::DropboxConnected(Err(err)) => {
+                self.state.browser.remote.auth_in_progress = false;
+                self.state.browser.remote.last_error = Some(err.clone());
+                self.state.status_text = format!("Dropbox connect failed: {err}");
+            }
+            Message::DisconnectDropbox => return self.on_disconnect_dropbox(),
+            Message::RefreshRemoteConnection => {
+                return self.handle_remote_catalog_refresh();
+            }
+            Message::RemoteCatalogPageFetched {
+                generation,
+                completed_pages,
+                result,
+            } => return self.on_remote_catalog_page_fetched(generation, completed_pages, result),
+            Message::RemoteCatalogSaved {
+                generation,
+                next_checkpoint,
+                result,
+            } => return self.on_remote_catalog_saved(generation, next_checkpoint, result),
+            Message::SetMediaCacheBudgetGiB(gib) => return self.on_set_media_cache_budget(gib),
+            Message::ToggleMediaCacheAutomaticEviction => {
+                return self.on_toggle_media_cache_automatic_eviction()
+            }
+            Message::MediaCacheMaintenanceComplete(result) => {
+                return self.on_media_cache_maintenance_complete(result)
+            }
+            Message::ClearMediaCache => return self.on_clear_media_cache(),
+            Message::MediaCacheCleared(result) => return self.on_media_cache_cleared(result),
+            Message::ClickRemoteBrowserEntry(entry) => {
+                return self.on_click_remote_browser_entry(entry)
+            }
+            Message::RemoteAuditionReady {
+                request_id,
+                generation,
+                source,
+                result,
+            } => return self.on_remote_audition_ready(request_id, generation, source, result),
+            Message::DropboxPreview(entry) => {
+                return self.start_remote_audition(entry, false);
+            }
+            Message::DropboxImportToArrangement(entry) => {
+                return self.handle_dropbox_import_to_arrangement(entry);
+            }
+            Message::DropboxImportToDevice(entry) => {
+                return self.handle_dropbox_import_to_device(entry);
+            }
         }
         Task::none()
     }
