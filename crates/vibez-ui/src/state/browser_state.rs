@@ -103,6 +103,12 @@ pub struct BrowserState {
     /// reference: dropping it inside the RT callback would free on
     /// the audio thread and violate the allocation-free invariant.
     pub audition_audio: Option<Arc<DecodedAudio>>,
+    /// Ring of the most recently superseded audition buffers. The
+    /// Audition Bus holds at most four voices (one active + three
+    /// outgoing fades), so keeping the last four superseded Arcs
+    /// alive UI-side guarantees a re-trigger never leaves the engine
+    /// with the final reference either.
+    pub audition_audio_retired: [Option<Arc<DecodedAudio>>; 4],
     pub audition_mode: AuditionMode,
     pub audition_sync: AuditionSync,
     pub audition_loop: bool,
@@ -154,6 +160,7 @@ impl Default for BrowserState {
             audition_queued: false,
             audition_generation: 0,
             audition_audio: None,
+            audition_audio_retired: [None, None, None, None],
             audition_mode: AuditionMode::default(),
             audition_sync: AuditionSync::Off,
             audition_loop: false,

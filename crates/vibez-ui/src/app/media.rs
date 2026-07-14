@@ -241,7 +241,19 @@ impl App {
             self.state.transport.playing && self.state.browser.audition_sync != AuditionSync::Off;
         // Retain a UI-side clone (never cleared on stop) so the engine
         // voice can never drop the final Arc inside the RT callback.
-        self.state.browser.audition_audio = Some(Arc::clone(&audio));
+        // A superseded buffer moves into the retired ring rather than
+        // dropping here, because up to three outgoing engine voices may
+        // still hold it while fading.
+        if let Some(prev) = self
+            .state
+            .browser
+            .audition_audio
+            .replace(Arc::clone(&audio))
+        {
+            let retired = &mut self.state.browser.audition_audio_retired;
+            retired.rotate_right(1);
+            retired[0] = Some(prev);
+        }
         self.send_command(EngineCommand::StartAudition {
             audio,
             sync: self.state.browser.audition_sync,

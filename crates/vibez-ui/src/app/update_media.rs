@@ -412,6 +412,13 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
+        // Escape abandons any pending browser import at whatever stage
+        // it is in. The fetch/decode stage is covered by the abort
+        // handle below, but the WARP-preparation stage has no handle
+        // (remote_import_in_flight is already cleared), so only this
+        // generation bump stops BrowserImportPrepared from landing a
+        // clip after the user cancelled.
+        self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
         if self.state.browser.audition_playing
             || self.state.browser.audition_loading
             || self.state.browser.audition_queued
@@ -423,7 +430,6 @@ impl App {
                 handle.abort();
             }
             self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-            self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
             self.remote_import_in_flight = None;
             self.state.status_text = "Remote import cancelled; no project media added".into();
             let maintenance = self.media_cache_maintenance_task();
