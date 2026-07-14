@@ -7,6 +7,7 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
+use crate::widgets::drag::ValueDrag;
 use vibez_core::id::TrackId;
 
 /// 270° arc sweep matching DAW standards.
@@ -44,23 +45,11 @@ impl KnobWidget {
 }
 
 /// State for mouse interaction.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct KnobState {
-    dragging: bool,
-    last_y: f32,
+    drag: ValueDrag,
     shift_held: bool,
     last_click: Option<Instant>,
-}
-
-impl Default for KnobState {
-    fn default() -> Self {
-        Self {
-            dragging: false,
-            last_y: 0.0,
-            shift_held: false,
-            last_click: None,
-        }
-    }
 }
 
 impl canvas::Program<Message> for KnobWidget {
@@ -156,7 +145,7 @@ impl canvas::Program<Message> for KnobWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging {
+        if state.drag.is_active() {
             mouse::Interaction::Grabbing
         } else if cursor.is_over(bounds) {
             mouse::Interaction::Grab
@@ -196,43 +185,30 @@ impl canvas::Program<Message> for KnobWidget {
                     }
                     state.last_click = Some(now);
 
-                    state.dragging = true;
-                    if let Some(pos) = cursor.position() {
-                        state.last_y = pos.y;
-                    }
+                    state.drag.grab(cursor, bounds, self.value);
                     return (canvas::event::Status::Captured, None);
                 }
             }
 
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.dragging {
-                    state.dragging = false;
+                if state.drag.release() {
                     return (canvas::event::Status::Captured, None);
                 }
             }
 
-            // Drag: vertical movement adjusts value (use absolute position
-            // so dragging outside the small knob bounds still tracks)
+            // Drag: vertical movement adjusts value (up = positive).
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if state.dragging {
-                    if let Some(pos) = cursor.position() {
-                        let delta = state.last_y - pos.y; // up = positive
-                        state.last_y = pos.y;
-
-                        let sensitivity = if state.shift_held {
-                            BASE_SENSITIVITY / FINE_DIVISOR
-                        } else {
-                            BASE_SENSITIVITY
-                        };
-
-                        let new_pan = (self.value + delta * sensitivity).clamp(0.0, 1.0);
-
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::set_track_pan(self.track_id, new_pan)),
-                        );
-                    }
+                let sensitivity = if state.shift_held {
+                    BASE_SENSITIVITY / FINE_DIVISOR
+                } else {
+                    BASE_SENSITIVITY
+                };
+                if let Some(pan) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::set_track_pan(self.track_id, pan)),
+                    );
                 }
             }
 

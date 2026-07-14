@@ -4,6 +4,7 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
+use crate::widgets::drag::ValueDrag;
 use vibez_core::id::TrackId;
 
 /// Horizontal fader widget for track gain control (arrangement track headers).
@@ -28,8 +29,7 @@ impl HorizontalFaderWidget {
 /// State for horizontal fader mouse dragging.
 #[derive(Debug, Default)]
 pub struct HorizontalFaderState {
-    dragging: bool,
-    last_x: f32,
+    drag: ValueDrag,
 }
 
 impl canvas::Program<Message> for HorizontalFaderWidget {
@@ -105,7 +105,7 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging || cursor.is_over(bounds) {
+        if state.drag.is_active() || cursor.is_over(bounds) {
             mouse::Interaction::ResizingHorizontally
         } else {
             mouse::Interaction::default()
@@ -121,35 +121,21 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
-                // Gate the grab on the widget, but track the drag in
-                // absolute coordinates so it keeps working when the
-                // cursor leaves this thin strip mid-drag.
-                if cursor.is_over(bounds) {
-                    if let Some(pos) = cursor.position() {
-                        state.dragging = true;
-                        state.last_x = pos.x;
-                        return (canvas::event::Status::Captured, None);
-                    }
-                }
-            }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if state.dragging {
-                    state.dragging = false;
+                if state.drag.grab(cursor, bounds, self.value) {
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
-                if let Some(pos) = cursor.position() {
-                    let delta = pos.x - state.last_x;
-                    state.last_x = pos.x;
-
-                    let track_w = bounds.width - 8.0;
-                    let gain_delta = delta / track_w * 2.0;
-                    let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
-
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                if state.drag.release() {
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                let track_w = (bounds.width - 8.0).max(1.0);
+                if let Some(gain) = state.drag.drag_to(cursor, 2.0 / track_w, 0.0, 0.0..=2.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::set_track_gain(self.track_id, new_gain)),
+                        Some(Message::set_track_gain(self.track_id, gain)),
                     );
                 }
             }
@@ -207,6 +193,34 @@ mod tests {
     }
 
     #[test]
+    fn vertical_fader_accumulates_moves_between_view_rebuilds() {
+        // Several CursorMoved events can share one view rebuild, so
+        // the widget's `value` field stays stale across them; the
+        // drag must still apply every delta, not just the last one.
+        let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let mut state = FaderState::default();
+
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+
+        let (event, cursor) = drag(Point::new(112.0, 140.0));
+        let (_, first) = widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 130.0));
+        let (_, second) = widget.update(&mut state, event, bounds, cursor);
+
+        let first = gain_of(first).expect("first move emits");
+        let second = gain_of(second).expect("second move emits");
+        let step = first - 1.0;
+        assert!(step > 0.0);
+        let expected = 1.0 + 2.0 * step;
+        assert!(
+            (second - expected).abs() < 1e-4,
+            "second move must include the first delta: got {second}, expected {expected}"
+        );
+    }
+
+    #[test]
     fn horizontal_fader_keeps_tracking_when_cursor_leaves_bounds() {
         let widget = HorizontalFaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
         let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(108.0, 16.0));
@@ -245,8 +259,7 @@ impl FaderWidget {
 /// State for mouse dragging.
 #[derive(Debug, Default)]
 pub struct FaderState {
-    dragging: bool,
-    last_y: f32,
+    drag: ValueDrag,
 }
 
 impl canvas::Program<Message> for FaderWidget {
@@ -322,7 +335,7 @@ impl canvas::Program<Message> for FaderWidget {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
-        if state.dragging || cursor.is_over(bounds) {
+        if state.drag.is_active() || cursor.is_over(bounds) {
             mouse::Interaction::ResizingVertically
         } else {
             mouse::Interaction::default()
@@ -338,35 +351,21 @@ impl canvas::Program<Message> for FaderWidget {
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
-                // Gate the grab on the widget, but track the drag in
-                // absolute coordinates so it keeps working when the
-                // cursor leaves this thin strip mid-drag.
-                if cursor.is_over(bounds) {
-                    if let Some(pos) = cursor.position() {
-                        state.dragging = true;
-                        state.last_y = pos.y;
-                        return (canvas::event::Status::Captured, None);
-                    }
-                }
-            }
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if state.dragging {
-                    state.dragging = false;
+                if state.drag.grab(cursor, bounds, self.value) {
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) if state.dragging => {
-                if let Some(pos) = cursor.position() {
-                    let delta = state.last_y - pos.y;
-                    state.last_y = pos.y;
-
-                    let track_h = bounds.height - 8.0;
-                    let gain_delta = delta / track_h * 2.0;
-                    let new_gain = (self.value + gain_delta).clamp(0.0, 2.0);
-
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                if state.drag.release() {
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
+                let track_h = (bounds.height - 8.0).max(1.0);
+                if let Some(gain) = state.drag.drag_to(cursor, 0.0, -2.0 / track_h, 0.0..=2.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::set_track_gain(self.track_id, new_gain)),
+                        Some(Message::set_track_gain(self.track_id, gain)),
                     );
                 }
             }
