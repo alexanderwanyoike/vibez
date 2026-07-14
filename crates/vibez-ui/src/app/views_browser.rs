@@ -1501,6 +1501,9 @@ impl App {
                 };
                 context = format!("{channels} · {} HZ · {context}", metadata.sample_rate);
             }
+            // Availability is seeded from the persisted cache index and kept
+            // current by fetch/import events; rendering must never stat the
+            // filesystem per row.
             let availability = if entry.is_folder {
                 crate::state::RemoteAvailability::RemoteOnly
             } else {
@@ -1513,10 +1516,7 @@ impl App {
                             error: error.clone(),
                         }
                     }
-                    _ if self
-                        .dropbox_cache
-                        .is_cached(&entry.provider_item_id, entry.revision.as_deref()) =>
-                    {
+                    Some(crate::state::RemoteAvailability::Cached) => {
                         crate::state::RemoteAvailability::Cached
                     }
                     _ if remote.connected => crate::state::RemoteAvailability::RemoteOnly,

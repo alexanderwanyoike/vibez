@@ -190,7 +190,7 @@ impl App {
         if let Some(handle) = self.remote_import_abort.take() {
             handle.abort();
             self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-            self.remote_import_in_flight = false;
+            self.remote_import_in_flight = None;
         }
         if let Some(handle) = self.remote_materialization_abort.take() {
             handle.abort();

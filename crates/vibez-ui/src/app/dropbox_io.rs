@@ -24,6 +24,7 @@ pub(super) fn remote_catalog_page_task(
     client: Arc<DropboxClient>,
     checkpoint: Option<String>,
     completed_pages: usize,
+    generation: u64,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -32,13 +33,129 @@ pub(super) fn remote_catalog_page_task(
                 .await
         },
         move |result| Message::RemoteCatalogPageFetched {
+            generation,
             completed_pages,
             result,
         },
     )
 }
 
+/// Mark catalog entries whose bytes are already materialized as Cached, so
+/// rendering never has to stat the disk per row. Availability states that
+/// track an in-flight fetch or a hard error are preserved.
+pub(super) fn seed_remote_availability(
+    cache: &DropboxCache,
+    remote: &mut crate::state::RemoteUiState,
+) {
+    use crate::state::RemoteAvailability;
+    let cached: std::collections::HashMap<String, Option<String>> =
+        cache.cached_identities().into_iter().collect();
+    for entry in &remote.catalog.entries {
+        if entry.is_folder {
+            continue;
+        }
+        let is_cached = cached
+            .get(&entry.provider_item_id)
+            .is_some_and(|revision| revision.as_deref() == entry.revision.as_deref());
+        match remote.availability.get(&entry.provider_item_id) {
+            Some(RemoteAvailability::Fetching) => {}
+            Some(RemoteAvailability::Cached) if !is_cached => {
+                remote.availability.remove(&entry.provider_item_id);
+            }
+            _ if is_cached => {
+                remote
+                    .availability
+                    .insert(entry.provider_item_id.clone(), RemoteAvailability::Cached);
+            }
+            _ => {}
+        }
+    }
+}
+
 impl App {
+    pub(super) fn remote_import_active(&self) -> bool {
+        self.remote_import_in_flight.is_some()
+    }
+
+    pub(super) fn reseed_remote_availability(&mut self) {
+        seed_remote_availability(&self.dropbox_cache, &mut self.state.browser.remote);
+    }
+
+    /// Apply a Media Cache policy (and enforce its budget) off the update
+    /// thread; the result lands as [`Message::MediaCacheMaintenanceComplete`].
+    pub(super) fn media_cache_policy_task(
+        &self,
+        policy: vibez_dropbox::MediaCachePolicy,
+    ) -> Task<Message> {
+        let cache = self.dropbox_cache.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    cache.set_policy(policy).map_err(|error| error.to_string())
+                })
+                .await
+                .map_err(|error| error.to_string())?
+            },
+            Message::MediaCacheMaintenanceComplete,
+        )
+    }
+
+    /// Re-enforce the current budget (e.g. after releasing a lease).
+    pub(super) fn media_cache_maintenance_task(&self) -> Task<Message> {
+        self.media_cache_policy_task(self.dropbox_cache.policy())
+    }
+
+    /// Persist the current Remote catalog snapshot off the update thread.
+    /// Passing `next_checkpoint` chains the following page fetch behind a
+    /// successful save, so at most one save is ever in flight per refresh.
+    pub(super) fn remote_catalog_persist_task(
+        &self,
+        next_checkpoint: Option<String>,
+    ) -> Task<Message> {
+        let generation = self.remote_catalog_generation;
+        let snapshot = self.state.browser.remote.catalog.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    crate::remote_provider::RemoteCatalogStore::for_dropbox().save(&snapshot)
+                })
+                .await
+                .map_err(|error| format!("remote catalog save task failed: {error}"))?
+            },
+            move |result| Message::RemoteCatalogSaved {
+                generation,
+                next_checkpoint: next_checkpoint.clone(),
+                result,
+            },
+        )
+    }
+
+    /// Reconcile the pages accumulated since the last flush into the catalog
+    /// and rebuild the derived lookups. Returns whether anything changed.
+    pub(super) fn flush_remote_catalog_pages(
+        &mut self,
+        pages: usize,
+        checkpoint: Option<String>,
+    ) -> bool {
+        if self.remote_catalog_pending.is_empty() && checkpoint.is_none() {
+            return false;
+        }
+        let changes = std::mem::take(&mut self.remote_catalog_pending);
+        crate::remote_provider::reconcile_remote_catalog(
+            &mut self.state.browser.remote.catalog,
+            &crate::remote_provider::RemoteRefreshResult {
+                pages: pages.max(1),
+                changes,
+                checkpoint,
+                error: None,
+            },
+        );
+        self.state.browser.remote.rebuild_catalog_children();
+        self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
+        self.reseed_remote_availability();
+        true
+    }
+
     pub(super) fn start_remote_import(
         &mut self,
         entry: DropboxEntry,
@@ -54,10 +171,10 @@ impl App {
                 self.remote_materialization_request_id.saturating_add(1);
         }
         self.remote_audition_cache_lease = None;
-        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        let maintenance = self.media_cache_maintenance_task();
         self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
         let request_id = self.remote_import_request_id;
-        self.remote_import_in_flight = true;
+        self.remote_import_in_flight = Some(request_id);
         self.state.browser.remote.availability.insert(
             entry.path_lower.clone(),
             if self
@@ -83,7 +200,7 @@ impl App {
         );
         let (task, handle) = task.abortable();
         self.remote_import_abort = Some(handle);
-        task
+        Task::batch([task, maintenance])
     }
 
     pub(super) fn handle_connect_dropbox(&mut self) -> Task<Message> {
@@ -119,12 +236,14 @@ impl App {
                 };
             return Task::none();
         };
+        self.remote_catalog_generation = self.remote_catalog_generation.wrapping_add(1);
+        self.remote_catalog_pending.clear();
         self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Refreshing;
         self.state.browser.remote.refresh_pages = 0;
         self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
         self.state.status_text = "Refreshing Remote catalog…".into();
         let checkpoint = self.state.browser.remote.catalog.checkpoint.clone();
-        remote_catalog_page_task(client, checkpoint, 0)
+        remote_catalog_page_task(client, checkpoint, 0, self.remote_catalog_generation)
     }
 
     pub(super) fn start_remote_audition(
@@ -138,7 +257,7 @@ impl App {
             rev: entry.rev.clone(),
         };
         self.state.browser.select_source(source.clone());
-        if self.remote_import_in_flight {
+        if self.remote_import_active() {
             queue_latest_remote_audition(&mut self.pending_remote_audition, entry);
             self.state.status_text = "Remote Audition queued behind active import".into();
             return Task::none();
@@ -147,7 +266,7 @@ impl App {
             handle.abort();
         }
         self.remote_audition_cache_lease = None;
-        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
+        let maintenance = self.media_cache_maintenance_task();
         self.remote_materialization_request_id =
             self.remote_materialization_request_id.saturating_add(1);
         let request_id = self.remote_materialization_request_id;
@@ -208,7 +327,7 @@ impl App {
         );
         let (task, handle) = task.abortable();
         self.remote_materialization_abort = Some(handle);
-        task
+        Task::batch([task, maintenance])
     }
 
     pub(super) fn handle_dropbox_import_to_arrangement(
