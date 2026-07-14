@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -116,7 +116,6 @@ pub enum ProjectFormatError {
     InvalidContainer(String),
     InvalidProvenance(String),
     MissingMedia(String),
-    ExistingDestination(PathBuf),
 }
 
 impl std::fmt::Display for ProjectFormatError {
@@ -130,9 +129,6 @@ impl std::fmt::Display for ProjectFormatError {
             }
             Self::InvalidProvenance(message) => write!(f, "invalid media provenance: {message}"),
             Self::MissingMedia(id) => write!(f, "project media {id:?} was not found"),
-            Self::ExistingDestination(path) => {
-                write!(f, "Save As destination already exists: {}", path.display())
-            }
         }
     }
 }
@@ -163,65 +159,68 @@ pub struct ProjectContainer {
 }
 
 impl ProjectContainer {
-    /// First save: transactionally creates a new container and takes
-    /// ownership of staged bytes. Staging files are removed only after commit.
+    /// First save: transactionally builds a new container under a private
+    /// sibling path and atomically publishes it after commit, replacing any
+    /// existing destination the caller has already confirmed overwriting. A
+    /// failed save never leaves a partial container at `path`, so retries
+    /// stay possible. Staging copies are content-addressed and shared, so
+    /// commit leaves them in place; the staging sweep owns their cleanup.
     pub fn create_from_staged(
         path: impl AsRef<Path>,
         document: &mut ProjectDocumentV1,
         staged_media: &[StagedMedia],
     ) -> Result<(Self, SaveObservation), ProjectFormatError> {
         let path = path.as_ref();
-        if path.exists() {
-            return Err(ProjectFormatError::ExistingDestination(path.to_path_buf()));
-        }
-
         let started = Instant::now();
-        let mut connection = Connection::open(path)?;
-        configure_connection(&connection)?;
-        initialize_schema_markers(&connection)?;
-        connection.execute_batch(SCHEMA)?;
+        let temporary = sibling_temp_path(path);
+        let mut build = || -> Result<(usize, u64), ProjectFormatError> {
+            let mut connection = Connection::open(&temporary)?;
+            configure_connection(&connection)?;
+            initialize_schema_markers(&connection)?;
+            connection.execute_batch(SCHEMA)?;
 
-        let transaction = connection.transaction()?;
-        let mut media_bytes_written = 0_u64;
-        let mut media_rows_written = 0_usize;
-        for staged in staged_media {
-            let content = fs::read(&staged.path)?;
-            let entry = media_entry(staged, &content);
-            if insert_media(&transaction, &entry, &content)? {
-                media_rows_written += 1;
-                media_bytes_written += content.len() as u64;
+            let transaction = connection.transaction()?;
+            let mut media_bytes_written = 0_u64;
+            let mut media_rows_written = 0_usize;
+            for staged in staged_media {
+                let content = fs::read(&staged.path)?;
+                let entry = media_entry(staged, &content);
+                if insert_media(&transaction, &entry, &content)? {
+                    media_rows_written += 1;
+                    media_bytes_written += content.len() as u64;
+                }
+                if !document
+                    .project_media
+                    .iter()
+                    .any(|item| item.id == entry.id)
+                {
+                    document.project_media.push(entry);
+                }
             }
-            if !document
-                .project_media
-                .iter()
-                .any(|item| item.id == entry.id)
-            {
-                document.project_media.push(entry);
+            write_document(&transaction, document)?;
+            transaction.commit()?;
+            Ok((media_rows_written, media_bytes_written))
+        };
+        let published = build().and_then(|counts| {
+            fs::rename(&temporary, path)?;
+            Ok(counts)
+        });
+        let (media_rows_written, media_bytes_written) = match published {
+            Ok(counts) => counts,
+            Err(error) => {
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
             }
-        }
-        write_document(&transaction, document)?;
-        transaction.commit()?;
+        };
 
-        // A committed container owns the media; stale staging copies are no
-        // longer needed. Cleanup failure is intentionally non-fatal because
-        // losing the newly committed Project Media would be worse.
-        for staged in staged_media {
-            cleanup_staging_copy(staged);
-        }
-
+        let container = Self::open(path)?;
         let observation = SaveObservation {
             elapsed: started.elapsed(),
             container_bytes: fs::metadata(path)?.len(),
             media_rows_written,
             media_bytes_written,
         };
-        Ok((
-            Self {
-                path: path.to_path_buf(),
-                connection,
-            },
-            observation,
-        ))
+        Ok((container, observation))
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ProjectFormatError> {
@@ -322,9 +321,6 @@ impl ProjectContainer {
         }
         write_document(&transaction, document)?;
         transaction.commit()?;
-        for staged in staged_media {
-            cleanup_staging_copy(staged);
-        }
         Ok(SaveObservation {
             elapsed: started.elapsed(),
             container_bytes: fs::metadata(&self.path)?.len(),
@@ -334,28 +330,38 @@ impl ProjectContainer {
     }
 
     /// Creates a self-contained snapshot without changing the source path.
+    /// The copy is built under a private sibling path, validated, and
+    /// atomically renamed into place, replacing any existing destination the
+    /// caller has already confirmed overwriting.
     pub fn save_as(
         &self,
         destination: impl AsRef<Path>,
     ) -> Result<SaveObservation, ProjectFormatError> {
         let destination = destination.as_ref();
-        if destination.exists() {
-            return Err(ProjectFormatError::ExistingDestination(
-                destination.to_path_buf(),
-            ));
-        }
-        let destination_text = destination.to_str().ok_or_else(|| {
+        let temporary = sibling_temp_path(destination);
+        let temporary_text = temporary.to_str().ok_or_else(|| {
             ProjectFormatError::InvalidContainer("Save As destination is not valid UTF-8".into())
         })?;
         let started = Instant::now();
-        self.connection
-            .execute("VACUUM INTO ?1", [destination_text])?;
-        let reopened = Self::open(destination)?;
-        let document = reopened.load_document()?;
-        if document.format_version != FORMAT_VERSION {
-            return Err(ProjectFormatError::InvalidContainer(
-                "Save As lost format marker".into(),
-            ));
+        let published = self
+            .connection
+            .execute("VACUUM INTO ?1", [temporary_text])
+            .map_err(ProjectFormatError::from)
+            .and_then(|_| {
+                let copied = Self::open(&temporary)?;
+                let document = copied.load_document()?;
+                if document.format_version != FORMAT_VERSION {
+                    return Err(ProjectFormatError::InvalidContainer(
+                        "Save As lost format marker".into(),
+                    ));
+                }
+                drop(copied);
+                fs::rename(&temporary, destination)?;
+                Ok(())
+            });
+        if let Err(error) = published {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
         }
         Ok(SaveObservation {
             elapsed: started.elapsed(),
@@ -408,16 +414,66 @@ pub fn stage_local_content(
     })
 }
 
+/// Vibez-owned staging directory for content-addressed Project Media
+/// copies. Entries may be referenced by any unsaved project in any running
+/// instance, so nothing deletes them eagerly; [`sweep_stale_staging`]
+/// reclaims entries old enough that no live session can still depend on
+/// them.
+pub fn staging_root() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("vibez")
+        .join("staged-project-media")
+}
+
+/// Removes staging entries (including abandoned `.partial` temporaries)
+/// older than `max_age` from the default staging root. Returns the number
+/// of files removed.
+pub fn sweep_stale_staging(max_age: Duration) -> usize {
+    sweep_staging_root(&staging_root(), max_age)
+}
+
+/// Age-based sweep of a staging directory. Errors are non-fatal: a file in
+/// use elsewhere simply survives until a later sweep.
+pub fn sweep_staging_root(root: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(root) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let stale = metadata.is_file()
+            && metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age > max_age);
+        if stale && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn sibling_temp_path(path: &Path) -> PathBuf {
+    let nonce = STAGING_NONCE.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "container".to_string());
+    path.with_file_name(format!(".{name}.{}-{nonce}.saving", std::process::id()))
+}
+
 fn write_staging_copy(
     id: &str,
     file_name: &str,
     content: &[u8],
 ) -> Result<PathBuf, ProjectFormatError> {
-    let root = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("vibez")
-        .join("staged-project-media");
+    let root = staging_root();
     fs::create_dir_all(&root)?;
     let safe_name: String = file_name
         .chars()
@@ -430,15 +486,16 @@ fn write_staging_copy(
         })
         .collect();
     let staging_path = root.join(format!("{id}-{safe_name}"));
-    if !staging_path.exists() {
-        let nonce = STAGING_NONCE.fetch_add(1, Ordering::Relaxed);
-        let temporary = root.join(format!(
-            ".{id}-{safe_name}-{}-{nonce}.partial",
-            std::process::id()
-        ));
-        fs::write(&temporary, content)?;
-        fs::rename(temporary, &staging_path)?;
-    }
+    // Always rewrite: identical content-addressed bytes, but the fresh
+    // modification time keeps actively referenced entries clear of the
+    // age-based staging sweep.
+    let nonce = STAGING_NONCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = root.join(format!(
+        ".{id}-{safe_name}-{}-{nonce}.partial",
+        std::process::id()
+    ));
+    fs::write(&temporary, content)?;
+    fs::rename(temporary, &staging_path)?;
     Ok(staging_path)
 }
 
@@ -492,17 +549,19 @@ pub fn save_project_v1(
         let document = container.load_document()?;
         (container, document)
     } else if let Some(source) = source_container.filter(|source| source.exists()) {
-        if destination.exists() {
-            return Err(ProjectFormatError::ExistingDestination(
-                destination.to_path_buf(),
-            ));
-        }
         let source = ProjectContainer::open(source)?;
         source.save_as(destination)?;
         let copied = ProjectContainer::open(destination)?;
         let document = copied.load_document()?;
         (copied, document)
     } else {
+        // No source container to copy media rows from: any Project Media
+        // reference not satisfied by staged bytes would commit as a
+        // dangling row and silently drop the clip on reopen. Fail loudly
+        // instead (the open V1 container vanished or moved).
+        if let Some(id) = first_dangling_project_media(&mut project, &staged_media) {
+            return Err(ProjectFormatError::MissingMedia(id));
+        }
         let mut document = ProjectDocumentV1::new(project.clone());
         let (_container, observation) =
             ProjectContainer::create_from_staged(destination, &mut document, &staged_media)?;
@@ -518,6 +577,81 @@ pub fn save_project_v1(
         project,
         observation,
     })
+}
+
+/// Visits every media source reference in a project: audio clips, sampler
+/// sources, and drum rack pads across tracks, master, and buses.
+fn visit_sources_mut(project: &mut Project, visit: &mut dyn FnMut(&mut MediaSourceRef)) {
+    for clip in &mut project.clips {
+        if let Some(source) = &mut clip.source {
+            visit(source);
+        }
+    }
+    let tracks = project
+        .tracks
+        .iter_mut()
+        .chain(project.master.iter_mut())
+        .chain(project.buses.iter_mut());
+    for track in tracks {
+        match &mut track.native_instrument {
+            Some(InstrumentStateInfo::Sampler {
+                source: Some(source),
+                ..
+            }) => visit(source),
+            Some(InstrumentStateInfo::DrumRack { pads }) => {
+                for pad in pads {
+                    if let Some(source) = &mut pad.source {
+                        visit(source);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// First Project Media reference that neither an existing container nor the
+/// staged bytes can satisfy.
+fn first_dangling_project_media(project: &mut Project, staged: &[StagedMedia]) -> Option<String> {
+    let mut dangling = None;
+    visit_sources_mut(project, &mut |source| {
+        if let MediaSourceRef::ProjectMedia { id, .. } = source {
+            if dangling.is_none() && !staged.iter().any(|item| item.id == *id) {
+                dangling = Some(id.clone());
+            }
+        }
+    });
+    dangling
+}
+
+/// Rewrites transient staged references back to durable Source Storage
+/// identity for legacy JSON documents, which have no Project Media table. A
+/// serialized staging path would dangle as soon as the staging cache is
+/// swept, silently dropping the clip on reopen.
+pub fn strip_staged_sources(project: &mut Project) {
+    visit_sources_mut(project, &mut |source| match source {
+        MediaSourceRef::StagedProjectMedia { source_path, .. } => {
+            *source = MediaSourceRef::LocalFile {
+                path: source_path.clone(),
+            };
+        }
+        MediaSourceRef::StagedRemoteProjectMedia { provenance, .. } => {
+            if let MediaProvenance::Remote {
+                source_id,
+                source_path,
+                revision,
+                ..
+            } = provenance.as_ref()
+            {
+                *source = MediaSourceRef::DropboxFile {
+                    path_lower: source_id.clone(),
+                    display_path: source_path.clone(),
+                    rev: revision.clone(),
+                };
+            }
+        }
+        _ => {}
+    });
 }
 
 fn prepare_project_media(
@@ -605,7 +739,15 @@ fn prepare_source(
         ),
         MediaSourceRef::ProjectMedia { .. } | MediaSourceRef::DropboxFile { .. } => return Ok(()),
     };
-    let content = fs::read(&path)?;
+    let content = match fs::read(&path) {
+        Ok(content) => content,
+        // Unavailable Local Source Storage keeps its reference: the save
+        // preserves the pointer for a later relink instead of aborting or
+        // silently dropping the clip. Staged copies must still be readable,
+        // because their bytes exist nowhere else.
+        Err(_) if matches!(source, MediaSourceRef::LocalFile { .. }) => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
     let id = hex_sha256(&content);
     let retained_provenance = core_provenance(&provenance);
     if !staged_media.iter().any(|item| item.id == id) {
@@ -745,16 +887,6 @@ fn insert_media(
         ],
     )?;
     Ok(inserted == 1)
-}
-
-fn cleanup_staging_copy(staged: &StagedMedia) {
-    let disposable = match &staged.provenance {
-        Provenance::Local { source_path } => source_path != &staged.path,
-        Provenance::Remote { .. } => true,
-    };
-    if disposable {
-        let _ = fs::remove_file(&staged.path);
-    }
 }
 
 fn media_entry(staged: &StagedMedia, content: &[u8]) -> ProjectMediaEntry {

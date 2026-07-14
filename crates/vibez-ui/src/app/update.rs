@@ -953,14 +953,10 @@ impl App {
                     self.remote_import_request_id,
                     request_id,
                 ) {
-                    if let Ok((
-                        _,
-                        _,
-                        MediaSourceRef::StagedRemoteProjectMedia { staging_path, .. },
-                    )) = result
-                    {
-                        let _ = std::fs::remove_file(staging_path);
-                    }
+                    // Staging copies are content-addressed, so a superseding
+                    // import of the same bytes shares this exact file;
+                    // deleting it here would break that import's next save.
+                    // The startup staging sweep owns orphan cleanup.
                     return Task::none();
                 }
                 self.remote_import_abort = None;
@@ -1030,7 +1026,7 @@ impl App {
             }
             Message::SaveProject => {
                 self.state.project.file_menu_open = false;
-                let project = self.project_from_state();
+                let project = self.project_for_save();
                 if let Some(path) = self.state.project.current_path.clone() {
                     return Task::perform(
                         save_project_async(path.clone(), Some(path), project),
@@ -1074,7 +1070,7 @@ impl App {
                     {
                         path.set_extension("vzp");
                     }
-                    let project = self.project_from_state();
+                    let project = self.project_for_save();
                     return Task::perform(
                         save_project_async(path, self.state.project.current_path.clone(), project),
                         |result| Message::ProjectSaved(Box::new(result)),
