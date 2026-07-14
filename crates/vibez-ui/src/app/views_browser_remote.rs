@@ -1,7 +1,9 @@
 //! Remote sample-browser view rendering.
 //! Split from views_browser.rs; inherent methods on [`super::App`].
 
-use iced::widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, text};
+use iced::widget::{
+    button, column, container, horizontal_space, mouse_area, row, scrollable, text,
+};
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
