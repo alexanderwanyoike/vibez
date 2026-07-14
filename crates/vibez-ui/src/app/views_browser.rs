@@ -561,6 +561,11 @@ impl App {
     }
 
     fn view_browser_audition_footer(&self) -> Element<'_, Message> {
+        let compact = self
+            .state
+            .browser
+            .effective_dock_width(self.state.view.window_width)
+            < 360.0;
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
         let selected_label = match self.state.browser.mode {
@@ -639,9 +644,9 @@ impl App {
             .on_submit(Message::ConfirmAuditionBpm)
             .size(10)
             .padding([3, 5])
-            .width(Length::Fixed(62.0))
+            .width(Length::Fixed(if compact { 54.0 } else { 62.0 }))
             .style(browser_compact_input_style);
-        let confirm_bpm = button(text("CONFIRM").size(9))
+        let confirm_bpm = button(text(if compact { "SET" } else { "CONFIRM" }).size(9))
             .on_press(Message::ConfirmAuditionBpm)
             .padding([3, 5])
             .style(browser_utility_action_style);
@@ -1039,6 +1044,13 @@ impl App {
                 .duration_seconds
                 .map(format_browser_duration)
                 .unwrap_or_else(|| "—".into());
+            let source_detail = browser_folder_context(
+                &entry.root_path,
+                &entry.relative_path,
+                &metadata_detail,
+                entry.file_size,
+            );
+            let compact_detail = format!("BPM {bpm} · {length} · {source_detail}");
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
@@ -1049,12 +1061,11 @@ impl App {
                     .width(Length::Fill)
                     .height(Length::Fixed(14.0))
                     .wrapping(iced::widget::text::Wrapping::None),
-                text(browser_folder_context(
-                    &entry.root_path,
-                    &entry.relative_path,
-                    &metadata_detail,
-                    entry.file_size,
-                ))
+                text(if wide_columns {
+                    source_detail
+                } else {
+                    compact_detail
+                })
                 .size(9)
                 .color(cell_color)
                 .width(Length::Fill)
@@ -1441,6 +1452,9 @@ impl App {
             let length = metadata
                 .map(|metadata| format_browser_duration(metadata.duration_seconds))
                 .unwrap_or_else(|| "—".into());
+            if !wide_columns && !entry.is_folder {
+                context = format!("BPM {bpm} · {length} · {context}");
+            }
             let name_cell = column![
                 text(if entry.is_folder {
                     format!("› {}", entry.name)
@@ -1639,7 +1653,7 @@ impl App {
                     .style(browser_utility_action_style),
             );
         }
-        let refresh = button(text("REFRESH").size(9).color(th::text_dim()))
+        let refresh = button(text("REF").size(9).color(th::text_dim()))
             .on_press(Message::RefreshRemoteConnection)
             .padding([3, 5])
             .style(browser_utility_action_style);

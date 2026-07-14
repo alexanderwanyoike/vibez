@@ -36,6 +36,20 @@ pub(crate) fn global_key_handler(
         return Some(Message::EscapePressed);
     }
 
+    // Plain Up/Down moves the Active Source Entry through Browser Results.
+    // Text inputs consume these before the global ignored-event subscription.
+    if modifiers.is_empty() {
+        match key {
+            iced::keyboard::Key::Named(Named::ArrowUp) => {
+                return Some(Message::SelectAdjacentBrowserResult(-1));
+            }
+            iced::keyboard::Key::Named(Named::ArrowDown) => {
+                return Some(Message::SelectAdjacentBrowserResult(1));
+            }
+            _ => {}
+        }
+    }
+
     // Enter: the focused Browser selection always means Arrangement Import.
     // Text inputs capture Enter before this global ignored-event subscription.
     if !modifiers.control()
@@ -212,6 +226,24 @@ mod tests {
             Some(Message::ImportSelectedBrowserSampleToArrangement)
         ));
         assert!(global_key_handler(Key::Named(Named::Enter), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn plain_arrows_navigate_browser_results_without_stealing_track_reorder() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::empty()),
+            Some(Message::SelectAdjacentBrowserResult(-1))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowDown), Modifiers::empty()),
+            Some(Message::SelectAdjacentBrowserResult(1))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::CTRL),
+            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
+        ));
     }
 
     #[test]

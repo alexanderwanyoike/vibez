@@ -327,6 +327,7 @@ pub enum Message {
         track_id: TrackId,
     },
     ImportSelectedBrowserSampleToArrangement,
+    SelectAdjacentBrowserResult(i8),
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
         BrowserImportTarget,
