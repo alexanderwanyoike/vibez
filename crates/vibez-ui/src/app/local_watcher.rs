@@ -319,7 +319,10 @@ mod tests {
     #[test]
     fn recursive_watcher_observes_create_rename_move_delete_and_bursts() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path().join("Samples");
+        // Canonicalize so constructed paths match what the platform
+        // backend reports: macOS tempdirs live behind the /private
+        // symlink and Windows TEMP can be an 8.3 short name.
+        let root = temporary.path().canonicalize().unwrap().join("Samples");
         let drums = root.join("Drums");
         let bass = root.join("Bass");
         fs::create_dir_all(&drums).unwrap();
@@ -366,10 +369,28 @@ mod tests {
             let Ok(event) = receiver.recv_timeout(remaining) else {
                 break;
             };
-            if event.unwrap().paths.iter().any(|path| path == expected) {
+            if event
+                .unwrap()
+                .paths
+                .iter()
+                .any(|path| matches(path, expected))
+            {
                 return;
             }
         }
         panic!("watcher did not report {}", expected.display());
+    }
+
+    /// Structural match that survives platform path-prefix quirks
+    /// (macOS /private symlink, Windows verbatim prefixes): the event
+    /// names the expected file inside the expected directory, or is a
+    /// coalesced event on the directory itself (FSEvents does this
+    /// for bursts).
+    fn matches(path: &Path, expected: &Path) -> bool {
+        let dir_name = expected.parent().and_then(Path::file_name);
+        let same_file = path.file_name() == expected.file_name()
+            && path.parent().and_then(Path::file_name) == dir_name;
+        let parent_dir_event = path.file_name() == dir_name;
+        same_file || parent_dir_event
     }
 }
