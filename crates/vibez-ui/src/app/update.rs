@@ -222,7 +222,11 @@ impl App {
                 }
                 let browser_resize = match &msg {
                     ViewMsg::CursorMoved(x, _) if self.state.browser.dock_resize_active => {
-                        Some(BrowserMsg::ResizeDock(*x))
+                        Some(BrowserMsg::ResizeDock(
+                            self.state
+                                .browser
+                                .dock_drag_width(*x, self.state.view.window_width),
+                        ))
                     }
                     ViewMsg::MouseReleased if self.state.browser.dock_resize_active => {
                         Some(BrowserMsg::EndDockResize)

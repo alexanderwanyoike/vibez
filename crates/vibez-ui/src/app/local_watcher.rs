@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use iced::futures::SinkExt;
 use iced::{stream, Subscription};
@@ -7,6 +9,12 @@ use notify::{RecursiveMode, Watcher};
 
 use crate::domains::browser::BrowserMsg;
 use crate::message::{LocalRootWatchEvent, Message};
+
+/// Maximum raw filesystem events queued between polls of the
+/// consumer loop. Overflowing events are dropped and replaced by a
+/// conservative all-roots rescan, so memory stays bounded under
+/// sustained activity (large copies/extracts into a watched root).
+const WATCH_EVENT_QUEUE_CAPACITY: usize = 512;
 
 pub(super) fn subscription(roots: Vec<PathBuf>) -> Subscription<Message> {
     if roots.is_empty() {
@@ -16,9 +24,16 @@ pub(super) fn subscription(roots: Vec<PathBuf>) -> Subscription<Message> {
     let identity = ("local-root-watcher", roots.clone());
     let events = stream::channel(128, move |mut output| async move {
         let (sender, mut receiver) =
-            tokio::sync::mpsc::unbounded_channel::<notify::Result<notify::Event>>();
+            tokio::sync::mpsc::channel::<notify::Result<notify::Event>>(WATCH_EVENT_QUEUE_CAPACITY);
+        let overflowed = Arc::new(AtomicBool::new(false));
+        let callback_overflowed = Arc::clone(&overflowed);
         let mut watcher = match notify::recommended_watcher(move |event| {
-            let _ = sender.send(event);
+            // Never block or allocate without bound inside the notify
+            // callback: on a full queue, drop the event and flag the
+            // overflow so the consumer rescans every root.
+            if sender.try_send(event).is_err() {
+                callback_overflowed.store(true, Ordering::Relaxed);
+            }
         }) {
             Ok(watcher) => watcher,
             Err(error) => {
@@ -59,45 +74,85 @@ pub(super) fn subscription(roots: Vec<PathBuf>) -> Subscription<Message> {
         let mut watched_roots = HashSet::new();
         attach_available_roots(&roots, &mut watched_roots, &mut watcher, &mut output).await;
 
-        while let Some(event) = receiver.recv().await {
-            match event {
-                Ok(event) => {
-                    if !is_catalog_event(&event.kind) {
-                        continue;
-                    }
-                    let affected = affected_roots(&roots, &event.paths);
-                    refresh_root_watches(&roots, &mut watched_roots, &mut watcher, &mut output)
-                        .await;
-                    if !affected.is_empty() {
-                        let _ = output
-                            .send(Message::Browser(BrowserMsg::LocalRootWatchEvent(
-                                LocalRootWatchEvent::Changed(affected),
-                            )))
-                            .await;
-                    }
-                }
-                Err(error) => {
-                    let affected = if error.paths.is_empty() {
-                        roots.clone()
-                    } else {
-                        affected_roots(&roots, &error.paths)
-                    };
-                    if !affected.is_empty() {
-                        let _ = output
-                            .send(Message::Browser(BrowserMsg::LocalRootWatchEvent(
-                                LocalRootWatchEvent::Failed {
-                                    roots: affected,
-                                    message: error.to_string(),
-                                },
-                            )))
-                            .await;
-                    }
-                }
+        while let Some(first) = receiver.recv().await {
+            // Coalesce everything already queued into one batch so an
+            // event burst produces a single Changed message (and thus a
+            // single debounce task per root) instead of one per raw
+            // filesystem event.
+            let mut batch = vec![first];
+            while let Ok(event) = receiver.try_recv() {
+                batch.push(event);
+            }
+            let dropped = overflowed.swap(false, Ordering::Relaxed);
+            let saw_catalog_event = dropped
+                || batch.iter().any(|event| {
+                    event
+                        .as_ref()
+                        .is_ok_and(|event| is_catalog_event(&event.kind))
+                });
+            let (changed, failures) = coalesce_watch_events(&roots, batch, dropped);
+            if saw_catalog_event {
+                refresh_root_watches(&roots, &mut watched_roots, &mut watcher, &mut output).await;
+            }
+            if !changed.is_empty() {
+                let _ = output
+                    .send(Message::Browser(BrowserMsg::LocalRootWatchEvent(
+                        LocalRootWatchEvent::Changed(changed),
+                    )))
+                    .await;
+            }
+            for (affected, message) in failures {
+                let _ = output
+                    .send(Message::Browser(BrowserMsg::LocalRootWatchEvent(
+                        LocalRootWatchEvent::Failed {
+                            roots: affected,
+                            message,
+                        },
+                    )))
+                    .await;
             }
         }
     });
 
     Subscription::run_with_id(identity, events)
+}
+
+/// Fold a batch of raw notify events into one deduplicated list of
+/// changed roots (in configured-root order) plus any watch failures.
+/// `dropped` marks a queue overflow, which conservatively counts
+/// every root as changed.
+fn coalesce_watch_events(
+    roots: &[PathBuf],
+    batch: Vec<notify::Result<notify::Event>>,
+    dropped: bool,
+) -> (Vec<PathBuf>, Vec<(Vec<PathBuf>, String)>) {
+    let mut changed: Vec<PathBuf> = if dropped { roots.to_vec() } else { Vec::new() };
+    let mut failures: Vec<(Vec<PathBuf>, String)> = Vec::new();
+    for event in batch {
+        match event {
+            Ok(event) => {
+                if !is_catalog_event(&event.kind) {
+                    continue;
+                }
+                for root in affected_roots(roots, &event.paths) {
+                    if !changed.contains(&root) {
+                        changed.push(root);
+                    }
+                }
+            }
+            Err(error) => {
+                let affected = if error.paths.is_empty() {
+                    roots.to_vec()
+                } else {
+                    affected_roots(roots, &error.paths)
+                };
+                if !affected.is_empty() {
+                    failures.push((affected, error.to_string()));
+                }
+            }
+        }
+    }
+    (changed, failures)
 }
 
 fn is_catalog_event(kind: &notify::EventKind) -> bool {
@@ -207,6 +262,40 @@ mod tests {
         );
         assert!(affected_roots(&roots, &[PathBuf::from("/samples/.cache/a.wav")]).is_empty());
         assert!(affected_roots(&roots, &[PathBuf::from("/sibling/a.wav")]).is_empty());
+    }
+
+    #[test]
+    fn event_bursts_coalesce_into_one_deduplicated_changed_batch() {
+        let roots = vec![PathBuf::from("/samples"), PathBuf::from("/other")];
+        let created = |path: &str| {
+            let mut event =
+                notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File));
+            event.paths.push(PathBuf::from(path));
+            Ok(event)
+        };
+        let batch = vec![
+            created("/samples/a.wav"),
+            created("/samples/b.wav"),
+            created("/samples/.cache/hidden.wav"),
+            created("/other/c.wav"),
+            created("/samples/d.wav"),
+        ];
+
+        let (changed, failures) = coalesce_watch_events(&roots, batch, false);
+        assert_eq!(changed, roots);
+        assert!(failures.is_empty());
+
+        // A queue overflow conservatively marks every root changed.
+        let (changed, failures) = coalesce_watch_events(&roots, Vec::new(), true);
+        assert_eq!(changed, roots);
+        assert!(failures.is_empty());
+
+        // Noise-only batches change nothing.
+        let noise = notify::Event::new(notify::EventKind::Access(notify::event::AccessKind::Open(
+            notify::event::AccessMode::Read,
+        )));
+        let (changed, _) = coalesce_watch_events(&roots, vec![Ok(noise)], false);
+        assert!(changed.is_empty());
     }
 
     #[test]

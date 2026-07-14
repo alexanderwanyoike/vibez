@@ -17,14 +17,16 @@ pub struct BrowserWaveform {
 
 pub struct BrowserWaveformState {
     cache: canvas::Cache,
-    fingerprint: Cell<u64>,
+    /// (audio Arc pointer, theme epoch): a palette swap must repaint
+    /// the cached geometry, not just a new selection.
+    fingerprint: Cell<(u64, u64)>,
 }
 
 impl Default for BrowserWaveformState {
     fn default() -> Self {
         Self {
             cache: canvas::Cache::new(),
-            fingerprint: Cell::new(u64::MAX),
+            fingerprint: Cell::new((u64::MAX, u64::MAX)),
         }
     }
 }
@@ -40,11 +42,13 @@ impl canvas::Program<Message> for BrowserWaveform {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let fingerprint = self
-            .audio
-            .as_ref()
-            .map(|audio| Arc::as_ptr(audio) as u64)
-            .unwrap_or(0);
+        let fingerprint = (
+            self.audio
+                .as_ref()
+                .map(|audio| Arc::as_ptr(audio) as u64)
+                .unwrap_or(0),
+            theme::epoch(),
+        );
         if state.fingerprint.get() != fingerprint {
             state.cache.clear();
             state.fingerprint.set(fingerprint);

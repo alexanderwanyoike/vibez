@@ -172,14 +172,23 @@ pub(crate) fn scan_root_into(
     entries: &mut Vec<SampleBrowserEntry>,
     folders: &mut Vec<SampleBrowserFolder>,
     warnings: &mut Vec<String>,
-) {
+) -> Result<(), String> {
     let read_dir = match std::fs::read_dir(dir) {
         Ok(read_dir) => read_dir,
         Err(err) => {
+            // A subfolder failing to read is a warning; the root
+            // itself failing means the whole scan is unusable and
+            // must not masquerade as a successful empty catalog
+            // (that would wipe the stale-but-browsable one).
+            if dir == root {
+                return Err(format!("Root is unreadable: {} ({err})", root.display()));
+            }
             warnings.push(format!("Failed to read {} ({err})", dir.display()));
-            return;
+            return Ok(());
         }
     };
+    // Recursion below can only error for `dir == root`, so child
+    // directory failures always stay warnings.
 
     for item in read_dir {
         let item = match item {
@@ -232,7 +241,7 @@ pub(crate) fn scan_root_into(
                 relative_path,
                 name,
             });
-            scan_root_into(root, &path, entries, folders, warnings);
+            scan_root_into(root, &path, entries, folders, warnings)?;
             continue;
         }
         if !file_type.is_file() || !is_supported_audio_file(&path) {
@@ -274,6 +283,7 @@ pub(crate) fn scan_root_into(
             search_text,
         });
     }
+    Ok(())
 }
 
 pub(crate) fn scan_sample_root(root: &PathBuf) -> Result<SampleLibraryScanResult, String> {
@@ -283,7 +293,7 @@ pub(crate) fn scan_sample_root(root: &PathBuf) -> Result<SampleLibraryScanResult
     let mut entries = Vec::new();
     let mut folders = Vec::new();
     let mut warnings = Vec::new();
-    scan_root_into(root, root, &mut entries, &mut folders, &mut warnings);
+    scan_root_into(root, root, &mut entries, &mut folders, &mut warnings)?;
     entries.sort_by(|a, b| {
         a.relative_path
             .cmp(&b.relative_path)
@@ -360,7 +370,7 @@ mod local_catalog_tests {
         let mut entries = Vec::new();
         let mut folders = Vec::new();
         let mut warnings = Vec::new();
-        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
+        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings).unwrap();
 
         assert_eq!(snapshot_tree(&root), before);
         assert!(warnings.is_empty());
@@ -416,7 +426,7 @@ mod local_catalog_tests {
         let mut folders = Vec::new();
         let mut warnings = Vec::new();
         let started = Instant::now();
-        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings);
+        scan_root_into(&root, &root, &mut entries, &mut folders, &mut warnings).unwrap();
 
         assert_eq!(entries.len(), 2_000);
         assert!(warnings.is_empty());
@@ -443,6 +453,29 @@ mod local_catalog_tests {
         assert_eq!(catalog.entries[0].name, "keep.wav");
         assert_eq!(catalog.folders.len(), 1);
         assert_eq!(catalog.folders[0].name, "Visible");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_root_scans_error_instead_of_reporting_an_empty_catalog() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Samples");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("kick.wav"), b"kick").unwrap();
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
+        let still_readable = fs::read_dir(&root).is_ok();
+        let result = scan_sample_root(&root);
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+
+        if still_readable {
+            // Running as root: permissions cannot be revoked here.
+            return;
+        }
+        let error = result.unwrap_err();
+        assert!(error.contains("Root is unreadable"), "{error}");
     }
 
     #[cfg(unix)]

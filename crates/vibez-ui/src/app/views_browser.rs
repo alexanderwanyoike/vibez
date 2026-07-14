@@ -926,41 +926,10 @@ impl App {
         };
         root_results.sort_by_key(|root| browser_root_name(root).to_lowercase());
 
-        let mut folder_results: Vec<_> = self
-            .state
-            .browser
-            .folders
-            .iter()
-            .filter(|folder| {
-                self.state
-                    .browser
-                    .local_folder_is_result(folder, &search_lower)
-            })
-            .collect();
-        folder_results.sort_by(|a, b| {
-            a.name
-                .to_lowercase()
-                .cmp(&b.name.to_lowercase())
-                .then_with(|| a.path.cmp(&b.path))
-        });
-
-        let mut filtered_entries: Vec<&SampleBrowserEntry> = self
-            .state
-            .browser
-            .entries
-            .iter()
-            .filter(|entry| {
-                self.state
-                    .browser
-                    .local_entry_is_result(entry, &search_lower)
-            })
-            .collect();
-        filtered_entries.sort_by(|a, b| {
-            a.name
-                .to_lowercase()
-                .cmp(&b.name.to_lowercase())
-                .then_with(|| a.relative_path.cmp(&b.relative_path))
-        });
+        // Filtering and sorting the whole catalog is memoized on the
+        // catalog revision + query + scope, so the per-frame cost here
+        // is bounded by the 200-row window below, not the library size.
+        let local_results = self.state.browser.local_results(&search_lower);
 
         let selected_source = self.state.browser.selected_source.as_ref();
         let wide_columns = self
@@ -1024,7 +993,8 @@ impl App {
             .style(browser_table_header_style)
             .into()
         };
-        let total_results = root_results.len() + folder_results.len() + filtered_entries.len();
+        let total_results =
+            root_results.len() + local_results.folders.len() + local_results.entries.len();
         let visible_results = self.state.browser.visible_result_count(total_results);
         let mut remaining = visible_results;
         let mut entries_col = column![].spacing(1);
@@ -1080,7 +1050,8 @@ impl App {
                 .push(browser_row_divider());
             remaining = remaining.saturating_sub(1);
         }
-        for folder in folder_results.into_iter().take(remaining) {
+        for &index in local_results.folders.iter().take(remaining) {
+            let folder = &self.state.browser.folders[index];
             entries_col = entries_col
                 .push(self.view_local_folder_result(
                     folder.name.clone(),
@@ -1097,7 +1068,8 @@ impl App {
                 .push(browser_row_divider());
             remaining = remaining.saturating_sub(1);
         }
-        for entry in filtered_entries.into_iter().take(remaining) {
+        for &index in local_results.entries.iter().take(remaining) {
+            let entry = &self.state.browser.entries[index];
             let selected = selected_source.is_some_and(|source| &entry.source == source);
             let cell_color = browser_result_cell_color(selected);
             let metadata_detail = browser_entry_metadata(entry);
