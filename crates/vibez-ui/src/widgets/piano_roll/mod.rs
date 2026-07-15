@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -8,6 +8,8 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
 use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip};
+use crate::widgets::double_click::DoubleClick;
+use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 
@@ -215,7 +217,7 @@ enum DragAction {
 }
 
 /// Max time between clicks to count as double-click (ms).
-const DOUBLE_CLICK_MS: u128 = 400;
+const DOUBLE_CLICK_MS: u64 = 400;
 /// Max distance between clicks to count as double-click (px).
 const DOUBLE_CLICK_DIST: f32 = 8.0;
 
@@ -225,7 +227,7 @@ pub struct PianoRollState {
     drag: Option<DragAction>,
     last_cursor: Option<Point>,
     shift_held: bool,
-    last_click: Option<(Instant, Point)>,
+    double_click: DoubleClick,
     /// Pitch currently held down via a key-lane click (audition).
     audition_pitch: Option<u8>,
 }
@@ -467,13 +469,15 @@ impl canvas::Program<Message> for PianoRollWidget {
                         }
 
                         // Select mode empty space:
-                        // Double-click → add note, single-click → deselect
-                        let is_double = state.last_click.is_some_and(|(t, p)| {
-                            t.elapsed().as_millis() < DOUBLE_CLICK_MS
-                                && (p.x - pos.x).abs() < DOUBLE_CLICK_DIST
-                                && (p.y - pos.y).abs() < DOUBLE_CLICK_DIST
-                        });
-                        state.last_click = Some((Instant::now(), pos));
+                        // Double-click → add note, single-click → deselect.
+                        // The press stays on record (no clear) so a
+                        // rapid third click adds another note.
+                        let is_double = state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            Duration::from_millis(DOUBLE_CLICK_MS),
+                            Some(DOUBLE_CLICK_DIST),
+                        );
 
                         if is_double {
                             // Double-click: add note
@@ -519,8 +523,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             }
 
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if let Some(pos) = cursor.position() {
-                    let local = Point::new(pos.x - bounds.x, pos.y - bounds.y);
+                if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                     state.last_cursor = Some(local);
 
                     if let Some(ref drag) = state.drag {

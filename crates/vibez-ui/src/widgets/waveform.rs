@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::sync::Arc;
 
 use iced::mouse;
@@ -13,6 +14,9 @@ pub struct WaveformWidget {
     pub audio: Option<Arc<DecodedAudio>>,
     pub playhead_position: f64, // 0.0..1.0
     pub cache: canvas::Cache,
+    /// Theme generation baked into the cache; a palette swap bumps
+    /// theme::epoch() and forces a repaint of the cached colors.
+    epoch: Cell<u64>,
 }
 
 impl Default for WaveformWidget {
@@ -21,6 +25,7 @@ impl Default for WaveformWidget {
             audio: None,
             playhead_position: 0.0,
             cache: canvas::Cache::new(),
+            epoch: Cell::new(u64::MAX),
         }
     }
 }
@@ -51,6 +56,12 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
+        let epoch = theme::epoch();
+        if self.epoch.get() != epoch {
+            self.cache.clear();
+            self.epoch.set(epoch);
+        }
+
         let waveform = self.cache.draw(renderer, bounds.size(), |frame| {
             let w = bounds.width;
             let h = bounds.height;

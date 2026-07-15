@@ -28,27 +28,30 @@ pub struct MiniWaveform {
 
 pub struct MiniWaveformState {
     cache: canvas::Cache,
-    fingerprint: Cell<u64>,
+    /// (content hash, theme epoch): a palette swap must repaint the
+    /// cached geometry, not just a new sample or region.
+    fingerprint: Cell<(u64, u64)>,
 }
 
 impl Default for MiniWaveformState {
     fn default() -> Self {
         Self {
             cache: canvas::Cache::new(),
-            fingerprint: Cell::new(u64::MAX),
+            fingerprint: Cell::new((u64::MAX, u64::MAX)),
         }
     }
 }
 
 impl MiniWaveform {
-    fn fingerprint(&self) -> u64 {
+    fn fingerprint(&self) -> (u64, u64) {
         let ptr = self
             .audio
             .as_ref()
             .map(|a| Arc::as_ptr(a) as u64)
             .unwrap_or(0);
         let (s, e) = self.region.unwrap_or((0.0, 1.0));
-        ptr ^ ((s.to_bits() as u64) << 32) ^ (e.to_bits() as u64)
+        let content = ptr ^ ((s.to_bits() as u64) << 32) ^ (e.to_bits() as u64);
+        (content, theme::epoch())
     }
 }
 
