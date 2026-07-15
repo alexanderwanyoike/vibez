@@ -13,6 +13,7 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, GridConfig, UiTrack};
+use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 
 use super::*;
@@ -456,8 +457,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // -- Drag: move, resize, or region select --
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
                 if let Some(ref drag) = state.drag {
-                    if let Some(pos) = cursor.position() {
-                        let local_x = pos.x - bounds.x;
+                    if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
+                        let local_x = local.x;
                         let ppb = self.pixels_per_beat();
 
                         match drag {
@@ -524,7 +525,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let snapped = self.snapped_beat(new_pos);
 
                                 // Check for cross-track drag
-                                let local_y = pos.y - bounds.y;
+                                let local_y = local.y;
                                 let dy = local_y - start_y;
                                 let track_height = 70.0_f32;
 

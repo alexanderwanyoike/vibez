@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::keyboard;
 use iced::mouse;
@@ -7,6 +7,7 @@ use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::theme;
+use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
 use vibez_core::id::TrackId;
 
@@ -49,7 +50,7 @@ impl KnobWidget {
 pub struct KnobState {
     drag: ValueDrag,
     shift_held: bool,
-    last_click: Option<Instant>,
+    double_click: DoubleClick,
 }
 
 impl canvas::Program<Message> for KnobWidget {
@@ -171,19 +172,20 @@ impl canvas::Program<Message> for KnobWidget {
             // Click: start drag or double-click to reset
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if cursor.is_over(bounds) {
-                    let now = Instant::now();
-
-                    // Double-click detection
-                    if let Some(last) = state.last_click {
-                        if now.duration_since(last).as_millis() < DOUBLE_CLICK_MS as u128 {
-                            state.last_click = None;
+                    if let Some(pos) = cursor.position() {
+                        if state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            Duration::from_millis(DOUBLE_CLICK_MS),
+                            None,
+                        ) {
+                            state.double_click.clear();
                             return (
                                 canvas::event::Status::Captured,
                                 Some(Message::set_track_pan(self.track_id, 0.5)),
                             );
                         }
                     }
-                    state.last_click = Some(now);
 
                     state.drag.grab(cursor, bounds, self.value);
                     return (canvas::event::Status::Captured, None);

@@ -3,7 +3,7 @@
 //! gain, scroll trims Q on the parametric mids, double-click zeroes
 //! the band).
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -12,6 +12,7 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 use crate::message::Message;
 use crate::spectrum::{freq_to_norm, norm_to_freq, DISPLAY_BINS, FLOOR_DB};
 use crate::theme as th;
+use crate::widgets::double_click::DoubleClick;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::{EffectId, TrackId};
 
@@ -20,7 +21,7 @@ const RANGE_DB: f32 = 18.0;
 /// Handle hit/draw radius.
 const HANDLE_R: f32 = 6.0;
 /// Double-click window in milliseconds.
-const DOUBLE_CLICK_MS: u128 = 300;
+const DOUBLE_CLICK_MS: u64 = 300;
 /// Points sampled along the response curve.
 const CURVE_POINTS: usize = 128;
 
@@ -81,7 +82,7 @@ pub struct EqDisplayWidget {
 pub struct EqDisplayState {
     drag: Option<usize>,
     hover: Option<usize>,
-    last_click: Option<Instant>,
+    double_click: DoubleClick,
 }
 
 impl EqDisplayWidget {
@@ -378,24 +379,25 @@ impl canvas::Program<Message> for EqDisplayWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = local {
                     if let Some(band_idx) = self.band_at(pos, bounds) {
-                        let now = Instant::now();
-                        if let Some(last) = state.last_click {
-                            if now.duration_since(last).as_millis() < DOUBLE_CLICK_MS {
-                                // Double-click: zero the band's gain.
-                                state.last_click = None;
-                                state.drag = None;
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::set_effect_param(
-                                        self.track_id,
-                                        self.effect_id,
-                                        BANDS[band_idx].gain_i,
-                                        0.0,
-                                    )),
-                                );
-                            }
+                        if state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            Duration::from_millis(DOUBLE_CLICK_MS),
+                            None,
+                        ) {
+                            // Double-click: zero the band's gain.
+                            state.double_click.clear();
+                            state.drag = None;
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::set_effect_param(
+                                    self.track_id,
+                                    self.effect_id,
+                                    BANDS[band_idx].gain_i,
+                                    0.0,
+                                )),
+                            );
                         }
-                        state.last_click = Some(now);
                         state.drag = Some(band_idx);
                         return (canvas::event::Status::Captured, None);
                     }
