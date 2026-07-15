@@ -142,6 +142,7 @@ mod project_replay;
 mod update;
 mod update_media;
 mod update_remote;
+mod views_arrangement;
 mod views_browser;
 mod views_browser_audition;
 mod views_browser_places;
@@ -149,9 +150,11 @@ mod views_browser_remote;
 mod views_browser_style;
 mod views_detail;
 mod views_devices;
+mod views_mixer;
 mod views_overlays;
 mod views_settings;
 mod views_shell;
+mod views_transport;
 
 #[cfg(test)]
 mod project_format_v1_tests;
