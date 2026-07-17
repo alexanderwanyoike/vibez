@@ -18,7 +18,6 @@ const MODE_SELECTOR_INSET: f32 = 17.0;
 const MODE_TAB_MIN_WIDTH: f32 = 108.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
-const PAD_GRID_MAX_WIDTH: f32 = 620.0;
 fn perform_mode_tab_width(window_width: f32) -> f32 {
     ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
@@ -210,9 +209,7 @@ impl App {
             }
             grid = grid.push(pad_row);
         }
-        let grid = center(grid.max_width(PAD_GRID_MAX_WIDTH))
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let grid = center(grid).width(Length::Fill).height(Length::Fill);
 
         let surface = container(column![header, grid].spacing(12))
             .width(Length::FillPortion(2))
