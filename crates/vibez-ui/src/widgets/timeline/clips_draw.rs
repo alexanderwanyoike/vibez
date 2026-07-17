@@ -5,6 +5,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer};
 
 use crate::theme;
+use crate::timeline_geometry::TimelineGeometry;
 
 use super::*;
 
@@ -70,7 +71,8 @@ impl TrackClipCanvas {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
-        let ppb = self.pixels_per_beat();
+        let geometry = self.geometry();
+        let ppb = geometry.pixels_per_beat();
 
         // True when a sample drag is active and the cursor is hovering this
         // lane. Used to paint a drop indicator.
@@ -91,7 +93,7 @@ impl TrackClipCanvas {
 
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
-            let visible = w as f64 / ppb as f64;
+            let visible = geometry.visible_beats(w);
             let grid = self.grid.effective_grid(ppb);
             let step = grid.beat_size();
             let start = (self.scroll_offset_beats / step).floor().max(0.0) as i64;
@@ -134,7 +136,7 @@ impl TrackClipCanvas {
                 let clip_dur_beats = clip.duration as f64 / spb;
 
                 let clip_x = self.beat_to_x(clip_start_beat);
-                let clip_w = (clip_dur_beats * ppb as f64) as f32;
+                let clip_w = geometry.width_for_beats(clip_dur_beats);
 
                 // Skip clips entirely outside viewport
                 if clip_x + clip_w < 0.0 || clip_x > w {
@@ -187,7 +189,7 @@ impl TrackClipCanvas {
                     let mut repeat_beat = clip_start_beat + first_loop_offset_beats;
                     while repeat_beat < clip_start_beat + clip_dur_beats {
                         let rx = self.beat_to_x(repeat_beat);
-                        let rw = (loop_region_beats * ppb as f64) as f32;
+                        let rw = geometry.width_for_beats(loop_region_beats);
                         if rx < w && rx + rw > 0.0 {
                             frame.fill_rectangle(
                                 iced::Point::new(rx, clip_y),
@@ -323,7 +325,7 @@ impl TrackClipCanvas {
 
             for note_clip in &self.note_clips {
                 let clip_x = self.beat_to_x(note_clip.position_beats);
-                let clip_w = (note_clip.duration_beats * ppb as f64) as f32;
+                let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
                 // Skip clips outside viewport
                 if clip_x + clip_w < 0.0 || clip_x > w {
@@ -342,6 +344,8 @@ impl TrackClipCanvas {
 
                 // Draw note blocks inside the clip (below title bar)
                 if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                    let clip_geometry =
+                        TimelineGeometry::fitted(note_clip.duration_beats, clip_w, 0.0);
                     let body_top = clip_y + CLIP_TITLE_HEIGHT;
                     let body_h = clip_h - CLIP_TITLE_HEIGHT;
                     let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
@@ -351,10 +355,8 @@ impl TrackClipCanvas {
 
                     for &(pitch, start_beat, duration_beats) in &note_clip.notes {
                         // start_beat is clip-local (0.0 = clip start)
-                        let note_x =
-                            clip_x + (start_beat / note_clip.duration_beats * clip_w as f64) as f32;
-                        let note_w =
-                            (duration_beats / note_clip.duration_beats * clip_w as f64) as f32;
+                        let note_x = clip_x + clip_geometry.beat_to_x(start_beat);
+                        let note_w = clip_geometry.width_for_beats(duration_beats);
                         let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;
                         let note_y = body_top + 2.0 + note_y_frac * (body_h - 4.0);
                         let note_h = ((body_h - 4.0) / pitch_range).clamp(2.0, 6.0);
@@ -375,7 +377,7 @@ impl TrackClipCanvas {
                     let mut repeat_beat = note_clip.position_beats + note_clip.loop_end_beats;
                     while repeat_beat < note_clip.position_beats + note_clip.duration_beats {
                         let rx = self.beat_to_x(repeat_beat);
-                        let rw = (loop_len * ppb as f64) as f32;
+                        let rw = geometry.width_for_beats(loop_len);
                         if rx < w && rx + rw > 0.0 {
                             frame.fill_rectangle(
                                 iced::Point::new(rx, clip_y),
@@ -386,6 +388,8 @@ impl TrackClipCanvas {
 
                         // Draw ghost note blocks in this repeat (below title bar)
                         if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                            let clip_geometry =
+                                TimelineGeometry::fitted(note_clip.duration_beats, clip_w, 0.0);
                             let gbody_top = clip_y + CLIP_TITLE_HEIGHT;
                             let gbody_h = clip_h - CLIP_TITLE_HEIGHT;
                             let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
@@ -401,13 +405,8 @@ impl TrackClipCanvas {
                                 {
                                     continue;
                                 }
-                                let gx = clip_x
-                                    + ((start_beat + offset) / note_clip.duration_beats
-                                        * clip_w as f64)
-                                        as f32;
-                                let gnw = (duration_beats / note_clip.duration_beats
-                                    * clip_w as f64)
-                                    as f32;
+                                let gx = clip_x + clip_geometry.beat_to_x(start_beat + offset);
+                                let gnw = clip_geometry.width_for_beats(duration_beats);
                                 let gy_frac = (gmax.saturating_sub(pitch)) as f32 / gpitch_range;
                                 let gy = gbody_top + 2.0 + gy_frac * (gbody_h - 4.0);
                                 let gnh = ((gbody_h - 4.0) / gpitch_range).clamp(2.0, 6.0);
@@ -601,7 +600,7 @@ impl TrackClipCanvas {
                 }
                 if drop_compatible {
                     if let Some(duration_beats) = self.sample_drop_duration_beats {
-                        let preview_width = (duration_beats * self.pixels_per_beat() as f64) as f32;
+                        let preview_width = geometry.width_for_beats(duration_beats);
                         let visible_width = preview_width.min((w - snapped_x).max(0.0));
                         if visible_width > 0.0 {
                             frame.fill_rectangle(

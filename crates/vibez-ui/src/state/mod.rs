@@ -407,11 +407,11 @@ impl ProjectTracksState {
 /// stable identity. Hash-map storage prevents track reordering from moving or
 /// cloning timeline content.
 #[derive(Debug, Clone, Default)]
-pub struct ArrangementTimeline {
+pub struct TimelineContent {
     pub by_track: HashMap<TrackId, TrackTimelineContent>,
 }
 
-impl ArrangementTimeline {
+impl TimelineContent {
     pub fn get(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.by_track.get(&track_id)
     }
@@ -429,10 +429,13 @@ impl ArrangementTimeline {
     }
 }
 
-/// Arrange-owned timeline content and editor interaction state.
+/// Backward-compatible name for the project's linear Arrange content.
+pub type ArrangementTimeline = TimelineContent;
+
+/// Editing state shared by every resolved musical timeline.
 #[derive(Debug)]
-pub struct ArrangementState {
-    pub timeline: Arc<ArrangementTimeline>,
+pub struct TimelineEditorState {
+    pub timeline: Arc<TimelineContent>,
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
@@ -451,10 +454,10 @@ pub struct ArrangementState {
     pub clip_bpm_edit: HashMap<ClipId, String>,
 }
 
-impl Default for ArrangementState {
+impl Default for TimelineEditorState {
     fn default() -> Self {
         Self {
-            timeline: Arc::new(ArrangementTimeline::default()),
+            timeline: Arc::new(TimelineContent::default()),
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
@@ -467,6 +470,52 @@ impl Default for ArrangementState {
             clip_bpm_edit: HashMap::new(),
         }
     }
+}
+
+impl std::ops::Deref for TimelineEditorState {
+    type Target = TimelineContent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.timeline
+    }
+}
+
+impl std::ops::DerefMut for TimelineEditorState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.timeline)
+    }
+}
+
+/// Arrange's thin adapter over the shared Timeline Editor state.
+#[derive(Debug, Default)]
+pub struct ArrangementState {
+    pub(crate) editor: TimelineEditorState,
+}
+
+impl std::ops::Deref for ArrangementState {
+    type Target = TimelineEditorState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.editor
+    }
+}
+
+impl std::ops::DerefMut for ArrangementState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.editor
+    }
+}
+
+/// An adapter-resolved, read-only Timeline Editor target.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedTimeline<'a> {
+    pub editor: &'a TimelineEditorState,
+}
+
+/// An adapter-resolved, mutable Timeline Editor target.
+#[derive(Debug)]
+pub struct ResolvedTimelineMut<'a> {
+    pub editor: &'a mut TimelineEditorState,
 }
 
 pub struct AppState {
@@ -610,25 +659,41 @@ impl AppState {
     /// Pixels per beat at the current zoom level.
     #[allow(dead_code)]
     pub fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.view.zoom_level
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .pixels_per_beat()
     }
 
     /// Number of beats visible in a canvas of the given width.
     #[allow(dead_code)]
     pub fn visible_beats(&self, canvas_width: f32) -> f64 {
-        canvas_width as f64 / self.pixels_per_beat() as f64
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .visible_beats(canvas_width)
     }
 
     /// Convert a beat value to a pixel x coordinate in the viewport.
     #[allow(dead_code)]
     pub fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.view.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .beat_to_x(beat)
     }
 
     /// Convert a pixel x coordinate in the viewport to a beat value.
     #[allow(dead_code)]
     pub fn x_to_beat(&self, x: f32) -> f64 {
-        x as f64 / self.pixels_per_beat() as f64 + self.view.scroll_offset_beats
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .x_to_beat(x)
     }
 
     /// Total duration in beats across all tracks, with generous padding.

@@ -6,8 +6,9 @@
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::state::{
-    ArrangementTimeline, ContextMenuTarget, DetailPanelTab, SnapGrid, ViewState, Workspace,
+    ContextMenuTarget, DetailPanelTab, SnapGrid, TimelineEditorState, ViewState, Workspace,
 };
+use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -79,7 +80,7 @@ impl ViewState {
     pub fn update(
         &mut self,
         msg: ViewMsg,
-        timeline: &ArrangementTimeline,
+        timeline: &TimelineEditorState,
         ctx: ViewCtx,
     ) -> ViewAction {
         let mut action = ViewAction::default();
@@ -104,8 +105,9 @@ impl ViewState {
                 if content_beats > 0.0 {
                     // Conservative estimate of canvas width (window minus track headers)
                     let canvas_width = 1400.0_f32;
-                    let target_ppb = canvas_width / content_beats as f32;
-                    self.zoom_level = (target_ppb / 20.0).clamp(0.01, 16.0);
+                    let target_ppb = TimelineGeometry::fitted(content_beats, canvas_width, 0.0)
+                        .pixels_per_beat();
+                    self.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
                     self.scroll_offset_beats = 0.0;
                 }
             }
@@ -248,13 +250,13 @@ mod tests {
         let mut v = ViewState::default();
         v.update(
             ViewMsg::SetZoom(99.0),
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.zoom_level, 16.0);
         v.update(
             ViewMsg::SetZoom(0.0),
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.zoom_level, 0.01);
@@ -267,7 +269,7 @@ mod tests {
             scroll_offset_beats: 12.0,
             ..ViewState::default()
         };
-        let timeline = ArrangementTimeline::default();
+        let timeline = TimelineEditorState::default();
 
         for workspace in [Workspace::Perform, Workspace::Mix, Workspace::Arrange] {
             view.update(
@@ -287,13 +289,13 @@ mod tests {
         let ctx = ViewCtx { total_beats: 32.0 };
         v.update(
             ViewMsg::ScrollArrangement(100.0),
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ctx,
         );
         assert_eq!(v.scroll_offset_beats, 32.0);
         v.update(
             ViewMsg::ScrollArrangement(-100.0),
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ctx,
         );
         assert_eq!(v.scroll_offset_beats, 0.0);
@@ -314,7 +316,7 @@ mod tests {
                     is_note_clip: false,
                 },
             },
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert!(v.context_menu.is_some());
@@ -325,7 +327,7 @@ mod tests {
     fn finish_editing_track_name_emits_rename() {
         let mut v = ViewState::default();
         let tid = TrackId::new();
-        let timeline = ArrangementTimeline::default();
+        let timeline = TimelineEditorState::default();
         v.update(
             ViewMsg::StartEditingTrackName {
                 track_id: tid,
@@ -358,7 +360,7 @@ mod tests {
                 track_id: bus_id,
                 name: "A Return".to_string(),
             },
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
 
@@ -375,31 +377,31 @@ mod tests {
 
         v.update(
             ViewMsg::NarrowGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.snap_grid, SnapGrid::SIXTEENTH);
         v.update(
             ViewMsg::WidenGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
         v.update(
             ViewMsg::ToggleTripletGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.snap_grid, SnapGrid::EIGHTH.triplet());
         v.update(
             ViewMsg::ToggleSnapToGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert!(!v.snap_enabled);
         v.update(
             ViewMsg::ToggleAdaptiveGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert!(v.adaptive_grid);
@@ -409,7 +411,7 @@ mod tests {
         );
         v.update(
             ViewMsg::NarrowGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(
@@ -418,7 +420,7 @@ mod tests {
         );
         v.update(
             ViewMsg::WidenGrid,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(
@@ -436,7 +438,7 @@ mod tests {
         };
         let action = v.update(
             ViewMsg::CancelEditing,
-            &ArrangementTimeline::default(),
+            &TimelineEditorState::default(),
             ViewCtx::default(),
         );
         assert_eq!(v.editing_track_name, None);

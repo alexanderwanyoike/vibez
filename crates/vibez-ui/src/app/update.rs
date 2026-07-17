@@ -16,6 +16,7 @@ use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrume
 use crate::message::Message;
 
 use super::*;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
@@ -202,7 +203,7 @@ impl App {
                     self.state.piano_roll.update(
                         msg,
                         &mut engine,
-                        Arc::make_mut(&mut self.state.arrangement.timeline),
+                        self.state.arrangement.resolve_timeline_mut().editor,
                         ctx,
                     )
                 };
@@ -220,7 +221,7 @@ impl App {
                         msg,
                         &mut engine,
                         project_tracks,
-                        Arc::make_mut(&mut self.state.arrangement.timeline),
+                        self.state.arrangement.resolve_timeline_mut().editor,
                     )
                 };
                 if let Some(status) = action.status {
@@ -284,10 +285,11 @@ impl App {
                 let ctx = crate::domains::view::ViewCtx {
                     total_beats: self.state.total_beats(),
                 };
-                let action = self
-                    .state
-                    .view
-                    .update(msg, &self.state.arrangement.timeline, ctx);
+                let action = self.state.view.update(
+                    msg,
+                    self.state.arrangement.resolve_timeline().editor,
+                    ctx,
+                );
                 return self.apply_view_action(action);
             }
             Message::Project(msg) => {

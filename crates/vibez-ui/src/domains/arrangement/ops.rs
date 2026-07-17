@@ -7,13 +7,13 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::{ArrangementAction, ArrangementCtx, ArrangementMsg, EngineHandle};
+use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
-    ArrangementSelection, ArrangementState, ClipClipboard, ClipboardClip, ProjectTracksState,
+    ArrangementSelection, ClipClipboard, ClipboardClip, ProjectTracksState, TimelineEditorState,
     UiNoteClip,
 };
 
-impl ArrangementState {
+impl TimelineEditorState {
     pub(super) fn op_delete_clips_in_region(
         &mut self,
         engine: &mut impl EngineHandle,
@@ -614,7 +614,7 @@ impl ArrangementState {
 
     pub(super) fn op_resize_selected_clips(
         &mut self,
-        project_tracks: &mut ProjectTracksState,
+        _project_tracks: &mut ProjectTracksState,
         engine: &mut impl EngineHandle,
         ctx: ArrangementCtx,
         anchor: ArrangementSelection,
@@ -653,15 +653,12 @@ impl ArrangementState {
                     if let Some(old) = old {
                         let duration =
                             ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
-                        let action = self.update(
-                            project_tracks,
-                            ArrangementMsg::ResizeAudioClip {
-                                track_id,
-                                clip_id,
-                                new_duration: duration.max(1),
-                            },
+                        let action = self.op_resize_audio_clip(
                             engine,
                             ctx,
+                            track_id,
+                            clip_id,
+                            duration.max(1),
                         );
                         max_end = match (max_end, action.scroll_to_beat) {
                             (Some(a), Some(b)) => Some(a.max(b)),
