@@ -158,6 +158,7 @@ mod views_mixer;
 mod views_overlays;
 mod views_perform;
 mod views_settings;
+mod views_settings_perform;
 mod views_shell;
 mod views_transport;
 
@@ -253,6 +254,7 @@ impl App {
             },
             ..Default::default()
         };
+        state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
 
         // Themes: scan the user's .vzt collection, then restore the
         // saved selection (built-in name or user theme name).
@@ -469,8 +471,8 @@ impl App {
         Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(UI_TICK_MS)).map(|_| Message::Tick),
             local_watcher::subscription(self.state.browser.roots.clone()),
-            iced::keyboard::on_key_press(global_key_handler),
             iced::event::listen_with(|event, _status, _id| match event {
+                iced::Event::Keyboard(event) => keyboard_input_message(event, _status),
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                     Some(Message::View(ViewMsg::CursorMoved(position.x, position.y)))
                 }

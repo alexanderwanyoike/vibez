@@ -39,9 +39,11 @@ flowchart LR
     ENG --> OUT(("audio out"))
 ```
 
-The UI polls the event ring at 60 fps (an iced subscription tick) and pumps
-every background service in the same tick: engine events, finished plugin
-loads, plugin GUI run loops, and MIDI input.
+The UI polls the engine event ring at 60 fps (an iced subscription tick) and
+pumps background services in the same tick: finished plugin loads, plugin GUI
+run loops, and the legacy MIDI input. Computer-key Perform input instead enters
+through iced's keyboard event subscription and is timestamped and dispatched
+without waiting for that tick.
 
 ## Crate map
 
@@ -106,6 +108,17 @@ router and `EngineHandle`. The initial workspace shell sends no engine commands
 when its mode changes. Perform is a sibling of Arrange and Mix in the shared
 shell, and all three retain their interaction state when producers switch
 between them.
+
+Perform input adapters resolve physical controls before mode semantics. The
+computer-key adapter maps physical key codes through the global
+`PerformInputMapping`, suppresses auto-repeat, pairs releases with the original
+press, and emits a timestamped `PadGesture` containing Pad Position, state,
+optional velocity, and source identity. The domain consumes the gesture
+synchronously to mirror pressed state in the Pad Surface; later musical slices
+consume the same gesture action without deriving input from rendered state or
+the 60 fps engine-event pump. Widget-captured presses are not forwarded, so
+text fields suppress pad input. The mapping persists in the user's `ui.json`
+settings and is absent from the project document and undo snapshots.
 
 ## Project Tracks and timeline content
 

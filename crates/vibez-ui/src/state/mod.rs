@@ -185,6 +185,7 @@ pub enum SettingsTab {
     Plugins,
     Dropbox,
     Warping,
+    Perform,
     Appearance,
 }
 

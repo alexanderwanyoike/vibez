@@ -236,6 +236,7 @@ impl App {
         let ordinal = u16::from(position.ordinal(mode))
             + u16::from(self.state.perform.banks.for_mode(mode)) * 16;
         let selected = self.state.perform.selected_pad == Some(position);
+        let pressed = self.state.perform.is_pad_pressed(position);
         let (title, detail, color) = match mode {
             PerformMode::Sections => (
                 "+ SECTION".to_string(),
@@ -309,7 +310,9 @@ impl App {
                 iced::gradient::Linear::new(2.35)
                     .add_stop(
                         0.0,
-                        if selected {
+                        if pressed {
+                            th::blend(th::accent_dim(), color, 0.35)
+                        } else if selected {
                             th::bg_hover()
                         } else {
                             th::perform_pad_highlight()
@@ -319,7 +322,7 @@ impl App {
                     .into(),
             ),
             border: iced::Border {
-                color: if selected {
+                color: if pressed || selected {
                     th::accent()
                 } else {
                     th::blend(th::border_light(), color, 0.38)
@@ -335,7 +338,14 @@ impl App {
             .height(Length::Fill)
             .padding(3)
             .style(move |_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
+                background: Some(
+                    if pressed {
+                        th::blend(th::bg_dark(), color, 0.28)
+                    } else {
+                        th::bg_dark()
+                    }
+                    .into(),
+                ),
                 border: iced::Border {
                     color: th::blend(th::border(), color, 0.3),
                     width: 1.0,
@@ -343,8 +353,8 @@ impl App {
                 },
                 shadow: Shadow {
                     color: th::perform_shadow(),
-                    offset: Vector::new(0.0, 3.0),
-                    blur_radius: 7.0,
+                    offset: Vector::new(0.0, if pressed { 1.0 } else { 3.0 }),
+                    blur_radius: if pressed { 3.0 } else { 7.0 },
                 },
                 ..Default::default()
             })

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     #[serde(default)]
+    pub perform_input_mapping: crate::domains::perform::PerformInputMapping,
+    #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
@@ -44,6 +46,7 @@ pub struct UiSettings {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
+            perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
@@ -189,5 +192,67 @@ mod tests {
         let loaded: UiSettings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(loaded.sample_library_roots, roots);
+    }
+
+    #[test]
+    fn old_settings_receive_the_default_perform_input_mapping() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[0]),
+            ComputerKey::Digit1
+        );
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[15]),
+            ComputerKey::V
+        );
+    }
+
+    #[test]
+    fn perform_input_mapping_roundtrips_in_global_settings() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+
+        let mut settings = UiSettings::default();
+        settings
+            .perform_input_mapping
+            .rebind(PadPosition::ALL[0], ComputerKey::Y);
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[0]),
+            ComputerKey::Y
+        );
+    }
+
+    #[test]
+    fn rebinding_global_input_does_not_change_project_bytes() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+
+        let project = vibez_project::Project::default();
+        let before = serde_json::to_vec(&project).unwrap();
+        let mut settings = UiSettings::default();
+        settings
+            .perform_input_mapping
+            .rebind(PadPosition::ALL[0], ComputerKey::Y);
+        let after = serde_json::to_vec(&project).unwrap();
+
+        assert_eq!(before, after);
+        assert_ne!(
+            settings.perform_input_mapping,
+            crate::domains::perform::PerformInputMapping::default()
+        );
+    }
+}
+
+#[cfg(test)]
+impl UiSettings {
+    fn input_mapping_key(
+        &self,
+        position: crate::domains::perform::PadPosition,
+    ) -> crate::domains::perform::ComputerKey {
+        self.perform_input_mapping.key_for(position)
     }
 }

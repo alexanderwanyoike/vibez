@@ -12,6 +12,149 @@ use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
 
+pub(crate) fn keyboard_input_message(
+    event: iced::keyboard::Event,
+    status: iced::event::Status,
+) -> Option<Message> {
+    let should_forward = match &event {
+        iced::keyboard::Event::KeyPressed { .. } => status == iced::event::Status::Ignored,
+        // A release must clear a press that began before focus moved into a
+        // text field. Unpaired releases are harmless in the adapter.
+        iced::keyboard::Event::KeyReleased { .. } => true,
+        iced::keyboard::Event::ModifiersChanged(_) => false,
+    };
+    should_forward.then(|| Message::KeyboardInput {
+        event,
+        occurred_at: std::time::Instant::now(),
+    })
+}
+
+fn computer_key_from_physical(
+    physical: iced::keyboard::key::Physical,
+) -> Option<crate::domains::perform::ComputerKey> {
+    use crate::domains::perform::ComputerKey;
+    use iced::keyboard::key::Code;
+
+    let iced::keyboard::key::Physical::Code(code) = physical else {
+        return None;
+    };
+    Some(match code {
+        Code::Digit0 => ComputerKey::Digit0,
+        Code::Digit1 => ComputerKey::Digit1,
+        Code::Digit2 => ComputerKey::Digit2,
+        Code::Digit3 => ComputerKey::Digit3,
+        Code::Digit4 => ComputerKey::Digit4,
+        Code::Digit5 => ComputerKey::Digit5,
+        Code::Digit6 => ComputerKey::Digit6,
+        Code::Digit7 => ComputerKey::Digit7,
+        Code::Digit8 => ComputerKey::Digit8,
+        Code::Digit9 => ComputerKey::Digit9,
+        Code::KeyA => ComputerKey::A,
+        Code::KeyB => ComputerKey::B,
+        Code::KeyC => ComputerKey::C,
+        Code::KeyD => ComputerKey::D,
+        Code::KeyE => ComputerKey::E,
+        Code::KeyF => ComputerKey::F,
+        Code::KeyG => ComputerKey::G,
+        Code::KeyH => ComputerKey::H,
+        Code::KeyI => ComputerKey::I,
+        Code::KeyJ => ComputerKey::J,
+        Code::KeyK => ComputerKey::K,
+        Code::KeyL => ComputerKey::L,
+        Code::KeyM => ComputerKey::M,
+        Code::KeyN => ComputerKey::N,
+        Code::KeyO => ComputerKey::O,
+        Code::KeyP => ComputerKey::P,
+        Code::KeyQ => ComputerKey::Q,
+        Code::KeyR => ComputerKey::R,
+        Code::KeyS => ComputerKey::S,
+        Code::KeyT => ComputerKey::T,
+        Code::KeyU => ComputerKey::U,
+        Code::KeyV => ComputerKey::V,
+        Code::KeyW => ComputerKey::W,
+        Code::KeyX => ComputerKey::X,
+        Code::KeyY => ComputerKey::Y,
+        Code::KeyZ => ComputerKey::Z,
+        _ => return None,
+    })
+}
+
+fn runtime_key_id(key: &iced::keyboard::Key) -> String {
+    format!("{key:?}")
+}
+
+impl super::App {
+    pub(super) fn handle_keyboard_input(
+        &mut self,
+        event: iced::keyboard::Event,
+        occurred_at: std::time::Instant,
+    ) -> iced::Task<Message> {
+        use iced::keyboard::key::Named;
+
+        let (perform_msg, fallback) = match event {
+            iced::keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                modifiers,
+                ..
+            } => {
+                if self.state.perform.key_rebind_target.is_some()
+                    && matches!(key, iced::keyboard::Key::Named(Named::Escape))
+                {
+                    (Some(PerformMsg::CancelKeyRebind), None)
+                } else if let Some(computer_key) = computer_key_from_physical(physical_key) {
+                    if modifiers.is_empty() || self.state.perform.key_rebind_target.is_some() {
+                        (
+                            Some(PerformMsg::ComputerKeyPressed {
+                                key: computer_key,
+                                key_id: runtime_key_id(&key),
+                                occurred_at,
+                            }),
+                            Some((key, modifiers)),
+                        )
+                    } else {
+                        (None, Some((key, modifiers)))
+                    }
+                } else if self.state.perform.key_rebind_target.is_some() {
+                    self.state.status_text = "Perform keys must be letters or numbers".into();
+                    return iced::Task::none();
+                } else {
+                    (None, Some((key, modifiers)))
+                }
+            }
+            iced::keyboard::Event::KeyReleased { key, .. } => (
+                Some(PerformMsg::ComputerKeyReleased {
+                    key_id: runtime_key_id(&key),
+                    occurred_at,
+                }),
+                None,
+            ),
+            iced::keyboard::Event::ModifiersChanged(_) => return iced::Task::none(),
+        };
+
+        if let Some(msg) = perform_msg {
+            let ctx = crate::domains::perform::PerformCtx {
+                workspace_visible: self.state.view.workspace == crate::state::Workspace::Perform,
+            };
+            let action = {
+                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                self.state.perform.update(msg, &mut engine, ctx)
+            };
+            if action.persist_settings {
+                self.persist_ui_settings();
+                self.state.status_text = "Perform key mapping saved".into();
+            }
+            if action.keyboard_consumed {
+                return iced::Task::none();
+            }
+        }
+
+        fallback
+            .and_then(|(key, modifiers)| global_key_handler(key, modifiers))
+            .map_or_else(iced::Task::none, iced::Task::done)
+    }
+}
+
 pub(crate) fn truncate_end(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         text.to_string()
@@ -290,5 +433,26 @@ mod tests {
         }
 
         assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn text_field_capture_suppresses_computer_pad_presses() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Event, Key, Location, Modifiers};
+
+        let event = Event::KeyPressed {
+            key: Key::Character("q".into()),
+            modified_key: Key::Character("q".into()),
+            physical_key: Physical::Code(Code::KeyQ),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: Some("q".into()),
+        };
+
+        assert!(keyboard_input_message(event.clone(), iced::event::Status::Captured).is_none());
+        assert!(matches!(
+            keyboard_input_message(event, iced::event::Status::Ignored),
+            Some(Message::KeyboardInput { .. })
+        ));
     }
 }
