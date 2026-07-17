@@ -1,14 +1,28 @@
 //! Perform workspace shell: mode selector, 4x4 Pad Surface, and the empty
 //! Section construction area. Musical behavior arrives in later cards.
 
-use iced::widget::{button, center, column, container, horizontal_space, mouse_area, row, text};
-use iced::{Element, Length, Theme};
+use iced::widget::{
+    button, center, column, container, horizontal_space, mouse_area, row, stack, text,
+};
+use iced::{Element, Font, Length, Shadow, Theme, Vector};
 
 use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
 use crate::message::Message;
 use crate::theme as th;
 
 use super::*;
+
+const MODE_SELECTOR_HEIGHT: f32 = 34.0;
+const MODE_SELECTOR_INSET: f32 = 17.0;
+const MODE_TAB_MIN_WIDTH: f32 = 108.0;
+const MODE_TAB_MAX_WIDTH: f32 = 132.0;
+const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
+const PAD_GRID_MAX_WIDTH: f32 = 620.0;
+
+fn perform_mode_tab_width(window_width: f32) -> f32 {
+    ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
+        .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
+}
 
 impl App {
     pub(super) fn view_perform(&self) -> Element<'_, Message> {
@@ -37,59 +51,99 @@ impl App {
     }
 
     fn view_perform_mode_selector(&self) -> Element<'_, Message> {
-        let mut modes = row![].width(Length::Fill).height(Length::Fixed(38.0));
+        let tab_width = perform_mode_tab_width(self.state.view.window_width);
+        let mut modes = row![].height(Length::Fill).spacing(1);
         for mode in PerformMode::ALL {
             let active = self.state.perform.mode == mode;
             let text_color = if active { th::accent() } else { th::text_dim() };
-            let tab = button(
-                row![
-                    text(mode.label()).size(11).color(text_color),
-                    horizontal_space(),
-                    text(mode.shortcut()).size(9).color(if active {
+            let label = mode.label().to_uppercase();
+            let tab_content = row![
+                text(label).font(Font::MONOSPACE).size(10).color(text_color),
+                text(mode.shortcut())
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(if active {
                         th::accent_dim()
                     } else {
                         th::text_muted()
                     })
-                ]
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::Perform(PerformMsg::SelectMode(mode)))
-            .width(Length::FillPortion(1))
-            .height(Length::Fill)
-            .padding([0, 14])
-            .style(move |_theme: &Theme, status| {
-                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                let background = if active {
-                    th::bg_elevated()
-                } else if hovered {
-                    th::bg_hover()
-                } else {
-                    th::bg_surface()
-                };
-                button::Style {
-                    background: Some(background.into()),
-                    text_color,
-                    border: iced::Border {
-                        color: if active { th::accent() } else { th::divider() },
-                        width: if active { 2.0 } else { 1.0 },
-                        radius: 0.0.into(),
-                    },
+            ]
+            .spacing(9)
+            .align_y(iced::Alignment::Center);
+            let tab_button = button(center(tab_content).width(Length::Fill).height(Length::Fill))
+                .on_press(Message::Perform(PerformMsg::SelectMode(mode)))
+                .width(Length::Fill)
+                .height(Length::Fixed(MODE_SELECTOR_HEIGHT - 2.0))
+                .padding(0)
+                .style(move |_theme: &Theme, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    let background = if active {
+                        th::perform_active_surface()
+                    } else if hovered {
+                        th::bg_hover()
+                    } else {
+                        iced::Color::TRANSPARENT
+                    };
+                    button::Style {
+                        background: Some(background.into()),
+                        text_color,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }
+                });
+
+            let underline_color = if active {
+                th::accent()
+            } else {
+                iced::Color::TRANSPARENT
+            };
+            let underline = container(horizontal_space())
+                .width(Length::Fill)
+                .height(Length::Fixed(2.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: Some(underline_color.into()),
                     ..Default::default()
-                }
-            });
-            modes = modes.push(tab);
+                });
+
+            modes = modes.push(
+                column![tab_button, underline]
+                    .width(Length::Fixed(tab_width))
+                    .height(Length::Fill),
+            );
         }
 
-        modes.into()
+        container(row![modes, horizontal_space()].height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fixed(MODE_SELECTOR_HEIGHT))
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: MODE_SELECTOR_INSET,
+            })
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::divider(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_pad_surface(&self) -> Element<'_, Message> {
         let mode = self.state.perform.mode;
         let heading = column![
-            text("PAD SURFACE").size(9).color(th::text_dim()),
-            text(mode.label()).size(19).color(th::text())
+            text("PERFORM SURFACE")
+                .font(Font::MONOSPACE)
+                .size(8)
+                .color(th::accent()),
+            text(mode.label().to_uppercase()).size(21).color(th::text())
         ]
-        .spacing(4);
+        .spacing(5);
         let origin = match mode {
             PerformMode::Sections => "ORDER · TOP-LEFT",
             PerformMode::TrackMutes => "PROJECT TRACKS · TOP-LEFT",
@@ -98,7 +152,10 @@ impl App {
         let header = row![
             heading,
             horizontal_space(),
-            text(origin).size(8).color(th::text_muted())
+            text(origin)
+                .font(Font::MONOSPACE)
+                .size(8)
+                .color(th::text_dim())
         ]
         .align_y(iced::Alignment::End);
 
@@ -120,13 +177,16 @@ impl App {
             }
             grid = grid.push(pad_row);
         }
+        let grid = center(grid.max_width(PAD_GRID_MAX_WIDTH))
+            .width(Length::Fill)
+            .height(Length::Fill);
 
         let surface = container(column![header, grid].spacing(12))
             .width(Length::FillPortion(2))
             .height(Length::Fill)
             .padding(14)
             .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
+                background: Some(th::perform_inset().into()),
                 border: iced::Border {
                     color: th::border(),
                     width: 1.0,
@@ -146,13 +206,12 @@ impl App {
         let ordinal = u16::from(position.ordinal(mode))
             + u16::from(self.state.perform.banks.for_mode(mode)) * 16;
         let selected = self.state.perform.selected_pad == Some(position);
-        let background = if selected {
-            th::bg_hover()
-        } else {
-            th::bg_elevated()
-        };
         let (title, detail, color) = match mode {
-            PerformMode::Sections => ("+ Section".to_string(), "EMPTY", th::text_dim()),
+            PerformMode::Sections => (
+                "+ SECTION".to_string(),
+                "EMPTY",
+                th::track_color((ordinal - 1) as u8),
+            ),
             PerformMode::TrackMutes => {
                 if let Some(track) = self
                     .state
@@ -174,24 +233,28 @@ impl App {
                 }
             }
             PerformMode::Instrument => (
-                "Select MIDI".to_string(),
+                "SELECT MIDI".to_string(),
                 "NO INSTRUMENT TARGET",
-                th::text_muted(),
+                th::track_color((ordinal - 1) as u8),
             ),
         };
 
-        container(
+        let pad_face = container(
             column![
                 row![
-                    text(format!("{ordinal:02}")).size(10).color(color),
+                    text(format!("{ordinal:02}"))
+                        .font(Font::MONOSPACE)
+                        .size(9)
+                        .color(color),
                     horizontal_space(),
                     text(format!("R{}C{}", position.row + 1, position.column + 1))
+                        .font(Font::MONOSPACE)
                         .size(7)
-                        .color(th::text_muted())
+                        .color(th::text_dim())
                 ],
                 center(
                     text(title)
-                        .size(12)
+                        .size(11)
                         .color(if mode == PerformMode::Sections {
                             th::text_dim()
                         } else {
@@ -200,85 +263,241 @@ impl App {
                 )
                 .width(Length::Fill)
                 .height(Length::Fill),
-                text(detail).size(7).color(th::text_muted())
+                text(detail)
+                    .font(Font::MONOSPACE)
+                    .size(7)
+                    .color(th::text_dim())
             ]
             .height(Length::Fill),
         )
-        .width(Length::FillPortion(1))
+        .width(Length::Fill)
         .height(Length::Fill)
-        .padding(9)
+        .padding(8)
         .style(move |_theme: &Theme| container::Style {
-            background: Some(background.into()),
+            background: Some(
+                iced::gradient::Linear::new(2.35)
+                    .add_stop(
+                        0.0,
+                        if selected {
+                            th::bg_hover()
+                        } else {
+                            th::perform_pad_highlight()
+                        },
+                    )
+                    .add_stop(1.0, th::perform_pad_lowlight())
+                    .into(),
+            ),
             border: iced::Border {
                 color: if selected {
                     th::accent()
-                } else if mode == PerformMode::Sections {
-                    th::border_light()
                 } else {
-                    color
+                    th::blend(th::border_light(), color, 0.38)
                 },
                 width: 1.0,
-                radius: 7.0.into(),
+                radius: 5.0.into(),
             },
             ..Default::default()
-        })
-        .into()
+        });
+
+        container(pad_face)
+            .width(Length::FillPortion(1))
+            .height(Length::Fill)
+            .padding(3)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(th::bg_dark().into()),
+                border: iced::Border {
+                    color: th::blend(th::border(), color, 0.3),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                shadow: Shadow {
+                    color: th::perform_shadow(),
+                    offset: Vector::new(0.0, 3.0),
+                    blur_radius: 7.0,
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_section_construction(&self) -> Element<'_, Message> {
         let toolbar = row![
             column![
-                text("SECTION CONSTRUCTION").size(9).color(th::text_dim()),
+                text("SECTION CONSTRUCTION")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::accent()),
                 text("No Section selected").size(18).color(th::text())
             ]
             .spacing(4),
             horizontal_space(),
             column![
-                text("LOCAL TIMELINE").size(8).color(th::text_muted()),
-                text("— BARS").size(10).color(th::text_dim())
+                text("LOCAL TIMELINE")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::text_dim()),
+                text("— BARS")
+                    .font(Font::MONOSPACE)
+                    .size(9)
+                    .color(th::text_dim())
             ]
             .spacing(4)
             .align_x(iced::Alignment::End)
         ]
         .align_y(iced::Alignment::Center)
         .padding([12, 16]);
+        let toolbar = container(toolbar)
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
 
         let ruler = row![
-            container(text("PROJECT TRACK").size(7).color(th::text_muted()))
-                .width(Length::Fixed(112.0))
-                .padding([8, 10]),
-            container(text("1").size(8).color(th::text_muted()))
-                .width(Length::FillPortion(1))
-                .padding(8),
-            container(text("2").size(8).color(th::text_muted()))
-                .width(Length::FillPortion(1))
-                .padding(8),
-            container(text("3").size(8).color(th::text_muted()))
-                .width(Length::FillPortion(1))
-                .padding(8),
-            container(text("4").size(8).color(th::text_muted()))
-                .width(Length::FillPortion(1))
-                .padding(8)
+            container(
+                text("PROJECT TRACK")
+                    .font(Font::MONOSPACE)
+                    .size(7)
+                    .color(th::text_dim())
+            )
+            .width(Length::Fixed(112.0))
+            .padding([8, 10]),
+            container(
+                text("1")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::text_dim())
+            )
+            .width(Length::FillPortion(1))
+            .padding(8),
+            container(
+                text("2")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::text_dim())
+            )
+            .width(Length::FillPortion(1))
+            .padding(8),
+            container(
+                text("3")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::text_dim())
+            )
+            .width(Length::FillPortion(1))
+            .padding(8),
+            container(
+                text("4")
+                    .font(Font::MONOSPACE)
+                    .size(8)
+                    .color(th::text_dim())
+            )
+            .width(Length::FillPortion(1))
+            .padding(8)
         ]
         .height(Length::Fixed(30.0));
 
+        let mut ghost_tracks = column![].width(Length::Fill).height(Length::Fill);
+        for index in 0..6_u8 {
+            let marker = container(horizontal_space())
+                .width(Length::Fixed(3.0))
+                .height(Length::Fixed(18.0))
+                .style(move |_theme: &Theme| container::Style {
+                    background: Some(th::with_alpha(th::track_color(index), 0.38).into()),
+                    ..Default::default()
+                });
+            let gutter =
+                container(row![marker, horizontal_space()].align_y(iced::Alignment::Center))
+                    .width(Length::Fixed(112.0))
+                    .height(Length::Fill)
+                    .padding([0, 10])
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::bg_surface().into()),
+                        border: iced::Border {
+                            color: th::perform_grid_line(),
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    });
+            let mut lanes = row![].width(Length::Fill).height(Length::Fill);
+            for _ in 0..4 {
+                lanes = lanes.push(
+                    container(horizontal_space())
+                        .width(Length::FillPortion(1))
+                        .height(Length::Fill)
+                        .style(|_theme: &Theme| container::Style {
+                            border: iced::Border {
+                                color: th::perform_grid_line(),
+                                width: 1.0,
+                                radius: 0.0.into(),
+                            },
+                            ..Default::default()
+                        }),
+                );
+            }
+            ghost_tracks = ghost_tracks.push(
+                row![gutter, lanes]
+                    .width(Length::Fill)
+                    .height(Length::FillPortion(1)),
+            );
+        }
+        let timeline_grid = container(ghost_tracks)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::display_bg().into()),
+                ..Default::default()
+            });
+
         let empty = center(
-            column![
-                text("SECTION SPACE").size(9).color(th::accent_dim()),
-                text("Select a Section to construct its multitrack timeline")
-                    .size(14)
-                    .color(th::text_dim()),
-                text("Section creation and editing are not available yet")
-                    .size(9)
-                    .color(th::text_muted())
-            ]
-            .spacing(8)
-            .align_x(iced::Alignment::Center),
+            container(
+                column![
+                    text("SECTION SPACE")
+                        .font(Font::MONOSPACE)
+                        .size(8)
+                        .color(th::accent()),
+                    text("SELECT A SECTION")
+                        .font(Font::MONOSPACE)
+                        .size(12)
+                        .color(th::text()),
+                    text("Its multitrack timeline will open here")
+                        .size(10)
+                        .color(th::text_dim()),
+                    text("CREATION + EDITING ARRIVE IN A LATER CARD")
+                        .font(Font::MONOSPACE)
+                        .size(7)
+                        .color(th::text_dim())
+                ]
+                .spacing(8)
+                .align_x(iced::Alignment::Center),
+            )
+            .padding([16, 22])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::perform_inset().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                shadow: Shadow {
+                    color: th::perform_shadow(),
+                    offset: Vector::new(0.0, 4.0),
+                    blur_radius: 10.0,
+                },
+                ..Default::default()
+            }),
         )
         .width(Length::Fill)
         .height(Length::Fill);
+        let empty_timeline = stack![timeline_grid, empty];
 
-        let construction = container(column![toolbar, ruler, empty].height(Length::Fill))
+        let construction = container(column![toolbar, ruler, empty_timeline].height(Length::Fill))
             .width(Length::FillPortion(3))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
@@ -296,5 +515,22 @@ impl App {
                 PerformEditorFocus::SectionConstruction,
             )))
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_tabs_scale_with_the_pad_surface_then_stop_growing() {
+        let narrow = perform_mode_tab_width(900.0);
+        let default = perform_mode_tab_width(1400.0);
+        let wide = perform_mode_tab_width(2000.0);
+
+        assert!((MODE_TAB_MIN_WIDTH..MODE_TAB_MAX_WIDTH).contains(&narrow));
+        assert_eq!(default, MODE_TAB_MAX_WIDTH);
+        assert_eq!(wide, MODE_TAB_MAX_WIDTH);
+        assert!(MODE_SELECTOR_INSET + narrow * 3.0 <= 900.0 * PAD_SURFACE_WIDTH_SHARE);
     }
 }
