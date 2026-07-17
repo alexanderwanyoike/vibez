@@ -209,6 +209,10 @@ pub enum Message {
     Project(crate::domains::project::ProjectMsg),
     Automation(crate::domains::automation::AutomationMsg),
     Perform(crate::domains::perform::PerformMsg),
+    KeyboardInput {
+        event: iced::keyboard::Event,
+        occurred_at: std::time::Instant,
+    },
     View(crate::domains::view::ViewMsg),
 
     // Workspace

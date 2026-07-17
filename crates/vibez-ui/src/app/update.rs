@@ -125,6 +125,9 @@ impl App {
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
+            Message::KeyboardInput { event, occurred_at } => {
+                return self.handle_keyboard_input(event, occurred_at);
+            }
             // The transport domain owns its logic entirely; app.rs
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
@@ -233,8 +236,8 @@ impl App {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                     self.state.perform.update(msg, &mut engine, ctx)
                 };
-                match action {
-                    crate::domains::perform::PerformAction::None => {}
+                if action.persist_settings {
+                    self.persist_ui_settings();
                 }
             }
             Message::View(msg) => {
@@ -408,6 +411,7 @@ impl App {
             }
             Message::CloseSettings => {
                 self.state.settings_open = false;
+                self.state.perform.key_rebind_target = None;
                 let _ = self.state.plugin_settings.save();
             }
             Message::SelectSettingsTab(tab) => {
