@@ -70,6 +70,15 @@ pub enum EngineEvent {
         peak_r: f32,
     },
 
+    /// A track mute command became effective in the audio engine at this
+    /// absolute transport sample. This is the authoritative event later
+    /// Capture work consumes.
+    TrackMuteChanged {
+        track_id: TrackId,
+        muted: bool,
+        effective_at_samples: u64,
+    },
+
     /// Playback has started (transport entered playing state).
     PlaybackStarted,
 
@@ -101,6 +110,11 @@ mod tests {
             track_id: TrackId::new(),
             peak_l: 0.5,
             peak_r: 0.4,
+        };
+        let _track_mute = EngineEvent::TrackMuteChanged {
+            track_id: TrackId::new(),
+            muted: true,
+            effective_at_samples: 44_100,
         };
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;

@@ -91,6 +91,9 @@ impl App {
         }
 
         self.state.project_tracks = snapshot.project_tracks;
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;

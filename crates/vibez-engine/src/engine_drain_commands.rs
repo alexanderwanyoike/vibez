@@ -152,8 +152,19 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
-                    if let Some(track) = self.channel_mut(id) {
+                    let effective_at_samples = self.transport.position();
+                    let changed = if let Some(track) = self.channel_mut(id) {
                         track.mute = mute;
+                        true
+                    } else {
+                        false
+                    };
+                    if changed {
+                        let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
+                            track_id: id,
+                            muted: mute,
+                            effective_at_samples,
+                        });
                     }
                 }
 

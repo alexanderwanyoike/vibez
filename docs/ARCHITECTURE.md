@@ -104,10 +104,12 @@ math happens in the domains.
 
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
 selection, and editor-focus state; `PerformMsg` changes that slice through the
-router and `EngineHandle`. The initial workspace shell sends no engine commands
-when its mode changes. Perform is a sibling of Arrange and Mix in the shared
+router and `EngineHandle`. Perform is a sibling of Arrange and Mix in the shared
 shell, and all three retain their interaction state when producers switch
-between them.
+between them. Track Mute pad slots retain stable `TrackId` assignments across
+track additions and deletions. A pad press resolves inside Perform to a narrow
+mute request; the router applies that request to the one project-owned mute
+field used by Arrange and Mix instead of storing a second Perform value.
 
 Perform input adapters resolve physical controls before mode semantics. The
 computer-key adapter maps physical key codes through the global
@@ -119,6 +121,12 @@ consume the same gesture action without deriving input from rendered state or
 the 60 fps engine-event pump. Widget-captured presses are not forwarded, so
 text fields suppress pad input. The mapping persists in the user's `ui.json`
 settings and is absent from the project document and undo snapshots.
+
+Track mute commands become authoritative when the audio callback drains them.
+The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
+absolute transport sample; the UI mirrors that result into the shared Project
+Track. This keeps pad, mixer, persisted, and audible state aligned while giving
+later Capture work an engine-timestamped event source.
 
 ## Project Tracks and timeline content
 

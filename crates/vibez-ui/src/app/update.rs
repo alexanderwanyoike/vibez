@@ -187,6 +187,9 @@ impl App {
                         ctx,
                     )
                 };
+                self.state
+                    .perform
+                    .sync_project_tracks(&self.state.project_tracks.tracks);
                 return self.apply_arrangement_action(action);
             }
             Message::PianoRoll(msg) => {
@@ -231,14 +234,13 @@ impl App {
                 let ctx = crate::domains::perform::PerformCtx {
                     workspace_visible: self.state.view.workspace
                         == crate::state::Workspace::Perform,
+                    project_tracks: &self.state.project_tracks.tracks,
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                     self.state.perform.update(msg, &mut engine, ctx)
                 };
-                if action.persist_settings {
-                    self.persist_ui_settings();
-                }
+                self.apply_perform_action(action);
             }
             Message::View(msg) => {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {

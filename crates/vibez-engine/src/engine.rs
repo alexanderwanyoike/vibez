@@ -941,3 +941,7 @@ mod tests;
 #[cfg(test)]
 #[path = "engine_stuck_note_tests.rs"]
 mod stuck_note_tests;
+
+#[cfg(test)]
+#[path = "engine_mute_event_tests.rs"]
+mod mute_event_tests;
