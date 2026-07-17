@@ -319,6 +319,7 @@ pub enum ArrangementSelection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Arrange,
+    Perform,
     Mix,
 }
 

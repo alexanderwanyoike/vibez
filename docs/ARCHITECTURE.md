@@ -15,7 +15,7 @@ back through channels.
 flowchart LR
     subgraph UI["UI thread (iced)"]
         APP["App: message router"]
-        DOM["Domain modules<br/>transport / arrangement / piano roll<br/>devices / browser / project / view"]
+        DOM["Domain modules<br/>transport / arrangement / perform / piano roll<br/>devices / browser / project / view"]
         APP --> DOM
     end
 
@@ -99,6 +99,13 @@ Anything asynchronous (file dialogs, decoding, saving, bounce renders) stays
 in the router layer as iced Tasks in topic modules under
 `crates/vibez-ui/src/app/`; the results come back as messages and the state
 math happens in the domains.
+
+Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
+selection, and editor-focus state; `PerformMsg` changes that slice through the
+router and `EngineHandle`. The initial workspace shell sends no engine commands
+when its mode changes. Perform is a sibling of Arrange and Mix in the shared
+shell, and all three retain their interaction state when producers switch
+between them.
 
 ## Project Tracks and timeline content
 

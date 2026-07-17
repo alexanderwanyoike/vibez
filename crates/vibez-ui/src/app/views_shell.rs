@@ -24,6 +24,7 @@ impl App {
 
         let workspace_content = match self.state.view.workspace {
             Workspace::Arrange => self.view_arrangement(),
+            Workspace::Perform => self.view_perform(),
             Workspace::Mix => self.view_mixer(),
         };
         let content: Element<'_, Message> =
@@ -188,7 +189,40 @@ impl App {
             })
         };
 
-        let tabs = row![arrange_tab, mix_tab].spacing(4);
+        let perform_tab = {
+            let active = self.state.view.workspace == Workspace::Perform;
+            let (bg, text_color, border_color) = if active {
+                (th::bg_elevated(), th::accent(), th::accent_dim())
+            } else {
+                (
+                    iced::Color::TRANSPARENT,
+                    th::text_dim(),
+                    iced::Color::TRANSPARENT,
+                )
+            };
+            button(
+                row![
+                    icons::icon(icons::MUSIC).size(13).color(text_color),
+                    text("Perform").size(13).color(text_color)
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::View(ViewMsg::SwitchWorkspace(Workspace::Perform)))
+            .padding([6, 14])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(bg.into()),
+                text_color,
+                border: iced::Border {
+                    color: border_color,
+                    width: if active { 1.0 } else { 0.0 },
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+        };
+
+        let tabs = row![arrange_tab, perform_tab, mix_tab].spacing(4);
 
         let file_btn = button(text("File").size(13).color(th::text_dim()))
             .on_press(Message::Project(ProjectMsg::ToggleFileMenu))
