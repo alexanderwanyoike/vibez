@@ -4,11 +4,12 @@
 use iced::widget::{
     button, center, column, container, horizontal_space, mouse_area, row, stack, text,
 };
-use iced::{Element, Font, Length, Shadow, Theme, Vector};
+use iced::{Element, Length, Shadow, Theme, Vector};
 
 use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
 use crate::message::Message;
 use crate::theme as th;
+use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 
 use super::*;
 
@@ -18,7 +19,6 @@ const MODE_TAB_MIN_WIDTH: f32 = 108.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
 const PAD_GRID_MAX_WIDTH: f32 = 620.0;
-
 fn perform_mode_tab_width(window_width: f32) -> f32 {
     ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
@@ -55,18 +55,47 @@ impl App {
         let mut modes = row![].height(Length::Fill).spacing(1);
         for mode in PerformMode::ALL {
             let active = self.state.perform.mode == mode;
-            let text_color = if active { th::accent() } else { th::text_dim() };
+            let text_color = if active {
+                th::accent()
+            } else {
+                th::blend(th::text_dim(), th::text(), 0.38)
+            };
             let label = mode.label().to_uppercase();
-            let tab_content = row![
-                text(label).font(Font::MONOSPACE).size(10).color(text_color),
+            let shortcut_color = if active {
+                th::blend(th::accent_dim(), th::accent(), 0.48)
+            } else {
+                th::blend(th::text_dim(), th::text(), 0.18)
+            };
+            let shortcut = container(
                 text(mode.shortcut())
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(if active {
+                    .font(PERFORM_TECH_STRONG)
+                    .size(9)
+                    .color(shortcut_color),
+            )
+            .padding([2, 4])
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(
+                    if active {
+                        th::perform_active_surface()
+                    } else {
+                        th::bg_dark()
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    color: if active {
                         th::accent_dim()
                     } else {
-                        th::text_muted()
-                    })
+                        th::border_light()
+                    },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+            let tab_content = row![
+                text(label).font(PERFORM_LABEL).size(11).color(text_color),
+                shortcut
             ]
             .spacing(9)
             .align_y(iced::Alignment::Center);
@@ -138,10 +167,13 @@ impl App {
         let mode = self.state.perform.mode;
         let heading = column![
             text("PERFORM SURFACE")
-                .font(Font::MONOSPACE)
-                .size(8)
+                .font(PERFORM_LABEL)
+                .size(9)
                 .color(th::accent()),
-            text(mode.label().to_uppercase()).size(21).color(th::text())
+            text(mode.label().to_uppercase())
+                .font(PERFORM_DISPLAY)
+                .size(22)
+                .color(th::text())
         ]
         .spacing(5);
         let origin = match mode {
@@ -152,10 +184,11 @@ impl App {
         let header = row![
             heading,
             horizontal_space(),
-            text(origin)
-                .font(Font::MONOSPACE)
-                .size(8)
-                .color(th::text_dim())
+            text(origin).font(PERFORM_TECH).size(9).color(th::blend(
+                th::text_dim(),
+                th::text(),
+                0.24
+            ))
         ]
         .align_y(iced::Alignment::End);
 
@@ -238,35 +271,36 @@ impl App {
                 th::track_color((ordinal - 1) as u8),
             ),
         };
+        let number_color = th::blend(color, th::text(), 0.3);
+        let coordinate_color = th::blend(th::text_dim(), th::text(), 0.2);
 
         let pad_face = container(
             column![
                 row![
                     text(format!("{ordinal:02}"))
-                        .font(Font::MONOSPACE)
-                        .size(9)
-                        .color(color),
-                    horizontal_space(),
-                    text(format!("R{}C{}", position.row + 1, position.column + 1))
-                        .font(Font::MONOSPACE)
-                        .size(7)
-                        .color(th::text_dim())
-                ],
-                center(
-                    text(title)
+                        .font(PERFORM_TECH_STRONG)
                         .size(11)
-                        .color(if mode == PerformMode::Sections {
-                            th::text_dim()
-                        } else {
-                            th::text()
-                        })
-                )
+                        .color(number_color),
+                    horizontal_space(),
+                    text(format!("R{} · C{}", position.row + 1, position.column + 1))
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(coordinate_color)
+                ],
+                center(text(title).font(PERFORM_DISPLAY).size(13).color(
+                    if mode == PerformMode::Sections {
+                        th::blend(th::text_dim(), th::text(), 0.22)
+                    } else {
+                        th::text()
+                    }
+                ))
                 .width(Length::Fill)
                 .height(Length::Fill),
-                text(detail)
-                    .font(Font::MONOSPACE)
-                    .size(7)
-                    .color(th::text_dim())
+                text(detail).font(PERFORM_TECH).size(8).color(th::blend(
+                    th::text_dim(),
+                    th::text(),
+                    0.12
+                ))
             ]
             .height(Length::Fill),
         )
@@ -324,22 +358,26 @@ impl App {
         let toolbar = row![
             column![
                 text("SECTION CONSTRUCTION")
-                    .font(Font::MONOSPACE)
-                    .size(8)
+                    .font(PERFORM_LABEL)
+                    .size(9)
                     .color(th::accent()),
-                text("No Section selected").size(18).color(th::text())
+                text("No Section selected")
+                    .font(PERFORM_DISPLAY)
+                    .size(19)
+                    .color(th::text())
             ]
             .spacing(4),
             horizontal_space(),
             column![
                 text("LOCAL TIMELINE")
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(th::text_dim()),
-                text("— BARS")
-                    .font(Font::MONOSPACE)
+                    .font(PERFORM_LABEL)
                     .size(9)
-                    .color(th::text_dim())
+                    .color(th::blend(th::text_dim(), th::text(), 0.28)),
+                text("— BARS").font(PERFORM_TECH).size(9).color(th::blend(
+                    th::text_dim(),
+                    th::text(),
+                    0.2
+                ))
             ]
             .spacing(4)
             .align_x(iced::Alignment::End)
@@ -358,44 +396,45 @@ impl App {
                 ..Default::default()
             });
 
+        let ruler_number_color = th::blend(th::text_dim(), th::text(), 0.36);
         let ruler = row![
             container(
                 text("PROJECT TRACK")
-                    .font(Font::MONOSPACE)
-                    .size(7)
-                    .color(th::text_dim())
+                    .font(PERFORM_TECH)
+                    .size(8)
+                    .color(th::blend(th::text_dim(), th::text(), 0.16))
             )
             .width(Length::Fixed(112.0))
             .padding([8, 10]),
             container(
                 text("1")
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(th::text_dim())
+                    .font(PERFORM_TECH_STRONG)
+                    .size(11)
+                    .color(ruler_number_color)
             )
             .width(Length::FillPortion(1))
             .padding(8),
             container(
                 text("2")
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(th::text_dim())
+                    .font(PERFORM_TECH_STRONG)
+                    .size(11)
+                    .color(ruler_number_color)
             )
             .width(Length::FillPortion(1))
             .padding(8),
             container(
                 text("3")
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(th::text_dim())
+                    .font(PERFORM_TECH_STRONG)
+                    .size(11)
+                    .color(ruler_number_color)
             )
             .width(Length::FillPortion(1))
             .padding(8),
             container(
                 text("4")
-                    .font(Font::MONOSPACE)
-                    .size(8)
-                    .color(th::text_dim())
+                    .font(PERFORM_TECH_STRONG)
+                    .size(11)
+                    .color(ruler_number_color)
             )
             .width(Length::FillPortion(1))
             .padding(8)
@@ -459,20 +498,20 @@ impl App {
             container(
                 column![
                     text("SECTION SPACE")
-                        .font(Font::MONOSPACE)
-                        .size(8)
+                        .font(PERFORM_LABEL)
+                        .size(9)
                         .color(th::accent()),
                     text("SELECT A SECTION")
-                        .font(Font::MONOSPACE)
-                        .size(12)
+                        .font(PERFORM_LABEL)
+                        .size(13)
                         .color(th::text()),
                     text("Its multitrack timeline will open here")
                         .size(10)
                         .color(th::text_dim()),
                     text("CREATION + EDITING ARRIVE IN A LATER CARD")
-                        .font(Font::MONOSPACE)
-                        .size(7)
-                        .color(th::text_dim())
+                        .font(PERFORM_TECH)
+                        .size(8)
+                        .color(th::blend(th::text_dim(), th::text(), 0.1))
                 ]
                 .spacing(8)
                 .align_x(iced::Alignment::Center),

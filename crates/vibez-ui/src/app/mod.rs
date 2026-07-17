@@ -120,6 +120,10 @@ pub fn run() -> iced::Result {
         })
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
         .run_with(App::new)
 }
 
