@@ -63,8 +63,8 @@ The UI follows the Elm architecture (iced's native model) with one twist:
 instead of a single giant `update`, state and logic are split into **domain
 modules** under `crates/vibez-ui/src/domains/`. Each domain owns:
 
-- a **state slice** (for example `ArrangementState` holds the track list and
-  selection), stored on the app state
+- a **state slice** (for example `ArrangementState` holds Arrange Timeline
+  Content and editor selection), stored on the app state
 - a **message enum** (`ArrangementMsg`, `TransportMsg`, ...) describing
   everything that can happen to it
 - an **update function** that can only touch its own slice, plus three narrow
@@ -99,6 +99,32 @@ Anything asynchronous (file dialogs, decoding, saving, bounce renders) stays
 in the router layer as iced Tasks in topic modules under
 `crates/vibez-ui/src/app/`; the results come back as messages and the state
 math happens in the domains.
+
+## Project Tracks and timeline content
+
+Project Tracks exist once per project. `ProjectTracksState` owns their stable
+`TrackId`, channel name/type, instruments, effects, routing, sends, and mixer
+state. Arrange does not own or duplicate those channels.
+
+`ArrangementState` instead owns an `ArrangementTimeline`: a separate store
+keyed by the shared `TrackId`. Each `TrackTimelineContent` contains only the
+audio clips, note clips, and automation associated with that Project Track in
+Arrange. Track order is therefore independent from timeline storage, and a
+timeline edit cannot clone instruments, effects, routing, or mixer state.
+
+```mermaid
+flowchart LR
+    PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
+    AT["ArrangementTimeline<br/>TrackId → TrackTimelineContent"]
+    UI["Arrange editor selection/view state"]
+    PT -- "shared TrackId" --> AT
+    AT --> UI
+```
+
+Undo snapshots retain the Project Track store and Arrange Timeline Content as
+separate `Arc` values. Copy-on-write happens only in the store being edited.
+Meters, decoded device media, waveform/runtime caches, and UI selection are UI
+runtime state; they are not fields of persisted timeline content.
 
 ## The audio engine
 
@@ -144,12 +170,15 @@ are handled in three stages:
 
 ## Projects, undo, and warping
 
-- Projects are JSON (`vibez-project`): tracks, clips, note data, device
-  chains, and plugin state as base64 blobs. Loading replays the whole
-  document into the engine as commands; plugin devices reload through the
-  same background pipeline as interactive loads.
-- Undo/redo keeps snapshots of the editable state (cheap: audio is shared via
-  `Arc`). Restoring a snapshot tears down the engine side and replays it.
+- Projects are JSON (`vibez-project`): Project Tracks remain in the existing
+  `tracks`/`master`/`buses` fields, while Arrange audio and note clips remain
+  in the existing `clips`/`note_clips` fields. Automation is projected between
+  Track Timeline Content and the compatible on-disk track record. Loading
+  rehydrates the two in-memory stores and replays them into the engine; legacy
+  project bytes remain loadable without a format migration.
+- Undo/redo keeps independently shared snapshots of Project Tracks and Arrange
+  Timeline Content (audio is also shared via `Arc`). Restoring a snapshot tears
+  down the engine side and replays both stores.
   Live plugin state is captured before teardown so undo does not reset
   plugin parameters.
 - Warping detects a clip's BPM, then time-stretches it to the project tempo

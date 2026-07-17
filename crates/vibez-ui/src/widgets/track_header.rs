@@ -8,7 +8,7 @@ use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use crate::icons;
 use crate::message::Message;
-use crate::state::UiTrack;
+use crate::state::ProjectTrack;
 use crate::theme as th;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
@@ -23,7 +23,7 @@ pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
 pub fn view_editable_channel_name<'a>(
-    track: &'a UiTrack,
+    track: &'a ProjectTrack,
     editing_name: bool,
     edit_text: &'a str,
     size: u16,
@@ -55,7 +55,7 @@ pub fn view_editable_channel_name<'a>(
 
 /// Render the track header for the arrangement view.
 pub fn view_track_header<'a>(
-    track: &'a UiTrack,
+    track: &'a ProjectTrack,
     selected: bool,
     editing_name: bool,
     edit_text: &'a str,

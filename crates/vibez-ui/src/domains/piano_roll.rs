@@ -13,7 +13,9 @@ use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{PianoRollState, SnapGrid, UiNoteClip, UiTrack};
+use crate::state::{
+    ArrangementTimeline, PianoRollState, SnapGrid, TrackTimelineContent, UiNoteClip,
+};
 
 /// Messages the piano roll domain handles.
 #[derive(Debug, Clone)]
@@ -114,12 +116,15 @@ pub struct PianoRollAction {
     pub close_context_menu: bool,
 }
 
-fn find_track(tracks: &[UiTrack], track_id: TrackId) -> Option<&UiTrack> {
-    tracks.iter().find(|t| t.id == track_id)
+fn find_track(timeline: &ArrangementTimeline, track_id: TrackId) -> Option<&TrackTimelineContent> {
+    timeline.get(track_id)
 }
 
-fn find_track_mut(tracks: &mut [UiTrack], track_id: TrackId) -> Option<&mut UiTrack> {
-    tracks.iter_mut().find(|t| t.id == track_id)
+fn find_track_mut(
+    timeline: &mut ArrangementTimeline,
+    track_id: TrackId,
+) -> Option<&mut TrackTimelineContent> {
+    timeline.get_mut(track_id)
 }
 
 /// Loop region that covers the note content, rounded up to whole
@@ -140,7 +145,7 @@ pub fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
 /// Snap every note start to the grid and sync changed notes to the
 /// engine.
 fn quantize_note_clip(
-    tracks: &mut [UiTrack],
+    tracks: &mut ArrangementTimeline,
     track_id: TrackId,
     clip_id: ClipId,
     grid: SnapGrid,
@@ -178,7 +183,7 @@ impl PianoRollState {
         &mut self,
         msg: PianoRollMsg,
         engine: &mut impl EngineHandle,
-        tracks: &mut [UiTrack],
+        tracks: &mut ArrangementTimeline,
         ctx: PianoRollCtx,
     ) -> PianoRollAction {
         let mut action = PianoRollAction::default();
@@ -695,13 +700,12 @@ mod tests {
     use super::super::test_support::RecordingEngine;
     use super::*;
     use crate::state::PianoRollEditMode;
-    use vibez_core::midi::TrackKind;
 
-    fn midi_track_with_clip() -> (Vec<UiTrack>, TrackId, ClipId) {
+    fn midi_track_with_clip() -> (ArrangementTimeline, TrackId, ClipId) {
         let track_id = TrackId::new();
         let clip_id = ClipId::new();
-        let mut track = UiTrack::new(track_id, "MIDI 1".to_string(), 0);
-        track.kind = TrackKind::Midi;
+        let mut timeline = ArrangementTimeline::default();
+        let track = timeline.ensure(track_id);
         track.note_clips.push(UiNoteClip {
             id: clip_id,
             name: "Pattern 1".to_string(),
@@ -726,7 +730,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
         });
-        (vec![track], track_id, clip_id)
+        (timeline, track_id, clip_id)
     }
 
     #[test]
@@ -746,14 +750,14 @@ mod tests {
             &mut tracks,
             PianoRollCtx::default(),
         );
-        assert_eq!(tracks[0].note_clips[0].notes.len(), 3);
+        assert_eq!(tracks.get(tid).unwrap().note_clips[0].notes.len(), 3);
         assert!(matches!(engine.0[0], EngineCommand::AddNote { .. }));
     }
 
     #[test]
     fn remove_note_reindexes_selection() {
         let (mut tracks, tid, cid) = midi_track_with_clip();
-        tracks[0].note_clips[0].selected_notes = [0, 1].into_iter().collect();
+        tracks.get_mut(tid).unwrap().note_clips[0].selected_notes = [0, 1].into_iter().collect();
         let mut pr = PianoRollState::default();
         let mut engine = RecordingEngine::default();
         pr.update(
@@ -762,7 +766,7 @@ mod tests {
             &mut tracks,
             PianoRollCtx::default(),
         );
-        let clip = &tracks[0].note_clips[0];
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert_eq!(clip.notes.len(), 1);
         assert_eq!(
             clip.selected_notes.iter().copied().collect::<Vec<_>>(),
@@ -786,7 +790,7 @@ mod tests {
                 snap_grid: SnapGrid::QUARTER,
             },
         );
-        let clip = &tracks[0].note_clips[0];
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert_eq!(clip.notes[0].start_beat, 0.0);
         assert_eq!(clip.notes[1].start_beat, 2.0);
         assert!(action.close_context_menu);
@@ -804,7 +808,7 @@ mod tests {
             &mut tracks,
             PianoRollCtx::default(),
         );
-        let clip = &tracks[0].note_clips[0];
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert_eq!(clip.duration_beats, 8.0);
         assert_eq!(clip.notes.len(), 4);
         assert_eq!(clip.notes[2].start_beat, 4.1);
@@ -825,7 +829,7 @@ mod tests {
             &mut tracks,
             PianoRollCtx::default(),
         );
-        let clip = &tracks[0].note_clips[0];
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert!(clip.loop_enabled);
         assert_eq!(clip.loop_start_beats, 0.0);
         assert_eq!(clip.loop_end_beats, 4.0);
@@ -836,7 +840,7 @@ mod tests {
     fn toggle_edit_mode_flips_and_reports() {
         let mut pr = PianoRollState::default();
         let mut engine = RecordingEngine::default();
-        let mut tracks: Vec<UiTrack> = Vec::new();
+        let mut tracks = ArrangementTimeline::default();
         let action = pr.update(
             PianoRollMsg::ToggleEditMode,
             &mut engine,

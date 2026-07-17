@@ -12,7 +12,9 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, ContextMenuTarget, GridConfig, UiTrack};
+use crate::state::{
+    ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent,
+};
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 
@@ -95,7 +97,8 @@ pub struct TrackClipCanvas {
 impl TrackClipCanvas {
     #[allow(clippy::too_many_arguments)]
     pub fn from_track(
-        track: &UiTrack,
+        track: &ProjectTrack,
+        content: &TrackTimelineContent,
         playhead_beats: f64,
         zoom_level: f32,
         grid: GridConfig,
@@ -122,7 +125,7 @@ impl TrackClipCanvas {
         sample_drop_duration_beats: Option<f64>,
         sample_drop_detail: Option<String>,
     ) -> Self {
-        let clips = track
+        let clips = content
             .clips
             .iter()
             .map(|c| TimelineClip {
@@ -140,7 +143,7 @@ impl TrackClipCanvas {
                         .unwrap_or(false),
             })
             .collect();
-        let note_clips = track
+        let note_clips = content
             .note_clips
             .iter()
             .map(|c| TimelineNoteClip {

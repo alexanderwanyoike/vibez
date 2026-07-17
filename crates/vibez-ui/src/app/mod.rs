@@ -396,8 +396,8 @@ impl App {
 
     pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
         if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
-            if let Some(duration) = self.state.find_track(track_id).and_then(|track| {
-                track
+            if let Some(duration) = self.state.arrange_content(track_id).and_then(|content| {
+                content
                     .note_clips
                     .iter()
                     .find(|clip| clip.id == clip_id)
@@ -415,13 +415,18 @@ impl App {
     /// deletes, or undo chains.
     fn next_unique_track_number(&mut self, prefix: &str) -> u32 {
         loop {
-            let candidate = self.state.arrangement.next_track_number;
+            let candidate = self.state.project_tracks.next_track_number;
             let name = format!("{prefix} {candidate}");
-            let clash = self.state.arrangement.tracks.iter().any(|t| t.name == name);
+            let clash = self
+                .state
+                .project_tracks
+                .tracks
+                .iter()
+                .any(|t| t.name == name);
             if !clash {
                 return candidate;
             }
-            self.state.arrangement.next_track_number += 1;
+            Arc::make_mut(&mut self.state.project_tracks).next_track_number += 1;
         }
     }
 

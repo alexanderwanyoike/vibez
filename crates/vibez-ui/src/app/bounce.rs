@@ -12,7 +12,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use crate::message::Message;
-use crate::state::{ArrangementSelection, UiClip, UiTrack};
+use crate::state::{ArrangementSelection, ProjectTrack, UiClip};
 
 use super::*;
 
@@ -32,9 +32,11 @@ impl App {
         let mut clips = std::collections::HashMap::new();
         let mut samplers = std::collections::HashMap::new();
         let mut pads = std::collections::HashMap::new();
-        for track in &self.state.arrangement.tracks {
-            for clip in &track.clips {
-                clips.insert(clip.id, Arc::clone(&clip.audio));
+        for track in &self.state.project_tracks.tracks {
+            if let Some(content) = self.state.arrange_content(track.id) {
+                for clip in &content.clips {
+                    clips.insert(clip.id, Arc::clone(&clip.audio));
+                }
             }
             if let Some(audio) = &track.sample_audio {
                 samplers.insert(
@@ -118,16 +120,15 @@ impl App {
 
     pub(super) fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
         let track_num = self.next_unique_track_number("Bounce");
-        self.state.arrangement.next_track_number = track_num + 1;
+        Arc::make_mut(&mut self.state.project_tracks).next_track_number = track_num + 1;
         let color_index = (track_num.wrapping_sub(1) % 8) as u8;
         let track_id = TrackId::new();
         let track_name = format!("Bounce {track_num}");
 
         self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
-        self.state
-            .arrangement
+        Arc::make_mut(&mut self.state.project_tracks)
             .tracks
-            .push(UiTrack::new(track_id, track_name, color_index));
+            .push(ProjectTrack::new(track_id, track_name, color_index));
 
         let clip_id = ClipId::new();
         let duration = outcome.audio.num_frames() as u64;
@@ -143,8 +144,8 @@ impl App {
             loop_end: 0,
         });
 
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
+        if self.state.find_track(track_id).is_some() {
+            self.state.arrange_content_mut(track_id).clips.push(UiClip {
                 id: clip_id,
                 name: outcome.clip_name.clone(),
                 audio: Arc::clone(&outcome.audio),
@@ -192,8 +193,10 @@ impl App {
         self.state.view.context_menu = None;
         let (range, insert_pos, name) = if is_note_clip {
             let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
-            let track_opt = self.state.find_track(track_id);
-            let nc = track_opt.and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id));
+            let nc = self
+                .state
+                .arrange_content(track_id)
+                .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id));
             match nc {
                 Some(nc) => {
                     let start = (nc.position_beats * spb) as u64;
@@ -203,8 +206,10 @@ impl App {
                 None => (None, 0, String::new()),
             }
         } else {
-            let track_opt = self.state.find_track(track_id);
-            let ac = track_opt.and_then(|t| t.clips.iter().find(|c| c.id == clip_id));
+            let ac = self
+                .state
+                .arrange_content(track_id)
+                .and_then(|content| content.clips.iter().find(|c| c.id == clip_id));
             match ac {
                 Some(ac) => (
                     Some((ac.position, ac.position + ac.duration)),

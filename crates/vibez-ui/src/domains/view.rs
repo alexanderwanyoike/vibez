@@ -5,7 +5,9 @@
 
 use vibez_core::id::{ClipId, TrackId};
 
-use crate::state::{ContextMenuTarget, DetailPanelTab, SnapGrid, UiTrack, ViewState, Workspace};
+use crate::state::{
+    ArrangementTimeline, ContextMenuTarget, DetailPanelTab, SnapGrid, ViewState, Workspace,
+};
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -73,12 +75,13 @@ pub struct ViewAction {
     pub close_device_menu: bool,
 }
 
-fn find_track(tracks: &[UiTrack], track_id: TrackId) -> Option<&UiTrack> {
-    tracks.iter().find(|t| t.id == track_id)
-}
-
 impl ViewState {
-    pub fn update(&mut self, msg: ViewMsg, tracks: &[UiTrack], ctx: ViewCtx) -> ViewAction {
+    pub fn update(
+        &mut self,
+        msg: ViewMsg,
+        timeline: &ArrangementTimeline,
+        ctx: ViewCtx,
+    ) -> ViewAction {
         let mut action = ViewAction::default();
         match msg {
             ViewMsg::SwitchWorkspace(ws) => {
@@ -189,7 +192,7 @@ impl ViewState {
             }
             ViewMsg::StartEditingClipName(track_id, clip_id) => {
                 self.context_menu = None;
-                let name = find_track(tracks, track_id).and_then(|t| {
+                let name = timeline.get(track_id).and_then(|t| {
                     t.clips
                         .iter()
                         .find(|c| c.id == clip_id)
@@ -243,9 +246,17 @@ mod tests {
     #[test]
     fn zoom_clamps_both_directions() {
         let mut v = ViewState::default();
-        v.update(ViewMsg::SetZoom(99.0), &[], ViewCtx::default());
+        v.update(
+            ViewMsg::SetZoom(99.0),
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.zoom_level, 16.0);
-        v.update(ViewMsg::SetZoom(0.0), &[], ViewCtx::default());
+        v.update(
+            ViewMsg::SetZoom(0.0),
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.zoom_level, 0.01);
     }
 
@@ -253,9 +264,17 @@ mod tests {
     fn scroll_clamps_to_content() {
         let mut v = ViewState::default();
         let ctx = ViewCtx { total_beats: 32.0 };
-        v.update(ViewMsg::ScrollArrangement(100.0), &[], ctx);
+        v.update(
+            ViewMsg::ScrollArrangement(100.0),
+            &ArrangementTimeline::default(),
+            ctx,
+        );
         assert_eq!(v.scroll_offset_beats, 32.0);
-        v.update(ViewMsg::ScrollArrangement(-100.0), &[], ctx);
+        v.update(
+            ViewMsg::ScrollArrangement(-100.0),
+            &ArrangementTimeline::default(),
+            ctx,
+        );
         assert_eq!(v.scroll_offset_beats, 0.0);
     }
 
@@ -274,7 +293,7 @@ mod tests {
                     is_note_clip: false,
                 },
             },
-            &[],
+            &ArrangementTimeline::default(),
             ViewCtx::default(),
         );
         assert!(v.context_menu.is_some());
@@ -285,24 +304,22 @@ mod tests {
     fn finish_editing_track_name_emits_rename() {
         let mut v = ViewState::default();
         let tid = TrackId::new();
-        let mut track = UiTrack::new(tid, "Old".to_string(), 0);
-        track.name = "Old".to_string();
-        let tracks = vec![track];
+        let timeline = ArrangementTimeline::default();
         v.update(
             ViewMsg::StartEditingTrackName {
                 track_id: tid,
-                name: tracks[0].name.clone(),
+                name: "Old".to_string(),
             },
-            &tracks,
+            &timeline,
             ViewCtx::default(),
         );
         assert_eq!(v.edit_name_text, "Old");
         v.update(
             ViewMsg::EditNameText("New".to_string()),
-            &tracks,
+            &timeline,
             ViewCtx::default(),
         );
-        let action = v.update(ViewMsg::FinishEditing, &tracks, ViewCtx::default());
+        let action = v.update(ViewMsg::FinishEditing, &timeline, ViewCtx::default());
         assert_eq!(
             action.rename,
             Some(RenameRequest::Track(tid, "New".to_string()))
@@ -320,7 +337,7 @@ mod tests {
                 track_id: bus_id,
                 name: "A Return".to_string(),
             },
-            &[],
+            &ArrangementTimeline::default(),
             ViewCtx::default(),
         );
 
@@ -335,26 +352,54 @@ mod tests {
         assert!(v.snap_enabled);
         assert!(!v.adaptive_grid);
 
-        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::NarrowGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.snap_grid, SnapGrid::SIXTEENTH);
-        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::WidenGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.snap_grid, SnapGrid::EIGHTH);
-        v.update(ViewMsg::ToggleTripletGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::ToggleTripletGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.snap_grid, SnapGrid::EIGHTH.triplet());
-        v.update(ViewMsg::ToggleSnapToGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::ToggleSnapToGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert!(!v.snap_enabled);
-        v.update(ViewMsg::ToggleAdaptiveGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::ToggleAdaptiveGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert!(v.adaptive_grid);
         assert_eq!(
             v.grid_config().effective_grid(20.0),
             SnapGrid::QUARTER.triplet()
         );
-        v.update(ViewMsg::NarrowGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::NarrowGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(
             v.grid_config().effective_grid(20.0),
             SnapGrid::EIGHTH.triplet()
         );
-        v.update(ViewMsg::WidenGrid, &[], ViewCtx::default());
+        v.update(
+            ViewMsg::WidenGrid,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(
             v.grid_config().effective_grid(20.0),
             SnapGrid::QUARTER.triplet()
@@ -368,7 +413,11 @@ mod tests {
             edit_name_text: "x".to_string(),
             ..ViewState::default()
         };
-        let action = v.update(ViewMsg::CancelEditing, &[], ViewCtx::default());
+        let action = v.update(
+            ViewMsg::CancelEditing,
+            &ArrangementTimeline::default(),
+            ViewCtx::default(),
+        );
         assert_eq!(v.editing_track_name, None);
         assert!(v.edit_name_text.is_empty());
         assert!(action.close_device_menu);

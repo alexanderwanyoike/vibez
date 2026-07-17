@@ -1,666 +1,19 @@
-//! Heavier arrangement operations: warp/quantize result
-//! application and clip joining (audio-buffer merges).
+//! Multi-clip and range operations for Arrange Timeline Content.
 
 use std::collections::HashSet;
-
-use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::EngineHandle;
+use super::{ArrangementAction, ArrangementCtx, ArrangementMsg, EngineHandle};
 use crate::state::{
-    ArrangementSelection, ArrangementState, ClipClipboard, ClipboardClip, UiClip, UiNoteClip,
+    ArrangementSelection, ArrangementState, ClipClipboard, ClipboardClip, ProjectTracksState,
+    UiNoteClip,
 };
 
-use super::*;
-
-fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    let raw = clip.source_offset.saturating_add(local_frame);
-    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
-        let loop_len = clip.loop_end - clip.loop_start;
-        (clip.loop_start + (raw - clip.loop_start) % loop_len) as usize
-    } else {
-        raw as usize
-    }
-}
-
-fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
-    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-    let mut visible = Vec::new();
-    for note in &clip.notes {
-        let mut occurrence = note.start_beat;
-        loop {
-            let note_end = occurrence + note.duration_beats;
-            let kept_start = occurrence.max(local_start);
-            let kept_end = note_end.min(local_end);
-            if kept_end > kept_start {
-                visible.push(MidiNote {
-                    start_beat: kept_start - local_start,
-                    duration_beats: kept_end - kept_start,
-                    ..*note
-                });
-            }
-            if !looping
-                || note.start_beat < clip.loop_start_beats
-                || note.start_beat >= clip.loop_end_beats
-            {
-                break;
-            }
-            occurrence += clip.loop_end_beats - clip.loop_start_beats;
-            if occurrence >= local_end {
-                break;
-            }
-        }
-    }
-    visible.sort_by(|a, b| {
-        a.start_beat
-            .partial_cmp(&b.start_beat)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    visible
-}
-
 impl ArrangementState {
-    /// A background warp finished: swap in the stretched audio and
-    /// record the warp geometry on the clip.
-    pub fn apply_clip_warp_success(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: ClipWarpSuccess,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        engine.send(EngineCommand::ReplaceClipAudio {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&success.audio),
-            duration: success.new_duration,
-            source_offset: success.new_source_offset,
-            loop_start: success.new_loop_start,
-            loop_end: success.new_loop_end,
-        });
-        if let Some(track) = self.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.audio = Arc::clone(&success.audio);
-                clip.duration = success.new_duration;
-                clip.source_offset = success.new_source_offset;
-                clip.loop_start = success.new_loop_start;
-                clip.loop_end = success.new_loop_end;
-                clip.original_bpm = Some(success.detected_bpm);
-                clip.warped = true;
-                clip.warped_to_bpm = Some(success.warped_to_bpm);
-                clip.original_audio = Some(Arc::clone(&success.original_audio));
-            }
-        }
-        action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
-        action.mark_dirty = true;
-        action
-    }
-
-    /// An auto-warp-on-import attempt finished.
-    pub fn apply_auto_warp_outcome(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        outcome: AutoWarpOutcome,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        match outcome {
-            AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Point the user at the manual
-                // workflow in the clip detail panel.
-                action.status = Some(
-                    "Auto-warp: could not detect BPM. Select the clip and type the source \
-                     BPM in the Warp row, then press Enter and click Warp."
-                        .to_string(),
-                );
-            }
-            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
-                if let Some(track) = self.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                action.status = Some(format!(
-                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
-                     Use the clip's Warp button to apply it manually.",
-                    bpm, confidence
-                ));
-                action.mark_dirty = true;
-            }
-            AutoWarpOutcome::Warped { success, .. } => {
-                return self.apply_clip_warp_success(engine, track_id, clip_id, success);
-            }
-        }
-        action
-    }
-
-    /// Restore a warped clip's original audio (or just drop the warp
-    /// flags when the original is gone).
-    pub fn apply_clear_clip_warp(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        let restore = self
-            .find_track(track_id)
-            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
-            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
-        if let Some(original) = restore {
-            let original_frames = original.num_frames() as u64;
-            engine.send(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&original),
-                duration: original_frames,
-                source_offset: 0,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.find_track_mut(track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                    clip.audio = original;
-                    clip.duration = original_frames;
-                    clip.source_offset = 0;
-                    clip.loop_start = 0;
-                    clip.loop_end = 0;
-                    clip.warped = false;
-                    clip.warped_to_bpm = None;
-                    clip.original_audio = None;
-                }
-            }
-        } else if let Some(track) = self.find_track_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-            }
-        }
-        action.status = Some("Cleared clip warp".to_string());
-        action.mark_dirty = true;
-        action
-    }
-
-    /// A background audio quantize finished: replace the source clip
-    /// with the newly rendered one and select it.
-    pub fn apply_audio_quantize_success(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        old_clip_id: ClipId,
-        success: AudioQuantizeSuccess,
-        sample_rate: u32,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
-        if let Some(track) = self.find_track_mut(track_id) {
-            track.clips.retain(|c| c.id != old_clip_id);
-        }
-        self.selected_clips.retain(|sel| match sel {
-            ArrangementSelection::AudioClip {
-                clip_id: cid,
-                track_id: tid,
-            } => !(*tid == track_id && *cid == old_clip_id),
-            _ => true,
-        });
-
-        engine.send(EngineCommand::AddClip {
-            track_id,
-            clip_id: success.new_clip_id,
-            audio: Arc::clone(&success.new_audio),
-            position: success.new_position,
-            source_offset: 0,
-            duration: success.new_duration,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        });
-        if let Some(track) = self.find_track_mut(track_id) {
-            track.clips.push(UiClip {
-                id: success.new_clip_id,
-                name: success.new_name,
-                audio: Arc::clone(&success.new_audio),
-                source: None,
-                position: success.new_position,
-                source_offset: 0,
-                duration: success.new_duration,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-        self.selected_clips.insert(ArrangementSelection::AudioClip {
-            track_id,
-            clip_id: success.new_clip_id,
-        });
-
-        let duration_seconds = success.new_duration as f64 / sample_rate.max(1) as f64;
-        action.status = Some(format!(
-            "Quantized {} slice(s) to {} ({:.1}s)",
-            success.slice_count, success.grid_label, duration_seconds
-        ));
-        action
-    }
-
-    /// A background BPM detection finished.
-    pub fn apply_clip_bpm_detected(
-        &mut self,
-        track_id: TrackId,
-        clip_id: ClipId,
-        bpm: Option<f64>,
-        confidence: f32,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        match bpm {
-            Some(b) => {
-                if let Some(track) = self.find_track_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(b);
-                    }
-                }
-                self.clip_bpm_edit.remove(&clip_id);
-                action.status = Some(format!(
-                    "Detected {:.1} BPM (confidence {:.2})",
-                    b, confidence
-                ));
-                action.mark_dirty = true;
-            }
-            None => {
-                action.status = Some(
-                    "Could not detect BPM. Type the source BPM in the Warp row and \
-                     press Enter, then click Warp."
-                        .to_string(),
-                );
-            }
-        }
-        action
-    }
-
-    pub(super) fn join_audio_clips(
-        &mut self,
-        track_id: TrackId,
-        selections: &[ArrangementSelection],
-        engine: &mut impl EngineHandle,
-    ) -> Option<String> {
-        // Collect clip data sorted by position
-        let clip_ids: Vec<ClipId> = selections
-            .iter()
-            .filter_map(|s| match s {
-                ArrangementSelection::AudioClip { clip_id, .. } => Some(*clip_id),
-                _ => None,
-            })
-            .collect();
-
-        let mut clip_data: Vec<UiClip> = Vec::new();
-        if let Some(track) = self.find_track(track_id) {
-            for cid in &clip_ids {
-                if let Some(clip) = track.clips.iter().find(|c| c.id == *cid) {
-                    clip_data.push(clip.clone());
-                }
-            }
-        }
-
-        if clip_data.len() < 2 {
-            return None;
-        }
-
-        // Sort by position
-        clip_data.sort_by_key(|clip| clip.position);
-
-        let start_pos = clip_data[0].position;
-        let end_pos = clip_data
-            .iter()
-            .map(|clip| clip.position.saturating_add(clip.duration))
-            .max()
-            .unwrap_or(start_pos);
-        let total_duration = end_pos - start_pos;
-        let joined_loop_enabled = clip_data.iter().any(|clip| clip.loop_enabled);
-
-        // Determine channel count from first clip
-        let channels = clip_data[0].audio.num_channels();
-        let sr = clip_data[0].audio.sample_rate;
-
-        // Create joined buffer filled with silence
-        let mut joined_channels: Vec<Vec<f32>> = (0..channels)
-            .map(|_| vec![0.0f32; total_duration as usize])
-            .collect();
-
-        // Consolidate the audible arrangement result, including source
-        // wrapping for clips whose visible duration exceeds their loop.
-        for clip in &clip_data {
-            let offset_in_joined = (clip.position - start_pos) as usize;
-            let dur = clip.duration as usize;
-            let ch_count = channels.min(clip.audio.num_channels());
-            for (ch, dst) in joined_channels.iter_mut().enumerate().take(ch_count) {
-                for local in 0..dur {
-                    let dst_frame = offset_in_joined + local;
-                    if dst_frame >= dst.len() {
-                        break;
-                    }
-                    let source_frame = audio_source_frame(clip, local as u64);
-                    if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] = *sample;
-                    }
-                }
-            }
-        }
-
-        // Create DecodedAudio
-        let joined_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
-            channels: joined_channels,
-            sample_rate: sr,
-        });
-
-        // Remove all originals
-        for cid in &clip_ids {
-            engine.send(EngineCommand::RemoveClip(track_id, *cid));
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.clips.retain(|c| c.id != *cid);
-            }
-        }
-
-        // Add joined clip
-        let new_id = ClipId::new();
-        engine.send(EngineCommand::AddClip {
-            track_id,
-            clip_id: new_id,
-            audio: Arc::clone(&joined_audio),
-            position: start_pos,
-            source_offset: 0,
-            duration: total_duration,
-            loop_enabled: joined_loop_enabled,
-            loop_start: 0,
-            loop_end: total_duration,
-        });
-        if let Some(track) = self.find_track_mut(track_id) {
-            track.clips.push(UiClip {
-                id: new_id,
-                name: "Joined".to_string(),
-                audio: joined_audio,
-                source: None,
-                position: start_pos,
-                source_offset: 0,
-                duration: total_duration,
-                loop_enabled: joined_loop_enabled,
-                loop_start: 0,
-                loop_end: total_duration,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-
-        self.selected_clips.clear();
-        self.selected_clips.insert(ArrangementSelection::AudioClip {
-            track_id,
-            clip_id: new_id,
-        });
-        Some("Joined audio clips".to_string())
-    }
-
-    pub(super) fn join_note_clips(
-        &mut self,
-        track_id: TrackId,
-        selections: &[ArrangementSelection],
-        engine: &mut impl EngineHandle,
-    ) -> Option<String> {
-        let clip_ids: Vec<ClipId> = selections
-            .iter()
-            .filter_map(|s| match s {
-                ArrangementSelection::NoteClip { clip_id, .. } => Some(*clip_id),
-                _ => None,
-            })
-            .collect();
-
-        let mut clip_data: Vec<UiNoteClip> = Vec::new();
-        if let Some(track) = self.find_track(track_id) {
-            for cid in &clip_ids {
-                if let Some(clip) = track.note_clips.iter().find(|c| c.id == *cid) {
-                    clip_data.push(clip.clone());
-                }
-            }
-        }
-
-        if clip_data.len() < 2 {
-            return None;
-        }
-
-        // Sort by position
-        clip_data.sort_by(|a, b| {
-            a.position_beats
-                .partial_cmp(&b.position_beats)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let start_pos = clip_data[0].position_beats;
-        let end_pos = clip_data
-            .iter()
-            .map(|clip| clip.position_beats + clip.duration_beats)
-            .fold(0.0_f64, f64::max);
-        let total_duration = end_pos - start_pos;
-        let joined_loop_enabled = clip_data.iter().any(|clip| clip.loop_enabled);
-
-        // Merge the audible notes, expanding repeated loop occurrences.
-        let mut merged_notes: Vec<MidiNote> = Vec::new();
-        for clip in &clip_data {
-            let offset = clip.position_beats - start_pos;
-            for note in visible_notes(clip, 0.0, clip.duration_beats) {
-                merged_notes.push(MidiNote {
-                    start_beat: note.start_beat + offset,
-                    ..note
-                });
-            }
-        }
-
-        // Remove all originals
-        for cid in &clip_ids {
-            engine.send(EngineCommand::RemoveNoteClip(track_id, *cid));
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.note_clips.retain(|c| c.id != *cid);
-            }
-        }
-
-        // Add joined clip
-        let new_id = ClipId::new();
-        engine.send(EngineCommand::AddNoteClip {
-            track_id,
-            clip_id: new_id,
-            position_beats: start_pos,
-            duration_beats: total_duration,
-            loop_enabled: joined_loop_enabled,
-            loop_start_beats: 0.0,
-            loop_end_beats: total_duration,
-        });
-        for note in &merged_notes {
-            engine.send(EngineCommand::AddNote {
-                track_id,
-                clip_id: new_id,
-                note: *note,
-            });
-        }
-        if let Some(track) = self.find_track_mut(track_id) {
-            track.note_clips.push(UiNoteClip {
-                id: new_id,
-                name: "Joined".to_string(),
-                position_beats: start_pos,
-                duration_beats: total_duration,
-                notes: merged_notes,
-                selected_notes: HashSet::new(),
-                loop_enabled: joined_loop_enabled,
-                loop_start_beats: 0.0,
-                loop_end_beats: total_duration,
-            });
-        }
-
-        self.selected_clips.clear();
-        self.selected_clips.insert(ArrangementSelection::NoteClip {
-            track_id,
-            clip_id: new_id,
-        });
-        self.selected_note_clip = Some((track_id, new_id));
-        Some("Joined note clips".to_string())
-    }
-
-    pub(super) fn op_split_audio_clip(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        _ctx: ArrangementCtx,
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_position: u64,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        let split = self
-            .find_track(track_id)
-            .and_then(|track| track.clips.iter().find(|clip| clip.id == clip_id))
-            .filter(|clip| {
-                split_position > clip.position
-                    && split_position < clip.position.saturating_add(clip.duration)
-            })
-            .map(|clip| {
-                let left_duration = split_position - clip.position;
-                let mut left = clip.clone();
-                left.id = ClipId::new();
-                left.name = format!("{} L", clip.name);
-                left.duration = left_duration;
-
-                let mut right = clip.clone();
-                right.id = ClipId::new();
-                right.name = format!("{} R", clip.name);
-                right.position = split_position;
-                right.duration = clip.duration - left_duration;
-                right.source_offset = audio_source_frame(clip, left_duration) as u64;
-                (left, right)
-            });
-        if let Some((left, right)) = split {
-            let left_id = left.id;
-
-            engine.send(EngineCommand::RemoveClip(track_id, clip_id));
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.clips.retain(|c| c.id != clip_id);
-            }
-
-            for clip in [&left, &right] {
-                engine.send(EngineCommand::AddClip {
-                    track_id,
-                    clip_id: clip.id,
-                    audio: Arc::clone(&clip.audio),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    duration: clip.duration,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
-            }
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.clips.extend([left, right]);
-            }
-
-            self.selected_clips
-                .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
-            self.selected_clips.insert(ArrangementSelection::AudioClip {
-                track_id,
-                clip_id: left_id,
-            });
-            action.status = Some("Split audio clip".to_string());
-        }
-        action
-    }
-
-    pub(super) fn op_split_note_clip(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        _ctx: ArrangementCtx,
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_beat: f64,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        let split = self
-            .find_track(track_id)
-            .and_then(|track| track.note_clips.iter().find(|clip| clip.id == clip_id))
-            .filter(|clip| {
-                split_beat > clip.position_beats
-                    && split_beat < clip.position_beats + clip.duration_beats
-            })
-            .map(|clip| {
-                let local_split = split_beat - clip.position_beats;
-                let mut left = clip.clone();
-                left.id = ClipId::new();
-                left.name = format!("{} L", clip.name);
-                left.duration_beats = local_split;
-                left.notes = visible_notes(clip, 0.0, local_split);
-                left.selected_notes.clear();
-
-                let mut right = clip.clone();
-                right.id = ClipId::new();
-                right.name = format!("{} R", clip.name);
-                right.position_beats = split_beat;
-                right.duration_beats = clip.duration_beats - local_split;
-                right.notes = visible_notes(clip, local_split, clip.duration_beats);
-                right.selected_notes.clear();
-
-                if clip.loop_enabled {
-                    left.loop_start_beats = 0.0;
-                    left.loop_end_beats = left.duration_beats;
-                    right.loop_start_beats = 0.0;
-                    right.loop_end_beats = right.duration_beats;
-                }
-                (left, right)
-            });
-        if let Some((left, right)) = split {
-            let left_id = left.id;
-            engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.note_clips.retain(|c| c.id != clip_id);
-            }
-
-            for clip in [&left, &right] {
-                engine.send(EngineCommand::AddNoteClip {
-                    track_id,
-                    clip_id: clip.id,
-                    position_beats: clip.position_beats,
-                    duration_beats: clip.duration_beats,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start_beats: clip.loop_start_beats,
-                    loop_end_beats: clip.loop_end_beats,
-                });
-                for note in &clip.notes {
-                    engine.send(EngineCommand::AddNote {
-                        track_id,
-                        clip_id: clip.id,
-                        note: *note,
-                    });
-                }
-            }
-            if let Some(track) = self.find_track_mut(track_id) {
-                track.note_clips.extend([left, right]);
-            }
-
-            self.selected_clips
-                .remove(&ArrangementSelection::NoteClip { track_id, clip_id });
-            self.selected_clips.insert(ArrangementSelection::NoteClip {
-                track_id,
-                clip_id: left_id,
-            });
-            self.selected_note_clip = Some((track_id, left_id));
-            action.status = Some("Split note clip".to_string());
-        }
-        action
-    }
-
     pub(super) fn op_delete_clips_in_region(
         &mut self,
         engine: &mut impl EngineHandle,
@@ -681,9 +34,9 @@ impl ArrangementState {
         // Collect clip IDs to remove
         let mut audio_removals: Vec<(TrackId, ClipId)> = Vec::new();
         let mut note_removals: Vec<(TrackId, ClipId)> = Vec::new();
-        for track in &self.tracks {
+        for (content_track_id, track) in &self.timeline.by_track {
             if let Some(tid) = target_track {
-                if track.id != tid {
+                if *content_track_id != tid {
                     continue;
                 }
             }
@@ -692,26 +45,26 @@ impl ArrangementState {
                     let clip_start = clip.position as f64 / spb;
                     let clip_end = (clip.position + clip.duration) as f64 / spb;
                     if clip_start >= start_beats - 1e-9 && clip_end <= end_beats + 1e-9 {
-                        audio_removals.push((track.id, clip.id));
+                        audio_removals.push((*content_track_id, clip.id));
                     }
                 }
             }
             for nc in &track.note_clips {
                 let clip_end = nc.position_beats + nc.duration_beats;
                 if nc.position_beats >= start_beats - 1e-9 && clip_end <= end_beats + 1e-9 {
-                    note_removals.push((track.id, nc.id));
+                    note_removals.push((*content_track_id, nc.id));
                 }
             }
         }
         for (tid, cid) in &audio_removals {
             engine.send(EngineCommand::RemoveClip(*tid, *cid));
-            if let Some(track) = self.find_track_mut(*tid) {
+            if let Some(track) = self.find_content_mut(*tid) {
                 track.clips.retain(|c| c.id != *cid);
             }
         }
         for (tid, cid) in &note_removals {
             engine.send(EngineCommand::RemoveNoteClip(*tid, *cid));
-            if let Some(track) = self.find_track_mut(*tid) {
+            if let Some(track) = self.find_content_mut(*tid) {
                 track.note_clips.retain(|c| c.id != *cid);
             }
         }
@@ -749,15 +102,16 @@ impl ArrangementState {
             // the originating track when the selection was drawn
             // on a single lane.
             let audio_hits: Vec<(TrackId, ClipId)> = if spb > 0.0 {
-                self.tracks
+                self.timeline
+                    .by_track
                     .iter()
-                    .filter(|t| target_track.is_none_or(|tid| t.id == tid))
-                    .flat_map(|t| {
-                        t.clips.iter().filter_map(|c| {
+                    .filter(|(tid, _)| target_track.is_none_or(|target| **tid == target))
+                    .flat_map(|(tid, content)| {
+                        content.clips.iter().filter_map(|c| {
                             let cs = c.position as f64 / spb;
                             let ce = (c.position + c.duration) as f64 / spb;
                             if boundary_beats > cs && boundary_beats < ce {
-                                Some((t.id, c.id))
+                                Some((*tid, c.id))
                             } else {
                                 None
                             }
@@ -769,14 +123,15 @@ impl ArrangementState {
             };
 
             let note_hits: Vec<(TrackId, ClipId)> = self
-                .tracks
+                .timeline
+                .by_track
                 .iter()
-                .filter(|t| target_track.is_none_or(|tid| t.id == tid))
-                .flat_map(|t| {
-                    t.note_clips.iter().filter_map(|c| {
+                .filter(|(tid, _)| target_track.is_none_or(|target| **tid == target))
+                .flat_map(|(tid, content)| {
+                    content.note_clips.iter().filter_map(|c| {
                         let ce = c.position_beats + c.duration_beats;
                         if boundary_beats > c.position_beats && boundary_beats < ce {
-                            Some((t.id, c.id))
+                            Some((*tid, c.id))
                         } else {
                             None
                         }
@@ -785,27 +140,11 @@ impl ArrangementState {
                 .collect();
 
             for (tid, cid) in audio_hits {
-                let _ = self.update(
-                    ArrangementMsg::SplitAudioClip {
-                        track_id: tid,
-                        clip_id: cid,
-                        split_position: boundary_sample,
-                    },
-                    engine,
-                    ctx,
-                );
+                let _ = self.op_split_audio_clip(engine, ctx, tid, cid, boundary_sample);
                 split_count += 1;
             }
             for (tid, cid) in note_hits {
-                let _ = self.update(
-                    ArrangementMsg::SplitNoteClip {
-                        track_id: tid,
-                        clip_id: cid,
-                        split_beat: boundary_beats,
-                    },
-                    engine,
-                    ctx,
-                );
+                let _ = self.op_split_note_clip(engine, ctx, tid, cid, boundary_beats);
                 split_count += 1;
             }
         }
@@ -818,17 +157,19 @@ impl ArrangementState {
 
     pub(super) fn op_create_clip_from_selection(
         &mut self,
+        project_tracks: &ProjectTracksState,
         engine: &mut impl EngineHandle,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
         if let Some(tid) = self.selected_track {
-            if let Some(track) = self.find_track(tid) {
+            if let Some(track) = project_tracks.find(tid) {
                 if track.kind.is_midi() {
-                    return self.update(
-                        ArrangementMsg::CreateNoteClipFromSelection(tid),
+                    return self.op_create_note_clip_from_selection(
+                        project_tracks,
                         engine,
                         ctx,
+                        tid,
                     );
                 } else {
                     action.status = Some("Select a time region on a MIDI track".to_string());
@@ -842,6 +183,7 @@ impl ArrangementState {
 
     pub(super) fn op_create_note_clip_from_selection(
         &mut self,
+        project_tracks: &ProjectTracksState,
         engine: &mut impl EngineHandle,
         _ctx: ArrangementCtx,
         track_id: TrackId,
@@ -854,7 +196,7 @@ impl ArrangementState {
             action.status = Some("No time selection active".to_string());
             return action;
         }
-        if let Some(track) = self.find_track(track_id) {
+        if let Some(track) = project_tracks.find(track_id) {
             if !track.kind.is_midi() {
                 action.status = Some("Can only create note clips on MIDI tracks".to_string());
                 return action;
@@ -863,7 +205,7 @@ impl ArrangementState {
         let clip_id = ClipId::new();
         let position_beats = self.selection_start_beats;
         let duration_beats = self.selection_end_beats - self.selection_start_beats;
-        if let Some(track) = self.find_track_mut(track_id) {
+        if let Some(track) = self.find_content_mut(track_id) {
             track.note_clips.push(UiNoteClip {
                 id: clip_id,
                 name: format!("Pattern {}", track.note_clips.len() + 1),
@@ -937,11 +279,10 @@ impl ArrangementState {
         {
             let start = self.selection_start_beats;
             let end = self.selection_end_beats;
-            for track in self
-                .tracks
-                .iter()
-                .filter(|t| self.time_selection_track.is_none_or(|tid| t.id == tid))
-            {
+            for (content_track_id, track) in self.timeline.by_track.iter().filter(|(tid, _)| {
+                self.time_selection_track
+                    .is_none_or(|target| **tid == target)
+            }) {
                 for clip in &track.clips {
                     let clip_start = clip.position as f64 / spb;
                     let clip_end = (clip.position + clip.duration) as f64 / spb;
@@ -968,7 +309,7 @@ impl ArrangementState {
                         raw_offset
                     };
                     copied.push(ClipboardClip::Audio {
-                        track_id: track.id,
+                        track_id: *content_track_id,
                         offset_beats: overlap_start - start,
                         clip: fragment,
                     });
@@ -1020,7 +361,7 @@ impl ArrangementState {
                     fragment.loop_start_beats = 0.0;
                     fragment.loop_end_beats = 0.0;
                     copied.push(ClipboardClip::Note {
-                        track_id: track.id,
+                        track_id: *content_track_id,
                         offset_beats: overlap_start - start,
                         clip: fragment,
                     });
@@ -1032,7 +373,7 @@ impl ArrangementState {
                 match selection {
                     ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
                         if let Some(clip) = self
-                            .find_track(*track_id)
+                            .find_content(*track_id)
                             .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
                         {
                             starts.push(clip.position as f64 / spb);
@@ -1040,7 +381,7 @@ impl ArrangementState {
                     }
                     ArrangementSelection::NoteClip { track_id, clip_id } => {
                         if let Some(clip) = self
-                            .find_track(*track_id)
+                            .find_content(*track_id)
                             .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
                         {
                             starts.push(clip.position_beats);
@@ -1054,7 +395,7 @@ impl ArrangementState {
                 match selection {
                     ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
                         if let Some(clip) = self
-                            .find_track(*track_id)
+                            .find_content(*track_id)
                             .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
                         {
                             copied.push(ClipboardClip::Audio {
@@ -1066,7 +407,7 @@ impl ArrangementState {
                     }
                     ArrangementSelection::NoteClip { track_id, clip_id } => {
                         if let Some(clip) = self
-                            .find_track(*track_id)
+                            .find_content(*track_id)
                             .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
                         {
                             copied.push(ClipboardClip::Note {
@@ -1117,7 +458,7 @@ impl ArrangementState {
                     offset_beats,
                     mut clip,
                 } => {
-                    if self.find_track(track_id).is_none() {
+                    if self.find_content(track_id).is_none() {
                         continue;
                     }
                     clip.id = ClipId::new();
@@ -1139,14 +480,14 @@ impl ArrangementState {
                         track_id,
                         clip_id: clip.id,
                     });
-                    self.find_track_mut(track_id).unwrap().clips.push(clip);
+                    self.find_content_mut(track_id).unwrap().clips.push(clip);
                 }
                 ClipboardClip::Note {
                     track_id,
                     offset_beats,
                     mut clip,
                 } => {
-                    if self.find_track(track_id).is_none() {
+                    if self.find_content(track_id).is_none() {
                         continue;
                     }
                     clip.id = ClipId::new();
@@ -1171,7 +512,10 @@ impl ArrangementState {
                         track_id,
                         clip_id: clip.id,
                     });
-                    self.find_track_mut(track_id).unwrap().note_clips.push(clip);
+                    self.find_content_mut(track_id)
+                        .unwrap()
+                        .note_clips
+                        .push(clip);
                 }
             }
         }
@@ -1195,11 +539,11 @@ impl ArrangementState {
         let selections: Vec<_> = self.selected_clips.iter().copied().collect();
         let enable = selections.iter().any(|selection| match selection {
             ArrangementSelection::AudioClip { track_id, clip_id } => self
-                .find_track(*track_id)
+                .find_content(*track_id)
                 .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
                 .is_some_and(|c| !c.loop_enabled),
             ArrangementSelection::NoteClip { track_id, clip_id } => self
-                .find_track(*track_id)
+                .find_content(*track_id)
                 .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
                 .is_some_and(|c| !c.loop_enabled),
         });
@@ -1209,7 +553,7 @@ impl ArrangementState {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
                     let mut command = None;
                     if let Some(clip) = self
-                        .find_track_mut(track_id)
+                        .find_content_mut(track_id)
                         .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.loop_enabled = enable;
@@ -1233,7 +577,7 @@ impl ArrangementState {
                 ArrangementSelection::NoteClip { track_id, clip_id } => {
                     let mut command = None;
                     if let Some(clip) = self
-                        .find_track_mut(track_id)
+                        .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.loop_enabled = enable;
@@ -1270,6 +614,7 @@ impl ArrangementState {
 
     pub(super) fn op_resize_selected_clips(
         &mut self,
+        project_tracks: &mut ProjectTracksState,
         engine: &mut impl EngineHandle,
         ctx: ArrangementCtx,
         anchor: ArrangementSelection,
@@ -1280,11 +625,11 @@ impl ArrangementState {
         }
         let anchor_duration = match anchor {
             ArrangementSelection::AudioClip { track_id, clip_id } => self
-                .find_track(track_id)
+                .find_content(track_id)
                 .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
                 .map(|c| c.duration as f64 / ctx.samples_per_beat),
             ArrangementSelection::NoteClip { track_id, clip_id } => self
-                .find_track(track_id)
+                .find_content(track_id)
                 .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
                 .map(|c| c.duration_beats),
         };
@@ -1302,13 +647,14 @@ impl ArrangementState {
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
                     let old = self
-                        .find_track(track_id)
+                        .find_content(track_id)
                         .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
                         .map(|c| c.duration as f64 / ctx.samples_per_beat);
                     if let Some(old) = old {
                         let duration =
                             ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
                         let action = self.update(
+                            project_tracks,
                             ArrangementMsg::ResizeAudioClip {
                                 track_id,
                                 clip_id,
@@ -1326,7 +672,7 @@ impl ArrangementState {
                 ArrangementSelection::NoteClip { track_id, clip_id } => {
                     let mut sync = None;
                     if let Some(clip) = self
-                        .find_track_mut(track_id)
+                        .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.duration_beats = (clip.duration_beats + delta).max(0.25);
