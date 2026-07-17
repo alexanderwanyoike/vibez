@@ -419,10 +419,9 @@ impl canvas::Program<Message> for EqDisplayWidget {
                         let pos = Point::new(abs.x - bounds.x, abs.y - bounds.y);
                         return (
                             canvas::event::Status::Captured,
-                            Some(
-                                self.drag_message(band_idx, pos, bounds)
-                                    .in_undo_gesture(state.undo_gesture.unwrap()),
-                            ),
+                            Some(self.drag_message(band_idx, pos, bounds).in_undo_gesture(
+                                *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                            )),
                         );
                     }
                 }

@@ -214,10 +214,9 @@ impl canvas::Program<Message> for KnobWidget {
                 if let Some(pan) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(
-                            Message::set_track_pan(self.track_id, pan)
-                                .in_undo_gesture(state.undo_gesture.unwrap()),
-                        ),
+                        Some(Message::set_track_pan(self.track_id, pan).in_undo_gesture(
+                            *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                        )),
                     );
                 }
             }

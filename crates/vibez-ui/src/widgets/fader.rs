@@ -140,8 +140,9 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
                     return (
                         canvas::event::Status::Captured,
                         Some(
-                            Message::set_track_gain(self.track_id, gain)
-                                .in_undo_gesture(state.undo_gesture.unwrap()),
+                            Message::set_track_gain(self.track_id, gain).in_undo_gesture(
+                                *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                            ),
                         ),
                     );
                 }
@@ -174,6 +175,20 @@ mod tests {
             }),
             mouse::Cursor::Available(cursor_at),
         )
+    }
+
+    fn release(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
+        (
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            mouse::Cursor::Available(cursor_at),
+        )
+    }
+
+    fn gesture_of(message: Option<Message>) -> Option<UndoGestureId> {
+        match message {
+            Some(Message::UndoGesture { id, .. }) => Some(id),
+            _ => None,
+        }
     }
 
     fn gain_of(message: Option<Message>) -> Option<f32> {
@@ -242,6 +257,29 @@ mod tests {
         let (_, message) = widget.update(&mut state, event, bounds, cursor);
         let gain = gain_of(message).expect("drag outside bounds must keep tracking");
         assert!(gain > 1.0, "rightward drag should raise gain, got {gain}");
+    }
+
+    #[test]
+    fn separate_fader_drags_get_distinct_undo_gestures() {
+        let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let mut state = FaderState::default();
+
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 140.0));
+        let (_, first) = widget.update(&mut state, event, bounds, cursor);
+        let first = gesture_of(first).expect("first drag emits a grouped edit");
+
+        let (event, cursor) = release(Point::new(112.0, 140.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 130.0));
+        let (_, second) = widget.update(&mut state, event, bounds, cursor);
+        let second = gesture_of(second).expect("second drag emits a grouped edit");
+
+        assert_ne!(first, second);
     }
 }
 
@@ -377,8 +415,9 @@ impl canvas::Program<Message> for FaderWidget {
                     return (
                         canvas::event::Status::Captured,
                         Some(
-                            Message::set_track_gain(self.track_id, gain)
-                                .in_undo_gesture(state.undo_gesture.unwrap()),
+                            Message::set_track_gain(self.track_id, gain).in_undo_gesture(
+                                *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                            ),
                         ),
                     );
                 }

@@ -394,7 +394,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
                         canvas::event::Status::Captured,
                         Some(
                             self.set_value_message(self.denormalize(norm))
-                                .in_undo_gesture(state.undo_gesture.unwrap()),
+                                .in_undo_gesture(
+                                    *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                                ),
                         ),
                     );
                 }

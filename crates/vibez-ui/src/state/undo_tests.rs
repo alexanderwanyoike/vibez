@@ -63,6 +63,32 @@ fn one_eq_drag_is_one_undo_step() {
 }
 
 #[test]
+fn separate_drags_are_separate_undo_steps() {
+    let mut state = AppState::default();
+    let first_drag = UndoGestureId::new();
+    let second_drag = UndoGestureId::new();
+
+    state
+        .project
+        .history
+        .push_edit(snapshot(&state), Some(first_drag));
+    state
+        .project
+        .history
+        .push_edit(snapshot(&state), Some(first_drag));
+    state
+        .project
+        .history
+        .push_edit(snapshot(&state), Some(second_drag));
+    state
+        .project
+        .history
+        .push_edit(snapshot(&state), Some(second_drag));
+
+    assert_eq!(state.project.history.undo.len(), 2);
+}
+
+#[test]
 fn clip_resize_does_not_hide_the_preceding_automation_undo_step() {
     let mut state = AppState::default();
     let track_id = TrackId::new();
