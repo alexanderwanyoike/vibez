@@ -14,11 +14,15 @@ use crate::state::{ArrangementSelection, AuditionMode, DetailPanelTab, UiEffect}
 use super::*;
 
 fn apply_track_mute_request(
-    project_tracks: &mut crate::state::ProjectTracksState,
+    project_tracks: &mut Arc<crate::state::ProjectTracksState>,
+    history: &mut crate::state::UndoHistory,
+    pre_edit_snapshot: crate::state::ProjectSnapshot,
     request: crate::domains::perform::TrackMuteRequest,
     engine: &mut impl crate::domains::EngineHandle,
 ) -> Option<String> {
-    let track = project_tracks.find_mut(request.track_id)?;
+    project_tracks.find(request.track_id)?;
+    history.push_edit(pre_edit_snapshot, None);
+    let track = Arc::make_mut(project_tracks).find_mut(request.track_id)?;
     track.mute = request.muted;
     let track_name = track.name.clone();
     engine.send(EngineCommand::SetTrackMute(request.track_id, request.muted));
@@ -34,10 +38,13 @@ impl App {
             self.state.status_text = "Perform key mapping saved".into();
         }
         if let Some(request) = action.track_mute_request {
+            let pre_edit_snapshot = self.take_snapshot();
             let changed = {
                 let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                 apply_track_mute_request(
-                    Arc::make_mut(&mut self.state.project_tracks),
+                    &mut self.state.project_tracks,
+                    &mut self.state.project.history,
+                    pre_edit_snapshot,
                     request,
                     &mut engine,
                 )
@@ -585,20 +592,38 @@ impl App {
 mod perform_action_tests {
     use super::*;
     use crate::domains::test_support::RecordingEngine;
-    use crate::state::{ProjectTrack, ProjectTracksState};
+    use crate::state::{AppState, ProjectSnapshot, ProjectTrack};
     use vibez_core::id::TrackId;
+
+    fn snapshot(state: &AppState) -> ProjectSnapshot {
+        ProjectSnapshot {
+            project_tracks: Arc::clone(&state.project_tracks),
+            arrange_timeline: Arc::clone(&state.arrangement.timeline),
+            bpm: state.transport.bpm,
+            bpm_text: state.transport.bpm_text.clone(),
+            loop_enabled: state.transport.loop_enabled,
+            loop_start_beats: state.transport.loop_start_beats,
+            loop_end_beats: state.transport.loop_end_beats,
+            selected_track: state.arrangement.selected_track,
+            selected_clips: state.arrangement.selected_clips.clone(),
+            selected_note_clip: state.arrangement.selected_note_clip,
+        }
+    }
 
     #[test]
     fn perform_mute_request_updates_the_shared_track_and_engine_together() {
         let track_id = TrackId::new();
-        let mut project_tracks = ProjectTracksState::default();
-        project_tracks
+        let mut state = AppState::default();
+        Arc::make_mut(&mut state.project_tracks)
             .tracks
             .push(ProjectTrack::new(track_id, "Drums".into(), 0));
         let mut engine = RecordingEngine::default();
+        let pre_edit_snapshot = snapshot(&state);
 
         let name = apply_track_mute_request(
-            &mut project_tracks,
+            &mut state.project_tracks,
+            &mut state.project.history,
+            pre_edit_snapshot,
             crate::domains::perform::TrackMuteRequest {
                 track_id,
                 muted: true,
@@ -607,10 +632,35 @@ mod perform_action_tests {
         );
 
         assert_eq!(name.as_deref(), Some("Drums"));
-        assert!(project_tracks.tracks[0].mute);
+        assert!(state.project_tracks.tracks[0].mute);
         assert!(matches!(
             engine.0.as_slice(),
             [EngineCommand::SetTrackMute(event_track, true)] if *event_track == track_id
         ));
+        assert_eq!(state.project.history.undo.len(), 1);
+        let before_mute = state.project.history.pop_undo().expect("mute undo step");
+        assert!(!before_mute.project_tracks.tracks[0].mute);
+    }
+
+    #[test]
+    fn missing_track_mute_request_does_not_create_an_undo_step() {
+        let mut state = AppState::default();
+        let mut engine = RecordingEngine::default();
+        let pre_edit_snapshot = snapshot(&state);
+
+        let name = apply_track_mute_request(
+            &mut state.project_tracks,
+            &mut state.project.history,
+            pre_edit_snapshot,
+            crate::domains::perform::TrackMuteRequest {
+                track_id: TrackId::new(),
+                muted: true,
+            },
+            &mut engine,
+        );
+
+        assert_eq!(name, None);
+        assert!(state.project.history.undo.is_empty());
+        assert!(engine.0.is_empty());
     }
 }
