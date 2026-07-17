@@ -257,6 +257,47 @@ mod tests {
     }
 
     #[test]
+    fn existing_project_document_roundtrips_semantically_unchanged() {
+        let track = TrackInfo::new("Legacy Track");
+        let project = Project {
+            name: "Legacy Layout".into(),
+            bpm: 123.0,
+            sample_rate: 44_100,
+            tracks: vec![track.clone()],
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: "legacy.wav".into(),
+                position: 128,
+                source_offset: 32,
+                duration: 2_048,
+                source: Some(MediaSourceRef::LocalFile {
+                    path: PathBuf::from("audio/legacy.wav"),
+                }),
+                file_path: Some(PathBuf::from("audio/legacy.wav")),
+                loop_enabled: true,
+                loop_start: 32,
+                loop_end: 2_080,
+                original_bpm: Some(123.0),
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            note_clips: Vec::new(),
+            master: None,
+            buses: Vec::new(),
+        };
+        let legacy_bytes = serde_json::to_vec_pretty(&project).unwrap();
+
+        let loaded: Project = serde_json::from_slice(&legacy_bytes).unwrap();
+        let rewritten = serde_json::to_vec_pretty(&loaded).unwrap();
+
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&legacy_bytes).unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&rewritten).unwrap()
+        );
+    }
+
+    #[test]
     fn load_bad_path() {
         let result = Project::load_from_file(Path::new("/nonexistent/path.vibez"));
         assert!(result.is_err());

@@ -122,7 +122,11 @@ impl App {
                                     _ => None,
                                 });
                         if let Some(sel_cid) = audio_sel {
-                            if let Some(clip) = track.clips.iter().find(|c| c.id == sel_cid) {
+                            if let Some(clip) = self
+                                .state
+                                .arrange_content(track_id)
+                                .and_then(|content| content.clips.iter().find(|c| c.id == sel_cid))
+                            {
                                 self.view_audio_clip_panel(track_id, clip, track_color)
                             } else {
                                 self.view_clip_placeholder()
@@ -196,11 +200,8 @@ impl App {
             if let Some((tid, cid)) = self.state.arrangement.selected_note_clip {
                 if tid == track_id {
                     self.state
-                        .arrangement
-                        .tracks
-                        .iter()
-                        .find(|t| t.id == track_id)
-                        .and_then(|t| t.note_clips.iter().find(|c| c.id == cid))
+                        .arrange_content(track_id)
+                        .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
                         .map(|c| {
                             (
                                 c.name.clone(),
@@ -219,8 +220,8 @@ impl App {
             };
 
         let piano_widget = if let Some(ref cd) = clip_data {
-            if let Some(track) = self.state.find_track(track_id) {
-                if let Some(clip) = track.note_clips.iter().find(|c| c.id == cd.5) {
+            if let Some(content) = self.state.arrange_content(track_id) {
+                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.5) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
                     PianoRollWidget::from_clip(
                         track_id,

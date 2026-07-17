@@ -16,7 +16,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_project::Project;
 
 use crate::message::{Message, ProjectLoadResult};
-use crate::state::{UiClip, UiDrumPad, UiEffect, UiNoteClip, UiTrack};
+use crate::state::{ProjectTrack, UiClip, UiDrumPad, UiEffect, UiNoteClip};
 use crate::ui_settings::UiSettings;
 
 use super::*;
@@ -32,18 +32,30 @@ impl App {
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));
 
-        let existing_track_ids: Vec<TrackId> =
-            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
+        let existing_track_ids: Vec<TrackId> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|t| t.id)
+            .collect();
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
 
-        self.state.arrangement.tracks.clear();
-        let bus_ids: Vec<TrackId> = self.state.arrangement.buses.iter().map(|b| b.id).collect();
+        Arc::make_mut(&mut self.state.project_tracks).tracks.clear();
+        let bus_ids: Vec<TrackId> = self
+            .state
+            .project_tracks
+            .buses
+            .iter()
+            .map(|b| b.id)
+            .collect();
         for bus_id in bus_ids {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
-        self.state.arrangement.buses.clear();
+        Arc::make_mut(&mut self.state.project_tracks).buses.clear();
+        self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.reset_master_channel();
         // The engine drops all plugin instances with their tracks;
         // their GUI windows and stale raw pointers must go with them
@@ -54,7 +66,7 @@ impl App {
         self.plugin_gui_raw_ptrs.clear();
         self.plugin_state_ptrs.clear();
         self.state.arrangement.selected_track = None;
-        self.state.arrangement.next_track_number = 1;
+        Arc::make_mut(&mut self.state.project_tracks).next_track_number = 1;
         self.state.arrangement.selected_note_clip = None;
         self.state.arrangement.selected_clips.clear();
         self.state.transport.loop_enabled = false;
@@ -79,7 +91,7 @@ impl App {
     pub(super) fn reset_master_channel(&mut self) {
         let effect_ids: Vec<EffectId> = self
             .state
-            .arrangement
+            .project_tracks
             .master
             .effects
             .iter()
@@ -88,7 +100,7 @@ impl App {
         for effect_id in effect_ids {
             self.send_command(EngineCommand::RemoveEffect(TrackId::MASTER, effect_id));
         }
-        self.state.arrangement.master = crate::state::new_master_track();
+        Arc::make_mut(&mut self.state.project_tracks).master = crate::state::new_master_track();
         self.send_command(EngineCommand::SetTrackGain(TrackId::MASTER, 1.0));
     }
 
@@ -112,16 +124,8 @@ impl App {
             // find_track_mut borrows state; re-resolve inside the
             // engine-handle scope.
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-            if let Some(channel) = if chan_id.is_master() {
-                Some(&mut self.state.arrangement.master)
-            } else {
-                self.state
-                    .arrangement
-                    .tracks
-                    .iter_mut()
-                    .chain(self.state.arrangement.buses.iter_mut())
-                    .find(|t| t.id == chan_id)
-            } {
+            let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
+            if let Some(channel) = project_tracks.find_mut(chan_id) {
                 crate::domains::arrangement::attach_channel_eq(&mut engine, channel);
             }
         }
@@ -230,7 +234,7 @@ impl App {
         }
     }
 
-    pub(super) fn track_info_from_ui(&self, track: &UiTrack) -> TrackInfo {
+    pub(super) fn track_info_from_ui(&self, track: &ProjectTrack) -> TrackInfo {
         let effects = track
             .effects
             .iter()
@@ -291,7 +295,11 @@ impl App {
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
-            automation: track.automation.clone(),
+            automation: self
+                .state
+                .arrange_content(track.id)
+                .map(|content| content.automation.clone())
+                .unwrap_or_default(),
             sends: track.sends.clone(),
         }
     }
@@ -308,7 +316,7 @@ impl App {
     pub(super) fn project_from_state(&self) -> Project {
         let tracks = self
             .state
-            .arrangement
+            .project_tracks
             .tracks
             .iter()
             .map(|track| self.track_info_from_ui(track))
@@ -316,57 +324,66 @@ impl App {
 
         let clips = self
             .state
-            .arrangement
+            .project_tracks
             .tracks
             .iter()
             .flat_map(|track| {
-                track.clips.iter().map(|clip| ClipInfo {
-                    id: clip.id,
-                    track_id: track.id,
-                    name: clip.name.clone(),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    duration: clip.duration,
-                    source: clip.source.clone(),
-                    file_path: clip.source.as_ref().and_then(|source| match source {
-                        MediaSourceRef::LocalFile { path } => Some(path.clone()),
-                        MediaSourceRef::StagedProjectMedia { .. }
-                        | MediaSourceRef::StagedRemoteProjectMedia { .. }
-                        | MediaSourceRef::ProjectMedia { .. }
-                        | MediaSourceRef::DropboxFile { .. } => None,
-                    }),
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                    original_bpm: clip.original_bpm,
-                    warped: clip.warped,
-                    warped_to_bpm: clip.warped_to_bpm,
-                })
-            })
-            .collect();
-
-        let note_clips = self
-            .state
-            .arrangement
-            .tracks
-            .iter()
-            .flat_map(|track| {
-                track
-                    .note_clips
-                    .iter()
-                    .map(|clip| vibez_core::midi::NoteClipInfo {
-                        id: clip.id,
-                        track_id: track.id,
-                        name: clip.name.clone(),
-                        position_beats: clip.position_beats,
-                        duration_beats: clip.duration_beats,
-                        notes: clip.notes.clone(),
-                        loop_enabled: clip.loop_enabled,
-                        loop_start_beats: clip.loop_start_beats,
-                        loop_end_beats: clip.loop_end_beats,
+                self.state
+                    .arrange_content(track.id)
+                    .into_iter()
+                    .flat_map(move |content| {
+                        content.clips.iter().map(move |clip| ClipInfo {
+                            id: clip.id,
+                            track_id: track.id,
+                            name: clip.name.clone(),
+                            position: clip.position,
+                            source_offset: clip.source_offset,
+                            duration: clip.duration,
+                            source: clip.source.clone(),
+                            file_path: clip.source.as_ref().and_then(|source| match source {
+                                MediaSourceRef::LocalFile { path } => Some(path.clone()),
+                                MediaSourceRef::StagedProjectMedia { .. }
+                                | MediaSourceRef::StagedRemoteProjectMedia { .. }
+                                | MediaSourceRef::ProjectMedia { .. }
+                                | MediaSourceRef::DropboxFile { .. } => None,
+                            }),
+                            loop_enabled: clip.loop_enabled,
+                            loop_start: clip.loop_start,
+                            loop_end: clip.loop_end,
+                            original_bpm: clip.original_bpm,
+                            warped: clip.warped,
+                            warped_to_bpm: clip.warped_to_bpm,
+                        })
                     })
             })
             .collect();
+
+        let note_clips =
+            self.state
+                .project_tracks
+                .tracks
+                .iter()
+                .flat_map(|track| {
+                    self.state
+                        .arrange_content(track.id)
+                        .into_iter()
+                        .flat_map(move |content| {
+                            content.note_clips.iter().map(move |clip| {
+                                vibez_core::midi::NoteClipInfo {
+                                    id: clip.id,
+                                    track_id: track.id,
+                                    name: clip.name.clone(),
+                                    position_beats: clip.position_beats,
+                                    duration_beats: clip.duration_beats,
+                                    notes: clip.notes.clone(),
+                                    loop_enabled: clip.loop_enabled,
+                                    loop_start_beats: clip.loop_start_beats,
+                                    loop_end_beats: clip.loop_end_beats,
+                                }
+                            })
+                        })
+                })
+                .collect();
 
         Project {
             name: self
@@ -382,10 +399,10 @@ impl App {
             tracks,
             clips,
             note_clips,
-            master: Some(self.track_info_from_ui(&self.state.arrangement.master)),
+            master: Some(self.track_info_from_ui(&self.state.project_tracks.master)),
             buses: self
                 .state
-                .arrangement
+                .project_tracks
                 .buses
                 .iter()
                 .map(|bus| self.track_info_from_ui(bus))
@@ -407,10 +424,14 @@ impl App {
 
     pub(super) fn apply_saved_project_sources(&mut self, project: &Project) {
         for saved_clip in &project.clips {
-            if let Some(track) = self.state.find_track_mut(saved_clip.track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == saved_clip.id) {
-                    clip.source = saved_clip.source.clone();
-                }
+            if let Some(clip) = self
+                .state
+                .arrange_content_mut(saved_clip.track_id)
+                .clips
+                .iter_mut()
+                .find(|clip| clip.id == saved_clip.id)
+            {
+                clip.source = saved_clip.source.clone();
             }
         }
         for saved_track in &project.tracks {
@@ -477,7 +498,7 @@ impl App {
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
 
         for track_info in &loaded.project.tracks {
-            let mut track = UiTrack::new_instrument(
+            let mut track = ProjectTrack::new_instrument(
                 track_info.id,
                 track_info.name.clone(),
                 track_info.kind,
@@ -487,7 +508,8 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
-            track.automation = track_info.automation.clone();
+            self.state.arrange_content_mut(track_info.id).automation =
+                track_info.automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
             if let Some(dev) = &track_info.plugin_instrument {
@@ -650,19 +672,18 @@ impl App {
                 });
             }
 
-            self.state.arrangement.next_track_number = self
-                .state
-                .arrangement
+            let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
+            project_tracks.next_track_number = project_tracks
                 .next_track_number
-                .max(self.state.arrangement.tracks.len() as u32 + 1);
-            self.state.arrangement.tracks.push(track);
+                .max(project_tracks.tracks.len() as u32 + 2);
+            project_tracks.tracks.push(track);
         }
 
         // Master bus: gain + effect chain from the file, then the
         // channel-EQ backfill for projects saved before the master
         // was a real channel. clear_project_runtime left it bare.
         if let Some(master_info) = &loaded.project.master {
-            self.state.arrangement.master.gain = master_info.gain;
+            Arc::make_mut(&mut self.state.project_tracks).master.gain = master_info.gain;
             self.send_command(EngineCommand::SetTrackGain(
                 TrackId::MASTER,
                 master_info.gain,
@@ -672,8 +693,9 @@ impl App {
                 TrackId::MASTER,
                 &mut plugin_effect_requests,
             );
-            self.state.arrangement.master.effects = effects;
-            self.state.arrangement.master.automation = master_info.automation.clone();
+            Arc::make_mut(&mut self.state.project_tracks).master.effects = effects;
+            self.state.arrange_content_mut(TrackId::MASTER).automation =
+                master_info.automation.clone();
             for lane in &master_info.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
@@ -687,7 +709,8 @@ impl App {
         // were restored with their tracks above.
         for bus_info in &loaded.project.buses {
             self.send_command(EngineCommand::AddBus(bus_info.id, bus_info.name.clone()));
-            let mut bus = UiTrack::new(bus_info.id, bus_info.name.clone(), bus_info.color_index);
+            let mut bus =
+                ProjectTrack::new(bus_info.id, bus_info.name.clone(), bus_info.color_index);
             bus.gain = bus_info.gain;
             bus.pan = bus_info.pan;
             bus.mute = bus_info.mute;
@@ -701,14 +724,16 @@ impl App {
                 bus_info.id,
                 &mut plugin_effect_requests,
             );
-            bus.automation = bus_info.automation.clone();
+            self.state.arrange_content_mut(bus_info.id).automation = bus_info.automation.clone();
             for lane in &bus_info.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
                     lane: lane.clone(),
                 });
             }
-            self.state.arrangement.buses.push(bus);
+            Arc::make_mut(&mut self.state.project_tracks)
+                .buses
+                .push(bus);
             self.ensure_channel_eq(bus_info.id);
         }
 
@@ -725,23 +750,26 @@ impl App {
                 loop_end: loaded_clip.info.loop_end,
             });
 
-            if let Some(track) = self.state.find_track_mut(loaded_clip.info.track_id) {
-                track.clips.push(UiClip {
-                    id: loaded_clip.info.id,
-                    name: loaded_clip.info.name,
-                    audio: loaded_clip.audio,
-                    source: loaded_clip.info.source.clone(),
-                    position: loaded_clip.info.position,
-                    source_offset: loaded_clip.info.source_offset,
-                    duration: loaded_clip.info.duration,
-                    loop_enabled: loaded_clip.info.loop_enabled,
-                    loop_start: loaded_clip.info.loop_start,
-                    loop_end: loaded_clip.info.loop_end,
-                    original_bpm: loaded_clip.info.original_bpm,
-                    warped: loaded_clip.info.warped,
-                    warped_to_bpm: loaded_clip.info.warped_to_bpm,
-                    original_audio: loaded_clip.original_audio,
-                });
+            if self.state.find_track(loaded_clip.info.track_id).is_some() {
+                self.state
+                    .arrange_content_mut(loaded_clip.info.track_id)
+                    .clips
+                    .push(UiClip {
+                        id: loaded_clip.info.id,
+                        name: loaded_clip.info.name,
+                        audio: loaded_clip.audio,
+                        source: loaded_clip.info.source.clone(),
+                        position: loaded_clip.info.position,
+                        source_offset: loaded_clip.info.source_offset,
+                        duration: loaded_clip.info.duration,
+                        loop_enabled: loaded_clip.info.loop_enabled,
+                        loop_start: loaded_clip.info.loop_start,
+                        loop_end: loaded_clip.info.loop_end,
+                        original_bpm: loaded_clip.info.original_bpm,
+                        warped: loaded_clip.info.warped,
+                        warped_to_bpm: loaded_clip.info.warped_to_bpm,
+                        original_audio: loaded_clip.original_audio,
+                    });
             }
         }
 
@@ -762,18 +790,21 @@ impl App {
                     note: *note,
                 });
             }
-            if let Some(track) = self.state.find_track_mut(note_clip.track_id) {
-                track.note_clips.push(UiNoteClip {
-                    id: note_clip.id,
-                    name: note_clip.name.clone(),
-                    position_beats: note_clip.position_beats,
-                    duration_beats: note_clip.duration_beats,
-                    notes: note_clip.notes.clone(),
-                    selected_notes: HashSet::new(),
-                    loop_enabled: note_clip.loop_enabled,
-                    loop_start_beats: note_clip.loop_start_beats,
-                    loop_end_beats: note_clip.loop_end_beats,
-                });
+            if self.state.find_track(note_clip.track_id).is_some() {
+                self.state
+                    .arrange_content_mut(note_clip.track_id)
+                    .note_clips
+                    .push(UiNoteClip {
+                        id: note_clip.id,
+                        name: note_clip.name.clone(),
+                        position_beats: note_clip.position_beats,
+                        duration_beats: note_clip.duration_beats,
+                        notes: note_clip.notes.clone(),
+                        selected_notes: HashSet::new(),
+                        loop_enabled: note_clip.loop_enabled,
+                        loop_start_beats: note_clip.loop_start_beats,
+                        loop_end_beats: note_clip.loop_end_beats,
+                    });
             }
         }
 
@@ -811,8 +842,12 @@ impl App {
             });
         }
 
-        self.state.arrangement.selected_track =
-            self.state.arrangement.tracks.first().map(|track| track.id);
+        self.state.arrangement.selected_track = self
+            .state
+            .project_tracks
+            .tracks
+            .first()
+            .map(|track| track.id);
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
         let provenance_suffix = remote_provenance

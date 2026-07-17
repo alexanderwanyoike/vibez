@@ -404,8 +404,9 @@ impl App {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);
                         // The master strip meters the same summed mix.
-                        self.state.arrangement.master.peak_l = self.state.peak_l;
-                        self.state.arrangement.master.peak_r = self.state.peak_r;
+                        let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
+                        project_tracks.master.peak_l = self.state.peak_l;
+                        project_tracks.master.peak_r = self.state.peak_r;
                     }
                     EngineEvent::PlaybackStopped => {
                         self.state.transport.playing = false;

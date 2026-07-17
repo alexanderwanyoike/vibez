@@ -12,7 +12,7 @@ use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::{AuditionSync, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
-use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad, UiTrack};
+use crate::state::{AuditionMode, ProjectTrack, SampleBrowserEntry, UiClip, UiDrumPad};
 
 use super::*;
 
@@ -438,16 +438,16 @@ impl App {
         }
 
         let track_num = self.next_unique_track_number("Audio");
-        self.state.arrangement.next_track_number = track_num + 1;
+        Arc::make_mut(&mut self.state.project_tracks).next_track_number = track_num + 1;
         let id = TrackId::new();
         let color_index = ((track_num - 1) % 8) as u8;
         let name = format!("Audio {track_num}");
 
         self.send_command(EngineCommand::AddTrack(id, name.clone()));
-        self.state
-            .arrangement
+        Arc::make_mut(&mut self.state.project_tracks)
             .tracks
-            .push(UiTrack::new(id, name, color_index));
+            .push(ProjectTrack::new(id, name, color_index));
+        self.state.arrange_content_mut(id);
         self.state.arrangement.selected_track = Some(id);
         id
     }
@@ -600,8 +600,8 @@ impl App {
             loop_start: 0,
             loop_end: 0,
         });
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
+        if self.state.find_track(track_id).is_some() {
+            self.state.arrange_content_mut(track_id).clips.push(UiClip {
                 id: clip_id,
                 name: name.clone(),
                 audio: Arc::clone(&audio),

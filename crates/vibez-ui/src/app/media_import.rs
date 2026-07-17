@@ -181,11 +181,11 @@ impl App {
         clip_id: ClipId,
         grid: crate::state::SnapGrid,
     ) -> Task<Message> {
-        let Some(track) = self.state.find_track(track_id) else {
+        let Some(content) = self.state.arrange_content(track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
-        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+        let Some(clip) = content.clips.iter().find(|c| c.id == clip_id) else {
             self.state.status_text = "Clip not found".to_string();
             return Task::none();
         };
@@ -221,11 +221,11 @@ impl App {
         track_id: TrackId,
         clip_id: ClipId,
     ) -> Task<Message> {
-        let Some(track) = self.state.find_track(track_id) else {
+        let Some(content) = self.state.arrange_content(track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
-        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+        let Some(clip) = content.clips.iter().find(|c| c.id == clip_id) else {
             self.state.status_text = "Clip not found".to_string();
             return Task::none();
         };
@@ -258,17 +258,18 @@ impl App {
         let mut warped: Vec<(TrackId, ClipId)> = Vec::new();
         let mut moves: Vec<(TrackId, ClipId, u64)> = Vec::new();
 
-        for track in &mut self.state.arrangement.tracks {
-            for clip in &mut track.clips {
+        for (track_id, content) in &mut Arc::make_mut(&mut self.state.arrangement.timeline).by_track
+        {
+            for clip in &mut content.clips {
                 if !clip.warped {
                     continue;
                 }
                 let new_position = (clip.position as f64 * position_ratio).round() as u64;
                 if new_position != clip.position {
                     clip.position = new_position;
-                    moves.push((track.id, clip.id, new_position));
+                    moves.push((*track_id, clip.id, new_position));
                 }
-                warped.push((track.id, clip.id));
+                warped.push((*track_id, clip.id));
             }
         }
         for (track_id, clip_id, new_position) in moves {
@@ -303,11 +304,11 @@ impl App {
             self.state.status_text = "Cannot warp at zero BPM".to_string();
             return Task::none();
         }
-        let Some(track) = self.state.find_track(track_id) else {
+        let Some(content) = self.state.arrange_content(track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
-        let Some(clip) = track.clips.iter().find(|c| c.id == clip_id) else {
+        let Some(clip) = content.clips.iter().find(|c| c.id == clip_id) else {
             self.state.status_text = "Clip not found".to_string();
             return Task::none();
         };
@@ -465,7 +466,7 @@ impl App {
     ) -> Task<Message> {
         let existing_end = self
             .state
-            .find_track(track_id)
+            .arrange_content(track_id)
             .map(|t| {
                 t.clips
                     .iter()
@@ -489,8 +490,8 @@ impl App {
             loop_end: 0,
         });
 
-        if let Some(track) = self.state.find_track_mut(track_id) {
-            track.clips.push(UiClip {
+        if self.state.find_track(track_id).is_some() {
+            self.state.arrange_content_mut(track_id).clips.push(UiClip {
                 id: clip_id,
                 name: name.clone(),
                 audio: Arc::clone(&audio),
@@ -556,15 +557,20 @@ impl App {
         // Collect targets first so we don't hold a borrow across dispatch.
         let targets: Vec<(TrackId, ClipId)> = self
             .state
-            .arrangement
+            .project_tracks
             .tracks
             .iter()
             .flat_map(|track| {
-                track
-                    .clips
-                    .iter()
-                    .filter(|c| c.warped && c.original_bpm.is_some())
-                    .map(move |c| (track.id, c.id))
+                self.state
+                    .arrange_content(track.id)
+                    .into_iter()
+                    .flat_map(move |content| {
+                        content
+                            .clips
+                            .iter()
+                            .filter(|c| c.warped && c.original_bpm.is_some())
+                            .map(move |c| (track.id, c.id))
+                    })
             })
             .collect();
         if targets.is_empty() {

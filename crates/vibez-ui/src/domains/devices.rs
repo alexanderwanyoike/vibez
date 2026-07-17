@@ -5,10 +5,10 @@
 //!
 //! Follows the transport reference pattern with one addition: tracks
 //! are the shared model (like database entities), so `update`
-//! receives `&mut [UiTrack]` explicitly. The domain may touch the
+//! receives `&mut [ProjectTrack]` explicitly. The domain may touch the
 //! DEVICE fields of a track and nothing else; every dependency is
 //! visible in the signature, which is what keeps this testable with
-//! plain `Vec<UiTrack>` fixtures.
+//! plain `Vec<ProjectTrack>` fixtures.
 //!
 //! Deliberately NOT here (async/infrastructure, future services
 //! tranche): plugin scanning and loading pipelines, plugin GUI window
@@ -23,7 +23,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 
 use super::EngineHandle;
 use crate::message::DrumPadParam;
-use crate::state::{DeviceContextMenu, DeviceMenuCategory, UiDrumPad, UiEffect, UiTrack};
+use crate::state::{DeviceContextMenu, DeviceMenuCategory, ProjectTrack, UiDrumPad, UiEffect};
 
 /// Messages the devices domain handles.
 #[derive(Debug, Clone)]
@@ -119,11 +119,11 @@ pub fn default_instrument_params(kind: InstrumentKind, sample_rate: f32) -> Vec<
 }
 
 fn find_track_mut<'a>(
-    tracks: &'a mut [UiTrack],
-    master: &'a mut UiTrack,
-    buses: &'a mut [UiTrack],
+    tracks: &'a mut [ProjectTrack],
+    master: &'a mut ProjectTrack,
+    buses: &'a mut [ProjectTrack],
     track_id: TrackId,
-) -> Option<&'a mut UiTrack> {
+) -> Option<&'a mut ProjectTrack> {
     if track_id.is_master() {
         return Some(master);
     }
@@ -136,7 +136,7 @@ fn find_track_mut<'a>(
 /// Send the engine a pad's full state (single source of truth for
 /// pad edits).
 fn sync_pad(
-    tracks: &[UiTrack],
+    tracks: &[ProjectTrack],
     track_id: TrackId,
     pad_index: usize,
     engine: &mut impl EngineHandle,
@@ -160,9 +160,9 @@ impl DevicesState {
         &mut self,
         msg: DevicesMsg,
         engine: &mut impl EngineHandle,
-        tracks: &mut [UiTrack],
-        master: &mut UiTrack,
-        buses: &mut [UiTrack],
+        tracks: &mut [ProjectTrack],
+        master: &mut ProjectTrack,
+        buses: &mut [ProjectTrack],
         sample_rate: u32,
     ) -> DevicesAction {
         let mut action = DevicesAction::default();
@@ -487,9 +487,9 @@ mod tests {
     use super::super::test_support::RecordingEngine;
     use super::*;
 
-    fn midi_track_with_effect() -> (Vec<UiTrack>, TrackId, EffectId) {
+    fn midi_track_with_effect() -> (Vec<ProjectTrack>, TrackId, EffectId) {
         let track_id = TrackId::new();
-        let mut track = UiTrack::new_instrument(
+        let mut track = ProjectTrack::new_instrument(
             track_id,
             "MIDI 1".to_string(),
             vibez_core::midi::TrackKind::Midi,

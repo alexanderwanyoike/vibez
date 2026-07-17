@@ -10,13 +10,13 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
-use crate::widgets::mixer_strip::{view_mixer_strip, StripRole};
+use crate::widgets::mixer_strip::{view_mixer_strip, MixerStripView, StripRole};
 
 use super::*;
 
 impl App {
     pub(super) fn view_mixer(&self) -> Element<'_, Message> {
-        if self.state.arrangement.tracks.is_empty() {
+        if self.state.project_tracks.tracks.is_empty() {
             let prompt = text("Add a track to get started")
                 .size(16)
                 .color(th::text_dim());
@@ -35,19 +35,26 @@ impl App {
 
         // ── Channel strips, buses, pinned master ──
         let playhead_beat = self.state.position_beats();
-        let buses = &self.state.arrangement.buses;
+        let buses = &self.state.project_tracks.buses;
         let mut strips = row![].spacing(4).padding(8).height(Length::Fill);
 
-        for track in &self.state.arrangement.tracks {
+        for track in &self.state.project_tracks.tracks {
             let selected = self.state.arrangement.selected_track == Some(track.id);
             let strip = view_mixer_strip(
                 track,
-                selected,
                 StripRole::Track,
                 buses,
-                self.state.view.editing_track_name == Some(track.id),
-                &self.state.view.edit_name_text,
-                playhead_beat,
+                MixerStripView {
+                    selected,
+                    editing_name: self.state.view.editing_track_name == Some(track.id),
+                    edit_text: &self.state.view.edit_name_text,
+                    playhead_beat,
+                    automation: self
+                        .state
+                        .arrange_content(track.id)
+                        .map(|content| content.automation.as_slice())
+                        .unwrap_or(&[]),
+                },
             );
             strips = strips.push(strip);
         }
@@ -59,12 +66,19 @@ impl App {
             let selected = self.state.arrangement.selected_track == Some(bus.id);
             right_group = right_group.push(view_mixer_strip(
                 bus,
-                selected,
                 StripRole::Bus,
                 buses,
-                self.state.view.editing_track_name == Some(bus.id),
-                &self.state.view.edit_name_text,
-                playhead_beat,
+                MixerStripView {
+                    selected,
+                    editing_name: self.state.view.editing_track_name == Some(bus.id),
+                    edit_text: &self.state.view.edit_name_text,
+                    playhead_beat,
+                    automation: self
+                        .state
+                        .arrange_content(bus.id)
+                        .map(|content| content.automation.as_slice())
+                        .unwrap_or(&[]),
+                },
             ));
         }
 
@@ -105,13 +119,20 @@ impl App {
         let master_selected =
             self.state.arrangement.selected_track == Some(vibez_core::id::TrackId::MASTER);
         let master_strip = container(view_mixer_strip(
-            &self.state.arrangement.master,
-            master_selected,
+            &self.state.project_tracks.master,
             StripRole::Master,
             buses,
-            false,
-            &self.state.view.edit_name_text,
-            playhead_beat,
+            MixerStripView {
+                selected: master_selected,
+                editing_name: false,
+                edit_text: &self.state.view.edit_name_text,
+                playhead_beat,
+                automation: self
+                    .state
+                    .arrange_content(vibez_core::id::TrackId::MASTER)
+                    .map(|content| content.automation.as_slice())
+                    .unwrap_or(&[]),
+            },
         ))
         .padding(8)
         .height(Length::Fill);

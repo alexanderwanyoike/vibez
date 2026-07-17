@@ -189,12 +189,15 @@ pub struct ClipClipboard {
     pub clips: Vec<ClipboardClip>,
 }
 
-/// A track as represented in the UI.
+/// A project-wide track/channel as represented in the UI.
+///
+/// Musical timeline content deliberately does not live here. Arrange (and,
+/// later, each Perform Section) associates its own [`TrackTimelineContent`]
+/// with this track's stable [`TrackId`].
 #[derive(Debug, Clone)]
-pub struct UiTrack {
+pub struct ProjectTrack {
     pub id: TrackId,
     pub name: String,
-    pub clips: Vec<UiClip>,
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
@@ -204,7 +207,6 @@ pub struct UiTrack {
     pub effects: Vec<UiEffect>,
     /// Post-fader send amounts into buses: `(bus id, 0..1)`.
     pub sends: Vec<(TrackId, f32)>,
-    pub note_clips: Vec<UiNoteClip>,
     pub kind: TrackKind,
     pub color_index: u8,
     pub has_instrument: bool,
@@ -216,8 +218,6 @@ pub struct UiTrack {
     pub sample_audio: Option<Arc<DecodedAudio>>,
     pub instrument_params: Vec<f32>,
     pub drum_rack_pads: Vec<UiDrumPad>,
-    /// Automation lanes (mirrored to the engine like note clips).
-    pub automation: Vec<vibez_core::automation::AutomationLane>,
     pub selected_drum_pad: usize,
     /// Display name for external plugin instruments (e.g. "Dexed", "Surge XT").
     pub plugin_instrument_name: Option<String>,
@@ -230,12 +230,15 @@ pub struct UiTrack {
     pub has_plugin_instrument_gui: bool,
 }
 
-impl UiTrack {
+/// Compatibility name used by older view-only modules. It resolves to the
+/// project-owned channel model and cannot carry Arrange Timeline Content.
+pub type UiTrack = ProjectTrack;
+
+impl ProjectTrack {
     pub fn new(id: TrackId, name: String, color_index: u8) -> Self {
         Self {
             id,
             name,
-            clips: Vec::new(),
             gain: 1.0,
             pan: 0.5,
             mute: false,
@@ -244,7 +247,6 @@ impl UiTrack {
             peak_r: 0.0,
             effects: Vec::new(),
             sends: Vec::new(),
-            note_clips: Vec::new(),
             kind: TrackKind::Audio,
             color_index,
             has_instrument: false,
@@ -254,7 +256,6 @@ impl UiTrack {
             sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
-            automation: Vec::new(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
@@ -271,7 +272,6 @@ impl UiTrack {
         Self {
             id,
             name,
-            clips: Vec::new(),
             gain: 1.0,
             pan: 0.5,
             mute: false,
@@ -280,7 +280,6 @@ impl UiTrack {
             peak_r: 0.0,
             effects: Vec::new(),
             sends: Vec::new(),
-            note_clips: Vec::new(),
             kind,
             color_index,
             has_instrument,
@@ -290,7 +289,6 @@ impl UiTrack {
             sample_audio: None,
             instrument_params: Vec::new(),
             drum_rack_pads: default_drum_rack_pads(),
-            automation: Vec::new(),
             selected_drum_pad: 0,
             plugin_instrument_name: None,
             plugin_instrument_ref: None,
@@ -298,6 +296,18 @@ impl UiTrack {
             has_plugin_instrument_gui: false,
         }
     }
+}
+
+/// Arrange-owned musical content for one shared Project Track.
+///
+/// This type contains only timeline-editable state. Channel identity,
+/// devices, routing, sends, and mixer state stay on [`ProjectTrack`]. Runtime
+/// meters and device-media caches therefore cannot leak into timeline clones.
+#[derive(Debug, Clone, Default)]
+pub struct TrackTimelineContent {
+    pub clips: Vec<UiClip>,
+    pub note_clips: Vec<UiNoteClip>,
+    pub automation: Vec<vibez_core::automation::AutomationLane>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

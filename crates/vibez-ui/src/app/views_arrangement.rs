@@ -24,7 +24,7 @@ use super::*;
 
 impl App {
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
-        if self.state.arrangement.tracks.is_empty() {
+        if self.state.project_tracks.tracks.is_empty() {
             let browser_drag_active = self.state.browser.drag_source.is_some();
             let empty_beat = match self.state.browser.drag_target {
                 Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
@@ -135,21 +135,27 @@ impl App {
             loop_end_beats: self.state.transport.loop_end_beats,
             tracks: self
                 .state
-                .arrangement
+                .project_tracks
                 .tracks
                 .iter()
                 .map(|t| {
                     let color = th::track_color(t.color_index);
-                    let mut clips: Vec<(f64, f64)> = t
-                        .clips
-                        .iter()
-                        .map(|c| (c.position as f64 / spb, c.duration as f64 / spb))
+                    let content = self.state.arrange_content(t.id);
+                    let mut clips: Vec<(f64, f64)> = content
+                        .into_iter()
+                        .flat_map(|content| {
+                            content
+                                .clips
+                                .iter()
+                                .map(|c| (c.position as f64 / spb, c.duration as f64 / spb))
+                        })
                         .collect();
-                    clips.extend(
-                        t.note_clips
+                    clips.extend(content.into_iter().flat_map(|content| {
+                        content
+                            .note_clips
                             .iter()
-                            .map(|c| (c.position_beats, c.duration_beats)),
-                    );
+                            .map(|c| (c.position_beats, c.duration_beats))
+                    }));
                     MinimapTrack { color, clips }
                 })
                 .collect(),
@@ -170,15 +176,21 @@ impl App {
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
         // Collect track IDs and kinds for cross-track drag
-        let track_ids: Vec<TrackId> = self.state.arrangement.tracks.iter().map(|t| t.id).collect();
+        let track_ids: Vec<TrackId> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|t| t.id)
+            .collect();
         let track_kinds: Vec<bool> = self
             .state
-            .arrangement
+            .project_tracks
             .tracks
             .iter()
             .map(|t| t.kind.is_midi())
             .collect();
-        let total_track_count = self.state.arrangement.tracks.len();
+        let total_track_count = self.state.project_tracks.tracks.len();
         let browser_drag_duration = self
             .state
             .browser
@@ -197,7 +209,11 @@ impl App {
         // Track rows: header widgets + clip canvas
         let mut track_rows = column![].spacing(0);
 
-        for (track_index, track) in self.state.arrangement.tracks.iter().enumerate() {
+        for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
+            let content = self
+                .state
+                .arrange_content(track.id)
+                .expect("every Project Track has Arrange Timeline Content");
             let selected = self.state.arrangement.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
 
@@ -236,6 +252,7 @@ impl App {
             // Clip canvas for this track
             let clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
+                content,
                 playhead_beats,
                 zoom_level,
                 self.state.view.grid_config(),
@@ -355,10 +372,10 @@ impl App {
         // Clipless lanes at the bottom, Ableton-style: a slim header
         // (select, expand, delete for returns) and their automation
         // lanes when expanded.
-        let master_ref = &self.state.arrangement.master;
-        let channel_refs: Vec<&crate::state::UiTrack> = self
+        let master_ref = &self.state.project_tracks.master;
+        let channel_refs: Vec<&crate::state::ProjectTrack> = self
             .state
-            .arrangement
+            .project_tracks
             .buses
             .iter()
             .chain(std::iter::once(master_ref))
@@ -507,14 +524,20 @@ impl App {
     pub(super) fn push_automation_lanes<'a>(
         &'a self,
         mut rows: iced::widget::Column<'a, Message>,
-        track: &'a crate::state::UiTrack,
+        track: &'a crate::state::ProjectTrack,
         track_color: iced::Color,
     ) -> iced::widget::Column<'a, Message> {
         use crate::domains::automation::{target_label_with_buses, AutomationMsg};
         use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
 
-        for lane in &track.automation {
-            let label = target_label_with_buses(&lane.target, track, &self.state.arrangement.buses);
+        let automation = self
+            .state
+            .arrange_content(track.id)
+            .map(|content| content.automation.as_slice())
+            .unwrap_or(&[]);
+        for lane in automation {
+            let label =
+                target_label_with_buses(&lane.target, track, &self.state.project_tracks.buses);
             let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
                 .on_press(Message::Automation(AutomationMsg::RemoveLane {
                     track_id: track.id,
@@ -642,19 +665,19 @@ impl App {
             let is_channel = track.id.is_master()
                 || self
                     .state
-                    .arrangement
+                    .project_tracks
                     .buses
                     .iter()
                     .any(|b| b.id == track.id);
             if !is_channel {
-                for bus in &self.state.arrangement.buses {
+                for bus in &self.state.project_tracks.buses {
                     choices.push(LaneChoice {
                         label: format!("Send: {}", bus.name),
                         target: vibez_core::automation::AutomationTarget::Send { bus_id: bus.id },
                     });
                 }
             }
-            choices.retain(|c| !track.automation.iter().any(|l| l.target == c.target));
+            choices.retain(|c| !automation.iter().any(|l| l.target == c.target));
 
             let needle = query.to_lowercase();
             let total_before = choices.len();
@@ -815,7 +838,7 @@ const MAX_PICKER_RESULTS: usize = 40;
 
 /// Reference value plus scale labels for a lane's target.
 fn lane_scale(
-    track: &crate::state::UiTrack,
+    track: &crate::state::ProjectTrack,
     target: &vibez_core::automation::AutomationTarget,
 ) -> (Option<f32>, String, String, String) {
     use crate::domains::automation::{normalized_target_value, target_descriptor};

@@ -7,16 +7,15 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::UiTrack;
+use crate::state::ProjectTrack;
 
 use super::*;
 
 impl App {
     pub(super) fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
         crate::state::ProjectSnapshot {
-            tracks: self.state.arrangement.tracks.clone(),
-            master: self.state.arrangement.master.clone(),
-            buses: self.state.arrangement.buses.clone(),
+            project_tracks: Arc::clone(&self.state.project_tracks),
+            arrange_timeline: Arc::clone(&self.state.arrangement.timeline),
             bpm: self.state.transport.bpm,
             bpm_text: self.state.transport.bpm_text.clone(),
             loop_enabled: self.state.transport.loop_enabled,
@@ -25,7 +24,6 @@ impl App {
             selected_track: self.state.arrangement.selected_track,
             selected_clips: self.state.arrangement.selected_clips.clone(),
             selected_note_clip: self.state.arrangement.selected_note_clip,
-            next_track_number: self.state.arrangement.next_track_number,
         }
     }
 
@@ -57,8 +55,13 @@ impl App {
         self.plugin_state_ptrs.clear();
 
         // Tear down the engine side.
-        let existing_track_ids: Vec<TrackId> =
-            self.state.arrangement.tracks.iter().map(|t| t.id).collect();
+        let existing_track_ids: Vec<TrackId> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|t| t.id)
+            .collect();
         for track_id in existing_track_ids {
             self.send_command(EngineCommand::RemoveTrack(track_id));
         }
@@ -66,7 +69,7 @@ impl App {
         // explicitly so the snapshot replay starts from bare.
         let master_effect_ids: Vec<EffectId> = self
             .state
-            .arrangement
+            .project_tracks
             .master
             .effects
             .iter()
@@ -76,14 +79,19 @@ impl App {
             self.send_command(EngineCommand::RemoveEffect(TrackId::MASTER, effect_id));
         }
 
-        let bus_ids: Vec<TrackId> = self.state.arrangement.buses.iter().map(|b| b.id).collect();
+        let bus_ids: Vec<TrackId> = self
+            .state
+            .project_tracks
+            .buses
+            .iter()
+            .map(|b| b.id)
+            .collect();
         for bus_id in bus_ids {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
 
-        self.state.arrangement.master = snapshot.master;
-        self.state.arrangement.buses = snapshot.buses;
-        self.state.arrangement.tracks = snapshot.tracks;
+        self.state.project_tracks = snapshot.project_tracks;
+        self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;
         self.state.transport.loop_enabled = snapshot.loop_enabled;
@@ -92,7 +100,6 @@ impl App {
         self.state.arrangement.selected_track = snapshot.selected_track;
         self.state.arrangement.selected_clips = snapshot.selected_clips;
         self.state.arrangement.selected_note_clip = snapshot.selected_note_clip;
-        self.state.arrangement.next_track_number = snapshot.next_track_number;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
         self.send_command(EngineCommand::SetArrangementLoop(
@@ -108,13 +115,13 @@ impl App {
             self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
 
-        let tracks = self.state.arrangement.tracks.clone();
+        let tracks = self.state.project_tracks.tracks.clone();
         for track in &tracks {
             self.replay_track_to_engine(track);
         }
-        let master = self.state.arrangement.master.clone();
+        let master = self.state.project_tracks.master.clone();
         self.replay_track_to_engine(&master);
-        let buses = self.state.arrangement.buses.clone();
+        let buses = self.state.project_tracks.buses.clone();
         for bus in &buses {
             self.replay_bus_to_engine(bus);
         }
@@ -124,13 +131,18 @@ impl App {
         self.spawn_project_plugin_loads(reloads.effects, reloads.instruments);
     }
 
-    pub(super) fn replay_track_to_engine(&mut self, track: &UiTrack) {
+    pub(super) fn replay_track_to_engine(&mut self, track: &ProjectTrack) {
+        let content = self
+            .state
+            .arrange_content(track.id)
+            .cloned()
+            .unwrap_or_default();
         if track.id.is_master() {
             // The master bus always exists in the engine: replay only
             // its gain and effect chain.
             self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
             self.replay_effects_to_engine(track);
-            for lane in &track.automation {
+            for lane in &content.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track.id,
                     lane: lane.clone(),
@@ -191,7 +203,7 @@ impl App {
             }
         }
 
-        for lane in &track.automation {
+        for lane in &content.automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: track.id,
                 lane: lane.clone(),
@@ -208,7 +220,7 @@ impl App {
             });
         }
 
-        for clip in &track.clips {
+        for clip in &content.clips {
             self.send_command(EngineCommand::AddClip {
                 track_id: track.id,
                 clip_id: clip.id,
@@ -222,7 +234,7 @@ impl App {
             });
         }
 
-        for clip in &track.note_clips {
+        for clip in &content.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
                 track_id: track.id,
                 clip_id: clip.id,
@@ -244,14 +256,19 @@ impl App {
 
     /// Recreate a bus in the engine from its UI model: the channel
     /// itself, then gain/pan/mute and the effect chain.
-    fn replay_bus_to_engine(&mut self, bus: &UiTrack) {
+    fn replay_bus_to_engine(&mut self, bus: &ProjectTrack) {
+        let automation = self
+            .state
+            .arrange_content(bus.id)
+            .map(|content| content.automation.clone())
+            .unwrap_or_default();
         self.send_command(EngineCommand::AddBus(bus.id, bus.name.clone()));
         self.send_command(EngineCommand::SetTrackGain(bus.id, bus.gain));
         self.send_command(EngineCommand::SetTrackPan(bus.id, bus.pan));
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));
         self.send_command(EngineCommand::SetTrackSolo(bus.id, bus.solo));
         self.replay_effects_to_engine(bus);
-        for lane in &bus.automation {
+        for lane in &automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: bus.id,
                 lane: lane.clone(),
@@ -262,7 +279,7 @@ impl App {
     /// Replay a channel's built-in effect chain to the engine
     /// (add, params, bypass). Plugin devices reload through the
     /// async pipeline instead.
-    fn replay_effects_to_engine(&mut self, track: &UiTrack) {
+    fn replay_effects_to_engine(&mut self, track: &ProjectTrack) {
         for effect in &track.effects {
             self.send_command(EngineCommand::AddEffect {
                 track_id: track.id,
