@@ -143,6 +143,7 @@ mod media_import;
 mod plugins;
 mod project_io;
 mod project_replay;
+mod project_sections;
 mod update;
 mod update_media;
 mod update_remote;

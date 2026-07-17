@@ -158,6 +158,7 @@ impl ArrangementState {
                     sel_track != track_id
                 });
                 action.close_track_guis = Some(track_id);
+                action.remove_track_from_sections = Some(track_id);
                 action.status = Some(format!(
                     "Removed {removed_name}. {} track(s) remain.",
                     project_tracks.tracks.len()
@@ -257,6 +258,7 @@ impl ArrangementState {
                 }
                 // Plugin GUIs on the bus die with its devices.
                 action.close_track_guis = Some(bus_id);
+                action.remove_track_from_sections = Some(bus_id);
                 action.status = Some("Removed bus".to_string());
             }
             ArrangementMsg::SetSend {

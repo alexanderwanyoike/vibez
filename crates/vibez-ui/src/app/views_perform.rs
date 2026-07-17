@@ -2,11 +2,11 @@
 //! Section construction area. Musical behavior arrives in later cards.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, stack, text,
+    button, center, column, container, horizontal_space, mouse_area, row, stack, text, text_input,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
-use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
+use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg, Section};
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
@@ -205,7 +205,7 @@ impl App {
                 .copied()
                 .filter(|position| position.row == row_index)
             {
-                pad_row = pad_row.push(self.view_empty_pad(position, mode));
+                pad_row = pad_row.push(self.view_perform_pad(position, mode));
             }
             grid = grid.push(pad_row);
         }
@@ -232,17 +232,34 @@ impl App {
             .into()
     }
 
-    fn view_empty_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
+    fn view_perform_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
         let ordinal = u16::from(position.ordinal(mode))
             + u16::from(self.state.perform.banks.for_mode(mode)) * 16;
-        let selected = self.state.perform.selected_pad == Some(position);
+        let section = (mode == PerformMode::Sections)
+            .then(|| self.state.perform.sections.at_slot(ordinal - 1))
+            .flatten();
+        let selected = section
+            .is_some_and(|section| self.state.perform.selected_section == Some(section.id))
+            || self.state.perform.selected_pad == Some(position);
         let pressed = self.state.perform.is_pad_pressed(position);
         let (title, detail, color) = match mode {
-            PerformMode::Sections => (
-                "+ SECTION".to_string(),
-                "EMPTY",
-                th::track_color((ordinal - 1) as u8),
-            ),
+            PerformMode::Sections => match section {
+                Some(section) => (
+                    section.name.clone(),
+                    format!("AVAILABLE · {:.0} BARS", section.length_beats / 4.0),
+                    th::track_color((ordinal - 1) as u8),
+                ),
+                None if self.state.perform.duplicate_source.is_some() => (
+                    "+ DUPLICATE".to_string(),
+                    "CHOOSE EMPTY SLOT".to_string(),
+                    th::track_color((ordinal - 1) as u8),
+                ),
+                None => (
+                    "+ SECTION".to_string(),
+                    "EMPTY".to_string(),
+                    th::track_color((ordinal - 1) as u8),
+                ),
+            },
             PerformMode::TrackMutes => {
                 if let Some(track) = self
                     .state
@@ -253,19 +270,23 @@ impl App {
                     (
                         track.name.clone(),
                         if track.kind.is_midi() {
-                            "MIDI TRACK"
+                            "MIDI TRACK".to_string()
                         } else {
-                            "AUDIO TRACK"
+                            "AUDIO TRACK".to_string()
                         },
                         th::track_color(track.color_index),
                     )
                 } else {
-                    ("—".to_string(), "NO PROJECT TRACK", th::text_muted())
+                    (
+                        "—".to_string(),
+                        "NO PROJECT TRACK".to_string(),
+                        th::text_muted(),
+                    )
                 }
             }
             PerformMode::Instrument => (
                 "SELECT MIDI".to_string(),
-                "NO INSTRUMENT TARGET",
+                "NO INSTRUMENT TARGET".to_string(),
                 th::track_color((ordinal - 1) as u8),
             ),
         };
@@ -333,7 +354,7 @@ impl App {
             ..Default::default()
         });
 
-        container(pad_face)
+        let pad = container(pad_face)
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .padding(3)
@@ -357,41 +378,57 @@ impl App {
                     blur_radius: if pressed { 3.0 } else { 7.0 },
                 },
                 ..Default::default()
-            })
-            .into()
+            });
+
+        match (mode, section) {
+            (PerformMode::Sections, Some(section)) => mouse_area(pad)
+                .on_press(Message::Perform(PerformMsg::SelectSection(section.id)))
+                .into(),
+            (PerformMode::Sections, None) if self.state.perform.duplicate_source.is_some() => {
+                mouse_area(pad)
+                    .on_press(Message::Perform(PerformMsg::DuplicateSectionTo(
+                        ordinal - 1,
+                    )))
+                    .into()
+            }
+            (PerformMode::Sections, None) => mouse_area(pad)
+                .on_press(Message::Perform(PerformMsg::CreateSectionAt(ordinal - 1)))
+                .into(),
+            _ => pad.into(),
+        }
     }
 
-    fn view_section_construction(&self) -> Element<'_, Message> {
-        let toolbar = row![
-            column![
-                text("SECTION CONSTRUCTION")
-                    .font(PERFORM_LABEL)
-                    .size(9)
-                    .color(th::accent()),
-                text("No Section selected")
-                    .font(PERFORM_DISPLAY)
-                    .size(19)
-                    .color(th::text())
-            ]
-            .spacing(4),
-            horizontal_space(),
-            column![
-                text("LOCAL TIMELINE")
-                    .font(PERFORM_LABEL)
-                    .size(9)
-                    .color(th::blend(th::text_dim(), th::text(), 0.28)),
-                text("— BARS").font(PERFORM_TECH).size(9).color(th::blend(
-                    th::text_dim(),
-                    th::text(),
-                    0.2
-                ))
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::End)
-        ]
-        .align_y(iced::Alignment::Center)
-        .padding([12, 16]);
-        let toolbar = container(toolbar)
+    fn view_section_toolbar(&self, section: Option<&Section>) -> Element<'_, Message> {
+        let Some(section) = section else {
+            return container(row![
+                column![
+                    text("SECTION CONSTRUCTION")
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(th::accent()),
+                    text("No Section selected")
+                        .font(PERFORM_DISPLAY)
+                        .size(19)
+                        .color(th::text())
+                ]
+                .spacing(4),
+                horizontal_space(),
+                column![
+                    text("LOCAL TIMELINE")
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(th::blend(th::text_dim(), th::text(), 0.28)),
+                    text("— BARS").font(PERFORM_TECH).size(9).color(th::blend(
+                        th::text_dim(),
+                        th::text(),
+                        0.2
+                    ))
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::End)
+            ])
+            .align_y(iced::Alignment::Center)
+            .padding([12, 16])
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
@@ -401,7 +438,133 @@ impl App {
                     radius: 0.0.into(),
                 },
                 ..Default::default()
-            });
+            })
+            .into();
+        };
+
+        let bars = section.length_beats / 4.0;
+        let quantization_index = vibez_project::SectionLaunchQuantization::ALL
+            .iter()
+            .position(|candidate| *candidate == section.launch_quantization)
+            .unwrap_or(0);
+        let next_quantization = vibez_project::SectionLaunchQuantization::ALL
+            [(quantization_index + 1) % vibez_project::SectionLaunchQuantization::ALL.len()];
+        let duplicate_label = if self.state.perform.duplicate_source == Some(section.id) {
+            "CANCEL DUPLICATE"
+        } else {
+            "DUPLICATE"
+        };
+        let duplicate_message = if self.state.perform.duplicate_source == Some(section.id) {
+            PerformMsg::CancelDuplicateSection
+        } else {
+            PerformMsg::BeginDuplicateSection(section.id)
+        };
+        let name = text_input("Section name", &self.state.perform.section_name_edit)
+            .on_input(|name| Message::Perform(PerformMsg::SectionNameInput(name)))
+            .on_submit(Message::Perform(PerformMsg::CommitSectionName(section.id)))
+            .font(PERFORM_DISPLAY)
+            .size(16)
+            .padding([5, 8]);
+        let property_label = |label| {
+            text(label)
+                .font(PERFORM_LABEL)
+                .size(8)
+                .color(th::text_dim())
+        };
+        let toolbar = row![
+            column![
+                text("SECTION CONSTRUCTION")
+                    .font(PERFORM_LABEL)
+                    .size(9)
+                    .color(th::accent()),
+                name
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(3)),
+            column![
+                property_label("LENGTH"),
+                row![
+                    button(text("−").font(PERFORM_TECH_STRONG).size(11)).on_press(
+                        Message::Perform(PerformMsg::SetSectionLengthBeats(
+                            section.id,
+                            section.length_beats - 4.0,
+                        ))
+                    ),
+                    text(format!("{bars:.0} BARS"))
+                        .font(PERFORM_TECH_STRONG)
+                        .size(10)
+                        .color(th::text()),
+                    button(text("+").font(PERFORM_TECH_STRONG).size(11)).on_press(
+                        Message::Perform(PerformMsg::SetSectionLengthBeats(
+                            section.id,
+                            section.length_beats + 4.0,
+                        ))
+                    )
+                ]
+                .spacing(5)
+                .align_y(iced::Alignment::Center)
+            ]
+            .spacing(3),
+            column![
+                property_label("LAUNCH"),
+                button(
+                    text(section.launch_quantization.label())
+                        .font(PERFORM_TECH_STRONG)
+                        .size(9)
+                )
+                .on_press(Message::Perform(
+                    PerformMsg::SetSectionLaunchQuantization(section.id, next_quantization)
+                ))
+            ]
+            .spacing(3),
+            column![
+                property_label("LOOP"),
+                button(
+                    text(if section.looping { "ON" } else { "OFF" })
+                        .font(PERFORM_TECH_STRONG)
+                        .size(9)
+                )
+                .on_press(Message::Perform(PerformMsg::ToggleSectionLoop(section.id)))
+            ]
+            .spacing(3),
+            column![
+                button(text(duplicate_label).font(PERFORM_TECH).size(8))
+                    .on_press(Message::Perform(duplicate_message)),
+                button(
+                    text("DELETE")
+                        .font(PERFORM_TECH)
+                        .size(8)
+                        .color(th::danger())
+                )
+                .on_press(Message::Perform(PerformMsg::DeleteSection(section.id)))
+            ]
+            .spacing(4)
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center)
+        .padding([8, 12]);
+
+        container(toolbar)
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view_section_construction(&self) -> Element<'_, Message> {
+        let selected = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id));
+        let toolbar = self.view_section_toolbar(selected);
 
         let ruler_number_color = th::blend(th::text_dim(), th::text(), 0.36);
         let ruler = row![
@@ -501,6 +664,19 @@ impl App {
                 ..Default::default()
             });
 
+        let (empty_title, empty_detail, empty_footnote) = if selected.is_some() {
+            (
+                "EMPTY SECTION",
+                "This Section has its own local timeline",
+                "MUSICAL AUTHORING ARRIVES IN CARD 07",
+            )
+        } else {
+            (
+                "SELECT A SECTION",
+                "Create one from an empty Pad Position",
+                "SECTION DATA IS SAVED WITH THE PROJECT",
+            )
+        };
         let empty = center(
             container(
                 column![
@@ -508,14 +684,12 @@ impl App {
                         .font(PERFORM_LABEL)
                         .size(9)
                         .color(th::accent()),
-                    text("SELECT A SECTION")
+                    text(empty_title)
                         .font(PERFORM_LABEL)
                         .size(13)
                         .color(th::text()),
-                    text("Its multitrack timeline will open here")
-                        .size(10)
-                        .color(th::text_dim()),
-                    text("CREATION + EDITING ARRIVE IN A LATER CARD")
+                    text(empty_detail).size(10).color(th::text_dim()),
+                    text(empty_footnote)
                         .font(PERFORM_TECH)
                         .size(8)
                         .color(th::blend(th::text_dim(), th::text(), 0.1))

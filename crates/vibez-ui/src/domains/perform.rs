@@ -4,11 +4,17 @@
 //! before the active Perform Mode assigns musical meaning.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use vibez_core::id::SectionId;
+use vibez_project::SectionLaunchQuantization;
 
 use super::EngineHandle;
+
+mod sections;
+pub use sections::{Section, SectionStore};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
 /// behavior and Capture semantics are defined.
@@ -73,6 +79,10 @@ impl PadPosition {
 
     const fn index(self) -> usize {
         self.row as usize * 4 + self.column as usize
+    }
+
+    pub const fn slot_in_bank(self, bank: u8) -> u16 {
+        bank as u16 * 16 + self.index() as u16
     }
 
     /// One-based mode order for this stable position. Sections and Track
@@ -282,8 +292,9 @@ impl PerformBanks {
     }
 }
 
-/// Perform's interaction slice. Its input mapping is a global user preference;
-/// no field here belongs to project persistence or undo.
+/// Perform state combines project-owned Sections with runtime interaction.
+/// Input mapping, mode, banks, focus, and edit buffers remain global/runtime;
+/// only the Section store enters project persistence and undo.
 #[derive(Default)]
 pub struct PerformState {
     pub mode: PerformMode,
@@ -292,15 +303,30 @@ pub struct PerformState {
     pub editor_focus: PerformEditorFocus,
     pub input_mapping: PerformInputMapping,
     pub key_rebind_target: Option<PadPosition>,
+    pub sections: Arc<SectionStore>,
+    pub selected_section: Option<SectionId>,
+    pub section_name_edit: String,
+    pub duplicate_source: Option<SectionId>,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PerformMsg {
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
     BeginKeyRebind(PadPosition),
     CancelKeyRebind,
+    SelectSection(SectionId),
+    CreateSectionAt(u16),
+    BeginDuplicateSection(SectionId),
+    CancelDuplicateSection,
+    DuplicateSectionTo(u16),
+    DeleteSection(SectionId),
+    SectionNameInput(String),
+    CommitSectionName(SectionId),
+    SetSectionLengthBeats(SectionId, f64),
+    SetSectionLaunchQuantization(SectionId, SectionLaunchQuantization),
+    ToggleSectionLoop(SectionId),
     ComputerKeyPressed {
         key: ComputerKey,
         key_id: String,
@@ -313,9 +339,17 @@ pub enum PerformMsg {
 }
 
 impl PerformMsg {
-    /// Perform shell interaction is UI state, never a project edit.
     pub const fn marks_dirty(&self) -> bool {
-        false
+        matches!(
+            self,
+            Self::CreateSectionAt(_)
+                | Self::DuplicateSectionTo(_)
+                | Self::DeleteSection(_)
+                | Self::CommitSectionName(_)
+                | Self::SetSectionLengthBeats(..)
+                | Self::SetSectionLaunchQuantization(..)
+                | Self::ToggleSectionLoop(_)
+        )
     }
 }
 
@@ -357,6 +391,89 @@ impl PerformState {
             }
             PerformMsg::CancelKeyRebind => {
                 self.key_rebind_target = None;
+            }
+            PerformMsg::SelectSection(id) => {
+                if ctx.workspace_visible {
+                    self.select_section(id);
+                }
+            }
+            PerformMsg::CreateSectionAt(slot) => {
+                if ctx.workspace_visible && self.sections.at_slot(slot).is_none() {
+                    let section = Section::new(slot);
+                    let id = section.id;
+                    Arc::make_mut(&mut self.sections).insert(section);
+                    self.duplicate_source = None;
+                    self.select_section(id);
+                }
+            }
+            PerformMsg::BeginDuplicateSection(id) => {
+                if ctx.workspace_visible && self.sections.by_id(id).is_some() {
+                    self.duplicate_source = Some(id);
+                }
+            }
+            PerformMsg::CancelDuplicateSection => {
+                self.duplicate_source = None;
+            }
+            PerformMsg::DuplicateSectionTo(slot) => {
+                if ctx.workspace_visible && self.sections.at_slot(slot).is_none() {
+                    let duplicate = self
+                        .duplicate_source
+                        .and_then(|id| self.sections.by_id(id))
+                        .map(|source| source.duplicate_to(slot));
+                    if let Some(section) = duplicate {
+                        let id = section.id;
+                        Arc::make_mut(&mut self.sections).insert(section);
+                        self.duplicate_source = None;
+                        self.select_section(id);
+                    }
+                }
+            }
+            PerformMsg::DeleteSection(id) => {
+                if ctx.workspace_visible && Arc::make_mut(&mut self.sections).remove(id).is_some() {
+                    if self.selected_section == Some(id) {
+                        self.selected_section = None;
+                        self.section_name_edit.clear();
+                    }
+                    if self.duplicate_source == Some(id) {
+                        self.duplicate_source = None;
+                    }
+                }
+            }
+            PerformMsg::SectionNameInput(name) => {
+                self.section_name_edit = name;
+            }
+            PerformMsg::CommitSectionName(id) => {
+                let name = self.section_name_edit.trim().to_string();
+                if ctx.workspace_visible && !name.is_empty() {
+                    if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
+                        section.name = name;
+                        self.section_name_edit = section.name.clone();
+                    }
+                }
+            }
+            PerformMsg::SetSectionLengthBeats(id, beats) => {
+                if ctx.workspace_visible {
+                    if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
+                        section.length_beats = beats.clamp(
+                            sections::MIN_SECTION_LENGTH_BEATS,
+                            sections::MAX_SECTION_LENGTH_BEATS,
+                        );
+                    }
+                }
+            }
+            PerformMsg::SetSectionLaunchQuantization(id, quantization) => {
+                if ctx.workspace_visible {
+                    if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
+                        section.launch_quantization = quantization;
+                    }
+                }
+            }
+            PerformMsg::ToggleSectionLoop(id) => {
+                if ctx.workspace_visible {
+                    if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
+                        section.looping = !section.looping;
+                    }
+                }
             }
             PerformMsg::ComputerKeyPressed {
                 key,
@@ -424,6 +541,14 @@ impl PerformState {
         self.active_computer_keys
             .values()
             .any(|(pressed, _)| *pressed == position)
+    }
+
+    fn select_section(&mut self, id: SectionId) {
+        if let Some(section) = self.sections.by_id(id) {
+            self.selected_section = Some(id);
+            self.section_name_edit = section.name.clone();
+            self.editor_focus = PerformEditorFocus::SectionConstruction;
+        }
     }
 }
 
@@ -694,5 +819,78 @@ mod tests {
         assert!(action.keyboard_consumed);
         assert!(action.persist_settings);
         assert!(action.gesture.is_none());
+    }
+
+    #[test]
+    fn section_crud_and_properties_update_the_ordered_store() {
+        let mut state = PerformState::default();
+        let mut engine = RecordingEngine::default();
+        let ctx = PerformCtx {
+            workspace_visible: true,
+        };
+
+        state.update(PerformMsg::CreateSectionAt(5), &mut engine, ctx);
+        let source_id = state.selected_section.expect("new section selected");
+        state.update(
+            PerformMsg::SectionNameInput("Breakdown".into()),
+            &mut engine,
+            ctx,
+        );
+        state.update(PerformMsg::CommitSectionName(source_id), &mut engine, ctx);
+        state.update(
+            PerformMsg::SetSectionLengthBeats(source_id, 32.0),
+            &mut engine,
+            ctx,
+        );
+        state.update(
+            PerformMsg::SetSectionLaunchQuantization(
+                source_id,
+                SectionLaunchQuantization::EndOfSection,
+            ),
+            &mut engine,
+            ctx,
+        );
+        state.update(PerformMsg::ToggleSectionLoop(source_id), &mut engine, ctx);
+        state.update(
+            PerformMsg::BeginDuplicateSection(source_id),
+            &mut engine,
+            ctx,
+        );
+        state.update(PerformMsg::DuplicateSectionTo(2), &mut engine, ctx);
+
+        let duplicate_id = state.selected_section.expect("duplicate selected");
+        let duplicate = state.sections.by_id(duplicate_id).unwrap();
+        assert_eq!(duplicate.slot, 2);
+        assert_eq!(duplicate.name, "Breakdown Copy");
+        assert_eq!(duplicate.length_beats, 32.0);
+        assert_eq!(
+            duplicate.launch_quantization,
+            SectionLaunchQuantization::EndOfSection
+        );
+        assert!(!duplicate.looping);
+        assert_eq!(state.sections.sections[1].slot, 5);
+
+        state.update(PerformMsg::DeleteSection(duplicate_id), &mut engine, ctx);
+        assert!(state.sections.by_id(duplicate_id).is_none());
+        assert_eq!(state.selected_section, None);
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn only_section_document_edits_are_dirty() {
+        let id = SectionId::new();
+        assert!(PerformMsg::CreateSectionAt(0).marks_dirty());
+        assert!(PerformMsg::DuplicateSectionTo(1).marks_dirty());
+        assert!(PerformMsg::DeleteSection(id).marks_dirty());
+        assert!(PerformMsg::CommitSectionName(id).marks_dirty());
+        assert!(PerformMsg::SetSectionLengthBeats(id, 8.0).marks_dirty());
+        assert!(
+            PerformMsg::SetSectionLaunchQuantization(id, SectionLaunchQuantization::OneBeat)
+                .marks_dirty()
+        );
+        assert!(PerformMsg::ToggleSectionLoop(id).marks_dirty());
+        assert!(!PerformMsg::SelectSection(id).marks_dirty());
+        assert!(!PerformMsg::SectionNameInput("Draft".into()).marks_dirty());
+        assert!(!PerformMsg::BeginDuplicateSection(id).marks_dirty());
     }
 }

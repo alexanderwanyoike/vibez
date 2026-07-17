@@ -60,6 +60,9 @@ impl App {
                 PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
             });
         }
+        if let Some(track_id) = action.remove_track_from_sections {
+            Arc::make_mut(&mut self.state.perform.sections).remove_track(track_id);
+        }
         if let Some(status) = action.status {
             self.state.status_text = status;
         }

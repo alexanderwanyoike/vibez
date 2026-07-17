@@ -156,6 +156,8 @@ pub struct ArrangementAction {
     /// All plugin GUI windows and raw pointers of this track must go
     /// (the track's devices are being destroyed).
     pub close_track_guis: Option<TrackId>,
+    /// Remove this shared identity from every Section timeline too.
+    pub remove_track_from_sections: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
     /// Selecting a clip focuses the detail panel's Clip tab.

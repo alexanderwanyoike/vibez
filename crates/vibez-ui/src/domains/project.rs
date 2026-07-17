@@ -175,6 +175,7 @@ mod tests {
                 next_track_number: 2,
             }),
             arrange_timeline: std::sync::Arc::new(ArrangementTimeline::default()),
+            sections: std::sync::Arc::new(crate::domains::perform::SectionStore::default()),
             bpm: 120.0,
             bpm_text: "120".to_string(),
             loop_enabled: false,
@@ -183,6 +184,7 @@ mod tests {
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
+            selected_section: None,
         }
     }
 

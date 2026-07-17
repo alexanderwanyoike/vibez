@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use vibez_core::id::ClipId;
+use vibez_core::id::{ClipId, SectionId};
 use vibez_core::track::{ClipInfo, MediaSourceRef, TrackInfo};
 use vibez_project::project_format_v1::{
     detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
     stage_remote_file, strip_staged_sources, sweep_staging_root, ProjectContainer,
     ProjectFileFormat, ProjectFormatError, Provenance, StagedMedia, APPLICATION_ID, FORMAT_VERSION,
 };
-use vibez_project::Project;
+use vibez_project::{Project, SectionInfo, SectionLaunchQuantization, TimelineInfo};
 
 fn stage(path: PathBuf, id: &str, seed: u8) -> (StagedMedia, Vec<u8>) {
     let bytes: Vec<u8> = (0..2 * 1024 * 1024)
@@ -59,7 +59,7 @@ fn representative_container_roundtrips_incrementally_and_save_as() {
         serde_json::to_vec(&document).unwrap()
     );
     assert_eq!(container.read_media("proof-media").unwrap(), media_bytes);
-    assert_eq!(loaded.project.note_clips[0].notes.len(), 2);
+    assert_eq!(loaded.project.arrange.note_clips[0].notes.len(), 2);
     assert_eq!(loaded.project.tracks[0].automation[0].points.len(), 2);
     assert!(loaded.project.tracks[0].native_instrument.is_some());
     assert!(loaded.project.tracks[0].effects[0]
@@ -157,24 +157,106 @@ fn project_with_source(source: MediaSourceRef) -> Project {
     let track = TrackInfo::new("Audio");
     Project {
         tracks: vec![track.clone()],
-        clips: vec![ClipInfo {
-            id: ClipId::new(),
-            track_id: track.id,
-            name: source.display_name(),
-            position: 0,
-            source_offset: 0,
-            duration: 128,
-            source: Some(source),
-            file_path: None,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 128,
-            original_bpm: Some(120.0),
-            warped: false,
-            warped_to_bpm: None,
-        }],
+        arrange: TimelineInfo {
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: source.display_name(),
+                position: 0,
+                source_offset: 0,
+                duration: 128,
+                source: Some(source),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 128,
+                original_bpm: Some(120.0),
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..TimelineInfo::default()
+        },
         ..Project::default()
     }
+}
+
+#[test]
+fn arrange_and_section_share_one_embedded_media_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("shared.wav");
+    let destination = directory.path().join("sections.vzp");
+    let bytes = vec![17_u8; 4096];
+    fs::write(&source_path, &bytes).unwrap();
+    let track = TrackInfo::new("Audio");
+    let track_id = track.id;
+    let clip = |id| ClipInfo {
+        id,
+        track_id,
+        name: "shared.wav".into(),
+        position: 0,
+        source_offset: 0,
+        duration: 128,
+        source: Some(MediaSourceRef::LocalFile {
+            path: source_path.clone(),
+        }),
+        file_path: Some(source_path.clone()),
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 128,
+        original_bpm: None,
+        warped: false,
+        warped_to_bpm: None,
+    };
+    let project = Project {
+        tracks: vec![track],
+        arrange: TimelineInfo {
+            clips: vec![clip(ClipId::new())],
+            ..TimelineInfo::default()
+        },
+        sections: vec![SectionInfo {
+            id: SectionId::new(),
+            slot: 3,
+            name: "Breakdown".into(),
+            length_beats: 32.0,
+            launch_quantization: SectionLaunchQuantization::EndOfSection,
+            looping: false,
+            timeline: TimelineInfo {
+                clips: vec![clip(ClipId::new())],
+                ..TimelineInfo::default()
+            },
+        }],
+        ..Project::default()
+    };
+
+    let saved = save_project_v1(&destination, None, project).unwrap();
+    assert_eq!(saved.observation.media_rows_written, 1);
+    assert_eq!(saved.project.sections[0].name, "Breakdown");
+    assert_eq!(saved.project.sections[0].length_beats, 32.0);
+    assert_eq!(
+        saved.project.sections[0].launch_quantization,
+        SectionLaunchQuantization::EndOfSection
+    );
+    assert!(!saved.project.sections[0].looping);
+    let arrange_id = match saved.project.arrange.clips[0].source.as_ref().unwrap() {
+        MediaSourceRef::ProjectMedia { id, .. } => id,
+        source => panic!("unexpected Arrange source {source:?}"),
+    };
+    let section_id = match saved.project.sections[0].timeline.clips[0]
+        .source
+        .as_ref()
+        .unwrap()
+    {
+        MediaSourceRef::ProjectMedia { id, .. } => id,
+        source => panic!("unexpected Section source {source:?}"),
+    };
+    assert_eq!(arrange_id, section_id);
+    assert_eq!(
+        ProjectContainer::open(destination)
+            .unwrap()
+            .read_media(arrange_id)
+            .unwrap(),
+        bytes
+    );
 }
 
 #[test]
@@ -197,7 +279,7 @@ fn production_save_is_self_contained_incremental_and_save_as_reuses_media() {
     let container = ProjectContainer::open(&path).unwrap();
     let document = container.load_document().unwrap();
     let MediaSourceRef::ProjectMedia { id, .. } =
-        document.project.clips[0].source.as_ref().unwrap()
+        document.project.arrange.clips[0].source.as_ref().unwrap()
     else {
         panic!("committed project must reference Project Media");
     };
@@ -236,7 +318,8 @@ fn unsaved_project_uses_staged_copy_before_first_save() {
         staging_path.exists(),
         "content-addressed staging copies stay shared after commit"
     );
-    let MediaSourceRef::ProjectMedia { id, .. } = saved.project.clips[0].source.as_ref().unwrap()
+    let MediaSourceRef::ProjectMedia { id, .. } =
+        saved.project.arrange.clips[0].source.as_ref().unwrap()
     else {
         panic!("saved project must no longer reference staging");
     };
@@ -284,7 +367,7 @@ fn remote_import_becomes_self_contained_project_media_with_safe_provenance() {
         id,
         provenance: Some(provenance),
         ..
-    } = saved.project.clips[0].source.as_ref().unwrap()
+    } = saved.project.arrange.clips[0].source.as_ref().unwrap()
     else {
         panic!("saved Remote import must resolve only to Project Media");
     };
@@ -429,7 +512,7 @@ fn missing_local_source_survives_save_for_relink() {
         .load_document()
         .unwrap();
     assert!(matches!(
-        document.project.clips[0].source.as_ref().unwrap(),
+        document.project.arrange.clips[0].source.as_ref().unwrap(),
         MediaSourceRef::LocalFile { path } if path == &missing
     ));
 }
@@ -443,7 +526,7 @@ fn strip_staged_sources_rewrites_transient_staging_references() {
     let mut local_project = project_with_source(staged_local);
     strip_staged_sources(&mut local_project);
     assert!(matches!(
-        local_project.clips[0].source.as_ref().unwrap(),
+        local_project.arrange.clips[0].source.as_ref().unwrap(),
         MediaSourceRef::LocalFile { path } if path == &local_source
     ));
 
@@ -465,7 +548,7 @@ fn strip_staged_sources_rewrites_transient_staging_references() {
     let mut remote_project = project_with_source(staged_remote);
     strip_staged_sources(&mut remote_project);
     assert!(matches!(
-        remote_project.clips[0].source.as_ref().unwrap(),
+        remote_project.arrange.clips[0].source.as_ref().unwrap(),
         MediaSourceRef::DropboxFile { path_lower, rev, .. }
             if path_lower == "/megalodon/vocal.wav" && rev.as_deref() == Some("rev-3")
     ));

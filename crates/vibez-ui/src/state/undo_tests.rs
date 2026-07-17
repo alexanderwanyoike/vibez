@@ -4,6 +4,9 @@ use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 
+use crate::domains::perform::{PerformCtx, PerformMsg};
+use crate::domains::test_support::RecordingEngine;
+
 use super::{
     AppState, ArrangementTimeline, ProjectSnapshot, ProjectTrack, TrackTimelineContent, UiEffect,
     UiNoteClip, UndoGestureId,
@@ -13,6 +16,7 @@ fn snapshot(state: &AppState) -> ProjectSnapshot {
     ProjectSnapshot {
         project_tracks: Arc::clone(&state.project_tracks),
         arrange_timeline: Arc::clone(&state.arrangement.timeline),
+        sections: Arc::clone(&state.perform.sections),
         bpm: state.transport.bpm,
         bpm_text: state.transport.bpm_text.clone(),
         loop_enabled: state.transport.loop_enabled,
@@ -21,12 +25,31 @@ fn snapshot(state: &AppState) -> ProjectSnapshot {
         selected_track: state.arrangement.selected_track,
         selected_clips: state.arrangement.selected_clips.clone(),
         selected_note_clip: state.arrangement.selected_note_clip,
+        selected_section: state.perform.selected_section,
     }
 }
 
 fn apply_snapshot(state: &mut AppState, snapshot: ProjectSnapshot) {
     state.project_tracks = snapshot.project_tracks;
     state.arrangement.timeline = snapshot.arrange_timeline;
+    state.perform.sections = snapshot.sections;
+    state.perform.selected_section = snapshot.selected_section;
+}
+
+fn perform_edit(state: &mut AppState, engine: &mut RecordingEngine, message: PerformMsg) {
+    state.project.history.push_edit(snapshot(state), None);
+    state.perform.update(
+        message,
+        engine,
+        PerformCtx {
+            workspace_visible: true,
+        },
+    );
+}
+
+fn undo_once(state: &mut AppState) {
+    let snapshot = state.project.history.pop_undo().unwrap();
+    apply_snapshot(state, snapshot);
 }
 
 #[test]
@@ -153,4 +176,51 @@ fn clip_resize_does_not_hide_the_preceding_automation_undo_step() {
         .unwrap()
         .automation
         .is_empty());
+}
+
+#[test]
+fn section_crud_operations_are_individual_undo_steps() {
+    let mut state = AppState::default();
+    let mut engine = RecordingEngine::default();
+
+    perform_edit(&mut state, &mut engine, PerformMsg::CreateSectionAt(0));
+    let source_id = state.perform.selected_section.unwrap();
+    state.perform.section_name_edit = "Breakdown".into();
+    perform_edit(
+        &mut state,
+        &mut engine,
+        PerformMsg::CommitSectionName(source_id),
+    );
+    state.perform.duplicate_source = Some(source_id);
+    perform_edit(&mut state, &mut engine, PerformMsg::DuplicateSectionTo(4));
+    let duplicate_id = state.perform.selected_section.unwrap();
+    perform_edit(
+        &mut state,
+        &mut engine,
+        PerformMsg::DeleteSection(duplicate_id),
+    );
+
+    assert_eq!(state.project.history.undo.len(), 4);
+    assert_eq!(state.perform.sections.sections.len(), 1);
+
+    undo_once(&mut state);
+    assert_eq!(state.perform.sections.sections.len(), 2);
+    assert_eq!(state.perform.sections.by_id(duplicate_id).unwrap().slot, 4);
+
+    undo_once(&mut state);
+    assert_eq!(state.perform.sections.sections.len(), 1);
+    assert_eq!(
+        state.perform.sections.by_id(source_id).unwrap().name,
+        "Breakdown"
+    );
+
+    undo_once(&mut state);
+    assert_eq!(
+        state.perform.sections.by_id(source_id).unwrap().name,
+        "Section 01"
+    );
+
+    undo_once(&mut state);
+    assert!(state.perform.sections.sections.is_empty());
+    assert!(engine.0.is_empty());
 }

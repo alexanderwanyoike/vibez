@@ -543,32 +543,37 @@ pub(super) async fn load_project_async(
     let mut drum_rack_pad_samples = Vec::new();
     let mut warnings = Vec::new();
 
-    for clip in &project.clips {
-        match clip.resolved_source().cloned() {
-            Some(source) => match hydrate_saved_source(
-                container_path.as_ref(),
-                dropbox.as_ref(),
-                &source,
-                &clip.name,
-            )
-            .await
-            {
-                Ok(audio) => clips.push(finish_loaded_clip(clip.clone(), Arc::new(audio)).await),
-                Err(err) => {
-                    // The clip cannot play this session, but dropping it
-                    // would also drop its source reference from the next
-                    // save. Keep it so the media stays relinkable.
-                    warnings.push(format!(
-                        "Clip '{}' unavailable, kept for relink ({})",
-                        clip.name, err
-                    ));
-                    unresolved_clips.push(clip.clone());
-                }
-            },
-            None => warnings.push(format!(
-                "Skipped clip '{}' (missing source reference)",
-                clip.name
-            )),
+    for (location, timeline) in project.timelines() {
+        for clip in &timeline.clips {
+            match clip.resolved_source().cloned() {
+                Some(source) => match hydrate_saved_source(
+                    container_path.as_ref(),
+                    dropbox.as_ref(),
+                    &source,
+                    &clip.name,
+                )
+                .await
+                {
+                    Ok(audio) => clips.push(crate::message::LoadedTimelineClip {
+                        location,
+                        clip: finish_loaded_clip(clip.clone(), Arc::new(audio)).await,
+                    }),
+                    Err(err) => {
+                        warnings.push(format!(
+                            "Clip '{}' unavailable, kept for relink ({})",
+                            clip.name, err
+                        ));
+                        unresolved_clips.push(crate::message::UnresolvedTimelineClip {
+                            location,
+                            info: clip.clone(),
+                        });
+                    }
+                },
+                None => warnings.push(format!(
+                    "Skipped clip '{}' (missing source reference)",
+                    clip.name
+                )),
+            }
         }
     }
 

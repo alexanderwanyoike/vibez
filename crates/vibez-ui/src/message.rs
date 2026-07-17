@@ -10,7 +10,7 @@ use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::project_format_v1::SaveObservation;
-use vibez_project::Project;
+use vibez_project::{Project, TimelineLocation};
 
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
@@ -36,6 +36,34 @@ pub struct LoadedClipData {
     /// Raw un-warped audio, retained when `info.warped` so later
     /// re-warps stretch from the original.
     pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedTimelineClip {
+    pub location: TimelineLocation,
+    pub clip: LoadedClipData,
+}
+
+impl std::ops::Deref for LoadedTimelineClip {
+    type Target = LoadedClipData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.clip
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnresolvedTimelineClip {
+    pub location: TimelineLocation,
+    pub info: ClipInfo,
+}
+
+impl std::ops::Deref for UnresolvedTimelineClip {
+    type Target = ClipInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.info
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -174,10 +202,10 @@ pub struct PreparedBrowserImport {
 pub struct ProjectLoadResult {
     pub path: PathBuf,
     pub project: Project,
-    pub clips: Vec<LoadedClipData>,
+    pub clips: Vec<LoadedTimelineClip>,
     /// Clips whose media could not be hydrated this session. They stay out
     /// of the arrangement but must survive the next save for relinking.
-    pub unresolved_clips: Vec<ClipInfo>,
+    pub unresolved_clips: Vec<UnresolvedTimelineClip>,
     pub sampler_samples: Vec<LoadedSamplerData>,
     pub drum_rack_pad_samples: Vec<LoadedDrumRackPadData>,
     pub warnings: Vec<String>,

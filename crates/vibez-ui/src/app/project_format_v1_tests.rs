@@ -92,22 +92,25 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
             tracks: vec![track.clone()],
-            clips: vec![ClipInfo {
-                id: ClipId::new(),
-                track_id: track.id,
-                name: file_name.into(),
-                position: 0,
-                source_offset: 0,
-                duration: imported.num_frames() as u64,
-                source: Some(staged),
-                file_path: None,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-            }],
+            arrange: vibez_project::TimelineInfo {
+                clips: vec![ClipInfo {
+                    id: ClipId::new(),
+                    track_id: track.id,
+                    name: file_name.into(),
+                    position: 0,
+                    source_offset: 0,
+                    duration: imported.num_frames() as u64,
+                    source: Some(staged),
+                    file_path: None,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 0,
+                    original_bpm: None,
+                    warped: false,
+                    warped_to_bpm: None,
+                }],
+                ..vibez_project::TimelineInfo::default()
+            },
             ..Project::default()
         };
         vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
@@ -123,7 +126,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             "{file_name}"
         );
         assert!(matches!(
-            reopened.project.clips[0].source,
+            reopened.project.arrange.clips[0].source,
             Some(MediaSourceRef::ProjectMedia { .. })
         ));
         assert_audible(reopened_audio, file_name);
@@ -176,22 +179,25 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
     let track = TrackInfo::new("Audio");
     let project = Project {
         tracks: vec![track.clone()],
-        clips: vec![ClipInfo {
-            id: ClipId::new(),
-            track_id: track.id,
-            name: "loop.wav".into(),
-            position: 0,
-            source_offset: 0,
-            duration: warped.num_frames() as u64,
-            source: Some(staged),
-            file_path: None,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-            original_bpm: Some(120.0),
-            warped: true,
-            warped_to_bpm: Some(60.0),
-        }],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: "loop.wav".into(),
+                position: 0,
+                source_offset: 0,
+                duration: warped.num_frames() as u64,
+                source: Some(staged),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                original_bpm: Some(120.0),
+                warped: true,
+                warped_to_bpm: Some(60.0),
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
         ..Project::default()
     };
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
@@ -200,7 +206,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
     let loaded = load_project_async(project_path, None).await.unwrap();
     assert_eq!(loaded.clips[0].audio.num_frames(), warped.num_frames());
     assert!(matches!(
-        loaded.project.clips[0].source,
+        loaded.project.arrange.clips[0].source,
         Some(MediaSourceRef::ProjectMedia { .. })
     ));
 }
@@ -271,24 +277,27 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
     let track = TrackInfo::new("Audio");
     let project = Project {
         tracks: vec![track.clone()],
-        clips: vec![ClipInfo {
-            id: ClipId::new(),
-            track_id: track.id,
-            name: "source.wav".into(),
-            position: 0,
-            source_offset: 0,
-            duration: audio.num_frames() as u64,
-            source: Some(MediaSourceRef::LocalFile {
-                path: source_path.clone(),
-            }),
-            file_path: Some(source_path.clone()),
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: audio.num_frames() as u64,
-            original_bpm: None,
-            warped: false,
-            warped_to_bpm: None,
-        }],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name: "source.wav".into(),
+                position: 0,
+                source_offset: 0,
+                duration: audio.num_frames() as u64,
+                source: Some(MediaSourceRef::LocalFile {
+                    path: source_path.clone(),
+                }),
+                file_path: Some(source_path.clone()),
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: audio.num_frames() as u64,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
         ..Project::default()
     };
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
@@ -298,10 +307,118 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
     assert_eq!(loaded.clips.len(), 1);
     assert_eq!(loaded.clips[0].audio.num_frames(), audio.num_frames());
     assert!(matches!(
-        loaded.project.clips[0].source,
+        loaded.project.arrange.clips[0].source,
         Some(MediaSourceRef::ProjectMedia { .. })
     ));
     assert_eq!(loaded.project.tracks[0].id, track.id);
+}
+
+#[tokio::test]
+async fn section_properties_and_shared_timeline_media_survive_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("shared.wav");
+    let project_path = directory.path().join("sections.vzp");
+    let audio = DecodedAudio {
+        channels: vec![vec![0.0, 0.25, -0.5, 0.75, -1.0]],
+        sample_rate: 44_100,
+    };
+    vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
+    let track = TrackInfo::new("Audio");
+    let track_id = track.id;
+    let section_id = vibez_core::id::SectionId::new();
+    let clip = |id| ClipInfo {
+        id,
+        track_id,
+        name: "shared.wav".into(),
+        position: 0,
+        source_offset: 0,
+        duration: audio.num_frames() as u64,
+        source: Some(MediaSourceRef::LocalFile {
+            path: source_path.clone(),
+        }),
+        file_path: Some(source_path.clone()),
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: audio.num_frames() as u64,
+        original_bpm: None,
+        warped: false,
+        warped_to_bpm: None,
+    };
+    let project = Project {
+        tracks: vec![track],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![clip(ClipId::new())],
+            ..vibez_project::TimelineInfo::default()
+        },
+        sections: vec![vibez_project::SectionInfo {
+            id: section_id,
+            slot: 7,
+            name: "Breakdown".into(),
+            length_beats: 32.0,
+            launch_quantization: vibez_project::SectionLaunchQuantization::EndOfSection,
+            looping: false,
+            timeline: vibez_project::TimelineInfo {
+                clips: vec![clip(ClipId::new())],
+                ..vibez_project::TimelineInfo::default()
+            },
+        }],
+        ..Project::default()
+    };
+    let saved =
+        vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+    assert_eq!(saved.observation.media_rows_written, 1);
+    std::fs::remove_file(source_path).unwrap();
+
+    let loaded = load_project_async(project_path, None).await.unwrap();
+    assert!(loaded.warnings.is_empty());
+    assert_eq!(loaded.clips.len(), 2);
+    assert!(loaded
+        .clips
+        .iter()
+        .any(|clip| clip.location == vibez_project::TimelineLocation::Arrange));
+    assert!(loaded
+        .clips
+        .iter()
+        .any(|clip| { clip.location == vibez_project::TimelineLocation::Section(section_id) }));
+    assert!(loaded
+        .clips
+        .iter()
+        .all(|clip| clip.audio.num_frames() == audio.num_frames()));
+    let section = &loaded.project.sections[0];
+    assert_eq!(section.id, section_id);
+    assert_eq!(section.slot, 7);
+    assert_eq!(section.name, "Breakdown");
+    assert_eq!(section.length_beats, 32.0);
+    assert_eq!(
+        section.launch_quantization,
+        vibez_project::SectionLaunchQuantization::EndOfSection
+    );
+    assert!(!section.looping);
+}
+
+#[tokio::test]
+async fn legacy_json_reopens_with_an_empty_section_store_and_no_warnings() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("legacy.json");
+    std::fs::write(
+        &project_path,
+        r#"{
+            "name": "Legacy",
+            "bpm": 120.0,
+            "sample_rate": 44100,
+            "tracks": [],
+            "clips": [],
+            "note_clips": [],
+            "master": null,
+            "buses": []
+        }"#,
+    )
+    .unwrap();
+
+    let loaded = load_project_async(project_path, None).await.unwrap();
+    assert!(loaded.project.sections.is_empty());
+    assert!(loaded.warnings.is_empty());
+    assert!(loaded.clips.is_empty());
 }
 
 #[tokio::test]
@@ -312,26 +429,29 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
     let clip_id = ClipId::new();
     let project = Project {
         tracks: vec![track.clone()],
-        clips: vec![ClipInfo {
-            id: clip_id,
-            track_id: track.id,
-            name: "Remote clip".into(),
-            position: 0,
-            source_offset: 0,
-            duration: 128,
-            source: Some(MediaSourceRef::DropboxFile {
-                path_lower: "/megalodon/pad.wav".into(),
-                display_path: "/Megalodon/Pad.wav".into(),
-                rev: Some("rev-1".into()),
-            }),
-            file_path: None,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 128,
-            original_bpm: None,
-            warped: false,
-            warped_to_bpm: None,
-        }],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: clip_id,
+                track_id: track.id,
+                name: "Remote clip".into(),
+                position: 0,
+                source_offset: 0,
+                duration: 128,
+                source: Some(MediaSourceRef::DropboxFile {
+                    path_lower: "/megalodon/pad.wav".into(),
+                    display_path: "/Megalodon/Pad.wav".into(),
+                    rev: Some("rev-1".into()),
+                }),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 128,
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
         ..Project::default()
     };
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
@@ -448,22 +568,25 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     let track = TrackInfo::new("Audio");
     let project = Project {
         tracks: vec![track.clone()],
-        clips: vec![ClipInfo {
-            id: ClipId::new(),
-            track_id: track.id,
-            name,
-            position: 0,
-            source_offset: 0,
-            duration: warped.num_frames() as u64,
-            source: Some(staged),
-            file_path: None,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-            original_bpm: Some(120.0),
-            warped: true,
-            warped_to_bpm: Some(60.0),
-        }],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: ClipId::new(),
+                track_id: track.id,
+                name,
+                position: 0,
+                source_offset: 0,
+                duration: warped.num_frames() as u64,
+                source: Some(staged),
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 0,
+                original_bpm: Some(120.0),
+                warped: true,
+                warped_to_bpm: Some(60.0),
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
         ..Project::default()
     };
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
@@ -476,7 +599,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     let Some(MediaSourceRef::ProjectMedia {
         provenance: Some(provenance),
         ..
-    }) = reopened.project.clips[0].source.as_ref()
+    }) = reopened.project.arrange.clips[0].source.as_ref()
     else {
         panic!("reopened clip must carry Remote provenance on Project Media");
     };
