@@ -152,6 +152,7 @@ mod views_detail;
 mod views_devices;
 mod views_mixer;
 mod views_overlays;
+mod views_perform;
 mod views_settings;
 mod views_shell;
 mod views_transport;

@@ -261,6 +261,27 @@ mod tests {
     }
 
     #[test]
+    fn all_workspaces_are_reachable_without_resetting_view_state() {
+        let mut view = ViewState {
+            zoom_level: 2.5,
+            scroll_offset_beats: 12.0,
+            ..ViewState::default()
+        };
+        let timeline = ArrangementTimeline::default();
+
+        for workspace in [Workspace::Perform, Workspace::Mix, Workspace::Arrange] {
+            view.update(
+                ViewMsg::SwitchWorkspace(workspace),
+                &timeline,
+                ViewCtx::default(),
+            );
+            assert_eq!(view.workspace, workspace);
+            assert_eq!(view.zoom_level, 2.5);
+            assert_eq!(view.scroll_offset_beats, 12.0);
+        }
+    }
+
+    #[test]
     fn scroll_clamps_to_content() {
         let mut v = ViewState::default();
         let ctx = ViewCtx { total_beats: 32.0 };

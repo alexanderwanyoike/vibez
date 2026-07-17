@@ -208,6 +208,7 @@ pub enum Message {
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
     Automation(crate::domains::automation::AutomationMsg),
+    Perform(crate::domains::perform::PerformMsg),
     View(crate::domains::view::ViewMsg),
 
     // Workspace

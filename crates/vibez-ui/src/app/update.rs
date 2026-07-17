@@ -224,6 +224,19 @@ impl App {
                     self.state.status_text = status;
                 }
             }
+            Message::Perform(msg) => {
+                let ctx = crate::domains::perform::PerformCtx {
+                    workspace_visible: self.state.view.workspace
+                        == crate::state::Workspace::Perform,
+                };
+                let action = {
+                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    self.state.perform.update(msg, &mut engine, ctx)
+                };
+                match action {
+                    crate::domains::perform::PerformAction::None => {}
+                }
+            }
             Message::View(msg) => {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {
                     self.state.project.file_menu_open = false;

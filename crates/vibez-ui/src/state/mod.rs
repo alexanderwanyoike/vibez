@@ -486,6 +486,9 @@ pub struct AppState {
 
     pub piano_roll: PianoRollState,
 
+    // Perform domain slice (runtime mode, bank, selection, and focus).
+    pub perform: crate::domains::perform::PerformState,
+
     // Project Track domain slice (shared channels and devices).
     pub project_tracks: Arc<ProjectTracksState>,
 
@@ -540,6 +543,7 @@ impl Default for AppState {
             status_text: "Ready — Add a track to get started".to_string(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),
+            perform: crate::domains::perform::PerformState::default(),
             project_tracks: Arc::new(ProjectTracksState {
                 next_track_number: 1,
                 ..ProjectTracksState::default()

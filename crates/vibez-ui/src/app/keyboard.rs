@@ -4,6 +4,7 @@
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::perform::{PerformMode, PerformMsg};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
@@ -29,6 +30,18 @@ pub(crate) fn global_key_handler(
     // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
         return Some(Message::Transport(TransportMsg::TogglePlayback));
+    }
+
+    if modifiers.is_empty() {
+        let mode = match key {
+            iced::keyboard::Key::Named(Named::F1) => Some(PerformMode::Sections),
+            iced::keyboard::Key::Named(Named::F2) => Some(PerformMode::TrackMutes),
+            iced::keyboard::Key::Named(Named::F3) => Some(PerformMode::Instrument),
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            return Some(Message::Perform(PerformMsg::SelectMode(mode)));
+        }
     }
 
     // Escape: the router stops Audition first, then falls back to cancel editing.
@@ -258,5 +271,24 @@ mod tests {
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
             Some(Message::EscapePressed)
         ));
+    }
+
+    #[test]
+    fn function_keys_select_the_three_perform_modes() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        let expected = [
+            (Named::F1, PerformMode::Sections),
+            (Named::F2, PerformMode::TrackMutes),
+            (Named::F3, PerformMode::Instrument),
+        ];
+        for (key, expected_mode) in expected {
+            assert!(matches!(
+                global_key_handler(Key::Named(key), Modifiers::empty()),
+                Some(Message::Perform(PerformMsg::SelectMode(mode))) if mode == expected_mode
+            ));
+        }
+
+        assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
     }
 }
