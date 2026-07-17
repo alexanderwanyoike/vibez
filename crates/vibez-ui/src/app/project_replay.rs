@@ -27,9 +27,9 @@ impl App {
         }
     }
 
-    pub(super) fn push_undo_snapshot(&mut self) {
+    pub(super) fn push_undo_snapshot(&mut self, gesture: Option<crate::state::UndoGestureId>) {
         let snapshot = self.take_snapshot();
-        self.state.project.history.push_undo(snapshot);
+        self.state.project.history.push_edit(snapshot, gesture);
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {

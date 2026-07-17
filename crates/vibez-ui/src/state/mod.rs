@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod browser_results;
@@ -205,6 +206,19 @@ pub struct ProjectSnapshot {
     pub selected_note_clip: Option<(TrackId, ClipId)>,
 }
 
+/// Runtime identity for one continuous pointer gesture. Every incremental
+/// project edit emitted while the pointer remains held carries the same id so
+/// undo history can retain the pre-gesture snapshot only once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UndoGestureId(u64);
+
+impl UndoGestureId {
+    pub fn new() -> Self {
+        static NEXT_GESTURE_ID: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT_GESTURE_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// Project domain slice: file-menu visibility, the current file,
 /// the dirty flag, and the undo/redo history.
 #[derive(Debug, Default)]
@@ -223,12 +237,18 @@ pub struct ProjectState {
 pub struct UndoHistory {
     pub undo: VecDeque<ProjectSnapshot>,
     pub redo: VecDeque<ProjectSnapshot>,
+    last_gesture: Option<UndoGestureId>,
 }
 
 impl UndoHistory {
     pub const CAPACITY: usize = 100;
 
     pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
+        self.last_gesture = None;
+        self.push_snapshot(snapshot);
+    }
+
+    fn push_snapshot(&mut self, snapshot: ProjectSnapshot) {
         self.undo.push_back(snapshot);
         if self.undo.len() > Self::CAPACITY {
             self.undo.pop_front();
@@ -236,7 +256,16 @@ impl UndoHistory {
         self.redo.clear();
     }
 
+    pub fn push_edit(&mut self, snapshot: ProjectSnapshot, gesture: Option<UndoGestureId>) {
+        if gesture.is_some() && self.last_gesture == gesture {
+            return;
+        }
+        self.push_snapshot(snapshot);
+        self.last_gesture = gesture;
+    }
+
     pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
+        self.last_gesture = None;
         self.undo.pop_back()
     }
 
@@ -248,6 +277,7 @@ impl UndoHistory {
     }
 
     pub fn pop_redo(&mut self) -> Option<ProjectSnapshot> {
+        self.last_gesture = None;
         self.redo.pop_back()
     }
 
@@ -264,8 +294,12 @@ impl UndoHistory {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.last_gesture = None;
     }
 }
+
+#[cfg(test)]
+mod undo_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceMenuCategory {

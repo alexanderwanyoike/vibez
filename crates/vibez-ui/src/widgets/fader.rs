@@ -3,6 +3,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
+use crate::state::UndoGestureId;
 use crate::theme;
 use crate::widgets::drag::ValueDrag;
 use vibez_core::id::TrackId;
@@ -30,6 +31,7 @@ impl HorizontalFaderWidget {
 #[derive(Debug, Default)]
 pub struct HorizontalFaderState {
     drag: ValueDrag,
+    undo_gesture: Option<UndoGestureId>,
 }
 
 impl canvas::Program<Message> for HorizontalFaderWidget {
@@ -122,11 +124,13 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if state.drag.grab(cursor, bounds, self.value) {
+                    state.undo_gesture = Some(UndoGestureId::new());
                     return (canvas::event::Status::Captured, None);
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 if state.drag.release() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -135,7 +139,11 @@ impl canvas::Program<Message> for HorizontalFaderWidget {
                 if let Some(gain) = state.drag.drag_to(cursor, 2.0 / track_w, 0.0, 0.0..=2.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::set_track_gain(self.track_id, gain)),
+                        Some(
+                            Message::set_track_gain(self.track_id, gain).in_undo_gesture(
+                                *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                            ),
+                        ),
                     );
                 }
             }
@@ -169,8 +177,23 @@ mod tests {
         )
     }
 
+    fn release(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
+        (
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            mouse::Cursor::Available(cursor_at),
+        )
+    }
+
+    fn gesture_of(message: Option<Message>) -> Option<UndoGestureId> {
+        match message {
+            Some(Message::UndoGesture { id, .. }) => Some(id),
+            _ => None,
+        }
+    }
+
     fn gain_of(message: Option<Message>) -> Option<f32> {
         match message {
+            Some(Message::UndoGesture { edit, .. }) => gain_of(Some(*edit)),
             Some(Message::Arrangement(ArrangementMsg::SetTrackGain(_, gain))) => Some(gain),
             _ => None,
         }
@@ -235,6 +258,29 @@ mod tests {
         let gain = gain_of(message).expect("drag outside bounds must keep tracking");
         assert!(gain > 1.0, "rightward drag should raise gain, got {gain}");
     }
+
+    #[test]
+    fn separate_fader_drags_get_distinct_undo_gestures() {
+        let widget = FaderWidget::new(TrackId::MASTER, 1.0, Color::WHITE);
+        let bounds = Rectangle::new(Point::new(100.0, 100.0), Size::new(24.0, 108.0));
+        let mut state = FaderState::default();
+
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 140.0));
+        let (_, first) = widget.update(&mut state, event, bounds, cursor);
+        let first = gesture_of(first).expect("first drag emits a grouped edit");
+
+        let (event, cursor) = release(Point::new(112.0, 140.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = press(Point::new(112.0, 150.0));
+        widget.update(&mut state, event, bounds, cursor);
+        let (event, cursor) = drag(Point::new(112.0, 130.0));
+        let (_, second) = widget.update(&mut state, event, bounds, cursor);
+        let second = gesture_of(second).expect("second drag emits a grouped edit");
+
+        assert_ne!(first, second);
+    }
 }
 
 /// Vertical fader widget for track gain control.
@@ -260,6 +306,7 @@ impl FaderWidget {
 #[derive(Debug, Default)]
 pub struct FaderState {
     drag: ValueDrag,
+    undo_gesture: Option<UndoGestureId>,
 }
 
 impl canvas::Program<Message> for FaderWidget {
@@ -352,11 +399,13 @@ impl canvas::Program<Message> for FaderWidget {
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if state.drag.grab(cursor, bounds, self.value) {
+                    state.undo_gesture = Some(UndoGestureId::new());
                     return (canvas::event::Status::Captured, None);
                 }
             }
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
                 if state.drag.release() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -365,7 +414,11 @@ impl canvas::Program<Message> for FaderWidget {
                 if let Some(gain) = state.drag.drag_to(cursor, 0.0, -2.0 / track_h, 0.0..=2.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::set_track_gain(self.track_id, gain)),
+                        Some(
+                            Message::set_track_gain(self.track_id, gain).in_undo_gesture(
+                                *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                            ),
+                        ),
                     );
                 }
             }
