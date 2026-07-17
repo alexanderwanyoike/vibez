@@ -6,6 +6,7 @@ use iced::widget::canvas;
 use iced::{Color, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
+use crate::state::UndoGestureId;
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
@@ -49,6 +50,7 @@ impl KnobWidget {
 #[derive(Debug, Default)]
 pub struct KnobState {
     drag: ValueDrag,
+    undo_gesture: Option<UndoGestureId>,
     shift_held: bool,
     double_click: DoubleClick,
 }
@@ -187,7 +189,9 @@ impl canvas::Program<Message> for KnobWidget {
                         }
                     }
 
-                    state.drag.grab(cursor, bounds, self.value);
+                    if state.drag.grab(cursor, bounds, self.value) {
+                        state.undo_gesture = Some(UndoGestureId::new());
+                    }
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -195,6 +199,7 @@ impl canvas::Program<Message> for KnobWidget {
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.drag.release() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -209,7 +214,10 @@ impl canvas::Program<Message> for KnobWidget {
                 if let Some(pan) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(Message::set_track_pan(self.track_id, pan)),
+                        Some(
+                            Message::set_track_pan(self.track_id, pan)
+                                .in_undo_gesture(state.undo_gesture.unwrap()),
+                        ),
                     );
                 }
             }

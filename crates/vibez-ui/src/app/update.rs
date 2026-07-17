@@ -19,6 +19,10 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        let (message, undo_gesture) = match message {
+            Message::UndoGesture { id, edit } => (*edit, Some(id)),
+            message => (message, None),
+        };
         if self.state.view.edit_menu_open {
             let keep_menu = matches!(
                 &message,
@@ -113,11 +117,14 @@ impl App {
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
             || matches!(&message, Message::Automation(m) if m.marks_dirty());
         if should_mark_dirty {
-            self.push_undo_snapshot();
+            self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();
         }
 
         match message {
+            Message::UndoGesture { .. } => {
+                unreachable!("undo gesture wrappers are removed before routing")
+            }
             // The transport domain owns its logic entirely; app.rs
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.

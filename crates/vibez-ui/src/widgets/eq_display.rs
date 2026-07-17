@@ -11,6 +11,7 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::message::Message;
 use crate::spectrum::{freq_to_norm, norm_to_freq, DISPLAY_BINS, FLOOR_DB};
+use crate::state::UndoGestureId;
 use crate::theme as th;
 use crate::widgets::double_click::DoubleClick;
 use vibez_core::effect::ParamDescriptor;
@@ -81,6 +82,7 @@ pub struct EqDisplayWidget {
 #[derive(Debug, Default)]
 pub struct EqDisplayState {
     drag: Option<usize>,
+    undo_gesture: Option<UndoGestureId>,
     hover: Option<usize>,
     double_click: DoubleClick,
 }
@@ -399,12 +401,14 @@ impl canvas::Program<Message> for EqDisplayWidget {
                             );
                         }
                         state.drag = Some(band_idx);
+                        state.undo_gesture = Some(UndoGestureId::new());
                         return (canvas::event::Status::Captured, None);
                     }
                 }
             }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.drag.take().is_some() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -415,7 +419,10 @@ impl canvas::Program<Message> for EqDisplayWidget {
                         let pos = Point::new(abs.x - bounds.x, abs.y - bounds.y);
                         return (
                             canvas::event::Status::Captured,
-                            Some(self.drag_message(band_idx, pos, bounds)),
+                            Some(
+                                self.drag_message(band_idx, pos, bounds)
+                                    .in_undo_gesture(state.undo_gesture.unwrap()),
+                            ),
                         );
                     }
                 }

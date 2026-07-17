@@ -6,6 +6,7 @@ use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
 use crate::message::{DrumPadParam, Message};
+use crate::state::UndoGestureId;
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
@@ -221,6 +222,7 @@ pub fn format_value(value: f32, unit: &str) -> String {
 #[derive(Debug, Default)]
 pub struct EffectKnobState {
     drag: ValueDrag,
+    undo_gesture: Option<UndoGestureId>,
     shift_held: bool,
     double_click: DoubleClick,
 }
@@ -365,7 +367,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
                         }
                     }
 
-                    state.drag.grab(cursor, bounds, self.normalized());
+                    if state.drag.grab(cursor, bounds, self.normalized()) {
+                        state.undo_gesture = Some(UndoGestureId::new());
+                    }
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -373,6 +377,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.drag.release() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -387,7 +392,10 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 if let Some(norm) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(self.set_value_message(self.denormalize(norm))),
+                        Some(
+                            self.set_value_message(self.denormalize(norm))
+                                .in_undo_gesture(state.undo_gesture.unwrap()),
+                        ),
                     );
                 }
             }

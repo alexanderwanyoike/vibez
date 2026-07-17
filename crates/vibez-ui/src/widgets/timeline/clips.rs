@@ -14,6 +14,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
     ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent,
+    UndoGestureId,
 };
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
@@ -24,6 +25,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
     MoveClip {
+        undo_gesture: UndoGestureId,
         clip_id: ClipId,
         is_note_clip: bool,
         /// Initial local x pixel where the drag started.
@@ -32,6 +34,7 @@ pub enum ClipDragAction {
         start_y: f32,
     },
     ResizeClip {
+        undo_gesture: UndoGestureId,
         clip_id: ClipId,
         is_note_clip: bool,
         clip_start_beat: f64,
@@ -342,6 +345,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         if near_right && in_title_bar {
                             // Right edge of title bar → resize
                             state.drag = Some(ClipDragAction::ResizeClip {
+                                undo_gesture: UndoGestureId::new(),
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat: pos_beats,
@@ -349,6 +353,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         } else if in_title_bar {
                             // Title bar → move clip
                             state.drag = Some(ClipDragAction::MoveClip {
+                                undo_gesture: UndoGestureId::new(),
                                 clip_id,
                                 is_note_clip,
                                 start_local_x: pos.x,
@@ -515,6 +520,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 return (canvas::event::Status::Captured, None);
                             }
                             ClipDragAction::MoveClip {
+                                undo_gesture,
                                 clip_id,
                                 is_note_clip,
                                 start_local_x,
@@ -547,46 +553,45 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         // Type compatibility: note clips to instrument tracks,
                                         // audio clips to audio tracks
                                         if *is_note_clip == target_is_instrument {
-                                            return (
-                                                canvas::event::Status::Captured,
-                                                Some(Message::Arrangement(
-                                                    ArrangementMsg::MoveClipToTrack {
-                                                        source_track: track_id,
-                                                        target_track,
-                                                        clip_id: *clip_id,
-                                                        is_note_clip: *is_note_clip,
-                                                    },
-                                                )),
-                                            );
+                                            let edit = Message::Arrangement(
+                                                ArrangementMsg::MoveClipToTrack {
+                                                    source_track: track_id,
+                                                    target_track,
+                                                    clip_id: *clip_id,
+                                                    is_note_clip: *is_note_clip,
+                                                },
+                                            )
+                                            .in_undo_gesture(*undo_gesture);
+                                            return (canvas::event::Status::Captured, Some(edit));
                                         }
                                     }
                                 }
 
                                 if *is_note_clip {
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::MoveNoteClipPosition {
-                                                track_id,
-                                                clip_id: *clip_id,
-                                                new_position_beats: snapped,
-                                            },
-                                        )),
-                                    );
+                                    let edit = Message::Arrangement(
+                                        ArrangementMsg::MoveNoteClipPosition {
+                                            track_id,
+                                            clip_id: *clip_id,
+                                            new_position_beats: snapped,
+                                        },
+                                    )
+                                    .in_undo_gesture(*undo_gesture);
+                                    return (canvas::event::Status::Captured, Some(edit));
                                 } else {
                                     let spb = self.spb();
                                     let new_sample_pos = (snapped * spb) as u64;
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(ArrangementMsg::MoveAudioClip {
+                                    let edit =
+                                        Message::Arrangement(ArrangementMsg::MoveAudioClip {
                                             track_id,
                                             clip_id: *clip_id,
                                             new_position: new_sample_pos,
-                                        })),
-                                    );
+                                        })
+                                        .in_undo_gesture(*undo_gesture);
+                                    return (canvas::event::Status::Captured, Some(edit));
                                 }
                             }
                             ClipDragAction::ResizeClip {
+                                undo_gesture,
                                 clip_id,
                                 is_note_clip,
                                 clip_start_beat,
@@ -601,31 +606,27 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let snapped = self.snapped_beat(new_dur).max(min_duration);
 
                                 if *is_note_clip {
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::ResizeSelectedClips {
-                                                anchor: ArrangementSelection::NoteClip {
-                                                    track_id,
-                                                    clip_id: *clip_id,
-                                                },
-                                                new_duration_beats: snapped,
+                                    let edit =
+                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                                            anchor: ArrangementSelection::NoteClip {
+                                                track_id,
+                                                clip_id: *clip_id,
                                             },
-                                        )),
-                                    );
+                                            new_duration_beats: snapped,
+                                        })
+                                        .in_undo_gesture(*undo_gesture);
+                                    return (canvas::event::Status::Captured, Some(edit));
                                 } else {
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::ResizeSelectedClips {
-                                                anchor: ArrangementSelection::AudioClip {
-                                                    track_id,
-                                                    clip_id: *clip_id,
-                                                },
-                                                new_duration_beats: snapped,
+                                    let edit =
+                                        Message::Arrangement(ArrangementMsg::ResizeSelectedClips {
+                                            anchor: ArrangementSelection::AudioClip {
+                                                track_id,
+                                                clip_id: *clip_id,
                                             },
-                                        )),
-                                    );
+                                            new_duration_beats: snapped,
+                                        })
+                                        .in_undo_gesture(*undo_gesture);
+                                    return (canvas::event::Status::Captured, Some(edit));
                                 }
                             }
                         }
