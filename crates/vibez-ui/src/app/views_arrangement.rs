@@ -15,7 +15,7 @@ use vibez_core::id::{ClipId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, ContextMenuTarget};
+use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
 use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
@@ -208,12 +208,13 @@ impl App {
 
         // Track rows: header widgets + clip canvas
         let mut track_rows = column![].spacing(0);
+        let empty_content = TrackTimelineContent::default();
 
         for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
             let content = self
                 .state
                 .arrange_content(track.id)
-                .expect("every Project Track has Arrange Timeline Content");
+                .unwrap_or(&empty_content);
             let selected = self.state.arrangement.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
 
