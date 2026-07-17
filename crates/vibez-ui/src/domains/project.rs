@@ -98,10 +98,11 @@ pub fn collect_plugin_reload_requests(
     mut capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
 ) -> PluginReloadRequests {
     let mut requests = PluginReloadRequests::default();
+    let project_tracks = std::sync::Arc::make_mut(&mut snapshot.project_tracks);
     let (tracks, master, buses) = (
-        &mut snapshot.tracks,
-        &mut snapshot.master,
-        &mut snapshot.buses,
+        &mut project_tracks.tracks,
+        &mut project_tracks.master,
+        &mut project_tracks.buses,
     );
     for track in tracks
         .iter_mut()
@@ -136,7 +137,7 @@ pub fn collect_plugin_reload_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{UiEffect, UiTrack};
+    use crate::state::{ArrangementTimeline, ProjectTrack, ProjectTracksState, UiEffect};
     use std::collections::HashSet;
     use vibez_core::effect::EffectType;
 
@@ -164,12 +165,16 @@ mod tests {
     }
 
     fn snapshot_with(effects: Vec<UiEffect>) -> ProjectSnapshot {
-        let mut track = UiTrack::new(TrackId::new(), "T1".to_string(), 0);
+        let mut track = ProjectTrack::new(TrackId::new(), "T1".to_string(), 0);
         track.effects = effects;
         ProjectSnapshot {
-            tracks: vec![track],
-            master: crate::state::new_master_track(),
-            buses: Vec::new(),
+            project_tracks: std::sync::Arc::new(ProjectTracksState {
+                tracks: vec![track],
+                master: crate::state::new_master_track(),
+                buses: Vec::new(),
+                next_track_number: 2,
+            }),
+            arrange_timeline: std::sync::Arc::new(ArrangementTimeline::default()),
             bpm: 120.0,
             bpm_text: "120".to_string(),
             loop_enabled: false,
@@ -178,7 +183,6 @@ mod tests {
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
-            next_track_number: 2,
         }
     }
 
@@ -195,8 +199,8 @@ mod tests {
         assert_eq!(*chain_pos, 1);
         assert_eq!(dev.name, "comp");
         // Plugin slot stripped; builtins remain for direct replay.
-        assert_eq!(snap.tracks[0].effects.len(), 2);
-        assert!(snap.tracks[0]
+        assert_eq!(snap.project_tracks.tracks[0].effects.len(), 2);
+        assert!(snap.project_tracks.tracks[0]
             .effects
             .iter()
             .all(|e| e.plugin_ref.is_none()));
@@ -245,11 +249,14 @@ mod tests {
     #[test]
     fn plugin_instrument_is_requested_and_fields_kept() {
         let mut snap = snapshot_with(Vec::new());
-        snap.tracks[0].plugin_instrument_ref = Some(plugin_device("synth"));
-        snap.tracks[0].has_instrument = true;
+        let track = &mut std::sync::Arc::make_mut(&mut snap.project_tracks).tracks[0];
+        track.plugin_instrument_ref = Some(plugin_device("synth"));
+        track.has_instrument = true;
         let requests = collect_plugin_reload_requests(&mut snap, |_| None);
         assert_eq!(requests.instruments.len(), 1);
-        assert!(snap.tracks[0].plugin_instrument_ref.is_some());
-        assert!(snap.tracks[0].has_instrument);
+        assert!(snap.project_tracks.tracks[0]
+            .plugin_instrument_ref
+            .is_some());
+        assert!(snap.project_tracks.tracks[0].has_instrument);
     }
 }

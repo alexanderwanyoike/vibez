@@ -5,7 +5,7 @@ use crate::icons;
 use crate::message::Message;
 use vibez_core::effect::EffectType;
 
-use crate::state::{UiEffect, UiTrack};
+use crate::state::{ProjectTrack, UiEffect};
 use crate::theme as th;
 use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::fader::FaderWidget;
@@ -24,16 +24,22 @@ pub enum StripRole {
     Master,
 }
 
+/// Per-render inputs that are not part of the project-owned channel itself.
+pub struct MixerStripView<'a> {
+    pub selected: bool,
+    pub editing_name: bool,
+    pub edit_text: &'a str,
+    pub playhead_beat: f64,
+    pub automation: &'a [vibez_core::automation::AutomationLane],
+}
+
 /// Render a single mixer channel strip. `buses` drives the send
 /// knob section on regular track strips.
 pub fn view_mixer_strip<'a>(
-    track: &'a UiTrack,
-    selected: bool,
+    track: &'a ProjectTrack,
     role: StripRole,
-    buses: &'a [UiTrack],
-    editing_name: bool,
-    edit_text: &'a str,
-    playhead_beat: f64,
+    buses: &'a [ProjectTrack],
+    view: MixerStripView<'a>,
 ) -> Element<'a, Message> {
     let is_master = role == StripRole::Master;
     let track_color = if is_master {
@@ -63,7 +69,7 @@ pub fn view_mixer_strip<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        view_editable_channel_name(track, editing_name, edit_text, 12, th::text())
+        view_editable_channel_name(track, view.editing_name, view.edit_text, 12, th::text())
     };
 
     // Tracks are deletable straight from the strip; the master is
@@ -261,7 +267,12 @@ pub fn view_mixer_strip<'a>(
     } else {
         let mut col = column![name_row, eq_section];
         if !buses.is_empty() {
-            col = col.push(view_sends(track, buses, playhead_beat));
+            col = col.push(view_sends(
+                track,
+                buses,
+                view.playhead_beat,
+                view.automation,
+            ));
         }
         col.push(knob_canvas)
             .push(pan_label)
@@ -280,7 +291,11 @@ pub fn view_mixer_strip<'a>(
         .style(move |_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: if selected { th::accent() } else { th::border() },
+                color: if view.selected {
+                    th::accent()
+                } else {
+                    th::border()
+                },
                 width: 1.0,
                 radius: 2.0.into(),
             },
@@ -299,9 +314,10 @@ pub fn view_mixer_strip<'a>(
 /// Send section on a track strip: one knob per bus, bus-colored,
 /// wrapped three to a row under a SENDS header.
 fn view_sends<'a>(
-    track: &'a UiTrack,
-    buses: &'a [UiTrack],
+    track: &'a ProjectTrack,
+    buses: &'a [ProjectTrack],
     playhead_beat: f64,
+    automation: &'a [vibez_core::automation::AutomationLane],
 ) -> Element<'a, Message> {
     let mut section = column![text("SENDS").size(7).color(th::text_muted())]
         .spacing(2)
@@ -309,7 +325,7 @@ fn view_sends<'a>(
     for chunk in buses.chunks(3) {
         let mut knobs = row![].spacing(4).align_y(iced::Alignment::Center);
         for bus in chunk {
-            let amount = effective_send_amount(track, bus.id, playhead_beat);
+            let amount = effective_send_amount(track, automation, bus.id, playhead_beat);
             let letter = bus.name.chars().next().unwrap_or('?');
             let knob = EffectKnobWidget::for_send(
                 track.id,
@@ -336,12 +352,12 @@ fn view_sends<'a>(
 }
 
 fn effective_send_amount(
-    track: &UiTrack,
+    track: &ProjectTrack,
+    automation: &[vibez_core::automation::AutomationLane],
     bus_id: vibez_core::id::TrackId,
     playhead_beat: f64,
 ) -> f32 {
-    track
-        .automation
+    automation
         .iter()
         .find_map(|lane| match lane.target {
             vibez_core::automation::AutomationTarget::Send { bus_id: target }
@@ -367,7 +383,7 @@ fn effective_send_amount(
 /// LMF blue, LF brown, like the console), with bell toggles on the
 /// outer bands and an IN (bypass) button. The EQ is an ordinary
 /// device on the chain, so automation and persistence come free.
-fn view_strip_eq(track: &UiTrack) -> Element<'_, Message> {
+fn view_strip_eq(track: &ProjectTrack) -> Element<'_, Message> {
     let eq = track
         .effects
         .iter()
@@ -627,7 +643,7 @@ mod tests {
     fn automated_send_value_overrides_the_manual_mixer_value() {
         let track_id = TrackId::new();
         let bus_id = TrackId::new();
-        let mut track = UiTrack::new(track_id, "Audio".to_string(), 0);
+        let mut track = ProjectTrack::new(track_id, "Audio".to_string(), 0);
         track.sends.push((bus_id, 0.25));
         let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id });
         lane.insert_point(AutomationPoint {
@@ -640,9 +656,9 @@ mod tests {
             value: 0.9,
             curve: 0.0,
         });
-        track.automation.push(lane);
+        let automation = vec![lane];
 
-        let displayed = effective_send_amount(&track, bus_id, 2.0);
+        let displayed = effective_send_amount(&track, &automation, bus_id, 2.0);
 
         assert!((displayed - 0.5).abs() < 1e-6);
     }

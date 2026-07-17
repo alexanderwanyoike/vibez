@@ -1,26 +1,11 @@
 //! Arrangement domain unit tests.
 
+use super::test_support::*;
 use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::UiClip;
 use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::midi::MidiNote;
-
-fn arrangement_with_tracks(n: usize) -> ArrangementState {
-    let mut a = ArrangementState {
-        next_track_number: 1,
-        ..Default::default()
-    };
-    let mut engine = RecordingEngine::default();
-    for _ in 0..n {
-        a.update(
-            ArrangementMsg::AddTrack,
-            &mut engine,
-            ArrangementCtx::default(),
-        );
-    }
-    a
-}
 
 #[test]
 fn add_track_selects_it_and_names_uniquely() {
@@ -46,6 +31,7 @@ fn remove_track_clears_its_selections_and_requests_gui_teardown() {
     assert_eq!(a.selected_track, Some(survivor));
     assert_eq!(a.selected_note_clip, None);
     assert_eq!(action.close_track_guis, Some(victim));
+    assert!(a.arrangement.timeline.get(victim).is_none());
 }
 
 #[test]
@@ -197,7 +183,7 @@ fn meter_decays_instead_of_snapping() {
 }
 
 fn add_audio_clip(
-    a: &mut ArrangementState,
+    a: &mut ArrangementFixture,
     track_idx: usize,
     position: u64,
     duration: u64,
@@ -208,7 +194,7 @@ fn add_audio_clip(
     });
     let id = ClipId::new();
     let tid = a.tracks[track_idx].id;
-    a.tracks[track_idx].clips.push(UiClip {
+    let clip = UiClip {
         id,
         name: "Clip".to_string(),
         audio,
@@ -223,7 +209,12 @@ fn add_audio_clip(
         warped: false,
         warped_to_bpm: None,
         original_audio: None,
-    });
+    };
+    a.tracks[track_idx].clips.push(clip.clone());
+    Arc::make_mut(&mut a.arrangement.timeline)
+        .ensure(tid)
+        .clips
+        .push(clip);
     (tid, id)
 }
 
@@ -395,7 +386,7 @@ fn warp_then_clear_roundtrips_clip_geometry() {
 
     let action =
         a.apply_clip_warp_success(&mut engine, tid, cid, warp_success(Arc::clone(&original)));
-    let clip = &a.tracks[0].clips[0];
+    let clip = &a.arrangement.timeline.get(tid).unwrap().clips[0];
     assert!(clip.warped);
     assert_eq!(clip.duration, 2000);
     assert_eq!(clip.warped_to_bpm, Some(120.0));
@@ -408,7 +399,7 @@ fn warp_then_clear_roundtrips_clip_geometry() {
     ));
 
     let action = a.apply_clear_clip_warp(&mut engine, tid, cid);
-    let clip = &a.tracks[0].clips[0];
+    let clip = &a.arrangement.timeline.get(tid).unwrap().clips[0];
     assert!(!clip.warped);
     assert_eq!(clip.duration, 1000);
     assert!(clip.original_audio.is_none());
@@ -422,7 +413,10 @@ fn bpm_detected_commits_and_clears_pending_edit() {
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
     a.clip_bpm_edit.insert(cid, "999".to_string());
     let action = a.apply_clip_bpm_detected(tid, cid, Some(174.0), 0.9);
-    assert_eq!(a.tracks[0].clips[0].original_bpm, Some(174.0));
+    assert_eq!(
+        a.arrangement.timeline.get(tid).unwrap().clips[0].original_bpm,
+        Some(174.0)
+    );
     assert!(a.clip_bpm_edit.is_empty());
     assert!(action.mark_dirty);
 

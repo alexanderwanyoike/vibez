@@ -12,7 +12,7 @@
 //! The dotted line is the parameter's current (un-automated) value;
 //! min/max labels give the scale.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::widget::canvas;
 use iced::{mouse, Color, Point, Rectangle, Renderer, Theme};
@@ -23,6 +23,8 @@ use crate::domains::automation::AutomationMsg;
 use crate::message::Message;
 use crate::state::GridConfig;
 use crate::theme as th;
+use crate::widgets::double_click::DoubleClick;
+use crate::widgets::local_drag::LocalDrag;
 
 pub const LANE_HEIGHT: f32 = 56.0;
 const HANDLE_RADIUS: f32 = 5.0;
@@ -60,7 +62,7 @@ pub struct LaneInteraction {
     /// (start beat, current beat) of a ctrl-drag erase sweep.
     erase_drag: Option<(f64, f64)>,
     /// Last left press, for double-click detection.
-    last_click: Option<(Instant, Point)>,
+    double_click: DoubleClick,
     alt: bool,
     ctrl: bool,
     shift: bool,
@@ -356,15 +358,9 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         let dragging =
             state.drag.is_some() || state.curve_drag.is_some() || state.erase_drag.is_some();
         let clamped_fallback = || {
-            if !dragging {
-                return None;
-            }
-            cursor.position().map(|abs| {
-                Point::new(
-                    (abs.x - bounds.x).clamp(0.0, bounds.width),
-                    (abs.y - bounds.y).clamp(0.0, bounds.height),
-                )
-            })
+            dragging
+                .then(|| LocalDrag::clamped().position(cursor, bounds))
+                .flatten()
         };
         let Some(pos) = cursor.position_in(bounds).or_else(clamped_fallback) else {
             if let canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
@@ -382,30 +378,30 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                 if state.ctrl {
                     let beat = self.x_to_snapped_beat(pos.x, state);
                     state.erase_drag = Some((beat, beat));
-                    state.last_click = None;
+                    state.double_click.clear();
                     return (canvas::event::Status::Captured, None);
                 }
                 // Alt: bend a segment (alt-double-click resets it).
                 if state.alt {
                     if let Some(index) = self.hit_segment(pos, h) {
-                        let now = Instant::now();
-                        if let Some((t, p)) = state.last_click {
-                            let close = (p.x - pos.x).abs() < 6.0 && (p.y - pos.y).abs() < 6.0;
-                            if close && now.duration_since(t).as_millis() < 400 {
-                                state.last_click = None;
-                                state.curve_drag = None;
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::Automation(AutomationMsg::SetCurve {
-                                        track_id: self.track_id,
-                                        lane_id: self.lane_id,
-                                        index,
-                                        curve: 0.0,
-                                    })),
-                                );
-                            }
+                        if state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            Duration::from_millis(400),
+                            Some(6.0),
+                        ) {
+                            state.double_click.clear();
+                            state.curve_drag = None;
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::Automation(AutomationMsg::SetCurve {
+                                    track_id: self.track_id,
+                                    lane_id: self.lane_id,
+                                    index,
+                                    curve: 0.0,
+                                })),
+                            );
                         }
-                        state.last_click = Some((now, pos));
                         let orig = self.points[index].curve;
                         state.curve_drag = Some((index, orig, pos.y, orig));
                         return (canvas::event::Status::Captured, None);
@@ -415,7 +411,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                 if let Some(index) = self.hit_point(pos, h) {
                     let p = self.points[index];
                     state.drag = Some((index, p.beat, p.value));
-                    state.last_click = None;
+                    state.double_click.clear();
                     return (
                         canvas::event::Status::Captured,
                         Some(Message::Automation(AutomationMsg::SelectPoint {
@@ -426,23 +422,23 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                     );
                 }
                 // Double-click on empty lane space adds a point.
-                let now = Instant::now();
-                if let Some((t, p)) = state.last_click {
-                    let close = (p.x - pos.x).abs() < 6.0 && (p.y - pos.y).abs() < 6.0;
-                    if close && now.duration_since(t).as_millis() < 400 {
-                        state.last_click = None;
-                        return (
-                            canvas::event::Status::Captured,
-                            Some(Message::Automation(AutomationMsg::AddPoint {
-                                track_id: self.track_id,
-                                lane_id: self.lane_id,
-                                beat: self.x_to_snapped_beat(pos.x, state),
-                                value: self.y_to_value(pos.y, h),
-                            })),
-                        );
-                    }
+                if state.double_click.press(
+                    Instant::now(),
+                    pos,
+                    Duration::from_millis(400),
+                    Some(6.0),
+                ) {
+                    state.double_click.clear();
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Automation(AutomationMsg::AddPoint {
+                            track_id: self.track_id,
+                            lane_id: self.lane_id,
+                            beat: self.x_to_snapped_beat(pos.x, state),
+                            value: self.y_to_value(pos.y, h),
+                        })),
+                    );
                 }
-                state.last_click = Some((now, pos));
                 (
                     canvas::event::Status::Captured,
                     Some(Message::Automation(AutomationMsg::SelectPoint {

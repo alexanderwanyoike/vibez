@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::keyboard;
 use iced::mouse;
@@ -6,7 +6,9 @@ use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
 use crate::message::{DrumPadParam, Message};
+use crate::state::UndoGestureId;
 use crate::theme;
+use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
 use vibez_core::id::{EffectId, TrackId};
 
@@ -220,8 +222,9 @@ pub fn format_value(value: f32, unit: &str) -> String {
 #[derive(Debug, Default)]
 pub struct EffectKnobState {
     drag: ValueDrag,
+    undo_gesture: Option<UndoGestureId>,
     shift_held: bool,
-    last_click: Option<Instant>,
+    double_click: DoubleClick,
 }
 
 impl canvas::Program<Message> for EffectKnobWidget {
@@ -348,21 +351,25 @@ impl canvas::Program<Message> for EffectKnobWidget {
             // Click: start drag or double-click to reset
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if cursor.is_over(bounds) {
-                    let now = Instant::now();
-
                     // Double-click detection: reset to default
-                    if let Some(last) = state.last_click {
-                        if now.duration_since(last).as_millis() < DOUBLE_CLICK_MS as u128 {
-                            state.last_click = None;
+                    if let Some(pos) = cursor.position() {
+                        if state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            Duration::from_millis(DOUBLE_CLICK_MS),
+                            None,
+                        ) {
+                            state.double_click.clear();
                             return (
                                 canvas::event::Status::Captured,
                                 Some(self.set_value_message(self.default)),
                             );
                         }
                     }
-                    state.last_click = Some(now);
 
-                    state.drag.grab(cursor, bounds, self.normalized());
+                    if state.drag.grab(cursor, bounds, self.normalized()) {
+                        state.undo_gesture = Some(UndoGestureId::new());
+                    }
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -370,6 +377,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.drag.release() {
+                    state.undo_gesture = None;
                     return (canvas::event::Status::Captured, None);
                 }
             }
@@ -384,7 +392,12 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 if let Some(norm) = state.drag.drag_to(cursor, 0.0, -sensitivity, 0.0..=1.0) {
                     return (
                         canvas::event::Status::Captured,
-                        Some(self.set_value_message(self.denormalize(norm))),
+                        Some(
+                            self.set_value_message(self.denormalize(norm))
+                                .in_undo_gesture(
+                                    *state.undo_gesture.get_or_insert_with(UndoGestureId::new),
+                                ),
+                        ),
                     );
                 }
             }

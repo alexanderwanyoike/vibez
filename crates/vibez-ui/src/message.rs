@@ -14,6 +14,7 @@ use vibez_project::Project;
 
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
+    UndoGestureId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +192,12 @@ pub struct ProjectSaveResult {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// One incremental update within a continuous pointer edit. Messages from
+    /// the same gesture share one pre-edit undo snapshot.
+    UndoGesture {
+        id: UndoGestureId,
+        edit: Box<Message>,
+    },
     /// Transport domain (playback, tempo, arrangement loop).
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
@@ -497,6 +504,13 @@ pub enum Message {
 /// Arity-preserving constructor helpers so call sites read cleanly
 /// and mechanical migrations stay parenthesis-balanced.
 impl Message {
+    pub fn in_undo_gesture(self, id: UndoGestureId) -> Self {
+        Self::UndoGesture {
+            id,
+            edit: Box::new(self),
+        }
+    }
+
     pub fn add_effect(t: TrackId, e: EffectType) -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::AddEffect(t, e))
     }

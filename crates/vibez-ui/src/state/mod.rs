@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod browser_results;
@@ -187,14 +188,14 @@ pub enum SettingsTab {
     Appearance,
 }
 
-/// A point-in-time snapshot of the editable project state, used to
-/// implement undo / redo. `UiTrack` clones share audio via `Arc` so
-/// each snapshot is cheap on memory despite the full tree.
+/// A point-in-time snapshot of the editable project state, used to implement
+/// undo / redo. The two owned stores are independently shared so a timeline
+/// edit never clones Project Track instruments, effects, routing, or mixer
+/// state (and a mixer edit never clones Arrange clips).
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
-    pub tracks: Vec<UiTrack>,
-    pub master: UiTrack,
-    pub buses: Vec<UiTrack>,
+    pub project_tracks: Arc<ProjectTracksState>,
+    pub arrange_timeline: Arc<ArrangementTimeline>,
     pub bpm: f64,
     pub bpm_text: String,
     pub loop_enabled: bool,
@@ -203,7 +204,19 @@ pub struct ProjectSnapshot {
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
-    pub next_track_number: u32,
+}
+
+/// Runtime identity for one continuous pointer gesture. Every incremental
+/// project edit emitted while the pointer remains held carries the same id so
+/// undo history can retain the pre-gesture snapshot only once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UndoGestureId(u64);
+
+impl UndoGestureId {
+    pub fn new() -> Self {
+        static NEXT_GESTURE_ID: AtomicU64 = AtomicU64::new(1);
+        Self(NEXT_GESTURE_ID.fetch_add(1, Ordering::Relaxed))
+    }
 }
 
 /// Project domain slice: file-menu visibility, the current file,
@@ -224,12 +237,18 @@ pub struct ProjectState {
 pub struct UndoHistory {
     pub undo: VecDeque<ProjectSnapshot>,
     pub redo: VecDeque<ProjectSnapshot>,
+    last_gesture: Option<UndoGestureId>,
 }
 
 impl UndoHistory {
     pub const CAPACITY: usize = 100;
 
     pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
+        self.last_gesture = None;
+        self.push_snapshot(snapshot);
+    }
+
+    fn push_snapshot(&mut self, snapshot: ProjectSnapshot) {
         self.undo.push_back(snapshot);
         if self.undo.len() > Self::CAPACITY {
             self.undo.pop_front();
@@ -237,7 +256,16 @@ impl UndoHistory {
         self.redo.clear();
     }
 
+    pub fn push_edit(&mut self, snapshot: ProjectSnapshot, gesture: Option<UndoGestureId>) {
+        if gesture.is_some() && self.last_gesture == gesture {
+            return;
+        }
+        self.push_snapshot(snapshot);
+        self.last_gesture = gesture;
+    }
+
     pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
+        self.last_gesture = None;
         self.undo.pop_back()
     }
 
@@ -249,6 +277,7 @@ impl UndoHistory {
     }
 
     pub fn pop_redo(&mut self) -> Option<ProjectSnapshot> {
+        self.last_gesture = None;
         self.redo.pop_back()
     }
 
@@ -265,8 +294,12 @@ impl UndoHistory {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.last_gesture = None;
     }
 }
+
+#[cfg(test)]
+mod undo_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceMenuCategory {
@@ -319,23 +352,87 @@ impl Default for TransportState {
 /// chain, no clips or instrument. Lives outside `tracks` so the
 /// arrangement never shows it, but `find_track` resolves it, so the
 /// mixer strip, device chain, and effect commands all work on it.
-pub fn new_master_track() -> UiTrack {
-    let mut master = UiTrack::new(TrackId::MASTER, "Master".to_string(), 0);
+pub fn new_master_track() -> ProjectTrack {
+    let mut master = ProjectTrack::new(TrackId::MASTER, "Master".to_string(), 0);
     master.pan = 0.5;
     master
 }
 
-/// Arrangement domain state: the track list (the shared model other
-/// domains receive explicitly), selection, and track numbering.
+/// Project-owned tracks and channels shared by every musical timeline.
+#[derive(Debug, Clone)]
+pub struct ProjectTracksState {
+    pub tracks: Vec<ProjectTrack>,
+    /// The master bus channel (see [`new_master_track`]).
+    pub master: ProjectTrack,
+    /// Return channels: mixer-only tracks fed by per-track sends.
+    pub buses: Vec<ProjectTrack>,
+    pub next_track_number: u32,
+}
+
+impl Default for ProjectTracksState {
+    fn default() -> Self {
+        Self {
+            tracks: Vec::new(),
+            master: new_master_track(),
+            buses: Vec::new(),
+            next_track_number: 0,
+        }
+    }
+}
+
+impl ProjectTracksState {
+    pub fn find(&self, id: TrackId) -> Option<&ProjectTrack> {
+        if id.is_master() {
+            return Some(&self.master);
+        }
+        self.tracks
+            .iter()
+            .chain(self.buses.iter())
+            .find(|t| t.id == id)
+    }
+
+    pub fn find_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {
+        if id.is_master() {
+            return Some(&mut self.master);
+        }
+        self.tracks
+            .iter_mut()
+            .chain(self.buses.iter_mut())
+            .find(|t| t.id == id)
+    }
+}
+
+/// One musical timeline's content, associated with shared Project Tracks by
+/// stable identity. Hash-map storage prevents track reordering from moving or
+/// cloning timeline content.
+#[derive(Debug, Clone, Default)]
+pub struct ArrangementTimeline {
+    pub by_track: HashMap<TrackId, TrackTimelineContent>,
+}
+
+impl ArrangementTimeline {
+    pub fn get(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
+        self.by_track.get(&track_id)
+    }
+
+    pub fn get_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
+        self.by_track.get_mut(&track_id)
+    }
+
+    pub fn ensure(&mut self, track_id: TrackId) -> &mut TrackTimelineContent {
+        self.by_track.entry(track_id).or_default()
+    }
+
+    pub fn remove(&mut self, track_id: TrackId) -> Option<TrackTimelineContent> {
+        self.by_track.remove(&track_id)
+    }
+}
+
+/// Arrange-owned timeline content and editor interaction state.
 #[derive(Debug)]
 pub struct ArrangementState {
-    pub tracks: Vec<UiTrack>,
-    /// The master bus channel (see [`new_master_track`]).
-    pub master: UiTrack,
-    /// Return channels: mixer-only tracks fed by per-track sends.
-    pub buses: Vec<UiTrack>,
+    pub timeline: Arc<ArrangementTimeline>,
     pub selected_track: Option<TrackId>,
-    pub next_track_number: u32,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
     pub clipboard: ClipClipboard,
@@ -356,11 +453,8 @@ pub struct ArrangementState {
 impl Default for ArrangementState {
     fn default() -> Self {
         Self {
-            tracks: Vec::new(),
-            master: new_master_track(),
-            buses: Vec::new(),
+            timeline: Arc::new(ArrangementTimeline::default()),
             selected_track: None,
-            next_track_number: 0,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
             clipboard: ClipClipboard::default(),
@@ -392,7 +486,10 @@ pub struct AppState {
 
     pub piano_roll: PianoRollState,
 
-    // Arrangement domain slice (tracks, selection, numbering).
+    // Project Track domain slice (shared channels and devices).
+    pub project_tracks: Arc<ProjectTracksState>,
+
+    // Arrange-owned timeline content and editor state.
     pub arrangement: ArrangementState,
 
     /// In-progress manual BPM input text keyed by clip id. Only
@@ -443,10 +540,11 @@ impl Default for AppState {
             status_text: "Ready — Add a track to get started".to_string(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),
-            arrangement: ArrangementState {
+            project_tracks: Arc::new(ProjectTracksState {
                 next_track_number: 1,
-                ..ArrangementState::default()
-            },
+                ..ProjectTracksState::default()
+            }),
+            arrangement: ArrangementState::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
@@ -570,35 +668,30 @@ impl AppState {
         }
     }
 
-    pub fn find_track(&self, id: TrackId) -> Option<&UiTrack> {
-        if id.is_master() {
-            return Some(&self.arrangement.master);
-        }
-        self.arrangement
-            .tracks
-            .iter()
-            .chain(self.arrangement.buses.iter())
-            .find(|t| t.id == id)
+    pub fn find_track(&self, id: TrackId) -> Option<&ProjectTrack> {
+        self.project_tracks.find(id)
     }
 
-    pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut UiTrack> {
-        if id.is_master() {
-            return Some(&mut self.arrangement.master);
-        }
-        self.arrangement
-            .tracks
-            .iter_mut()
-            .chain(self.arrangement.buses.iter_mut())
-            .find(|t| t.id == id)
+    pub fn find_track_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {
+        Arc::make_mut(&mut self.project_tracks).find_mut(id)
+    }
+
+    pub fn arrange_content(&self, id: TrackId) -> Option<&TrackTimelineContent> {
+        self.arrangement.timeline.get(id)
+    }
+
+    pub fn arrange_content_mut(&mut self, id: TrackId) -> &mut TrackTimelineContent {
+        Arc::make_mut(&mut self.arrangement.timeline).ensure(id)
     }
 
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
         let audio_max = self
             .arrangement
-            .tracks
-            .iter()
-            .flat_map(|t| t.clips.iter())
+            .timeline
+            .by_track
+            .values()
+            .flat_map(|content| content.clips.iter())
             .map(|c| c.position.saturating_add(c.duration))
             .max()
             .unwrap_or(0);
@@ -611,9 +704,10 @@ impl AppState {
         };
         let note_max = if spb > 0.0 {
             self.arrangement
-                .tracks
-                .iter()
-                .flat_map(|t| t.note_clips.iter())
+                .timeline
+                .by_track
+                .values()
+                .flat_map(|content| content.note_clips.iter())
                 .map(|c| ((c.position_beats + c.duration_beats) * spb) as u64)
                 .max()
                 .unwrap_or(0)
@@ -631,97 +725,109 @@ mod tests {
     use vibez_core::id::TrackId;
     use vibez_core::midi::TrackKind;
 
-    fn make_state_with(tracks: Vec<UiTrack>) -> AppState {
+    fn make_state_with(tracks: Vec<ProjectTrack>) -> AppState {
         let mut state = AppState::default();
-        state.arrangement.tracks = tracks;
+        Arc::make_mut(&mut state.project_tracks).tracks = tracks;
         state
     }
 
-    fn make_two_tracks() -> Vec<UiTrack> {
+    fn make_two_tracks() -> Vec<ProjectTrack> {
         vec![
-            UiTrack::new(TrackId::new(), "Track 1".into(), 0),
-            UiTrack::new(TrackId::new(), "Track 2".into(), 1),
+            ProjectTrack::new(TrackId::new(), "Track 1".into(), 0),
+            ProjectTrack::new(TrackId::new(), "Track 2".into(), 1),
         ]
     }
 
     #[test]
     fn move_track_up() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.arrangement.tracks[0].id;
-        let id1 = state.arrangement.tracks[1].id;
+        let id0 = state.project_tracks.tracks[0].id;
+        let id1 = state.project_tracks.tracks[1].id;
 
-        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id1) {
+        if let Some(idx) = state.project_tracks.tracks.iter().position(|t| t.id == id1) {
             if idx > 0 {
-                state.arrangement.tracks.swap(idx, idx - 1);
+                Arc::make_mut(&mut state.project_tracks)
+                    .tracks
+                    .swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.arrangement.tracks[0].id, id1);
-        assert_eq!(state.arrangement.tracks[1].id, id0);
+        assert_eq!(state.project_tracks.tracks[0].id, id1);
+        assert_eq!(state.project_tracks.tracks[1].id, id0);
     }
 
     #[test]
     fn move_track_down() {
         let mut state = make_state_with(make_two_tracks());
-        let id0 = state.arrangement.tracks[0].id;
-        let id1 = state.arrangement.tracks[1].id;
+        let id0 = state.project_tracks.tracks[0].id;
+        let id1 = state.project_tracks.tracks[1].id;
 
-        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.arrangement.tracks.len() {
-                state.arrangement.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.project_tracks.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.project_tracks.tracks.len() {
+                Arc::make_mut(&mut state.project_tracks)
+                    .tracks
+                    .swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.arrangement.tracks[0].id, id1);
-        assert_eq!(state.arrangement.tracks[1].id, id0);
+        assert_eq!(state.project_tracks.tracks[0].id, id1);
+        assert_eq!(state.project_tracks.tracks[1].id, id0);
     }
 
     #[test]
     fn move_first_track_up_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.arrangement.tracks[0].id;
+        let mut state =
+            make_state_with(vec![ProjectTrack::new(TrackId::new(), "Track 1".into(), 0)]);
+        let id0 = state.project_tracks.tracks[0].id;
 
-        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
+        if let Some(idx) = state.project_tracks.tracks.iter().position(|t| t.id == id0) {
             if idx > 0 {
-                state.arrangement.tracks.swap(idx, idx - 1);
+                Arc::make_mut(&mut state.project_tracks)
+                    .tracks
+                    .swap(idx, idx - 1);
             }
         }
-        assert_eq!(state.arrangement.tracks[0].id, id0);
+        assert_eq!(state.project_tracks.tracks[0].id, id0);
     }
 
     #[test]
     fn move_last_track_down_noop() {
-        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id0 = state.arrangement.tracks[0].id;
+        let mut state =
+            make_state_with(vec![ProjectTrack::new(TrackId::new(), "Track 1".into(), 0)]);
+        let id0 = state.project_tracks.tracks[0].id;
 
-        if let Some(idx) = state.arrangement.tracks.iter().position(|t| t.id == id0) {
-            if idx + 1 < state.arrangement.tracks.len() {
-                state.arrangement.tracks.swap(idx, idx + 1);
+        if let Some(idx) = state.project_tracks.tracks.iter().position(|t| t.id == id0) {
+            if idx + 1 < state.project_tracks.tracks.len() {
+                Arc::make_mut(&mut state.project_tracks)
+                    .tracks
+                    .swap(idx, idx + 1);
             }
         }
-        assert_eq!(state.arrangement.tracks[0].id, id0);
+        assert_eq!(state.project_tracks.tracks[0].id, id0);
     }
 
     #[test]
     fn rename_track() {
-        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.arrangement.tracks[0].id;
+        let mut state =
+            make_state_with(vec![ProjectTrack::new(TrackId::new(), "Track 1".into(), 0)]);
+        let id = state.project_tracks.tracks[0].id;
 
         if let Some(track) = state.find_track_mut(id) {
             track.name = "My Custom Track".into();
         }
-        assert_eq!(state.arrangement.tracks[0].name, "My Custom Track");
+        assert_eq!(state.project_tracks.tracks[0].name, "My Custom Track");
     }
 
     #[test]
     fn rename_note_clip() {
         let tid = TrackId::new();
         let cid = ClipId::new();
-        let mut track = UiTrack::new_instrument(
+        let track = ProjectTrack::new_instrument(
             tid,
             "Synth".into(),
             TrackKind::Instrument(vibez_core::midi::InstrumentKind::SubtractiveSynth),
             0,
         );
-        track.note_clips.push(UiNoteClip {
+        let mut state = make_state_with(vec![track]);
+        state.arrange_content_mut(tid).note_clips.push(UiNoteClip {
             id: cid,
             name: "Pattern 1".into(),
             position_beats: 0.0,
@@ -732,17 +838,38 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
         });
-        let mut state = make_state_with(vec![track]);
-
-        if let Some(t) = state.find_track_mut(tid) {
+        if let Some(t) = Arc::make_mut(&mut state.arrangement.timeline).get_mut(tid) {
             if let Some(c) = t.note_clips.iter_mut().find(|c| c.id == cid) {
                 c.name = "Intro Pattern".into();
             }
         }
         assert_eq!(
-            state.arrangement.tracks[0].note_clips[0].name,
+            state.arrange_content(tid).unwrap().note_clips[0].name,
             "Intro Pattern"
         );
+    }
+
+    #[test]
+    fn timeline_edits_clone_only_timeline_content() {
+        let track_id = TrackId::new();
+        let mut state = make_state_with(vec![ProjectTrack::new(
+            track_id,
+            "Shared Project Track".into(),
+            0,
+        )]);
+        state.arrange_content_mut(track_id);
+
+        let project_tracks_before = Arc::clone(&state.project_tracks);
+        let timeline_before = Arc::clone(&state.arrangement.timeline);
+        state.arrange_content_mut(track_id).automation.push(
+            vibez_core::automation::AutomationLane::new(
+                vibez_core::automation::AutomationTarget::TrackGain,
+            ),
+        );
+
+        assert!(Arc::ptr_eq(&project_tracks_before, &state.project_tracks));
+        assert!(!Arc::ptr_eq(&timeline_before, &state.arrangement.timeline));
+        assert_eq!(state.project_tracks.tracks[0].name, "Shared Project Track");
     }
 
     #[test]
@@ -770,8 +897,9 @@ mod tests {
 
     #[test]
     fn rename_empty_rejected() {
-        let mut state = make_state_with(vec![UiTrack::new(TrackId::new(), "Track 1".into(), 0)]);
-        let id = state.arrangement.tracks[0].id;
+        let mut state =
+            make_state_with(vec![ProjectTrack::new(TrackId::new(), "Track 1".into(), 0)]);
+        let id = state.project_tracks.tracks[0].id;
 
         // Simulate the FinishEditing guard: empty name doesn't rename
         let new_name = "";
@@ -780,6 +908,6 @@ mod tests {
                 track.name = new_name.to_string();
             }
         }
-        assert_eq!(state.arrangement.tracks[0].name, "Track 1");
+        assert_eq!(state.project_tracks.tracks[0].name, "Track 1");
     }
 }

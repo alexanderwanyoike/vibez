@@ -37,8 +37,8 @@ impl App {
         if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
             let has_selection = self
                 .state
-                .find_track(track_id)
-                .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
+                .arrange_content(track_id)
+                .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id))
                 .is_some_and(|c| !c.selected_notes.is_empty());
             if has_selection {
                 return self.update(Message::PianoRoll(PianoRollMsg::RemoveSelectedNotes(

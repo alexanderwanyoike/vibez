@@ -1,9 +1,9 @@
-//! Arrangement domain, tranche one: track lifecycle and mixing
-//! basics. Owns the track list (the shared model other domains
-//! receive explicitly), selection, and track numbering.
+//! Arrange editing domain.
 //!
-//! Clip operations (moves, splits, warp orchestration) are the next
-//! tranche; they follow this same pattern.
+//! Project Tracks are supplied explicitly from their project-wide store;
+//! Arrange owns only timeline content and editor selection. Track lifecycle
+//! and mixing messages originate here today because Arrange exposes those
+//! controls, but they mutate the separate `ProjectTracksState`.
 
 use std::collections::HashSet;
 
@@ -14,189 +14,17 @@ use vibez_core::midi::TrackKind;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, ArrangementState, UiNoteClip, UiTrack};
+use crate::state::{
+    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TrackTimelineContent,
+    UiNoteClip,
+};
 
-/// Messages the arrangement domain handles (track tranche).
-#[derive(Debug, Clone)]
-pub enum ArrangementMsg {
-    AddTrack,
-    AddMidiTrack,
-    AddInstrumentTrack,
-    RemoveTrack(TrackId),
-    SelectTrack(TrackId),
-    RenameTrack(TrackId, String),
-    RenameClip(TrackId, ClipId, String),
-    MoveTrackUp(TrackId),
-    MoveTrackDown(TrackId),
-    MoveSelectedTrackUp,
-    MoveSelectedTrackDown,
-    SetTrackGain(TrackId, f32),
-    SetTrackPan(TrackId, f32),
-    SetTrackMute(TrackId),
-    SetTrackSolo(TrackId),
-    /// Add a return bus (mixer-only channel).
-    AddBus,
-    /// Remove a bus and every send pointing at it.
-    RemoveBus(TrackId),
-    /// Set a track's post-fader send amount into a bus.
-    SetSend {
-        track_id: TrackId,
-        bus_id: TrackId,
-        amount: f32,
-    },
-    EngineTrackMeter {
-        track_id: TrackId,
-        peak_l: f32,
-        peak_r: f32,
-    },
-    // ── Clip tranche ──
-    RemoveClip(TrackId, ClipId),
-    SelectArrangementClip {
-        selection: ArrangementSelection,
-        shift_held: bool,
-    },
-    MoveAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position: u64,
-    },
-    MoveNoteClipPosition {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_position_beats: f64,
-    },
-    ResizeAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        new_duration: u64,
-    },
-    MoveClipToTrack {
-        source_track: TrackId,
-        target_track: TrackId,
-        clip_id: ClipId,
-        is_note_clip: bool,
-    },
-    ToggleClipLoop(TrackId, ClipId),
-    SetClipLoopRegion {
-        track_id: TrackId,
-        clip_id: ClipId,
-        loop_start: u64,
-        loop_end: u64,
-    },
-    SetTimeSelection {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-    SetTimeSelectionActive(bool),
-    SetSelectionAsLoop,
-    DeleteSelectedClip,
-    DuplicateSelectedClip,
-    CopySelectedClips,
-    CutSelectedClips,
-    PasteClipsAtPlayhead,
-    ToggleSelectedClipLoop,
-    ResizeSelectedClips {
-        anchor: ArrangementSelection,
-        new_duration_beats: f64,
-    },
-    DuplicateNoteClip(TrackId, ClipId),
-    SplitAudioClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_position: u64,
-    },
-    SplitNoteClip {
-        track_id: TrackId,
-        clip_id: ClipId,
-        split_beat: f64,
-    },
-    SplitSelectedAtPlayhead,
-    JoinSelectedClips,
-    DeleteClipsInRegion {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-    SplitClipsAtRegion {
-        start_beats: f64,
-        end_beats: f64,
-        track_id: Option<TrackId>,
-    },
-    CreateClipFromSelection,
-    CreateNoteClipFromSelection(TrackId),
-    ClipBpmInputChanged {
-        track_id: TrackId,
-        clip_id: ClipId,
-        text: String,
-    },
-    SubmitClipBpm {
-        track_id: TrackId,
-        clip_id: ClipId,
-    },
-    SetClipNominalBpm {
-        track_id: TrackId,
-        clip_id: ClipId,
-        bpm: f64,
-    },
-    ClearClipWarp {
-        track_id: TrackId,
-        clip_id: ClipId,
-    },
-}
+mod messages;
+pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
 
-impl ArrangementMsg {
-    /// Whether this message edits the project (drives the dirty flag).
-    pub fn marks_dirty(&self) -> bool {
-        !matches!(
-            self,
-            ArrangementMsg::SelectTrack(_)
-                | ArrangementMsg::EngineTrackMeter { .. }
-                | ArrangementMsg::SelectArrangementClip { .. }
-                | ArrangementMsg::SetTimeSelection { .. }
-                | ArrangementMsg::SetTimeSelectionActive(_)
-                | ArrangementMsg::SetSelectionAsLoop
-                | ArrangementMsg::CopySelectedClips
-                | ArrangementMsg::ClipBpmInputChanged { .. }
-        )
-    }
-}
-
-/// Cross-domain effects requested by an arrangement update.
-#[derive(Debug, Default, PartialEq)]
-pub struct ArrangementAction {
-    /// All plugin GUI windows and raw pointers of this track must go
-    /// (the track's devices are being destroyed).
-    pub close_track_guis: Option<TrackId>,
-    /// Status bar text.
-    pub status: Option<String>,
-    /// Selecting a clip focuses the detail panel's Clip tab.
-    pub focus_clip_tab: bool,
-    /// A time selection was promoted to the transport loop region.
-    pub loop_from_selection: Option<(f64, f64)>,
-    /// A drag moved a clip near the view edge; auto-scroll to it.
-    pub scroll_to_beat: Option<f64>,
-    /// Dismiss the arrangement context menu.
-    pub close_context_menu: bool,
-    /// The project content changed outside the undo-snapshot path.
-    pub mark_dirty: bool,
-}
-
-/// Read-only cross-domain facts for arrangement updates.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ArrangementCtx {
-    /// Samples per beat at the current tempo (clip drag snapping).
-    pub samples_per_beat: f64,
-    /// Playhead position in samples (split-at-playhead).
-    pub playhead_samples: u64,
-    /// Playhead position in beats.
-    pub playhead_beats: f64,
-}
-
-/// Every channel carries an SSL-style EQ, console style: create it
-/// flat (passthrough) alongside the track. Also used for the master
+/// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
-pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTrack) {
+pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut ProjectTrack) {
     let effect_id = vibez_core::id::EffectId::new();
     let effect_type = vibez_core::effect::EffectType::Eq;
     let descriptors = vibez_dsp::factory::create_effect(effect_type, 48_000.0).param_descriptors();
@@ -219,17 +47,7 @@ pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut UiTr
     });
 }
 
-impl ArrangementState {
-    fn find_track(&self, track_id: TrackId) -> Option<&UiTrack> {
-        if track_id.is_master() {
-            return Some(&self.master);
-        }
-        self.tracks
-            .iter()
-            .chain(self.buses.iter())
-            .find(|t| t.id == track_id)
-    }
-
+impl ProjectTracksState {
     /// First track number with no name clash for the given prefix.
     pub fn next_unique_track_number(&mut self, prefix: &str) -> u32 {
         loop {
@@ -240,16 +58,6 @@ impl ArrangementState {
             }
             self.next_track_number += 1;
         }
-    }
-
-    fn find_track_mut(&mut self, track_id: TrackId) -> Option<&mut UiTrack> {
-        if track_id.is_master() {
-            return Some(&mut self.master);
-        }
-        self.tracks
-            .iter_mut()
-            .chain(self.buses.iter_mut())
-            .find(|t| t.id == track_id)
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
@@ -268,9 +76,20 @@ impl ArrangementState {
             }
         }
     }
+}
+
+impl ArrangementState {
+    fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
+        self.timeline.get(track_id)
+    }
+
+    fn find_content_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
+        Arc::make_mut(&mut self.timeline).get_mut(track_id)
+    }
 
     pub fn update(
         &mut self,
+        project_tracks: &mut ProjectTracksState,
         msg: ArrangementMsg,
         engine: &mut impl EngineHandle,
         ctx: ArrangementCtx,
@@ -279,38 +98,41 @@ impl ArrangementState {
         let mut action = ArrangementAction::default();
         match msg {
             ArrangementMsg::AddTrack => {
-                let track_num = self.next_unique_track_number("Track");
+                let track_num = project_tracks.next_unique_track_number("Track");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.next_track_number = track_num + 1;
+                project_tracks.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("Track {track_num}");
                 engine.send(EngineCommand::AddTrack(id, name.clone()));
-                let mut track = UiTrack::new(id, name, color_index);
+                let mut track = ProjectTrack::new(id, name, color_index);
                 attach_channel_eq(engine, &mut track);
-                self.tracks.push(track);
+                project_tracks.tracks.push(track);
+                Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
-                action.status = Some(format!("{} tracks", self.tracks.len()));
+                action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
             ArrangementMsg::AddMidiTrack | ArrangementMsg::AddInstrumentTrack => {
-                let track_num = self.next_unique_track_number("MIDI");
+                let track_num = project_tracks.next_unique_track_number("MIDI");
                 let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                self.next_track_number = track_num + 1;
+                project_tracks.next_track_number = track_num + 1;
                 let id = TrackId::new();
                 let name = format!("MIDI {track_num}");
                 engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
-                let mut track = UiTrack::new_instrument(id, name, TrackKind::Midi, color_index);
+                let mut track =
+                    ProjectTrack::new_instrument(id, name, TrackKind::Midi, color_index);
                 track.has_instrument = false;
                 attach_channel_eq(engine, &mut track);
-                self.tracks.push(track);
+                project_tracks.tracks.push(track);
+                Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
-                action.status = Some(format!("{} tracks", self.tracks.len()));
+                action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
             ArrangementMsg::RemoveTrack(track_id) => {
                 if track_id.is_master() {
                     // The master bus cannot be deleted.
                     return action;
                 }
-                let removed_name = self
+                let removed_name = project_tracks
                     .tracks
                     .iter()
                     .find(|t| t.id == track_id)
@@ -318,9 +140,10 @@ impl ArrangementState {
                     .unwrap_or_else(|| format!("{track_id}"));
 
                 engine.send(EngineCommand::RemoveTrack(track_id));
-                self.tracks.retain(|t| t.id != track_id);
+                project_tracks.tracks.retain(|t| t.id != track_id);
+                Arc::make_mut(&mut self.timeline).remove(track_id);
                 if self.selected_track == Some(track_id) {
-                    self.selected_track = self.tracks.first().map(|t| t.id);
+                    self.selected_track = project_tracks.tracks.first().map(|t| t.id);
                 }
                 if let Some((tid, _)) = self.selected_note_clip {
                     if tid == track_id {
@@ -337,19 +160,19 @@ impl ArrangementState {
                 action.close_track_guis = Some(track_id);
                 action.status = Some(format!(
                     "Removed {removed_name}. {} track(s) remain.",
-                    self.tracks.len()
+                    project_tracks.tracks.len()
                 ));
             }
             ArrangementMsg::SelectTrack(track_id) => {
                 self.selected_track = Some(track_id);
             }
             ArrangementMsg::RenameTrack(track_id, new_name) => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.name = new_name;
                 }
             }
             ArrangementMsg::RenameClip(track_id, clip_id, new_name) => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(c) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         c.name = new_name.clone();
                     }
@@ -358,71 +181,79 @@ impl ArrangementState {
                     }
                 }
             }
-            ArrangementMsg::MoveTrackUp(track_id) => self.move_track(track_id, true, engine),
-            ArrangementMsg::MoveTrackDown(track_id) => self.move_track(track_id, false, engine),
+            ArrangementMsg::MoveTrackUp(track_id) => {
+                project_tracks.move_track(track_id, true, engine)
+            }
+            ArrangementMsg::MoveTrackDown(track_id) => {
+                project_tracks.move_track(track_id, false, engine)
+            }
             ArrangementMsg::MoveSelectedTrackUp => {
                 if let Some(tid) = self.selected_track {
-                    self.move_track(tid, true, engine);
+                    project_tracks.move_track(tid, true, engine);
                 }
             }
             ArrangementMsg::MoveSelectedTrackDown => {
                 if let Some(tid) = self.selected_track {
-                    self.move_track(tid, false, engine);
+                    project_tracks.move_track(tid, false, engine);
                 }
             }
             ArrangementMsg::SetTrackGain(track_id, gain) => {
                 let gain = gain.clamp(0.0, 2.0);
                 engine.send(EngineCommand::SetTrackGain(track_id, gain));
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.gain = gain;
                 }
             }
             ArrangementMsg::SetTrackPan(track_id, pan) => {
                 let pan = pan.clamp(0.0, 1.0);
                 engine.send(EngineCommand::SetTrackPan(track_id, pan));
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.pan = pan;
                 }
             }
             ArrangementMsg::SetTrackMute(track_id) => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.mute = !track.mute;
                     let mute = track.mute;
                     engine.send(EngineCommand::SetTrackMute(track_id, mute));
                 }
             }
             ArrangementMsg::SetTrackSolo(track_id) => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.solo = !track.solo;
                     let solo = track.solo;
                     engine.send(EngineCommand::SetTrackSolo(track_id, solo));
                 }
             }
             ArrangementMsg::AddBus => {
-                let letter = (b'A' + (self.buses.len() % 26) as u8) as char;
+                let letter = (b'A' + (project_tracks.buses.len() % 26) as u8) as char;
                 let id = TrackId::new();
                 let name = format!("{letter} Return");
                 engine.send(EngineCommand::AddBus(id, name.clone()));
                 // Offset into the palette so the first buses don't
                 // mirror the first tracks' colors.
-                let color_index = ((self.buses.len() + 4) % 8) as u8;
-                let mut bus = UiTrack::new(id, name.clone(), color_index);
+                let color_index = ((project_tracks.buses.len() + 4) % 8) as u8;
+                let mut bus = ProjectTrack::new(id, name.clone(), color_index);
                 attach_channel_eq(engine, &mut bus);
-                self.buses.push(bus);
+                project_tracks.buses.push(bus);
+                Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
                 action.status = Some(format!("Added {name}"));
             }
             ArrangementMsg::RemoveBus(bus_id) => {
                 engine.send(EngineCommand::RemoveBus(bus_id));
-                self.buses.retain(|b| b.id != bus_id);
-                for track in &mut self.tracks {
+                project_tracks.buses.retain(|b| b.id != bus_id);
+                Arc::make_mut(&mut self.timeline).remove(bus_id);
+                for track in &mut project_tracks.tracks {
                     track.sends.retain(|(b, _)| *b != bus_id);
-                    track.automation.retain(|lane| {
+                }
+                for content in Arc::make_mut(&mut self.timeline).by_track.values_mut() {
+                    content.automation.retain(|lane| {
                         lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
                     });
                 }
                 if self.selected_track == Some(bus_id) {
-                    self.selected_track = self.tracks.first().map(|t| t.id);
+                    self.selected_track = project_tracks.tracks.first().map(|t| t.id);
                 }
                 // Plugin GUIs on the bus die with its devices.
                 action.close_track_guis = Some(bus_id);
@@ -434,7 +265,7 @@ impl ArrangementState {
                 amount,
             } => {
                 let amount = amount.clamp(0.0, 1.0);
-                if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                if let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == track_id) {
                     match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
                         Some(send) => send.1 = amount,
                         None => track.sends.push((bus_id, amount)),
@@ -451,14 +282,14 @@ impl ArrangementState {
                 peak_l,
                 peak_r,
             } => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = project_tracks.find_mut(track_id) {
                     track.peak_l = peak_l.max(track.peak_l * 0.85);
                     track.peak_r = peak_r.max(track.peak_r * 0.85);
                 }
             }
             ArrangementMsg::RemoveClip(track_id, clip_id) => {
                 engine.send(EngineCommand::RemoveClip(track_id, clip_id));
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     track.clips.retain(|c| c.id != clip_id);
                 }
                 // Clear from multi-selection if this clip was selected
@@ -467,7 +298,7 @@ impl ArrangementState {
             }
             ArrangementMsg::ToggleClipLoop(track_id, clip_id) => {
                 let mut cmd_data = None;
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
                         if clip.loop_enabled && clip.loop_end == 0 {
@@ -494,7 +325,7 @@ impl ArrangementState {
                 loop_end,
             } => {
                 let mut enabled = false;
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_start = loop_start;
                         clip.loop_end = loop_end;
@@ -542,7 +373,7 @@ impl ArrangementState {
                 clip_id,
                 new_position,
             } => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position = new_position;
                     }
@@ -559,7 +390,7 @@ impl ArrangementState {
                 clip_id,
                 new_position_beats,
             } => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position_beats = new_position_beats;
                     }
@@ -580,7 +411,7 @@ impl ArrangementState {
                 let spb = ctx.samples_per_beat;
                 let mut sync_data = None;
                 let mut clip_end_beat = None;
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
                         if new_duration > source_len {
@@ -644,7 +475,7 @@ impl ArrangementState {
                 if is_note_clip {
                     // Move note clip between instrument tracks
                     let mut clip_data = None;
-                    if let Some(track) = self.find_track_mut(source_track) {
+                    if let Some(track) = self.find_content_mut(source_track) {
                         if let Some(idx) = track.note_clips.iter().position(|c| c.id == clip_id) {
                             clip_data = Some(track.note_clips.remove(idx));
                         }
@@ -670,7 +501,7 @@ impl ArrangementState {
                             });
                         }
                         // Add to UI target track
-                        if let Some(track) = self.find_track_mut(target_track) {
+                        if let Some(track) = self.find_content_mut(target_track) {
                             track.note_clips.push(clip);
                         }
                         // Update selection
@@ -688,7 +519,7 @@ impl ArrangementState {
                 } else {
                     // Move audio clip between audio tracks
                     let mut clip_data = None;
-                    if let Some(track) = self.find_track_mut(source_track) {
+                    if let Some(track) = self.find_content_mut(source_track) {
                         if let Some(idx) = track.clips.iter().position(|c| c.id == clip_id) {
                             clip_data = Some(track.clips.remove(idx));
                         }
@@ -709,7 +540,7 @@ impl ArrangementState {
                             loop_end: clip.loop_end,
                         });
                         // Add to UI target track
-                        if let Some(track) = self.find_track_mut(target_track) {
+                        if let Some(track) = self.find_content_mut(target_track) {
                             track.clips.push(clip);
                         }
                         // Update selection
@@ -733,13 +564,13 @@ impl ArrangementState {
                         match selection {
                             ArrangementSelection::AudioClip { track_id, clip_id } => {
                                 engine.send(EngineCommand::RemoveClip(*track_id, *clip_id));
-                                if let Some(track) = self.find_track_mut(*track_id) {
+                                if let Some(track) = self.find_content_mut(*track_id) {
                                     track.clips.retain(|c| c.id != *clip_id);
                                 }
                             }
                             ArrangementSelection::NoteClip { track_id, clip_id } => {
                                 engine.send(EngineCommand::RemoveNoteClip(*track_id, *clip_id));
-                                if let Some(track) = self.find_track_mut(*track_id) {
+                                if let Some(track) = self.find_content_mut(*track_id) {
                                     track.note_clips.retain(|c| c.id != *clip_id);
                                 }
                                 if self
@@ -766,7 +597,7 @@ impl ArrangementState {
                     for selection in &selections {
                         match selection {
                             ArrangementSelection::AudioClip { track_id, clip_id } => {
-                                let duplicate = self.find_track(*track_id).and_then(|track| {
+                                let duplicate = self.find_content(*track_id).and_then(|track| {
                                     track.clips.iter().find(|c| c.id == *clip_id).map(|clip| {
                                         let mut duplicate = clip.clone();
                                         duplicate.id = ClipId::new();
@@ -789,7 +620,7 @@ impl ArrangementState {
                                         loop_end: duplicate.loop_end,
                                     });
                                     let new_id = duplicate.id;
-                                    if let Some(track) = self.find_track_mut(*track_id) {
+                                    if let Some(track) = self.find_content_mut(*track_id) {
                                         track.clips.push(duplicate);
                                     }
                                     new_selections.insert(ArrangementSelection::AudioClip {
@@ -800,7 +631,7 @@ impl ArrangementState {
                             }
                             ArrangementSelection::NoteClip { track_id, clip_id } => {
                                 let duplicate =
-                                    self.find_track(*track_id).and_then(|track| {
+                                    self.find_content(*track_id).and_then(|track| {
                                         track.note_clips.iter().find(|c| c.id == *clip_id).map(
                                             |clip| {
                                                 let mut duplicate = clip.clone();
@@ -831,7 +662,7 @@ impl ArrangementState {
                                         });
                                     }
                                     let new_id = duplicate.id;
-                                    if let Some(track) = self.find_track_mut(*track_id) {
+                                    if let Some(track) = self.find_content_mut(*track_id) {
                                         track.note_clips.push(duplicate);
                                     }
                                     new_selections.insert(ArrangementSelection::NoteClip {
@@ -867,7 +698,12 @@ impl ArrangementState {
                 let mut result = if ranged {
                     self.op_delete_clips_in_region(engine, ctx, start, end, track_id)
                 } else {
-                    self.update(ArrangementMsg::DeleteSelectedClip, engine, ctx)
+                    self.update(
+                        project_tracks,
+                        ArrangementMsg::DeleteSelectedClip,
+                        engine,
+                        ctx,
+                    )
                 };
                 result.status = Some("Cut to clipboard".to_string());
                 return result;
@@ -882,7 +718,13 @@ impl ArrangementState {
                 anchor,
                 new_duration_beats,
             } => {
-                return self.op_resize_selected_clips(engine, ctx, anchor, new_duration_beats);
+                return self.op_resize_selected_clips(
+                    project_tracks,
+                    engine,
+                    ctx,
+                    anchor,
+                    new_duration_beats,
+                );
             }
             ArrangementMsg::SetTimeSelection {
                 start_beats,
@@ -916,7 +758,7 @@ impl ArrangementState {
                 let new_clip_id = ClipId::new();
                 let mut new_clip_data = None;
 
-                if let Some(track) = self.find_track(track_id) {
+                if let Some(track) = self.find_content(track_id) {
                     if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
                         let new_pos = clip.position_beats + clip.duration_beats;
                         new_clip_data = Some((
@@ -944,7 +786,7 @@ impl ArrangementState {
                 if let Some((new_clip, pos, dur, notes, loop_enabled, loop_start, loop_end)) =
                     new_clip_data
                 {
-                    if let Some(track) = self.find_track_mut(track_id) {
+                    if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
@@ -986,6 +828,7 @@ impl ArrangementState {
                     && self.selection_end_beats > self.selection_start_beats
                 {
                     return self.update(
+                        project_tracks,
                         ArrangementMsg::SplitClipsAtRegion {
                             start_beats: self.selection_start_beats,
                             end_beats: self.selection_end_beats,
@@ -1001,6 +844,7 @@ impl ArrangementState {
                     match selection {
                         ArrangementSelection::AudioClip { track_id, clip_id } => {
                             let _ = self.update(
+                                project_tracks,
                                 ArrangementMsg::SplitAudioClip {
                                     track_id,
                                     clip_id,
@@ -1012,6 +856,7 @@ impl ArrangementState {
                         }
                         ArrangementSelection::NoteClip { track_id, clip_id } => {
                             let _ = self.update(
+                                project_tracks,
                                 ArrangementMsg::SplitNoteClip {
                                     track_id,
                                     clip_id,
@@ -1054,10 +899,15 @@ impl ArrangementState {
                 );
             }
             ArrangementMsg::CreateClipFromSelection => {
-                return self.op_create_clip_from_selection(engine, ctx);
+                return self.op_create_clip_from_selection(project_tracks, engine, ctx);
             }
             ArrangementMsg::CreateNoteClipFromSelection(track_id) => {
-                return self.op_create_note_clip_from_selection(engine, ctx, track_id);
+                return self.op_create_note_clip_from_selection(
+                    project_tracks,
+                    engine,
+                    ctx,
+                    track_id,
+                );
             }
             ArrangementMsg::ClipBpmInputChanged {
                 track_id: _,
@@ -1073,7 +923,7 @@ impl ArrangementState {
                     .and_then(|t| t.parse::<f64>().ok())
                     .filter(|b| *b > 0.0 && *b < 1_000.0);
                 if let Some(bpm) = parsed {
-                    if let Some(track) = self.find_track_mut(track_id) {
+                    if let Some(track) = self.find_content_mut(track_id) {
                         if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                             clip.original_bpm = Some(bpm);
                         }
@@ -1087,7 +937,7 @@ impl ArrangementState {
                 clip_id,
                 bpm,
             } => {
-                if let Some(track) = self.find_track_mut(track_id) {
+                if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.original_bpm = Some(bpm);
                     }
@@ -1103,7 +953,10 @@ impl ArrangementState {
     }
 }
 
+mod media_ops;
 mod ops;
 
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;

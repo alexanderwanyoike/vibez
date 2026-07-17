@@ -19,6 +19,10 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        let (message, undo_gesture) = match message {
+            Message::UndoGesture { id, edit } => (*edit, Some(id)),
+            message => (message, None),
+        };
         if self.state.view.edit_menu_open {
             let keep_menu = matches!(
                 &message,
@@ -113,11 +117,14 @@ impl App {
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
             || matches!(&message, Message::Automation(m) if m.marks_dirty());
         if should_mark_dirty {
-            self.push_undo_snapshot();
+            self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();
         }
 
         match message {
+            Message::UndoGesture { .. } => {
+                unreachable!("undo gesture wrappers are removed before routing")
+            }
             // The transport domain owns its logic entirely; app.rs
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
@@ -146,12 +153,13 @@ impl App {
                 let sample_rate = self.state.transport.sample_rate;
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
                     self.state.devices.update(
                         msg,
                         &mut engine,
-                        &mut self.state.arrangement.tracks,
-                        &mut self.state.arrangement.master,
-                        &mut self.state.arrangement.buses,
+                        &mut project_tracks.tracks,
+                        &mut project_tracks.master,
+                        &mut project_tracks.buses,
                         sample_rate,
                     )
                 };
@@ -169,7 +177,12 @@ impl App {
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state.arrangement.update(msg, &mut engine, ctx)
+                    self.state.arrangement.update(
+                        Arc::make_mut(&mut self.state.project_tracks),
+                        msg,
+                        &mut engine,
+                        ctx,
+                    )
                 };
                 return self.apply_arrangement_action(action);
             }
@@ -186,7 +199,7 @@ impl App {
                     self.state.piano_roll.update(
                         msg,
                         &mut engine,
-                        &mut self.state.arrangement.tracks,
+                        Arc::make_mut(&mut self.state.arrangement.timeline),
                         ctx,
                     )
                 };
@@ -199,12 +212,12 @@ impl App {
             Message::Automation(msg) => {
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
                     self.state.automation_ui.update(
                         msg,
                         &mut engine,
-                        &mut self.state.arrangement.tracks,
-                        &mut self.state.arrangement.master,
-                        &mut self.state.arrangement.buses,
+                        project_tracks,
+                        Arc::make_mut(&mut self.state.arrangement.timeline),
                     )
                 };
                 if let Some(status) = action.status {
@@ -258,7 +271,7 @@ impl App {
                 let action = self
                     .state
                     .view
-                    .update(msg, &self.state.arrangement.tracks, ctx);
+                    .update(msg, &self.state.arrangement.timeline, ctx);
                 return self.apply_view_action(action);
             }
             Message::Project(msg) => {
@@ -442,7 +455,7 @@ impl App {
 
                     let is_bus = self
                         .state
-                        .arrangement
+                        .project_tracks
                         .buses
                         .iter()
                         .any(|b| b.id == track_id);
