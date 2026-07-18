@@ -755,6 +755,22 @@ impl AppState {
         Arc::make_mut(&mut self.arrangement.timeline).ensure(id)
     }
 
+    /// The Timeline Editor currently visible to the producer.
+    ///
+    /// Workspace identity is resolved here at the application boundary; the
+    /// editor and its widgets only receive the resolved target.
+    pub fn active_timeline_editor(&self) -> &TimelineEditorState {
+        if self.view.workspace == Workspace::Perform && self.perform.selected_section.is_some() {
+            self.perform.section_editor.editor()
+        } else {
+            &self.arrangement.editor
+        }
+    }
+
+    pub fn active_timeline_content(&self, id: TrackId) -> Option<&TrackTimelineContent> {
+        self.active_timeline_editor().timeline.get(id)
+    }
+
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
         let audio_max = self

@@ -1,0 +1,94 @@
+//! Routes shared editor messages to the active Arrange or Section adapter.
+
+use std::sync::Arc;
+
+use crate::domains::arrangement::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+use crate::domains::piano_roll::{PianoRollAction, PianoRollCtx, PianoRollMsg};
+use crate::domains::timeline_editor::TimelineEditorAdapter;
+use crate::state::Workspace;
+
+use super::*;
+
+impl App {
+    pub(super) fn route_arrangement_editor_message(
+        &mut self,
+        msg: ArrangementMsg,
+        ctx: ArrangementCtx,
+    ) -> ArrangementAction {
+        let editing_section = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.selected_section.is_some();
+        if editing_section {
+            if let ArrangementMsg::SelectTrack(track_id) = &msg {
+                self.state.arrangement.selected_track = Some(*track_id);
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_track = Some(*track_id);
+                return ArrangementAction::default();
+            }
+        }
+        if editing_section && msg.is_timeline_editor_message() {
+            let mut engine = crate::domains::DiscardingEngine;
+            let action = self.state.perform.section_editor.editor_mut().update(
+                Arc::make_mut(&mut self.state.project_tracks),
+                msg,
+                &mut engine,
+                ctx,
+            );
+            self.state.perform.commit_selected_section_timeline();
+            if let Some(track_id) = self.state.perform.section_editor.editor().selected_track {
+                self.state.arrangement.selected_track = Some(track_id);
+            }
+            action
+        } else {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            self.state.arrangement.update(
+                Arc::make_mut(&mut self.state.project_tracks),
+                msg,
+                &mut engine,
+                ctx,
+            )
+        }
+    }
+
+    pub(super) fn route_piano_roll_editor_message(
+        &mut self,
+        msg: PianoRollMsg,
+        ctx: PianoRollCtx,
+    ) -> PianoRollAction {
+        let editing_section = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.selected_section.is_some();
+        if editing_section {
+            if let PianoRollMsg::AddNoteClipToTrack(track_id) = &msg {
+                let midi_track = self
+                    .state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .any(|track| track.id == *track_id && track.kind.is_midi());
+                if !midi_track {
+                    self.state.status_text = "MIDI clips require a MIDI Project Track".into();
+                    return PianoRollAction::default();
+                }
+            }
+            let mut engine = crate::domains::DiscardingEngine;
+            let action = self.state.piano_roll.update(
+                msg,
+                &mut engine,
+                self.state.perform.section_editor.editor_mut(),
+                ctx,
+            );
+            self.state.perform.commit_selected_section_timeline();
+            action
+        } else {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            self.state.piano_roll.update(
+                msg,
+                &mut engine,
+                self.state.arrangement.resolve_timeline_mut().editor,
+                ctx,
+            )
+        }
+    }
+}

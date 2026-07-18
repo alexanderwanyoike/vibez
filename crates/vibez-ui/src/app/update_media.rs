@@ -35,10 +35,10 @@ impl App {
             ));
         }
         // Priority 2: selected notes in the open piano roll.
-        if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
+        if let Some((track_id, clip_id)) = self.state.active_timeline_editor().selected_note_clip {
             let has_selection = self
                 .state
-                .arrange_content(track_id)
+                .active_timeline_content(track_id)
                 .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id))
                 .is_some_and(|c| !c.selected_notes.is_empty());
             if has_selection {
@@ -48,7 +48,12 @@ impl App {
             }
         }
         // Priority 3: selected arrangement clips.
-        if !self.state.arrangement.selected_clips.is_empty() {
+        if !self
+            .state
+            .active_timeline_editor()
+            .selected_clips
+            .is_empty()
+        {
             return self.update(Message::Arrangement(ArrangementMsg::DeleteSelectedClip));
         }
         Task::none()

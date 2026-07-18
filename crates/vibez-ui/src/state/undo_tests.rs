@@ -44,6 +44,7 @@ fn perform_edit(state: &mut AppState, engine: &mut RecordingEngine, message: Per
         PerformCtx {
             workspace_visible: true,
             project_tracks: &state.project_tracks.tracks,
+            selected_project_track: state.arrangement.selected_track,
         },
     );
 }

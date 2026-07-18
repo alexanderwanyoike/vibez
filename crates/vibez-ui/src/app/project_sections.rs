@@ -178,3 +178,48 @@ pub(super) fn legacy_automation_for_track(
         })
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::midi::MidiNote;
+
+    #[test]
+    fn authored_section_midi_projects_to_document_and_back() {
+        let track_id = TrackId::new();
+        let mut section = Section::new(2);
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(UiNoteClip {
+                id: ClipId::new(),
+                name: "Kick Pattern".into(),
+                position_beats: 0.0,
+                duration_beats: 16.0,
+                notes: vec![MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 0.25,
+                }],
+                selected_notes: [0].into_iter().collect(),
+                loop_enabled: true,
+                loop_start_beats: 0.0,
+                loop_end_beats: 4.0,
+            });
+
+        let info = section_info_from_ui(&section);
+        let restored = section_store_from_project(&[info]);
+        let clip = &restored.sections[0]
+            .timeline
+            .get(track_id)
+            .expect("restored MIDI lane")
+            .note_clips[0];
+
+        assert_eq!(clip.name, "Kick Pattern");
+        assert_eq!(clip.notes.len(), 1);
+        assert_eq!(clip.notes[0].pitch, 36);
+        assert!(clip.selected_notes.is_empty(), "selection is runtime-only");
+    }
+}

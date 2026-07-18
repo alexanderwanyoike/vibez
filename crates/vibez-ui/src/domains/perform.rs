@@ -15,7 +15,7 @@ use super::EngineHandle;
 use crate::state::ProjectTrack;
 
 mod sections;
-pub use sections::{Section, SectionStore};
+pub use sections::{Section, SectionStore, SectionTimelineEditor};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
 /// behavior and Capture semantics are defined.
@@ -306,6 +306,8 @@ pub struct PerformState {
     pub key_rebind_target: Option<PadPosition>,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
+    pub section_editor: SectionTimelineEditor,
+    pub section_timeline_expanded: bool,
     pub editing_section_name: Option<SectionId>,
     pub section_name_edit: String,
     pub duplicate_source: Option<SectionId>,
@@ -332,6 +334,7 @@ pub enum PerformMsg {
     SetSectionLengthBeats(SectionId, f64),
     SetSectionLaunchQuantization(SectionId, SectionLaunchQuantization),
     ToggleSectionLoop(SectionId),
+    ToggleSectionTimelineExpanded,
     PreviousBank,
     NextBank,
     ToggleTrackMuteFromPad(PadPosition),
@@ -366,6 +369,7 @@ impl PerformMsg {
 pub struct PerformCtx<'a> {
     pub workspace_visible: bool,
     pub project_tracks: &'a [ProjectTrack],
+    pub selected_project_track: Option<TrackId>,
 }
 
 /// A semantic mute request resolved by Perform against a stable pad slot.
@@ -468,7 +472,7 @@ impl PerformState {
             }
             PerformMsg::SelectSection(id) => {
                 if ctx.workspace_visible {
-                    self.select_section(id);
+                    self.select_section(id, ctx.selected_project_track);
                 }
             }
             PerformMsg::CreateSectionAt(slot) => {
@@ -477,7 +481,7 @@ impl PerformState {
                     let id = section.id;
                     Arc::make_mut(&mut self.sections).insert(section);
                     self.duplicate_source = None;
-                    self.select_section(id);
+                    self.select_section(id, ctx.selected_project_track);
                 }
             }
             PerformMsg::BeginDuplicateSection(id) => {
@@ -498,7 +502,7 @@ impl PerformState {
                         let id = section.id;
                         Arc::make_mut(&mut self.sections).insert(section);
                         self.duplicate_source = None;
-                        self.select_section(id);
+                        self.select_section(id, ctx.selected_project_track);
                     }
                 }
             }
@@ -506,6 +510,7 @@ impl PerformState {
                 if ctx.workspace_visible && Arc::make_mut(&mut self.sections).remove(id).is_some() {
                     if self.selected_section == Some(id) {
                         self.selected_section = None;
+                        self.section_editor.clear();
                         self.editing_section_name = None;
                         self.section_name_edit.clear();
                     }
@@ -516,7 +521,7 @@ impl PerformState {
             }
             PerformMsg::StartEditingSectionName(id) => {
                 if ctx.workspace_visible && self.sections.by_id(id).is_some() {
-                    self.select_section(id);
+                    self.select_section(id, ctx.selected_project_track);
                     self.editing_section_name = Some(id);
                 }
             }
@@ -563,6 +568,11 @@ impl PerformState {
                     if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
                         section.looping = !section.looping;
                     }
+                }
+            }
+            PerformMsg::ToggleSectionTimelineExpanded => {
+                if ctx.workspace_visible && self.selected_section.is_some() {
+                    self.section_timeline_expanded = !self.section_timeline_expanded;
                 }
             }
             PerformMsg::PreviousBank => {
@@ -662,9 +672,11 @@ impl PerformState {
             .any(|(pressed, _)| *pressed == position)
     }
 
-    fn select_section(&mut self, id: SectionId) {
+    fn select_section(&mut self, id: SectionId, selected_track: Option<TrackId>) {
         if let Some(section) = self.sections.by_id(id) {
             self.selected_section = Some(id);
+            self.section_editor
+                .load(Arc::clone(&section.timeline), selected_track);
             self.editing_section_name = None;
             self.section_name_edit = section.name.clone();
             self.editor_focus = PerformEditorFocus::SectionConstruction;
@@ -673,6 +685,26 @@ impl PerformState {
 
     pub fn sync_project_tracks(&mut self, tracks: &[ProjectTrack]) {
         self.sync_track_mute_slots(tracks);
+    }
+
+    pub fn sync_selected_section_editor(&mut self, selected_track: Option<TrackId>) {
+        if let Some(section) = self.selected_section.and_then(|id| self.sections.by_id(id)) {
+            self.section_editor
+                .load(Arc::clone(&section.timeline), selected_track);
+        } else {
+            self.selected_section = None;
+            self.section_editor.clear();
+        }
+    }
+
+    pub fn commit_selected_section_timeline(&mut self) {
+        let Some(id) = self.selected_section else {
+            return;
+        };
+        let timeline = Arc::clone(&self.section_editor.editor().timeline);
+        if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
+            section.timeline = timeline;
+        }
     }
 }
 

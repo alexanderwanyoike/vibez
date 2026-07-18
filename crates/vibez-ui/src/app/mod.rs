@@ -147,6 +147,7 @@ mod project_sections;
 mod update;
 mod update_media;
 mod update_remote;
+mod update_timeline;
 mod views_arrangement;
 mod views_browser;
 mod views_browser_audition;
@@ -158,6 +159,7 @@ mod views_devices;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_sections;
 mod views_settings;
 mod views_settings_perform;
 mod views_shell;
@@ -403,14 +405,19 @@ impl App {
     }
 
     pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
-        if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
-            if let Some(duration) = self.state.arrange_content(track_id).and_then(|content| {
-                content
-                    .note_clips
-                    .iter()
-                    .find(|clip| clip.id == clip_id)
-                    .map(|clip| clip.duration_beats)
-            }) {
+        let editor = self.state.active_timeline_editor();
+        if let Some((track_id, clip_id)) = editor.selected_note_clip {
+            if let Some(duration) =
+                self.state
+                    .active_timeline_content(track_id)
+                    .and_then(|content| {
+                        content
+                            .note_clips
+                            .iter()
+                            .find(|clip| clip.id == clip_id)
+                            .map(|clip| clip.duration_beats)
+                    })
+            {
                 return crate::timeline_geometry::TimelineGeometry::fitted(
                     duration,
                     self.state.view.window_width,

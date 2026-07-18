@@ -2,7 +2,7 @@
 //!
 //! Adapters resolve their timeline once. Clip, note, automation, selection,
 //! and view code consume that resolved target without knowing whether it came
-//! from Arrange or, later, a Section.
+//! from Arrange or a Section.
 
 #[cfg(test)]
 use crate::state::TimelineEditorState;
@@ -34,8 +34,6 @@ pub fn resolved_editor_mut(adapter: &mut impl TimelineEditorAdapter) -> &mut Tim
 
 #[cfg(test)]
 pub(crate) mod conformance {
-    use std::sync::Arc;
-
     use vibez_core::automation::AutomationTarget;
     use vibez_core::id::TrackId;
     use vibez_core::midi::TrackKind;
@@ -65,14 +63,13 @@ pub(crate) mod conformance {
 
         let clip_id = {
             let editor = resolved_editor_mut(&mut adapter);
-            Arc::make_mut(&mut editor.timeline).ensure(track_id);
             editor.selected_track = Some(track_id);
             editor.time_selection_active = true;
             editor.selection_start_beats = 4.0;
             editor.selection_end_beats = 8.0;
             editor.update(
                 &mut project_tracks,
-                ArrangementMsg::CreateNoteClipFromSelection(track_id),
+                ArrangementMsg::CreateClipFromSelection,
                 &mut engine,
                 ArrangementCtx::default(),
             );
