@@ -317,6 +317,8 @@ pub enum Message {
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
     SetWarpConfidenceThreshold(f32),
+    /// Settings: ask before deleting a Project Track everywhere.
+    ToggleProjectTrackDeleteConfirmation,
     /// Settings: re-warp every warped clip to the current project
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.

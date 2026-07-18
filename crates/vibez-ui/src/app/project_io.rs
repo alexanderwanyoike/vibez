@@ -238,6 +238,7 @@ impl App {
             theme: Some(self.state.current_theme_name.clone()),
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
+            confirm_project_track_deletion: self.state.confirm_project_track_deletion,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");

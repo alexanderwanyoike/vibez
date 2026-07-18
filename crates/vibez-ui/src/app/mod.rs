@@ -149,6 +149,7 @@ mod update_media;
 mod update_remote;
 mod update_timeline;
 mod views_arrangement;
+mod views_automation;
 mod views_browser;
 mod views_browser_audition;
 mod views_browser_places;
@@ -242,6 +243,7 @@ impl App {
             },
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
+            confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
             browser: crate::state::BrowserState {
                 open: ui_settings.sample_browser_open,
                 dock_width: ui_settings.sample_browser_width.clamp(

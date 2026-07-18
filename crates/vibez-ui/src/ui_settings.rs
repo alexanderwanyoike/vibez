@@ -41,6 +41,10 @@ pub struct UiSettings {
     pub media_cache_budget_bytes: u64,
     #[serde(default = "default_media_cache_automatic_eviction")]
     pub media_cache_automatic_eviction: bool,
+    /// Ask before deleting a Project Track and all of its Arrange and
+    /// Section content. Off by default because deletion is undoable.
+    #[serde(default)]
+    pub confirm_project_track_deletion: bool,
 }
 
 impl Default for UiSettings {
@@ -59,6 +63,7 @@ impl Default for UiSettings {
             theme: None,
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
+            confirm_project_track_deletion: false,
         }
     }
 }
@@ -165,6 +170,20 @@ mod tests {
         assert!(!loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 0.42);
         assert!(loaded.audition_loop);
+    }
+
+    #[test]
+    fn project_track_deletion_confirmation_defaults_off_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert!(!old.confirm_project_track_deletion);
+
+        let settings = UiSettings {
+            confirm_project_track_deletion: true,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(loaded.confirm_project_track_deletion);
     }
 
     #[test]

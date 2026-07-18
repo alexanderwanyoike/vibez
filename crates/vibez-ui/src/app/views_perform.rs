@@ -2,7 +2,7 @@
 
 use iced::widget::{
     button, center, column, container, horizontal_space, mouse_area, pick_list, row, text,
-    text_input, tooltip,
+    text_input,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
@@ -24,7 +24,6 @@ pub(super) const SECTION_BAR_WIDTH: f32 = 160.0;
 
 fn perform_tool_button(
     icon: char,
-    help: impl Into<String>,
     message: Message,
     active: bool,
     destructive: bool,
@@ -36,7 +35,7 @@ fn perform_tool_button(
     } else {
         th::text_dim()
     };
-    let control = button(
+    button(
         center(icons::icon(icon).size(12).color(color))
             .width(Length::Fill)
             .height(Length::Fill),
@@ -72,25 +71,6 @@ fn perform_tool_button(
             },
             ..Default::default()
         }
-    });
-    tooltip(
-        control,
-        text(help.into())
-            .font(PERFORM_TECH)
-            .size(9)
-            .color(th::text()),
-        tooltip::Position::Bottom,
-    )
-    .gap(6)
-    .padding(6)
-    .style(|_theme: &Theme| container::Style {
-        background: Some(th::bg_elevated().into()),
-        border: iced::Border {
-            color: th::border_light(),
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        ..Default::default()
     })
     .into()
 }
@@ -98,6 +78,10 @@ fn perform_tool_button(
 fn perform_mode_tab_width(window_width: f32) -> f32 {
     ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
+}
+
+fn perform_pad_grid_height(window_height: f32) -> f32 {
+    (window_height * 0.48).clamp(272.0, 480.0)
 }
 
 impl App {
@@ -113,13 +97,7 @@ impl App {
 
         container(column![mode_selector, workspace].height(Length::Fill))
             .width(Length::Fill)
-            .height(Length::FillPortion(
-                if self.state.perform.section_timeline_expanded {
-                    6
-                } else {
-                    5
-                },
-            ))
+            .height(Length::FillPortion(5))
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_dark().into()),
                 border: iced::Border {
@@ -277,9 +255,10 @@ impl App {
         ]
         .align_y(iced::Alignment::End);
 
+        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
         let mut grid = column![]
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fixed(pad_grid_height))
             .spacing(8);
         for row_index in 0..4 {
             let mut pad_row = row![]
@@ -295,7 +274,9 @@ impl App {
             }
             grid = grid.push(pad_row);
         }
-        let grid = center(grid).width(Length::Fill).height(Length::Fill);
+        let grid = center(grid)
+            .width(Length::Fill)
+            .height(Length::Fixed(pad_grid_height));
 
         let surface = container(column![header, grid].spacing(12))
             .width(Length::FillPortion(2))
@@ -593,7 +574,6 @@ impl App {
         };
         let shorten = perform_tool_button(
             icons::MINUS,
-            "Shorten Section by 1 bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
                 section.length_beats - 4.0,
@@ -603,7 +583,6 @@ impl App {
         );
         let extend = perform_tool_button(
             icons::PLUS,
-            "Extend Section by 1 bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
                 section.length_beats + 4.0,
@@ -679,11 +658,6 @@ impl App {
         .into();
         let loop_toggle = perform_tool_button(
             icons::REPEAT,
-            if section.looping {
-                "Disable Section looping"
-            } else {
-                "Enable Section looping"
-            },
             Message::Perform(PerformMsg::ToggleSectionLoop(section.id)),
             section.looping,
             false,
@@ -694,29 +668,18 @@ impl App {
             } else {
                 icons::COPY
             },
-            if self.state.perform.duplicate_source == Some(section.id) {
-                "Cancel duplicate"
-            } else {
-                "Duplicate Section into an empty pad"
-            },
             Message::Perform(duplicate_message),
             self.state.perform.duplicate_source == Some(section.id),
             false,
         );
         let expand = perform_tool_button(
             icons::LAYOUT_LIST,
-            if self.state.perform.section_timeline_expanded {
-                "Return to compact Section overview"
-            } else {
-                "Expand the Section timeline"
-            },
             Message::Perform(PerformMsg::ToggleSectionTimelineExpanded),
             self.state.perform.section_timeline_expanded,
             false,
         );
         let delete = perform_tool_button(
             icons::TRASH_2,
-            "Delete Section",
             Message::Perform(PerformMsg::DeleteSection(section.id)),
             false,
             true,
@@ -800,5 +763,12 @@ mod tests {
         assert_eq!(default, MODE_TAB_MAX_WIDTH);
         assert_eq!(wide, MODE_TAB_MAX_WIDTH);
         assert!(MODE_SELECTOR_INSET + narrow * 3.0 <= 900.0 * PAD_SURFACE_WIDTH_SHARE);
+    }
+
+    #[test]
+    fn pad_grid_height_responds_only_to_window_geometry() {
+        assert_eq!(perform_pad_grid_height(400.0), 272.0);
+        assert_eq!(perform_pad_grid_height(900.0), 432.0);
+        assert_eq!(perform_pad_grid_height(1400.0), 480.0);
     }
 }

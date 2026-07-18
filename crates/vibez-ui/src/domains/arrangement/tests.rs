@@ -66,6 +66,25 @@ fn cancelling_track_removal_preserves_the_project_track() {
 }
 
 #[test]
+fn immediate_track_removal_reuses_the_confirmed_deletion_operation() {
+    let mut a = arrangement_with_tracks(2);
+    let victim = a.tracks[1].id;
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::RemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(a.tracks.len(), 1);
+    assert!(a.arrangement.timeline.get(victim).is_none());
+    assert_eq!(action.close_track_guis, Some(victim));
+    assert_eq!(action.remove_track_from_sections, Some(victim));
+    assert!(ArrangementMsg::RemoveTrack(victim).marks_dirty());
+}
+
+#[test]
 fn remove_bus_clears_sends_and_their_automation_lanes() {
     let mut a = arrangement_with_tracks(1);
     let track_id = a.tracks[0].id;

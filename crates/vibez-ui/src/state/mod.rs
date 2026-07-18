@@ -555,7 +555,8 @@ pub struct AppState {
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
-    // Project domain slice (file menu, path, dirty flag, undo).
+    pub confirm_project_track_deletion: bool,
+    // Project domain slice: file menu, path, dirty flag, undo.
     pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
     /// import. Mirrored from `UiSettings::auto_warp_on_import`.
@@ -563,12 +564,10 @@ pub struct AppState {
     /// Minimum BPM-detect confidence required to auto-warp. Mirrored
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
-    // Automation domain slice (lane expansion, point selection).
     pub automation_ui: crate::domains::automation::AutomationState,
 
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
-
     // Appearance / themes
     pub current_theme_name: String,
     pub user_themes: Vec<crate::themes::UserTheme>,
@@ -604,6 +603,7 @@ impl Default for AppState {
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
+            confirm_project_track_deletion: false,
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,

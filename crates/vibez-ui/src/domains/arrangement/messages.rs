@@ -13,6 +13,8 @@ pub enum ArrangementMsg {
     RequestRemoveTrack(TrackId),
     CancelRemoveTrack,
     ConfirmRemoveTrack(TrackId),
+    /// Delete immediately without opening the optional confirmation UI.
+    RemoveTrack(TrackId),
     SelectTrack(TrackId),
     RenameTrack(TrackId, String),
     RenameClip(TrackId, ClipId, String),

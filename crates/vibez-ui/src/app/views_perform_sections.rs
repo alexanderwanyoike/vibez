@@ -4,7 +4,6 @@ use std::collections::HashSet;
 
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
-    tooltip,
 };
 use iced::{Element, Length, Theme};
 
@@ -16,9 +15,9 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
-use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
 use crate::widgets::timeline::TrackClipCanvas;
 
+use super::views_automation::AutomationLaneLayout;
 use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
 use super::*;
 
@@ -263,98 +262,77 @@ impl App {
                     ..Default::default()
                 });
                 let add_clip: Element<'_, Message> = if track.kind.is_midi() {
-                    tooltip(
-                        button(icons::icon(icons::PLUS).size(11).color(th::accent()))
-                            .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
-                                track_id,
-                            )))
-                            .padding([5, 7])
-                            .style(|_theme: &Theme, status| button::Style {
-                                background: Some(
-                                    if matches!(status, button::Status::Hovered) {
-                                        th::bg_hover()
-                                    } else {
-                                        th::perform_inset()
-                                    }
-                                    .into(),
-                                ),
-                                text_color: th::accent(),
-                                border: iced::Border {
-                                    color: th::border_light(),
-                                    width: 1.0,
-                                    radius: 2.0.into(),
-                                },
-                                ..Default::default()
-                            }),
-                        text("Add MIDI clip").font(PERFORM_TECH).size(8),
-                        tooltip::Position::Right,
-                    )
-                    .into()
+                    button(icons::icon(icons::PLUS).size(11).color(th::accent()))
+                        .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
+                            track_id,
+                        )))
+                        .padding([5, 7])
+                        .style(|_theme: &Theme, status| button::Style {
+                            background: Some(
+                                if matches!(status, button::Status::Hovered) {
+                                    th::bg_hover()
+                                } else {
+                                    th::perform_inset()
+                                }
+                                .into(),
+                            ),
+                            text_color: th::accent(),
+                            border: iced::Border {
+                                color: th::border_light(),
+                                width: 1.0,
+                                radius: 2.0.into(),
+                            },
+                            ..Default::default()
+                        })
+                        .into()
                 } else {
-                    tooltip(
-                        container(
-                            icons::icon(icons::AUDIO_WAVEFORM)
-                                .size(10)
-                                .color(th::text_dim()),
-                        )
-                        .padding([5, 7]),
-                        text("Drag audio here from Browser")
-                            .font(PERFORM_TECH)
-                            .size(8),
-                        tooltip::Position::Right,
+                    container(
+                        icons::icon(icons::AUDIO_WAVEFORM)
+                            .size(10)
+                            .color(th::text_dim()),
                     )
+                    .padding([5, 7])
                     .into()
                 };
                 let automation_open = self.state.automation_ui.expanded.contains(&track.id);
-                let automation_toggle = tooltip(
-                    button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(
-                        if automation_open {
+                let automation_toggle = button(
+                    icons::icon(icons::SLIDERS_VERTICAL)
+                        .size(10)
+                        .color(if automation_open {
                             th::accent()
                         } else {
                             th::text_dim()
-                        },
-                    ))
-                    .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
-                        track_id,
-                    )))
-                    .padding([2, 5])
-                    .style(|_theme: &Theme, status| button::Style {
-                        background: matches!(
-                            status,
-                            button::Status::Hovered | button::Status::Pressed
-                        )
+                        }),
+                )
+                .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                    track_id,
+                )))
+                .padding([2, 5])
+                .style(|_theme: &Theme, status| button::Style {
+                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
                         .then(|| th::bg_hover().into()),
-                        text_color: th::text_dim(),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }),
-                    text("Automation lanes").font(PERFORM_TECH).size(8),
-                    tooltip::Position::Right,
-                );
+                    text_color: th::text_dim(),
+                    border: iced::Border::default(),
+                    ..Default::default()
+                });
                 let remove_content: Element<'_, Message> = if has_content {
-                    tooltip(
-                        button(icons::icon(icons::X).size(9).color(th::text_dim()))
-                            .on_press(Message::Perform(PerformMsg::RemoveTrackContent {
-                                section_id,
-                                track_id,
-                            }))
-                            .padding([2, 5])
-                            .style(|_theme: &Theme, status| button::Style {
-                                background: matches!(
-                                    status,
-                                    button::Status::Hovered | button::Status::Pressed
-                                )
-                                .then(|| th::with_alpha(th::danger(), 0.16).into()),
-                                text_color: th::text_dim(),
-                                border: iced::Border::default(),
-                                ..Default::default()
-                            }),
-                        text("Remove content from this Section")
-                            .font(PERFORM_TECH)
-                            .size(8),
-                        tooltip::Position::Right,
-                    )
-                    .into()
+                    button(icons::icon(icons::X).size(9).color(th::text_dim()))
+                        .on_press(Message::Perform(PerformMsg::RemoveTrackContent {
+                            section_id,
+                            track_id,
+                        }))
+                        .padding([2, 5])
+                        .style(|_theme: &Theme, status| button::Style {
+                            background: matches!(
+                                status,
+                                button::Status::Hovered | button::Status::Pressed
+                            )
+                            .then(|| th::with_alpha(th::danger(), 0.16).into()),
+                            text_color: th::text_dim(),
+                            border: iced::Border::default(),
+                            ..Default::default()
+                        })
+                        .into()
                 } else {
                     horizontal_space().width(Length::Shrink).into()
                 };
@@ -430,7 +408,7 @@ impl App {
                 let grid = self.state.view.grid_config();
                 let compatible = !track.kind.is_midi();
                 gutters = gutters.push(gutter);
-                lanes = lanes.push(
+                let clip_lane: Element<'_, Message> = if self.state.browser.drag_source.is_some() {
                     mouse_area(
                         canvas(clip_canvas)
                             .width(Length::Fixed(timeline_width))
@@ -445,117 +423,30 @@ impl App {
                             compatible,
                         })
                     })
-                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget)),
-                );
+                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+                    .into()
+                } else {
+                    canvas(clip_canvas)
+                        .width(Length::Fixed(timeline_width))
+                        .height(Length::Fixed(row_height))
+                        .into()
+                };
+                lanes = lanes.push(clip_lane);
                 content_height += row_height;
 
                 if automation_open {
-                    for lane in &content.automation {
-                        let label = crate::domains::automation::target_label_with_buses(
-                            &lane.target,
-                            track,
-                            &self.state.project_tracks.buses,
-                        );
-                        let lane_id = lane.id;
-                        let lane_header = container(
-                            row![
-                                text(label).font(PERFORM_TECH).size(8).color(th::text_dim()),
-                                horizontal_space(),
-                                button(icons::icon(icons::TRASH_2).size(8).color(th::text_dim()))
-                                    .on_press(Message::Automation(AutomationMsg::RemoveLane {
-                                        track_id,
-                                        lane_id,
-                                    }))
-                                    .padding([2, 4]),
-                            ]
-                            .align_y(iced::Alignment::Center),
-                        )
-                        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-                        .height(Length::Fixed(LANE_HEIGHT))
-                        .padding([4, 7])
-                        .style(|_theme: &Theme| container::Style {
-                            background: Some(th::bg_surface().into()),
-                            border: iced::Border {
-                                color: th::perform_grid_line(),
-                                width: 1.0,
-                                radius: 0.0.into(),
-                            },
-                            ..Default::default()
-                        });
-                        let selected_point = match self.state.automation_ui.selected {
-                            Some((selected_track, selected_lane, index))
-                                if selected_track == track_id && selected_lane == lane_id =>
-                            {
-                                Some(index)
-                            }
-                            _ => None,
-                        };
-                        let (reference, min_label, max_label, ref_label) =
-                            super::views_arrangement::lane_scale(track, &lane.target);
-                        let lane_canvas = canvas(AutomationLaneWidget {
-                            track_id,
-                            lane_id,
-                            points: lane.points.clone(),
-                            color: track_color,
-                            zoom_level: 2.0,
-                            scroll_offset_beats: 0.0,
-                            grid: self.state.view.grid_config(),
-                            selected: selected_point,
-                            reference,
-                            min_label,
-                            max_label,
-                            ref_label,
-                        })
-                        .width(Length::Fixed(timeline_width))
-                        .height(Length::Fixed(LANE_HEIGHT));
-                        gutters = gutters.push(lane_header);
-                        lanes = lanes.push(lane_canvas);
-                        content_height += LANE_HEIGHT;
-                    }
-                    let volume_exists = content.automation.iter().any(|lane| {
-                        lane.target == vibez_core::automation::AutomationTarget::TrackGain
-                    });
-                    let pan_exists = content.automation.iter().any(|lane| {
-                        lane.target == vibez_core::automation::AutomationTarget::TrackPan
-                    });
-                    if !volume_exists || !pan_exists {
-                        let add_header = container(
-                            text("ADD AUTOMATION")
-                                .font(PERFORM_TECH)
-                                .size(7)
-                                .color(th::text_muted()),
-                        )
-                        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-                        .height(Length::Fixed(32.0))
-                        .padding([10, 7]);
-                        let mut add_choices = row![].spacing(5).padding([3, 7]);
-                        if !volume_exists {
-                            add_choices = add_choices.push(
-                                button(text("+ Volume").size(9).color(th::text_dim())).on_press(
-                                    Message::Automation(AutomationMsg::AddLane {
-                                        track_id,
-                                        target: vibez_core::automation::AutomationTarget::TrackGain,
-                                    }),
-                                ),
-                            );
-                        }
-                        if !pan_exists {
-                            add_choices = add_choices.push(
-                                button(text("+ Pan").size(9).color(th::text_dim())).on_press(
-                                    Message::Automation(AutomationMsg::AddLane {
-                                        track_id,
-                                        target: vibez_core::automation::AutomationTarget::TrackPan,
-                                    }),
-                                ),
-                            );
-                        }
-                        gutters = gutters.push(add_header);
-                        lanes = lanes.push(
-                            container(add_choices)
-                                .width(Length::Fixed(timeline_width))
-                                .height(Length::Fixed(32.0)),
-                        );
-                        content_height += 32.0;
+                    let layout = AutomationLaneLayout {
+                        header_width: SECTION_TRACK_GUTTER_WIDTH,
+                        body_width: Some(timeline_width),
+                        zoom_level: 2.0,
+                        scroll_offset_beats: 0.0,
+                    };
+                    for part in
+                        self.automation_lane_parts(track, &content.automation, track_color, layout)
+                    {
+                        gutters = gutters.push(part.header);
+                        lanes = lanes.push(part.body);
+                        content_height += part.height;
                     }
                 }
             }

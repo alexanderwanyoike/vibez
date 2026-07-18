@@ -76,8 +76,33 @@ impl App {
             );
         } else {
             for location in locations {
-                location_list =
-                    location_list.push(text(format!("• {location}")).size(11).color(th::text()));
+                location_list = location_list.push(
+                    container(
+                        row![
+                            container(horizontal_space())
+                                .width(Length::Fixed(3.0))
+                                .height(Length::Fixed(14.0))
+                                .style(|_theme: &Theme| container::Style {
+                                    background: Some(th::danger().into()),
+                                    ..Default::default()
+                                }),
+                            text(location).size(11).color(th::text())
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding([5, 8])
+                    .width(Length::Fill)
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::bg_elevated().into()),
+                        border: iced::Border {
+                            color: th::border(),
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+                );
             }
         }
         let cancel = button(text("Cancel").size(12).color(th::text()))
@@ -105,18 +130,15 @@ impl App {
             });
         let card = container(
             column![
-                text("DELETE PROJECT TRACK?")
-                    .font(crate::typography::PERFORM_LABEL)
-                    .size(15)
-                    .color(th::danger()),
-                text(format!("“{track_name}” is shared across the project."))
-                    .size(12)
+                text(format!("Delete {track_name}?"))
+                    .font(crate::typography::PERFORM_DISPLAY)
+                    .size(18)
                     .color(th::text()),
-                text("Deleting it also removes its content from every affected location:")
+                text("This Project Track is shared. Its channel, devices, and authored content will be removed from:")
                     .size(11)
                     .color(th::text_dim()),
-                scrollable(location_list).height(Length::Fixed(130.0)),
-                text("The complete deletion is recorded as one undoable action.")
+                scrollable(location_list).height(Length::Fixed(120.0)),
+                text("One Undo restores the Track and every listed location.")
                     .size(10)
                     .color(th::text_dim()),
                 row![horizontal_space(), cancel, remove].spacing(8),
@@ -124,11 +146,11 @@ impl App {
             .spacing(12),
         )
         .padding(20)
-        .width(Length::Fixed(480.0))
+        .width(Length::Fixed(440.0))
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::danger(),
+                color: th::border_light(),
                 width: 1.0,
                 radius: 4.0.into(),
             },
