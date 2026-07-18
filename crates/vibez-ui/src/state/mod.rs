@@ -42,7 +42,7 @@ pub struct AuditionImportInput {
 }
 
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
-
+pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMediaDrag {
     pub source: MediaSourceRef,
@@ -69,13 +69,14 @@ pub enum BrowserDropTarget {
         pad_index: usize,
     },
 }
-
 /// View domain slice: everything about how the project is being
 /// looked at, none of it part of the project itself.
 #[derive(Debug)]
 pub struct ViewState {
     pub workspace: Workspace,
     pub detail_panel_tab: DetailPanelTab,
+    pub perform_surface_width: f32,
+    pub perform_surface_resize_active: bool,
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
@@ -84,23 +85,22 @@ pub struct ViewState {
     pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
     pub edit_menu_open: bool,
-    /// Cursor tracking (for right-click positioning from mouse_area).
-    pub cursor_x: f32,
+    pub cursor_x: f32, // globally tracked for popup positioning and pane drags
     pub cursor_y: f32,
-    /// Last known window size, for clamping popup menus on-screen.
-    pub window_width: f32,
+    pub window_width: f32, // last known size for responsive view clamping
     pub window_height: f32,
     // Inline renaming
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
 }
-
 impl Default for ViewState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Arrange,
             detail_panel_tab: DetailPanelTab::Clip,
+            perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
+            perform_surface_resize_active: false,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::EIGHTH,

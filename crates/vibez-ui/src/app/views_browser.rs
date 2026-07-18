@@ -173,22 +173,10 @@ impl App {
     }
 
     pub(super) fn view_browser_splitter(&self) -> Element<'_, Message> {
-        mouse_area(
-            container(text(""))
-                .width(Length::Fixed(7.0))
-                .height(Length::Fill)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(if self.state.browser.dock_resize_active {
-                        th::accent_dim().into()
-                    } else {
-                        th::divider().into()
-                    }),
-                    ..Default::default()
-                }),
+        super::views_shell::horizontal_pane_splitter(
+            self.state.browser.dock_resize_active,
+            Message::Browser(BrowserMsg::BeginDockResize),
         )
-        .on_press(Message::Browser(BrowserMsg::BeginDockResize))
-        .interaction(iced::mouse::Interaction::ResizingHorizontally)
-        .into()
     }
 
     pub(super) fn view_local_sample_browser(&self) -> Element<'_, Message> {

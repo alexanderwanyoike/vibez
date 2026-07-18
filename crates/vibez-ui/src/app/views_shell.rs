@@ -16,6 +16,33 @@ use crate::theme as th;
 
 use super::*;
 
+pub(super) const HORIZONTAL_PANE_SPLITTER_WIDTH: f32 = 7.0;
+
+pub(super) fn horizontal_pane_splitter(
+    active: bool,
+    on_press: Message,
+) -> Element<'static, Message> {
+    mouse_area(
+        container(text(""))
+            .width(Length::Fixed(HORIZONTAL_PANE_SPLITTER_WIDTH))
+            .height(Length::Fill)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(
+                    if active {
+                        th::accent_dim()
+                    } else {
+                        th::divider()
+                    }
+                    .into(),
+                ),
+                ..Default::default()
+            }),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::ResizingHorizontally)
+    .into()
+}
+
 impl App {
     // ── View ──
 

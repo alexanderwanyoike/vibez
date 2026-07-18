@@ -140,6 +140,9 @@ impl App {
         if action.close_device_menu {
             self.state.devices.context_menu = None;
         }
+        if action.persist_settings {
+            self.persist_ui_settings();
+        }
         if let Some(rename) = action.rename {
             use crate::domains::view::RenameRequest;
             return match rename {

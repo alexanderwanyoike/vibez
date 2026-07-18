@@ -26,6 +26,9 @@ pub enum ViewMsg {
     ToggleTripletGrid,
     ToggleSnapToGrid,
     ToggleAdaptiveGrid,
+    BeginPerformSurfaceResize,
+    ResizePerformSurface(f32),
+    EndPerformSurfaceResize,
     CursorMoved(f32, f32),
     WindowResized(f32, f32),
     MouseReleased,
@@ -74,6 +77,8 @@ pub struct ViewAction {
     pub end_drag_resize: bool,
     /// Cancelling an edit also dismisses the device context menu.
     pub close_device_menu: bool,
+    /// A global view preference changed and should be persisted.
+    pub persist_settings: bool,
 }
 
 impl ViewState {
@@ -142,6 +147,20 @@ impl ViewState {
             }
             ViewMsg::ToggleAdaptiveGrid => {
                 self.adaptive_grid = !self.adaptive_grid;
+            }
+            ViewMsg::BeginPerformSurfaceResize => {
+                self.perform_surface_resize_active = true;
+            }
+            ViewMsg::ResizePerformSurface(width) => {
+                if self.perform_surface_resize_active {
+                    self.perform_surface_width = width;
+                }
+            }
+            ViewMsg::EndPerformSurfaceResize => {
+                if self.perform_surface_resize_active {
+                    self.perform_surface_resize_active = false;
+                    action.persist_settings = true;
+                }
             }
             ViewMsg::CursorMoved(x, y) => {
                 self.cursor_x = x;
@@ -444,5 +463,41 @@ mod tests {
         assert_eq!(v.editing_track_name, None);
         assert!(v.edit_name_text.is_empty());
         assert!(action.close_device_menu);
+    }
+
+    #[test]
+    fn perform_surface_resize_commits_one_global_view_preference() {
+        let mut view = ViewState::default();
+        let timeline = TimelineEditorState::default();
+
+        view.update(
+            ViewMsg::ResizePerformSurface(720.0),
+            &timeline,
+            ViewCtx::default(),
+        );
+        assert_eq!(
+            view.perform_surface_width,
+            crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
+        );
+
+        view.update(
+            ViewMsg::BeginPerformSurfaceResize,
+            &timeline,
+            ViewCtx::default(),
+        );
+        view.update(
+            ViewMsg::ResizePerformSurface(720.0),
+            &timeline,
+            ViewCtx::default(),
+        );
+        let action = view.update(
+            ViewMsg::EndPerformSurfaceResize,
+            &timeline,
+            ViewCtx::default(),
+        );
+
+        assert_eq!(view.perform_surface_width, 720.0);
+        assert!(!view.perform_surface_resize_active);
+        assert!(action.persist_settings);
     }
 }

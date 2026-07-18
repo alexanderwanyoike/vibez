@@ -23,6 +23,13 @@ use crate::theme as th;
 
 use super::*;
 
+fn project_track_deletion_list_height(location_count: usize) -> f32 {
+    match location_count {
+        0 | 1 => 28.0,
+        count => (count as f32 * 28.0 + (count - 1) as f32 * 4.0).min(120.0),
+    }
+}
+
 impl App {
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
         let track_id = self
@@ -41,6 +48,7 @@ impl App {
             .perform
             .sections
             .track_content_locations(&self.state.arrangement.timeline, track_id);
+        let location_list_height = project_track_deletion_list_height(locations.len());
         let mut location_list = column![].spacing(4);
         if locations.is_empty() {
             location_list = location_list.push(
@@ -117,7 +125,7 @@ impl App {
                 text("This Project Track is shared. Its channel, devices, and authored content will be removed from:")
                     .size(11)
                     .color(th::text_dim()),
-                scrollable(location_list).height(Length::Fixed(120.0)),
+                scrollable(location_list).height(Length::Fixed(location_list_height)),
                 text("One Undo restores the Track and every listed location.")
                     .size(10)
                     .color(th::text_dim()),
@@ -874,5 +882,18 @@ impl App {
         )
         .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_track_deletion_list_height;
+
+    #[test]
+    fn deletion_location_list_grows_with_content_then_caps() {
+        assert_eq!(project_track_deletion_list_height(0), 28.0);
+        assert_eq!(project_track_deletion_list_height(1), 28.0);
+        assert_eq!(project_track_deletion_list_height(2), 60.0);
+        assert_eq!(project_track_deletion_list_height(8), 120.0);
     }
 }

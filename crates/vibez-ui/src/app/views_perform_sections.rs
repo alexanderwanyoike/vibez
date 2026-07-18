@@ -487,7 +487,7 @@ impl App {
         };
 
         let construction = container(column![toolbar, timeline].height(Length::Fill))
-            .width(Length::FillPortion(3))
+            .width(Length::Fill)
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_dark().into()),

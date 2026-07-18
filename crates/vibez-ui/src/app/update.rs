@@ -254,6 +254,30 @@ impl App {
                         self.persist_ui_settings();
                     }
                 }
+                let perform_surface_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::ResizePerformSurface(
+                            self.perform_surface_drag_width(*x),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::EndPerformSurfaceResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = perform_surface_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
                 let pending_drag_msg = match &msg {
                     ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
                         Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })

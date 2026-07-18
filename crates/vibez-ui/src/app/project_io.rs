@@ -229,6 +229,7 @@ impl App {
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,
+            perform_surface_width: self.state.view.perform_surface_width,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
             audition_loop: self.state.browser.audition_loop,

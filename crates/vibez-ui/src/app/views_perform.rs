@@ -2,7 +2,7 @@
 
 use iced::widget::{
     button, center, column, container, horizontal_space, mouse_area, pick_list, row, text,
-    text_input,
+    text_input, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
@@ -16,14 +16,16 @@ use super::*;
 
 const MODE_SELECTOR_HEIGHT: f32 = 34.0;
 const MODE_SELECTOR_INSET: f32 = 17.0;
-const MODE_TAB_MIN_WIDTH: f32 = 108.0;
+const MODE_TAB_MIN_WIDTH: f32 = 92.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
-const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
+const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
+const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
 pub(super) const SECTION_BAR_WIDTH: f32 = 160.0;
 
 fn perform_tool_button(
     icon: char,
+    tooltip_label: &'static str,
     message: Message,
     active: bool,
     destructive: bool,
@@ -35,7 +37,7 @@ fn perform_tool_button(
     } else {
         th::text_dim()
     };
-    button(
+    let control = button(
         center(icons::icon(icon).size(12).color(color))
             .width(Length::Fill)
             .height(Length::Fill),
@@ -71,13 +73,36 @@ fn perform_tool_button(
             },
             ..Default::default()
         }
-    })
-    .into()
+    });
+    let hint = container(text(tooltip_label).size(10).color(th::text()))
+        .padding([5, 7])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_elevated().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+    tooltip(control, hint, tooltip::Position::Bottom)
+        .gap(6)
+        .padding(0)
+        .into()
 }
 
-fn perform_mode_tab_width(window_width: f32) -> f32 {
-    ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
+fn perform_mode_tab_width(surface_width: f32) -> f32 {
+    ((surface_width - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
+}
+
+fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
+    let maximum = (workspace_width
+        - SECTION_CONSTRUCTION_MIN_WIDTH
+        - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
+        .max(0.0);
+    let minimum = PAD_SURFACE_MIN_WIDTH.min(maximum);
+    preferred_width.clamp(minimum, maximum)
 }
 
 fn perform_pad_grid_height(window_height: f32) -> f32 {
@@ -86,14 +111,21 @@ fn perform_pad_grid_height(window_height: f32) -> f32 {
 
 impl App {
     pub(super) fn view_perform(&self) -> Element<'_, Message> {
-        let mode_selector = self.view_perform_mode_selector();
-        let pad_surface = self.view_pad_surface();
+        let workspace_width = self.perform_workspace_width();
+        let surface_width =
+            effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
+        let mode_selector = self.view_perform_mode_selector(surface_width);
+        let pad_surface = self.view_pad_surface(surface_width);
         let section_construction = self.view_section_construction();
 
-        let workspace = row![pad_surface, section_construction]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(0);
+        let workspace = row![
+            pad_surface,
+            self.view_perform_surface_splitter(),
+            section_construction
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0);
 
         container(column![mode_selector, workspace].height(Length::Fill))
             .width(Length::Fill)
@@ -110,8 +142,26 @@ impl App {
             .into()
     }
 
-    fn view_perform_mode_selector(&self) -> Element<'_, Message> {
-        let tab_width = perform_mode_tab_width(self.state.view.window_width);
+    pub(super) fn perform_workspace_width(&self) -> f32 {
+        let browser_width = if self.state.browser.open {
+            self.state
+                .browser
+                .effective_dock_width(self.state.view.window_width)
+                + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
+        } else {
+            0.0
+        };
+        (self.state.view.window_width - browser_width).max(0.0)
+    }
+
+    pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
+        let workspace_width = self.perform_workspace_width();
+        let workspace_left = self.state.view.window_width - workspace_width;
+        effective_perform_surface_width(cursor_x - workspace_left, workspace_width)
+    }
+
+    fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
+        let tab_width = perform_mode_tab_width(surface_width);
         let mut modes = row![].height(Length::Fill).spacing(1);
         for mode in PerformMode::ALL {
             let active = self.state.perform.mode == mode;
@@ -223,7 +273,7 @@ impl App {
             .into()
     }
 
-    fn view_pad_surface(&self) -> Element<'_, Message> {
+    fn view_pad_surface(&self, surface_width: f32) -> Element<'_, Message> {
         let mode = self.state.perform.mode;
         let heading = column![
             text("PERFORM SURFACE")
@@ -279,7 +329,7 @@ impl App {
             .height(Length::Fixed(pad_grid_height));
 
         let surface = container(column![header, grid].spacing(12))
-            .width(Length::FillPortion(2))
+            .width(Length::Fixed(surface_width))
             .height(Length::Fill)
             .padding(14)
             .style(|_theme: &Theme| container::Style {
@@ -297,6 +347,13 @@ impl App {
                 PerformEditorFocus::PadSurface,
             )))
             .into()
+    }
+
+    fn view_perform_surface_splitter(&self) -> Element<'_, Message> {
+        super::views_shell::horizontal_pane_splitter(
+            self.state.view.perform_surface_resize_active,
+            Message::View(crate::domains::view::ViewMsg::BeginPerformSurfaceResize),
+        )
     }
 
     fn view_perform_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
@@ -574,6 +631,7 @@ impl App {
         };
         let shorten = perform_tool_button(
             icons::MINUS,
+            "Shorten Section by one bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
                 section.length_beats - 4.0,
@@ -583,6 +641,7 @@ impl App {
         );
         let extend = perform_tool_button(
             icons::PLUS,
+            "Extend Section by one bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
                 section.length_beats + 4.0,
@@ -658,6 +717,7 @@ impl App {
         .into();
         let loop_toggle = perform_tool_button(
             icons::REPEAT,
+            "Toggle Section loop",
             Message::Perform(PerformMsg::ToggleSectionLoop(section.id)),
             section.looping,
             false,
@@ -668,18 +728,29 @@ impl App {
             } else {
                 icons::COPY
             },
+            if self.state.perform.duplicate_source == Some(section.id) {
+                "Cancel Section duplication"
+            } else {
+                "Duplicate Section"
+            },
             Message::Perform(duplicate_message),
             self.state.perform.duplicate_source == Some(section.id),
             false,
         );
         let expand = perform_tool_button(
             icons::LAYOUT_LIST,
+            if self.state.perform.section_timeline_expanded {
+                "Compact Section timeline"
+            } else {
+                "Expand Section timeline"
+            },
             Message::Perform(PerformMsg::ToggleSectionTimelineExpanded),
             self.state.perform.section_timeline_expanded,
             false,
         );
         let delete = perform_tool_button(
             icons::TRASH_2,
+            "Delete Section",
             Message::Perform(PerformMsg::DeleteSection(section.id)),
             false,
             true,
@@ -755,14 +826,14 @@ mod tests {
 
     #[test]
     fn mode_tabs_scale_with_the_pad_surface_then_stop_growing() {
-        let narrow = perform_mode_tab_width(900.0);
-        let default = perform_mode_tab_width(1400.0);
-        let wide = perform_mode_tab_width(2000.0);
+        let narrow = perform_mode_tab_width(320.0);
+        let default = perform_mode_tab_width(560.0);
+        let wide = perform_mode_tab_width(960.0);
 
         assert!((MODE_TAB_MIN_WIDTH..MODE_TAB_MAX_WIDTH).contains(&narrow));
         assert_eq!(default, MODE_TAB_MAX_WIDTH);
         assert_eq!(wide, MODE_TAB_MAX_WIDTH);
-        assert!(MODE_SELECTOR_INSET + narrow * 3.0 <= 900.0 * PAD_SURFACE_WIDTH_SHARE);
+        assert!(MODE_SELECTOR_INSET + narrow * 3.0 <= 320.0);
     }
 
     #[test]
@@ -770,5 +841,13 @@ mod tests {
         assert_eq!(perform_pad_grid_height(400.0), 272.0);
         assert_eq!(perform_pad_grid_height(900.0), 432.0);
         assert_eq!(perform_pad_grid_height(1400.0), 480.0);
+    }
+
+    #[test]
+    fn perform_surface_width_preserves_both_panes_during_drag() {
+        assert_eq!(effective_perform_surface_width(200.0, 1400.0), 320.0);
+        assert_eq!(effective_perform_surface_width(640.0, 1400.0), 640.0);
+        assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 933.0);
+        assert_eq!(effective_perform_surface_width(500.0, 820.0), 353.0);
     }
 }
