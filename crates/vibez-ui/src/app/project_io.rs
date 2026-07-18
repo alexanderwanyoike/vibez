@@ -58,6 +58,7 @@ impl App {
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
         self.state.perform.selected_section = None;
+        self.state.perform.editing_section_name = None;
         self.state.perform.section_name_edit.clear();
         self.state.perform.duplicate_source = None;
         self.reset_master_channel();
@@ -789,6 +790,7 @@ impl App {
             .and_then(|id| self.state.perform.sections.by_id(id))
             .map(|section| section.name.clone())
             .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
         let provenance_suffix = remote_provenance

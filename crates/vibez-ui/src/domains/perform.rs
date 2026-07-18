@@ -305,6 +305,7 @@ pub struct PerformState {
     pub key_rebind_target: Option<PadPosition>,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
+    pub editing_section_name: Option<SectionId>,
     pub section_name_edit: String,
     pub duplicate_source: Option<SectionId>,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
@@ -322,6 +323,8 @@ pub enum PerformMsg {
     CancelDuplicateSection,
     DuplicateSectionTo(u16),
     DeleteSection(SectionId),
+    StartEditingSectionName(SectionId),
+    CancelSectionNameEdit,
     SectionNameInput(String),
     CommitSectionName(SectionId),
     SetSectionLengthBeats(SectionId, f64),
@@ -432,12 +435,27 @@ impl PerformState {
                 if ctx.workspace_visible && Arc::make_mut(&mut self.sections).remove(id).is_some() {
                     if self.selected_section == Some(id) {
                         self.selected_section = None;
+                        self.editing_section_name = None;
                         self.section_name_edit.clear();
                     }
                     if self.duplicate_source == Some(id) {
                         self.duplicate_source = None;
                     }
                 }
+            }
+            PerformMsg::StartEditingSectionName(id) => {
+                if ctx.workspace_visible && self.sections.by_id(id).is_some() {
+                    self.select_section(id);
+                    self.editing_section_name = Some(id);
+                }
+            }
+            PerformMsg::CancelSectionNameEdit => {
+                self.editing_section_name = None;
+                self.section_name_edit = self
+                    .selected_section
+                    .and_then(|id| self.sections.by_id(id))
+                    .map(|section| section.name.clone())
+                    .unwrap_or_default();
             }
             PerformMsg::SectionNameInput(name) => {
                 self.section_name_edit = name;
@@ -448,6 +466,7 @@ impl PerformState {
                     if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
                         section.name = name;
                         self.section_name_edit = section.name.clone();
+                        self.editing_section_name = None;
                     }
                 }
             }
@@ -546,6 +565,7 @@ impl PerformState {
     fn select_section(&mut self, id: SectionId) {
         if let Some(section) = self.sections.by_id(id) {
             self.selected_section = Some(id);
+            self.editing_section_name = None;
             self.section_name_edit = section.name.clone();
             self.editor_focus = PerformEditorFocus::SectionConstruction;
         }
@@ -832,11 +852,18 @@ mod tests {
         state.update(PerformMsg::CreateSectionAt(5), &mut engine, ctx);
         let source_id = state.selected_section.expect("new section selected");
         state.update(
+            PerformMsg::StartEditingSectionName(source_id),
+            &mut engine,
+            ctx,
+        );
+        assert_eq!(state.editing_section_name, Some(source_id));
+        state.update(
             PerformMsg::SectionNameInput("Breakdown".into()),
             &mut engine,
             ctx,
         );
         state.update(PerformMsg::CommitSectionName(source_id), &mut engine, ctx);
+        assert_eq!(state.editing_section_name, None);
         state.update(
             PerformMsg::SetSectionLengthBeats(source_id, 32.0),
             &mut engine,
@@ -891,6 +918,8 @@ mod tests {
         assert!(PerformMsg::ToggleSectionLoop(id).marks_dirty());
         assert!(!PerformMsg::SelectSection(id).marks_dirty());
         assert!(!PerformMsg::SectionNameInput("Draft".into()).marks_dirty());
+        assert!(!PerformMsg::StartEditingSectionName(id).marks_dirty());
+        assert!(!PerformMsg::CancelSectionNameEdit.marks_dirty());
         assert!(!PerformMsg::BeginDuplicateSection(id).marks_dirty());
     }
 }

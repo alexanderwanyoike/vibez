@@ -24,6 +24,7 @@ impl App {
         // edited; backspace belongs to the text there.
         if self.state.view.editing_track_name.is_some()
             || self.state.view.editing_clip_name.is_some()
+            || self.state.perform.editing_section_name.is_some()
         {
             return Task::none();
         }
@@ -442,6 +443,10 @@ impl App {
         {
             self.state.browser.cancel_media_drag();
             self.state.status_text = "Drag cancelled".into();
+        } else if self.state.perform.editing_section_name.is_some() {
+            return self.update(Message::Perform(
+                crate::domains::perform::PerformMsg::CancelSectionNameEdit,
+            ));
         } else {
             return self.update(Message::View(ViewMsg::CancelEditing));
         }

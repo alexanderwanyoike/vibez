@@ -111,6 +111,7 @@ impl App {
             .and_then(|id| self.state.perform.sections.by_id(id))
             .map(|section| section.name.clone())
             .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
         self.state.perform.duplicate_source = None;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
