@@ -297,7 +297,7 @@ pub(crate) fn global_key_handler(
                     Some(Message::Arrangement(ArrangementMsg::AddTrack))
                 }
             }
-            "m" => Some(Message::create_clip_from_selection()),
+            "m" | "M" => Some(Message::create_clip_from_selection()),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
             "l" | "L" => {
@@ -380,6 +380,21 @@ mod tests {
         assert!(matches!(
             wider,
             Some(Message::Browser(BrowserMsg::NudgeDockWidth(delta))) if delta == 40.0
+        ));
+    }
+
+    #[test]
+    fn create_clip_shortcut_accepts_shifted_m() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(
+                Key::Character("M".into()),
+                Modifiers::CTRL | Modifiers::SHIFT
+            ),
+            Some(Message::Arrangement(
+                ArrangementMsg::CreateClipFromSelection
+            ))
         ));
     }
 

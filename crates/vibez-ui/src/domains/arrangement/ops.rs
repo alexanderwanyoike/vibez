@@ -205,19 +205,18 @@ impl TimelineEditorState {
         let clip_id = ClipId::new();
         let position_beats = self.selection_start_beats;
         let duration_beats = self.selection_end_beats - self.selection_start_beats;
-        if let Some(track) = self.find_content_mut(track_id) {
-            track.note_clips.push(UiNoteClip {
-                id: clip_id,
-                name: format!("Pattern {}", track.note_clips.len() + 1),
-                position_beats,
-                duration_beats,
-                notes: Vec::new(),
-                selected_notes: HashSet::new(),
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-            });
-        }
+        let track = Arc::make_mut(&mut self.timeline).ensure(track_id);
+        track.note_clips.push(UiNoteClip {
+            id: clip_id,
+            name: format!("Pattern {}", track.note_clips.len() + 1),
+            position_beats,
+            duration_beats,
+            notes: Vec::new(),
+            selected_notes: HashSet::new(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        });
         engine.send(EngineCommand::AddNoteClip {
             track_id,
             clip_id,
