@@ -111,7 +111,11 @@ decoded audio remains shared. `PerformMsg` changes that slice through the
 router and `EngineHandle`. Creating and editing Sections does not send engine
 commands yet—Section playback belongs to the later launch slice. Perform is a
 sibling of Arrange and Mix in the shared shell, and all three retain their
-interaction state when producers switch between them.
+interaction state when producers switch between them. Track Mute pad slots
+retain stable `TrackId` assignments across
+track additions and deletions. A pad press resolves inside Perform to a narrow
+mute request; the router applies that request to the one project-owned mute
+field used by Arrange and Mix instead of storing a second Perform value.
 
 Perform input adapters resolve physical controls before mode semantics. The
 computer-key adapter maps physical key codes through the global
@@ -124,28 +128,53 @@ the 60 fps engine-event pump. Widget-captured presses are not forwarded, so
 text fields suppress pad input. The mapping persists in the user's `ui.json`
 settings and is absent from the project document and undo snapshots.
 
+Track mute commands become authoritative when the audio callback drains them.
+The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
+absolute transport sample; the UI mirrors that result into the shared Project
+Track. This keeps pad, mixer, persisted, and audible state aligned while giving
+later Capture work an engine-timestamped event source.
+
 ## Project Tracks and timeline content
 
 Project Tracks exist once per project. `ProjectTracksState` owns their stable
 `TrackId`, channel name/type, instruments, effects, routing, sends, and mixer
 state. Arrange does not own or duplicate those channels.
 
-`ArrangementState` owns Arrange's `ArrangementTimeline`, and every Perform
-Section owns another timeline with the same shape. Each is a separate store
-keyed by the shared `TrackId`. `TrackTimelineContent` contains only the audio
-clips, note clips, and automation associated with that Project Track in that
-timeline. Track order is therefore independent from timeline storage, and a
-timeline edit cannot clone instruments, effects, routing, or mixer state.
+`TimelineContent` is the separate musical-content store keyed by shared
+`TrackId`. Each `TrackTimelineContent` contains only the audio clips, note
+clips, and automation associated with that Project Track in one timeline.
+Track order is therefore independent from timeline storage, and a timeline
+edit cannot clone instruments, effects, routing, or mixer state. Arrange owns
+one `TimelineContent`, while every Perform Section owns another store with the
+same shape and shared Project `TrackId`s.
+
+`TimelineEditorState` is the shared editing boundary around that content. It
+owns clip/note selection, the clipboard, time selection, and other interaction
+state; clip operations, piano-roll editing, automation editing, and timeline
+view behavior receive this already-resolved target. `ArrangementState` is a
+thin adapter that retains Arrange's Project Track/channel controls and
+implements `TimelineEditorAdapter` to resolve its editor. The editor never
+asks which workspace is active and contains no `Arrange | Section` branch, so
+a Section can provide the same adapter in the later authoring slice.
+
+Every horizontal editor surface uses `TimelineGeometry` for beat-to-pixel,
+pixel-to-beat, fitted viewport, visible-range, and beat-width conversions.
+Ruler, clip lanes, automation, piano roll, minimap, drag/drop, and auto-scroll
+therefore share one geometry implementation even when they use different
+resolved scales. A generic conformance harness currently runs against the
+Arrange adapter and is reusable unchanged by the Section adapter.
 
 ```mermaid
 flowchart LR
     PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
-    AT["ArrangementTimeline<br/>TrackId → TrackTimelineContent"]
-    SS["SectionStore<br/>Section → ArrangementTimeline"]
-    UI["Arrange editor selection/view state"]
-    PT -- "shared TrackId" --> AT
+    AA["ArrangementState<br/>thin adapter + channel controls"]
+    TE["TimelineEditorState<br/>selection + resolved TimelineContent"]
+    SS["SectionStore<br/>Section → TimelineContent"]
+    TG["TimelineGeometry<br/>one beat/pixel layer"]
+    PT -- "shared TrackId" --> TE
     PT -- "shared TrackId" --> SS
-    AT --> UI
+    AA -- "resolves once" --> TE
+    TG --> TE
 ```
 
 Undo snapshots retain the Project Track store, Arrange Timeline Content, and

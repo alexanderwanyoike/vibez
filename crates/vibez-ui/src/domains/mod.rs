@@ -13,6 +13,7 @@ pub mod devices;
 pub mod perform;
 pub mod piano_roll;
 pub mod project;
+pub mod timeline_editor;
 pub mod transport;
 pub mod view;
 

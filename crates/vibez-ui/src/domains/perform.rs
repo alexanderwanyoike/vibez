@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use vibez_core::id::SectionId;
+use vibez_core::id::{SectionId, TrackId};
 use vibez_project::SectionLaunchQuantization;
 
 use super::EngineHandle;
+use crate::state::ProjectTrack;
 
 mod sections;
 pub use sections::{Section, SectionStore};
@@ -309,6 +310,7 @@ pub struct PerformState {
     pub section_name_edit: String,
     pub duplicate_source: Option<SectionId>,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
+    track_mute_slots: Vec<Option<TrackId>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +332,9 @@ pub enum PerformMsg {
     SetSectionLengthBeats(SectionId, f64),
     SetSectionLaunchQuantization(SectionId, SectionLaunchQuantization),
     ToggleSectionLoop(SectionId),
+    PreviousBank,
+    NextBank,
+    ToggleTrackMuteFromPad(PadPosition),
     ComputerKeyPressed {
         key: ComputerKey,
         key_id: String,
@@ -358,8 +363,17 @@ impl PerformMsg {
 
 /// Read-only facts supplied by the router.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct PerformCtx {
+pub struct PerformCtx<'a> {
     pub workspace_visible: bool,
+    pub project_tracks: &'a [ProjectTrack],
+}
+
+/// A semantic mute request resolved by Perform against a stable pad slot.
+/// The router applies it to the single shared Project Track state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackMuteRequest {
+    pub track_id: TrackId,
+    pub muted: bool,
 }
 
 /// Cross-domain effects requested by Perform. Pad Gestures leave the adapter
@@ -369,15 +383,72 @@ pub struct PerformAction {
     pub keyboard_consumed: bool,
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
+    pub track_mute_request: Option<TrackMuteRequest>,
 }
 
 impl PerformState {
+    fn sync_track_mute_slots(&mut self, tracks: &[ProjectTrack]) {
+        for slot in &mut self.track_mute_slots {
+            if slot.is_some_and(|track_id| !tracks.iter().any(|track| track.id == track_id)) {
+                *slot = None;
+            }
+        }
+
+        for track in tracks {
+            if self
+                .track_mute_slots
+                .iter()
+                .flatten()
+                .any(|track_id| *track_id == track.id)
+            {
+                continue;
+            }
+            if let Some(vacant) = self.track_mute_slots.iter_mut().find(|slot| slot.is_none()) {
+                *vacant = Some(track.id);
+            } else {
+                self.track_mute_slots.push(Some(track.id));
+            }
+        }
+
+        while self.track_mute_slots.last().is_some_and(Option::is_none) {
+            self.track_mute_slots.pop();
+        }
+
+        let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
+        self.banks.track_mutes = self.banks.track_mutes.min(last_bank as u8);
+    }
+
+    fn track_mute_request(
+        &self,
+        position: PadPosition,
+        tracks: &[ProjectTrack],
+    ) -> Option<TrackMuteRequest> {
+        let slot = usize::from(self.banks.track_mutes) * 16 + position.index();
+        let track_id = self.track_mute_slots.get(slot).copied().flatten()?;
+        let track = tracks.iter().find(|track| track.id == track_id)?;
+        Some(TrackMuteRequest {
+            track_id,
+            muted: !track.mute,
+        })
+    }
+
+    pub fn track_for_mute_pad<'a>(
+        &self,
+        position: PadPosition,
+        tracks: &'a [ProjectTrack],
+    ) -> Option<&'a ProjectTrack> {
+        let slot = usize::from(self.banks.track_mutes) * 16 + position.index();
+        let track_id = self.track_mute_slots.get(slot).copied().flatten()?;
+        tracks.iter().find(|track| track.id == track_id)
+    }
+
     pub fn update(
         &mut self,
         msg: PerformMsg,
         _engine: &mut impl EngineHandle,
-        ctx: PerformCtx,
+        ctx: PerformCtx<'_>,
     ) -> PerformAction {
+        self.sync_track_mute_slots(ctx.project_tracks);
         match msg {
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
@@ -494,6 +565,29 @@ impl PerformState {
                     }
                 }
             }
+            PerformMsg::PreviousBank => {
+                if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
+                    self.banks.track_mutes = self.banks.track_mutes.saturating_sub(1);
+                }
+            }
+            PerformMsg::NextBank => {
+                if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
+                    let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
+                    self.banks.track_mutes = self
+                        .banks
+                        .track_mutes
+                        .saturating_add(1)
+                        .min(last_bank as u8);
+                }
+            }
+            PerformMsg::ToggleTrackMuteFromPad(position) => {
+                if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
+                    return PerformAction {
+                        track_mute_request: self.track_mute_request(position, ctx.project_tracks),
+                        ..PerformAction::default()
+                    };
+                }
+            }
             PerformMsg::ComputerKeyPressed {
                 key,
                 key_id,
@@ -505,6 +599,7 @@ impl PerformState {
                         keyboard_consumed: true,
                         persist_settings: true,
                         gesture: None,
+                        ..PerformAction::default()
                     };
                 }
                 if !ctx.workspace_visible {
@@ -521,6 +616,9 @@ impl PerformState {
                 };
                 let source = PadGestureSource::ComputerKeyboard { key };
                 self.active_computer_keys.insert(key_id, (position, source));
+                let track_mute_request = (self.mode == PerformMode::TrackMutes)
+                    .then(|| self.track_mute_request(position, ctx.project_tracks))
+                    .flatten();
                 return PerformAction {
                     keyboard_consumed: true,
                     persist_settings: false,
@@ -531,6 +629,7 @@ impl PerformState {
                         source,
                         occurred_at,
                     }),
+                    track_mute_request,
                 };
             }
             PerformMsg::ComputerKeyReleased {
@@ -550,6 +649,7 @@ impl PerformState {
                         source,
                         occurred_at,
                     }),
+                    ..PerformAction::default()
                 };
             }
         }
@@ -570,356 +670,12 @@ impl PerformState {
             self.editor_focus = PerformEditorFocus::SectionConstruction;
         }
     }
+
+    pub fn sync_project_tracks(&mut self, tracks: &[ProjectTrack]) {
+        self.sync_track_mute_slots(tracks);
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::test_support::RecordingEngine;
-    use super::*;
-
-    #[test]
-    fn exposes_exactly_the_three_settled_v1_modes() {
-        assert_eq!(
-            PerformMode::ALL.map(PerformMode::label),
-            ["Sections", "Track Mutes", "Instrument"]
-        );
-        assert_eq!(
-            PerformMode::ALL.map(PerformMode::shortcut),
-            ["F1", "F2", "F3"]
-        );
-    }
-
-    #[test]
-    fn visible_mode_switches_are_ui_only() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-
-        let action = state.update(
-            PerformMsg::SelectMode(PerformMode::Instrument),
-            &mut engine,
-            PerformCtx {
-                workspace_visible: true,
-            },
-        );
-
-        assert_eq!(state.mode, PerformMode::Instrument);
-        assert_eq!(action, PerformAction::default());
-        assert!(engine.0.is_empty());
-        assert!(!PerformMsg::SelectMode(PerformMode::Sections).marks_dirty());
-    }
-
-    #[test]
-    fn shortcuts_do_not_change_hidden_perform_state() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-
-        state.update(
-            PerformMsg::SelectMode(PerformMode::TrackMutes),
-            &mut engine,
-            PerformCtx {
-                workspace_visible: false,
-            },
-        );
-
-        assert_eq!(state.mode, PerformMode::Sections);
-        assert!(engine.0.is_empty());
-    }
-
-    #[test]
-    fn pad_positions_are_stable_with_mode_specific_order_origins() {
-        let top_left = PadPosition::ALL[0];
-        let bottom_left = PadPosition::ALL[12];
-
-        assert_eq!(top_left.ordinal(PerformMode::Sections), 1);
-        assert_eq!(bottom_left.ordinal(PerformMode::Sections), 13);
-        assert_eq!(top_left.ordinal(PerformMode::Instrument), 13);
-        assert_eq!(bottom_left.ordinal(PerformMode::Instrument), 1);
-
-        let mut instrument_ordinals =
-            PadPosition::ALL.map(|position| position.ordinal(PerformMode::Instrument));
-        instrument_ordinals.sort_unstable();
-        assert_eq!(
-            instrument_ordinals,
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        );
-    }
-
-    #[test]
-    fn bank_selection_and_focus_default_to_ui_owned_shell_state() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-        assert_eq!(state.banks, PerformBanks::default());
-        assert_eq!(state.selected_pad, None);
-        assert_eq!(state.editor_focus, PerformEditorFocus::PadSurface);
-
-        state.update(
-            PerformMsg::FocusEditor(PerformEditorFocus::SectionConstruction),
-            &mut engine,
-            PerformCtx {
-                workspace_visible: true,
-            },
-        );
-        assert_eq!(state.editor_focus, PerformEditorFocus::SectionConstruction);
-        assert!(engine.0.is_empty());
-    }
-
-    #[test]
-    fn default_mapping_uses_the_settled_physical_layout() {
-        let mapping = PerformInputMapping::default();
-        assert_eq!(
-            PadPosition::ALL.map(|position| mapping.key_for(position).label()),
-            ["1", "2", "3", "4", "Q", "W", "E", "R", "A", "S", "D", "F", "Z", "X", "C", "V"]
-        );
-    }
-
-    #[test]
-    fn one_hold_produces_exactly_one_press_and_release() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-        let pressed_at = Instant::now();
-        let released_at = pressed_at + std::time::Duration::from_millis(23);
-        let ctx = PerformCtx {
-            workspace_visible: true,
-        };
-
-        let press = state.update(
-            PerformMsg::ComputerKeyPressed {
-                key: ComputerKey::Q,
-                key_id: "q".into(),
-                occurred_at: pressed_at,
-            },
-            &mut engine,
-            ctx,
-        );
-        let repeat = state.update(
-            PerformMsg::ComputerKeyPressed {
-                key: ComputerKey::Q,
-                key_id: "q".into(),
-                occurred_at: pressed_at,
-            },
-            &mut engine,
-            ctx,
-        );
-        let release = state.update(
-            PerformMsg::ComputerKeyReleased {
-                key_id: "q".into(),
-                occurred_at: released_at,
-            },
-            &mut engine,
-            ctx,
-        );
-        let extra_release = state.update(
-            PerformMsg::ComputerKeyReleased {
-                key_id: "q".into(),
-                occurred_at: released_at,
-            },
-            &mut engine,
-            ctx,
-        );
-
-        let position = PadPosition { row: 1, column: 0 };
-        assert_eq!(
-            press.gesture,
-            Some(PadGesture {
-                position,
-                kind: PadGestureKind::Press,
-                velocity: None,
-                source: PadGestureSource::ComputerKeyboard {
-                    key: ComputerKey::Q
-                },
-                occurred_at: pressed_at,
-            })
-        );
-        assert!(repeat.keyboard_consumed);
-        assert!(repeat.gesture.is_none());
-        assert_eq!(release.gesture.unwrap().kind, PadGestureKind::Release);
-        assert_eq!(release.gesture.unwrap().occurred_at, released_at);
-        assert!(extra_release.gesture.is_none());
-        assert!(!state.is_pad_pressed(position));
-        assert!(engine.0.is_empty());
-    }
-
-    #[test]
-    fn mapping_changes_do_not_change_gesture_structure_between_modes() {
-        let at = Instant::now();
-        let mut engine = RecordingEngine::default();
-        let mut sections = PerformState::default();
-        let mut instrument = PerformState {
-            mode: PerformMode::Instrument,
-            ..PerformState::default()
-        };
-        sections
-            .input_mapping
-            .rebind(PadPosition::ALL[0], ComputerKey::Y);
-        instrument.input_mapping = sections.input_mapping.clone();
-
-        let mut press = |state: &mut PerformState, key_id: &str| {
-            state
-                .update(
-                    PerformMsg::ComputerKeyPressed {
-                        key: ComputerKey::Y,
-                        key_id: key_id.into(),
-                        occurred_at: at,
-                    },
-                    &mut engine,
-                    PerformCtx {
-                        workspace_visible: true,
-                    },
-                )
-                .gesture
-                .unwrap()
-        };
-
-        assert_eq!(
-            press(&mut sections, "sections"),
-            press(&mut instrument, "instrument")
-        );
-    }
-
-    #[test]
-    fn release_keeps_the_original_pair_when_mapping_changes_mid_hold() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-        let ctx = PerformCtx {
-            workspace_visible: true,
-        };
-        let at = Instant::now();
-        let press = state.update(
-            PerformMsg::ComputerKeyPressed {
-                key: ComputerKey::Q,
-                key_id: "q".into(),
-                occurred_at: at,
-            },
-            &mut engine,
-            ctx,
-        );
-        state
-            .input_mapping
-            .rebind(PadPosition::ALL[0], ComputerKey::Q);
-        let release = state.update(
-            PerformMsg::ComputerKeyReleased {
-                key_id: "q".into(),
-                occurred_at: at,
-            },
-            &mut engine,
-            ctx,
-        );
-
-        assert_eq!(press.gesture.unwrap().position, PadPosition::ALL[4]);
-        assert_eq!(release.gesture.unwrap().position, PadPosition::ALL[4]);
-    }
-
-    #[test]
-    fn rebinding_swaps_an_existing_key_and_requests_global_persistence() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-        state.update(
-            PerformMsg::BeginKeyRebind(PadPosition::ALL[0]),
-            &mut engine,
-            PerformCtx::default(),
-        );
-        let action = state.update(
-            PerformMsg::ComputerKeyPressed {
-                key: ComputerKey::Q,
-                key_id: "q".into(),
-                occurred_at: Instant::now(),
-            },
-            &mut engine,
-            PerformCtx::default(),
-        );
-
-        assert_eq!(
-            state.input_mapping.key_for(PadPosition::ALL[0]),
-            ComputerKey::Q
-        );
-        assert_eq!(
-            state.input_mapping.key_for(PadPosition::ALL[4]),
-            ComputerKey::Digit1
-        );
-        assert!(action.keyboard_consumed);
-        assert!(action.persist_settings);
-        assert!(action.gesture.is_none());
-    }
-
-    #[test]
-    fn section_crud_and_properties_update_the_ordered_store() {
-        let mut state = PerformState::default();
-        let mut engine = RecordingEngine::default();
-        let ctx = PerformCtx {
-            workspace_visible: true,
-        };
-
-        state.update(PerformMsg::CreateSectionAt(5), &mut engine, ctx);
-        let source_id = state.selected_section.expect("new section selected");
-        state.update(
-            PerformMsg::StartEditingSectionName(source_id),
-            &mut engine,
-            ctx,
-        );
-        assert_eq!(state.editing_section_name, Some(source_id));
-        state.update(
-            PerformMsg::SectionNameInput("Breakdown".into()),
-            &mut engine,
-            ctx,
-        );
-        state.update(PerformMsg::CommitSectionName(source_id), &mut engine, ctx);
-        assert_eq!(state.editing_section_name, None);
-        state.update(
-            PerformMsg::SetSectionLengthBeats(source_id, 32.0),
-            &mut engine,
-            ctx,
-        );
-        state.update(
-            PerformMsg::SetSectionLaunchQuantization(
-                source_id,
-                SectionLaunchQuantization::EndOfSection,
-            ),
-            &mut engine,
-            ctx,
-        );
-        state.update(PerformMsg::ToggleSectionLoop(source_id), &mut engine, ctx);
-        state.update(
-            PerformMsg::BeginDuplicateSection(source_id),
-            &mut engine,
-            ctx,
-        );
-        state.update(PerformMsg::DuplicateSectionTo(2), &mut engine, ctx);
-
-        let duplicate_id = state.selected_section.expect("duplicate selected");
-        let duplicate = state.sections.by_id(duplicate_id).unwrap();
-        assert_eq!(duplicate.slot, 2);
-        assert_eq!(duplicate.name, "Breakdown Copy");
-        assert_eq!(duplicate.length_beats, 32.0);
-        assert_eq!(
-            duplicate.launch_quantization,
-            SectionLaunchQuantization::EndOfSection
-        );
-        assert!(!duplicate.looping);
-        assert_eq!(state.sections.sections[1].slot, 5);
-
-        state.update(PerformMsg::DeleteSection(duplicate_id), &mut engine, ctx);
-        assert!(state.sections.by_id(duplicate_id).is_none());
-        assert_eq!(state.selected_section, None);
-        assert!(engine.0.is_empty());
-    }
-
-    #[test]
-    fn only_section_document_edits_are_dirty() {
-        let id = SectionId::new();
-        assert!(PerformMsg::CreateSectionAt(0).marks_dirty());
-        assert!(PerformMsg::DuplicateSectionTo(1).marks_dirty());
-        assert!(PerformMsg::DeleteSection(id).marks_dirty());
-        assert!(PerformMsg::CommitSectionName(id).marks_dirty());
-        assert!(PerformMsg::SetSectionLengthBeats(id, 8.0).marks_dirty());
-        assert!(
-            PerformMsg::SetSectionLaunchQuantization(id, SectionLaunchQuantization::OneBeat)
-                .marks_dirty()
-        );
-        assert!(PerformMsg::ToggleSectionLoop(id).marks_dirty());
-        assert!(!PerformMsg::SelectSection(id).marks_dirty());
-        assert!(!PerformMsg::SectionNameInput("Draft".into()).marks_dirty());
-        assert!(!PerformMsg::StartEditingSectionName(id).marks_dirty());
-        assert!(!PerformMsg::CancelSectionNameEdit.marks_dirty());
-        assert!(!PerformMsg::BeginDuplicateSection(id).marks_dirty());
-    }
-}
+#[path = "perform_tests.rs"]
+mod tests;

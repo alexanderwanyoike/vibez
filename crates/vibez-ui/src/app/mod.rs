@@ -411,10 +411,19 @@ impl App {
                     .find(|clip| clip.id == clip_id)
                     .map(|clip| clip.duration_beats)
             }) {
-                return (self.state.view.window_width - 52.0).max(1.0) / duration.max(1.0) as f32;
+                return crate::timeline_geometry::TimelineGeometry::fitted(
+                    duration,
+                    self.state.view.window_width,
+                    52.0,
+                )
+                .pixels_per_beat();
             }
         }
-        20.0 * self.state.view.zoom_level
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.state.view.zoom_level,
+            self.state.view.scroll_offset_beats,
+        )
+        .pixels_per_beat()
     }
 
     /// Walk `next_track_number` forward past any names already in use so
@@ -441,10 +450,13 @@ impl App {
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
-        let ppb = 20.0 * self.state.view.zoom_level as f64;
         // Conservative estimate of canvas width (window minus track headers)
-        let canvas_width = 1400.0_f64;
-        let visible_beats = canvas_width / ppb;
+        let canvas_width = 1400.0_f32;
+        let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.state.view.zoom_level,
+            self.state.view.scroll_offset_beats,
+        );
+        let visible_beats = geometry.visible_beats(canvas_width);
         let visible_end = self.state.view.scroll_offset_beats + visible_beats;
         let margin = 2.0_f64;
 

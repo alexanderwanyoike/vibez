@@ -7,13 +7,14 @@
 //! vectors.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{LaneId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{ArrangementTimeline, ProjectTrack, ProjectTracksState};
+use crate::state::{ProjectTrack, ProjectTracksState, TimelineEditorState};
 
 /// Messages the automation domain handles.
 #[derive(Debug, Clone)]
@@ -272,8 +273,9 @@ impl AutomationState {
         msg: AutomationMsg,
         engine: &mut impl EngineHandle,
         project_tracks: &mut ProjectTracksState,
-        timeline: &mut ArrangementTimeline,
+        editor: &mut TimelineEditorState,
     ) -> AutomationAction {
+        let timeline = Arc::make_mut(&mut editor.timeline);
         let mut action = AutomationAction::default();
         match msg {
             AutomationMsg::ToggleTrackLanes(track_id) => {
@@ -481,16 +483,19 @@ impl AutomationState {
             }
             AutomationMsg::DeleteSelectedPoint => {
                 if let Some((track_id, lane_id, index)) = self.selected.take() {
-                    return self.update(
-                        AutomationMsg::RemovePoint {
-                            track_id,
-                            lane_id,
-                            index,
-                        },
-                        engine,
-                        project_tracks,
-                        timeline,
-                    );
+                    let Some(lane) = timeline.get_mut(track_id).and_then(|content| {
+                        content
+                            .automation
+                            .iter_mut()
+                            .find(|lane| lane.id == lane_id)
+                    }) else {
+                        return action;
+                    };
+                    if index < lane.points.len() {
+                        lane.points.remove(index);
+                        let lane = lane.clone();
+                        sync_lane(engine, track_id, &lane);
+                    }
                 }
             }
         }
@@ -503,12 +508,12 @@ mod tests {
     use super::super::test_support::RecordingEngine;
     use super::*;
 
-    fn track() -> (ProjectTracksState, ArrangementTimeline, TrackId) {
+    fn track() -> (ProjectTracksState, TimelineEditorState, TrackId) {
         let track = ProjectTrack::new(TrackId::new(), "T1".to_string(), 0);
         let track_id = track.id;
         let mut project_tracks = ProjectTracksState::default();
         project_tracks.tracks.push(track);
-        let mut timeline = ArrangementTimeline::default();
+        let mut timeline = TimelineEditorState::default();
         timeline.ensure(track_id);
         (project_tracks, timeline, track_id)
     }

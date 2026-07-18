@@ -209,6 +209,9 @@ impl App {
         self.remote_audition_cache_lease = None;
         let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
         self.clear_project_runtime();
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
         self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
@@ -791,6 +794,9 @@ impl App {
             .map(|section| section.name.clone())
             .unwrap_or_default();
         self.state.perform.editing_section_name = None;
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
         let provenance_suffix = remote_provenance

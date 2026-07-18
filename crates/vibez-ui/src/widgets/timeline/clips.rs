@@ -16,6 +16,7 @@ use crate::state::{
     ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent,
     UndoGestureId,
 };
+use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 
@@ -197,16 +198,20 @@ impl TrackClipCanvas {
         }
     }
 
+    pub(super) fn geometry(&self) -> TimelineGeometry {
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+    }
+
     pub(super) fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.zoom_level
+        self.geometry().pixels_per_beat()
     }
 
     pub(super) fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        self.geometry().beat_to_x(beat)
     }
 
     pub(super) fn x_to_beat(&self, x: f32) -> f64 {
-        x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats
+        self.geometry().x_to_beat(x)
     }
 
     pub(super) fn snapped_beat(&self, beat: f64) -> f64 {
@@ -225,7 +230,7 @@ impl TrackClipCanvas {
     /// Hit test: find a clip at the given pixel x position.
     /// Returns (clip_id, is_note_clip, near_right_edge, position_beats, duration_beats).
     pub(super) fn hit_test(&self, pos_x: f32) -> Option<(ClipId, bool, bool, f64, f64)> {
-        let ppb = self.pixels_per_beat();
+        let geometry = self.geometry();
         let spb = self.spb();
 
         // Check audio clips
@@ -233,7 +238,7 @@ impl TrackClipCanvas {
             let clip_start_beat = clip.position as f64 / spb;
             let clip_dur_beats = clip.duration as f64 / spb;
             let clip_x = self.beat_to_x(clip_start_beat);
-            let clip_w = (clip_dur_beats * ppb as f64) as f32;
+            let clip_w = geometry.width_for_beats(clip_dur_beats);
 
             if pos_x >= clip_x && pos_x <= clip_x + clip_w {
                 let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
@@ -250,7 +255,7 @@ impl TrackClipCanvas {
         // Check note clips
         for note_clip in &self.note_clips {
             let clip_x = self.beat_to_x(note_clip.position_beats);
-            let clip_w = (note_clip.duration_beats * ppb as f64) as f32;
+            let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
             if pos_x >= clip_x && pos_x <= clip_x + clip_w {
                 let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
@@ -392,8 +397,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     // Also surface the track as the selection target so subsequent
                     // browser imports / dropdowns know which lane is "active".
                     if bounds.width > 0.0 {
-                        let ppb = self.pixels_per_beat();
-                        let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
+                        let beat = self.geometry().x_to_beat(pos.x);
                         state.drag = Some(ClipDragAction::PendingSeek {
                             beat,
                             start_x: pos.x,
@@ -432,8 +436,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     if self.time_selection_active
                         && self.selection_end_beats > self.selection_start_beats
                     {
-                        let ppb = self.pixels_per_beat();
-                        let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
+                        let beat = self.geometry().x_to_beat(pos.x);
                         if beat >= self.selection_start_beats && beat <= self.selection_end_beats {
                             return (
                                 canvas::event::Status::Captured,
@@ -467,7 +470,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 if let Some(ref drag) = state.drag {
                     if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                         let local_x = local.x;
-                        let ppb = self.pixels_per_beat();
+                        let geometry = self.geometry();
 
                         match drag {
                             ClipDragAction::PendingSeek {
@@ -477,8 +480,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 let dx = (local_x - start_x).abs();
                                 if dx > 4.0 {
                                     let anchor_snapped = self.snapped_beat(*anchor);
-                                    let beat =
-                                        local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+                                    let beat = geometry.x_to_beat(local_x);
                                     let current = self.snapped_beat(beat);
                                     let start = anchor_snapped.min(current);
                                     let end = anchor_snapped.max(current);
@@ -501,7 +503,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 return (canvas::event::Status::Captured, None);
                             }
                             ClipDragAction::RegionSelect { anchor_beat } => {
-                                let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+                                let beat = geometry.x_to_beat(local_x);
                                 let current = self.snapped_beat(beat);
                                 let start = anchor_beat.min(current);
                                 let end = anchor_beat.max(current);
@@ -528,7 +530,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_y,
                             } => {
                                 let delta_px = local_x - start_local_x;
-                                let delta_beats = delta_px as f64 / ppb as f64;
+                                let delta_beats = geometry.beats_for_width(delta_px);
                                 let new_pos = (original_position_beats + delta_beats).max(0.0);
 
                                 let snapped = self.snapped_beat(new_pos);

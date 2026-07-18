@@ -43,6 +43,7 @@ fn perform_edit(state: &mut AppState, engine: &mut RecordingEngine, message: Per
         engine,
         PerformCtx {
             workspace_visible: true,
+            project_tracks: &state.project_tracks.tracks,
         },
     );
 }

@@ -254,9 +254,12 @@ impl App {
         ]
         .spacing(5);
         let origin = match mode {
-            PerformMode::Sections => "ORDER · TOP-LEFT",
-            PerformMode::TrackMutes => "PROJECT TRACKS · TOP-LEFT",
-            PerformMode::Instrument => "ORDER · BOTTOM-LEFT",
+            PerformMode::Sections => "ORDER · TOP-LEFT".to_string(),
+            PerformMode::TrackMutes => format!(
+                "BANK {} · PROJECT TRACKS · [ ]",
+                self.state.perform.banks.track_mutes + 1
+            ),
+            PerformMode::Instrument => "ORDER · BOTTOM-LEFT".to_string(),
         };
         let header = row![
             heading,
@@ -320,45 +323,56 @@ impl App {
             .is_some_and(|section| self.state.perform.selected_section == Some(section.id))
             || self.state.perform.selected_pad == Some(position);
         let pressed = self.state.perform.is_pad_pressed(position);
-        let (title, detail, color) = match mode {
+        let mute_track = (mode == PerformMode::TrackMutes)
+            .then(|| {
+                self.state
+                    .perform
+                    .track_for_mute_pad(position, &self.state.project_tracks.tracks)
+            })
+            .flatten();
+        let (title, detail, color, muted) = match mode {
             PerformMode::Sections => match section {
                 Some(section) => (
                     section.name.clone(),
                     format!("AVAILABLE · {:.0} BARS", section.length_beats / 4.0),
                     th::track_color((ordinal - 1) as u8),
+                    false,
                 ),
                 None if self.state.perform.duplicate_source.is_some() => (
                     "+ DUPLICATE".to_string(),
                     "CHOOSE EMPTY SLOT".to_string(),
                     th::track_color((ordinal - 1) as u8),
+                    false,
                 ),
                 None => (
                     "+ SECTION".to_string(),
                     "EMPTY".to_string(),
                     th::track_color((ordinal - 1) as u8),
+                    false,
                 ),
             },
             PerformMode::TrackMutes => {
-                if let Some(track) = self
-                    .state
-                    .project_tracks
-                    .tracks
-                    .get(usize::from(ordinal - 1))
-                {
+                if let Some(track) = mute_track {
                     (
                         track.name.clone(),
-                        if track.kind.is_midi() {
-                            "MIDI TRACK".to_string()
-                        } else {
-                            "AUDIO TRACK".to_string()
-                        },
+                        format!(
+                            "{} · {}",
+                            if track.kind.is_midi() {
+                                "MIDI"
+                            } else {
+                                "AUDIO"
+                            },
+                            if track.mute { "MUTED" } else { "LIVE" }
+                        ),
                         th::track_color(track.color_index),
+                        track.mute,
                     )
                 } else {
                     (
                         "—".to_string(),
                         "NO PROJECT TRACK".to_string(),
                         th::text_muted(),
+                        false,
                     )
                 }
             }
@@ -366,6 +380,7 @@ impl App {
                 "SELECT MIDI".to_string(),
                 "NO INSTRUMENT TARGET".to_string(),
                 th::track_color((ordinal - 1) as u8),
+                false,
             ),
         };
         let number_color = th::blend(color, th::text(), 0.3);
@@ -411,6 +426,8 @@ impl App {
                         0.0,
                         if pressed {
                             th::blend(th::accent_dim(), color, 0.35)
+                        } else if muted {
+                            th::blend(th::mute_active(), color, 0.28)
                         } else if selected {
                             th::bg_hover()
                         } else {
@@ -423,6 +440,8 @@ impl App {
             border: iced::Border {
                 color: if pressed || selected {
                     th::accent()
+                } else if muted {
+                    th::mute_active()
                 } else {
                     th::blend(th::border_light(), color, 0.38)
                 },
@@ -432,7 +451,7 @@ impl App {
             ..Default::default()
         });
 
-        let pad = container(pad_face)
+        let pad: Element<'_, Message> = container(pad_face)
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .padding(3)
@@ -456,7 +475,8 @@ impl App {
                     blur_radius: if pressed { 3.0 } else { 7.0 },
                 },
                 ..Default::default()
-            });
+            })
+            .into();
 
         match (mode, section) {
             (PerformMode::Sections, Some(section)) => mouse_area(pad)
@@ -472,7 +492,12 @@ impl App {
             (PerformMode::Sections, None) => mouse_area(pad)
                 .on_press(Message::Perform(PerformMsg::CreateSectionAt(ordinal - 1)))
                 .into(),
-            _ => pad.into(),
+            (PerformMode::TrackMutes, _) if mute_track.is_some() => mouse_area(pad)
+                .on_press(Message::Perform(PerformMsg::ToggleTrackMuteFromPad(
+                    position,
+                )))
+                .into(),
+            _ => pad,
         }
     }
 

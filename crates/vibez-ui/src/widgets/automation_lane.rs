@@ -23,6 +23,7 @@ use crate::domains::automation::AutomationMsg;
 use crate::message::Message;
 use crate::state::GridConfig;
 use crate::theme as th;
+use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 
@@ -69,16 +70,20 @@ pub struct LaneInteraction {
 }
 
 impl AutomationLaneWidget {
+    fn geometry(&self) -> TimelineGeometry {
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+    }
+
     fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.zoom_level
+        self.geometry().pixels_per_beat()
     }
 
     fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        self.geometry().beat_to_x(beat)
     }
 
     fn x_to_beat(&self, x: f32) -> f64 {
-        (x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats).max(0.0)
+        self.geometry().x_to_beat(x).max(0.0)
     }
 
     /// Cursor x to beat, snapped to the grid unless shift is held.
