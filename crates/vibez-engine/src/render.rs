@@ -164,7 +164,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 continue;
             }
             match req.clip_audio.get(&clip.id) {
-                Some(audio) => engine.clips.push(EngineClip {
+                Some(audio) => engine.playback_source.clips.push(EngineClip {
                     id: clip.id,
                     audio: Arc::clone(audio),
                     position: clip.position,
@@ -186,7 +186,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             if !clip_included_for_mode(nc.id, req.mode, true) {
                 continue;
             }
-            engine.note_clips.push(EngineNoteClip {
+            engine.playback_source.note_clips.push(EngineNoteClip {
                 id: nc.id,
                 position_beats: nc.position_beats,
                 duration_beats: nc.duration_beats,

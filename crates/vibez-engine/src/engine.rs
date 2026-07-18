@@ -13,9 +13,9 @@ use crate::commands::{AuditionSync, EngineCommand};
 use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
-    any_solo, calculate_total_length, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip,
-    EngineTrack,
+    any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
 };
+use crate::playback_source::calculate_total_length;
 use crate::transport::Transport;
 
 /// Capacity of the UI spectrum-analyser sample ring: roughly a third
@@ -818,7 +818,12 @@ impl AudioEngine {
         } else {
             0.0
         };
-        let total = calculate_total_length(&self.tracks, samples_per_beat);
+        let total = calculate_total_length(
+            self.tracks
+                .iter()
+                .map(|track| track.playback_source.as_ref()),
+            samples_per_beat,
+        );
         if total > 0 {
             self.transport.set_audio_length(Some(total));
         } else if self.audio.is_none() {

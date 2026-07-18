@@ -797,7 +797,7 @@ fn move_clip_changes_position() {
     engine.process(&mut buf, 2);
 
     // Clip is now at position 50, engine should recognize this
-    assert_eq!(engine.tracks()[0].clips[0].position, 50);
+    assert_eq!(engine.tracks()[0].playback_source.clips[0].position, 50);
 }
 
 #[test]
