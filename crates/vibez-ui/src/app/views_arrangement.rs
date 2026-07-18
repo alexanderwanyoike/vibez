@@ -836,7 +836,7 @@ impl App {
 const MAX_PICKER_RESULTS: usize = 40;
 
 /// Reference value plus scale labels for a lane's target.
-fn lane_scale(
+pub(super) fn lane_scale(
     track: &crate::state::ProjectTrack,
     target: &vibez_core::automation::AutomationTarget,
 ) -> (Option<f32>, String, String, String) {

@@ -106,6 +106,12 @@ impl Section {
             timeline: Arc::new(timeline),
         }
     }
+
+    /// Whether a beat is active inside this Section's non-destructive
+    /// playable boundary. Timeline content outside the boundary remains stored.
+    pub fn contains_playable_beat(&self, beat: f64) -> bool {
+        beat >= 0.0 && beat < self.length_beats
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -250,5 +256,40 @@ mod tests {
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
         assert_eq!(section_clip.position_beats, 0.0);
+    }
+
+    #[test]
+    fn shortening_only_changes_the_playable_boundary() {
+        let track_id = TrackId::new();
+        let mut section = Section::new(0);
+        let hidden_clip = UiNoteClip {
+            id: ClipId::new(),
+            name: "Fill".into(),
+            position_beats: 12.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        };
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(hidden_clip.clone());
+
+        section.length_beats = 8.0;
+        assert!(!section.contains_playable_beat(hidden_clip.position_beats));
+        assert_eq!(
+            section.timeline.get(track_id).unwrap().note_clips[0].id,
+            hidden_clip.id
+        );
+
+        section.length_beats = 16.0;
+        assert!(section.contains_playable_beat(hidden_clip.position_beats));
+        assert_eq!(
+            section.timeline.get(track_id).unwrap().note_clips[0].id,
+            hidden_clip.id
+        );
     }
 }

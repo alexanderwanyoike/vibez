@@ -314,7 +314,7 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
 }
 
 #[tokio::test]
-async fn section_properties_and_shared_timeline_media_survive_reopen() {
+async fn shortened_section_audio_and_automation_survive_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("shared.wav");
     let project_path = directory.path().join("sections.vzp");
@@ -326,11 +326,11 @@ async fn section_properties_and_shared_timeline_media_survive_reopen() {
     let track = TrackInfo::new("Audio");
     let track_id = track.id;
     let section_id = vibez_core::id::SectionId::new();
-    let clip = |id| ClipInfo {
+    let clip = |id, position| ClipInfo {
         id,
         track_id,
         name: "shared.wav".into(),
-        position: 0,
+        position,
         source_offset: 0,
         duration: audio.num_frames() as u64,
         source: Some(MediaSourceRef::LocalFile {
@@ -344,21 +344,34 @@ async fn section_properties_and_shared_timeline_media_survive_reopen() {
         warped: false,
         warped_to_bpm: None,
     };
+    let mut section_lane = vibez_core::automation::AutomationLane::new(
+        vibez_core::automation::AutomationTarget::TrackGain,
+    );
+    section_lane.insert_point(vibez_core::automation::AutomationPoint {
+        beat: 12.0,
+        value: 0.25,
+        curve: 0.4,
+    });
+    let beyond_boundary_position = 132_300;
     let project = Project {
         tracks: vec![track],
         arrange: vibez_project::TimelineInfo {
-            clips: vec![clip(ClipId::new())],
+            clips: vec![clip(ClipId::new(), 0)],
             ..vibez_project::TimelineInfo::default()
         },
         sections: vec![vibez_project::SectionInfo {
             id: section_id,
             slot: 7,
             name: "Breakdown".into(),
-            length_beats: 32.0,
+            length_beats: 4.0,
             launch_quantization: vibez_project::SectionLaunchQuantization::EndOfSection,
             looping: false,
             timeline: vibez_project::TimelineInfo {
-                clips: vec![clip(ClipId::new())],
+                clips: vec![clip(ClipId::new(), beyond_boundary_position)],
+                automation: vec![vibez_project::TimelineAutomationInfo {
+                    track_id,
+                    lanes: vec![section_lane.clone()],
+                }],
                 ..vibez_project::TimelineInfo::default()
             },
         }],
@@ -388,12 +401,14 @@ async fn section_properties_and_shared_timeline_media_survive_reopen() {
     assert_eq!(section.id, section_id);
     assert_eq!(section.slot, 7);
     assert_eq!(section.name, "Breakdown");
-    assert_eq!(section.length_beats, 32.0);
+    assert_eq!(section.length_beats, 4.0);
     assert_eq!(
         section.launch_quantization,
         vibez_project::SectionLaunchQuantization::EndOfSection
     );
     assert!(!section.looping);
+    assert_eq!(section.timeline.clips[0].position, beyond_boundary_position);
+    assert_eq!(section.timeline.automation[0].lanes, vec![section_lane]);
 }
 
 #[tokio::test]

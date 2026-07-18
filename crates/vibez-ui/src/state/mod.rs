@@ -491,8 +491,8 @@ impl std::ops::DerefMut for TimelineEditorState {
 #[derive(Debug, Default)]
 pub struct ArrangementState {
     pub(crate) editor: TimelineEditorState,
+    pub pending_project_track_deletion: Option<TrackId>,
 }
-
 impl std::ops::Deref for ArrangementState {
     type Target = TimelineEditorState;
 

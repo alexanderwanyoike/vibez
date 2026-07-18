@@ -16,14 +16,22 @@ fn add_track_selects_it_and_names_uniquely() {
 }
 
 #[test]
-fn remove_track_clears_its_selections_and_requests_gui_teardown() {
+fn track_removal_requires_confirmation_then_clears_its_state() {
     let mut a = arrangement_with_tracks(2);
     let victim = a.tracks[1].id;
     let survivor = a.tracks[0].id;
     a.selected_note_clip = Some((victim, ClipId::new()));
     let mut engine = RecordingEngine::default();
+    let request = a.update(
+        ArrangementMsg::RequestRemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(a.tracks.len(), 2);
+    assert_eq!(a.pending_project_track_deletion, Some(victim));
+    assert_eq!(request.close_track_guis, None);
     let action = a.update(
-        ArrangementMsg::RemoveTrack(victim),
+        ArrangementMsg::ConfirmRemoveTrack(victim),
         &mut engine,
         ArrangementCtx::default(),
     );
@@ -32,6 +40,29 @@ fn remove_track_clears_its_selections_and_requests_gui_teardown() {
     assert_eq!(a.selected_note_clip, None);
     assert_eq!(action.close_track_guis, Some(victim));
     assert!(a.arrangement.timeline.get(victim).is_none());
+}
+
+#[test]
+fn cancelling_track_removal_preserves_the_project_track() {
+    let mut a = arrangement_with_tracks(1);
+    let victim = a.tracks[0].id;
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::RequestRemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.update(
+        ArrangementMsg::CancelRemoveTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(a.tracks.len(), 1);
+    assert_eq!(a.pending_project_track_deletion, None);
+    assert!(engine.0.is_empty());
+    assert!(!ArrangementMsg::RequestRemoveTrack(victim).marks_dirty());
+    assert!(!ArrangementMsg::CancelRemoveTrack.marks_dirty());
+    assert!(ArrangementMsg::ConfirmRemoveTrack(victim).marks_dirty());
 }
 
 #[test]

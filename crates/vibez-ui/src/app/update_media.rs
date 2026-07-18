@@ -467,6 +467,18 @@ impl App {
             return Task::none();
         };
         self.state.browser.cancel_media_drag();
+        if self.state.view.workspace == crate::state::Workspace::Perform {
+            if let Some(section_id) = self.state.perform.selected_section {
+                return self.dispatch_drop_for_target(
+                    source,
+                    BrowserImportTarget::SectionClipAt {
+                        section_id,
+                        track_id,
+                        position_samples,
+                    },
+                );
+            }
+        }
         self.dispatch_drop_on_arrangement(track_id, position_samples, source)
     }
 

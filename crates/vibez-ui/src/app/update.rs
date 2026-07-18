@@ -202,16 +202,7 @@ impl App {
                 return self.apply_browser_action(action);
             }
             Message::Automation(msg) => {
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                    self.state.automation_ui.update(
-                        msg,
-                        &mut engine,
-                        project_tracks,
-                        self.state.arrangement.resolve_timeline_mut().editor,
-                    )
-                };
+                let action = self.route_automation_editor_message(msg);
                 if let Some(status) = action.status {
                     self.state.status_text = status;
                 }

@@ -27,18 +27,21 @@ impl App {
             Workspace::Perform => self.view_perform(),
             Workspace::Mix => self.view_mixer(),
         };
-        let content: Element<'_, Message> =
-            if self.state.view.workspace == Workspace::Arrange && self.state.browser.open {
-                row![
-                    self.view_sample_browser_panel(),
-                    self.view_browser_splitter(),
-                    workspace_content
-                ]
-                .height(Length::FillPortion(5))
-                .into()
-            } else {
+        let browser_workspace = matches!(
+            self.state.view.workspace,
+            Workspace::Arrange | Workspace::Perform
+        );
+        let content: Element<'_, Message> = if browser_workspace && self.state.browser.open {
+            row![
+                self.view_sample_browser_panel(),
+                self.view_browser_splitter(),
                 workspace_content
-            };
+            ]
+            .height(Length::FillPortion(5))
+            .into()
+        } else {
+            workspace_content
+        };
 
         let detail_panel = self.view_detail_panel();
         let transport_bar = self.view_transport();
@@ -100,7 +103,14 @@ impl App {
             base_layout
         };
 
-        if self.state.settings_open {
+        if self
+            .state
+            .arrangement
+            .pending_project_track_deletion
+            .is_some()
+        {
+            stack![base_layout, self.view_track_deletion_overlay()].into()
+        } else if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
         } else if self.state.project.file_menu_open {
             stack![base_layout, self.view_file_menu_overlay()].into()

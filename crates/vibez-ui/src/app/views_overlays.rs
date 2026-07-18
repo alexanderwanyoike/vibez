@@ -23,7 +23,127 @@ use crate::theme as th;
 
 use super::*;
 
+fn track_deletion_locations(
+    arrangement: &crate::state::ArrangementTimeline,
+    sections: &crate::domains::perform::SectionStore,
+    track_id: vibez_core::id::TrackId,
+) -> Vec<String> {
+    let has_content = |timeline: &crate::state::ArrangementTimeline| {
+        timeline.get(track_id).is_some_and(|content| {
+            !content.clips.is_empty()
+                || !content.note_clips.is_empty()
+                || !content.automation.is_empty()
+        })
+    };
+    let mut locations = Vec::new();
+    if has_content(arrangement) {
+        locations.push("Arrange".to_string());
+    }
+    locations.extend(
+        sections
+            .sections
+            .iter()
+            .filter(|section| has_content(&section.timeline))
+            .map(|section| format!("Section {:02} · {}", section.slot + 1, section.name)),
+    );
+    locations
+}
+
 impl App {
+    pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
+        let track_id = self
+            .state
+            .arrangement
+            .pending_project_track_deletion
+            .expect("track deletion overlay requires a pending track");
+        let track_name = self
+            .state
+            .project_tracks
+            .find(track_id)
+            .map(|track| track.name.as_str())
+            .unwrap_or("Missing Project Track");
+        let locations = track_deletion_locations(
+            &self.state.arrangement.timeline,
+            &self.state.perform.sections,
+            track_id,
+        );
+        let mut location_list = column![].spacing(4);
+        if locations.is_empty() {
+            location_list = location_list.push(
+                text("No authored timeline content")
+                    .size(11)
+                    .color(th::text_dim()),
+            );
+        } else {
+            for location in locations {
+                location_list =
+                    location_list.push(text(format!("• {location}")).size(11).color(th::text()));
+            }
+        }
+        let cancel = button(text("Cancel").size(12).color(th::text()))
+            .on_press(Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::CancelRemoveTrack,
+            ))
+            .padding([7, 14]);
+        let remove = button(text("Delete Project Track").size(12).color(th::bg_dark()))
+            .on_press(Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::ConfirmRemoveTrack(track_id),
+            ))
+            .padding([7, 14])
+            .style(|_theme: &Theme, status| button::Style {
+                background: Some(
+                    if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                        th::blend(th::danger(), th::text(), 0.18)
+                    } else {
+                        th::danger()
+                    }
+                    .into(),
+                ),
+                text_color: th::bg_dark(),
+                border: iced::Border::default(),
+                ..Default::default()
+            });
+        let card = container(
+            column![
+                text("DELETE PROJECT TRACK?")
+                    .font(crate::typography::PERFORM_LABEL)
+                    .size(15)
+                    .color(th::danger()),
+                text(format!("“{track_name}” is shared across the project."))
+                    .size(12)
+                    .color(th::text()),
+                text("Deleting it also removes its content from every affected location:")
+                    .size(11)
+                    .color(th::text_dim()),
+                scrollable(location_list).height(Length::Fixed(130.0)),
+                text("The complete deletion is recorded as one undoable action.")
+                    .size(10)
+                    .color(th::text_dim()),
+                row![horizontal_space(), cancel, remove].spacing(8),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .width(Length::Fixed(480.0))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::danger(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+        container(center(card))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.62).into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
     pub(super) fn view_edit_menu_overlay(&self) -> Element<'_, Message> {
         let item = |icon: char, label: &'static str, shortcut: &'static str, message: Message| {
             button(
@@ -752,5 +872,46 @@ impl App {
         )
         .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
+    }
+}
+
+#[cfg(test)]
+mod track_deletion_tests {
+    use std::sync::Arc;
+
+    use super::track_deletion_locations;
+    use crate::domains::perform::{Section, SectionStore};
+    use crate::state::ArrangementTimeline;
+    use vibez_core::automation::{AutomationLane, AutomationTarget};
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn warning_lists_arrange_and_every_affected_section() {
+        let track_id = TrackId::new();
+        let mut arrange = ArrangementTimeline::default();
+        arrange
+            .ensure(track_id)
+            .automation
+            .push(AutomationLane::new(AutomationTarget::TrackGain));
+        let mut first = Section::new(0);
+        first.name = "Verse".into();
+        Arc::make_mut(&mut first.timeline)
+            .ensure(track_id)
+            .automation
+            .push(AutomationLane::new(AutomationTarget::TrackPan));
+        let mut second = Section::new(5);
+        second.name = "Fill".into();
+        Arc::make_mut(&mut second.timeline)
+            .ensure(track_id)
+            .automation
+            .push(AutomationLane::new(AutomationTarget::TrackGain));
+        let sections = SectionStore {
+            sections: vec![first, second],
+        };
+
+        assert_eq!(
+            track_deletion_locations(&arrange, &sections, track_id),
+            ["Arrange", "Section 01 · Verse", "Section 06 · Fill"]
+        );
     }
 }

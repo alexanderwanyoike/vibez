@@ -10,11 +10,13 @@ use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{PerformEditorFocus, PerformMsg};
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::{automation::AutomationMsg, browser::BrowserMsg};
 use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
 use crate::widgets::timeline::TrackClipCanvas;
 
 use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
@@ -36,10 +38,24 @@ impl App {
         let total_beats = selected.map_or(16.0, |section| section.length_beats);
         let timeline_width = SECTION_BAR_WIDTH * bar_count as f32;
         let row_height = if self.state.perform.section_timeline_expanded {
-            72.0
+            78.0
         } else {
-            48.0
+            58.0
         };
+        let browser_drag_duration = self
+            .state
+            .browser
+            .drag_preview_beats(self.state.transport.bpm);
+        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
+            let mode = match self.state.browser.audition_mode {
+                crate::state::AuditionMode::Raw => "RAW",
+                crate::state::AuditionMode::Warp => "WARP",
+            };
+            match browser_drag_duration {
+                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
+                None => format!("{label} · {mode}"),
+            }
+        });
 
         let timeline: Element<'_, Message> = if selected.is_none() {
             center(
@@ -80,6 +96,11 @@ impl App {
             .height(Length::Fill)
             .into()
         } else {
+            let selected_section = match selected {
+                Some(section) => section,
+                None => unreachable!("empty Section selection is rendered above"),
+            };
+            let section_id = selected_section.id;
             let ruler_gutter = container(
                 column![
                     text("PROJECT TRACK")
@@ -154,12 +175,29 @@ impl App {
             let empty_content = TrackTimelineContent::default();
             let mut gutters = column![];
             let mut lanes = column![].width(Length::Fixed(timeline_width));
+            let mut content_height = 32.0;
 
             for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
                 let content = editor.timeline.get(track.id).unwrap_or(&empty_content);
                 let selected_track = editor.selected_track == Some(track.id);
                 let track_color = th::track_color(track.color_index);
-                let clip_count = content.note_clips.len();
+                let clip_count = content.note_clips.len() + content.clips.len();
+                let hidden_note_count = content
+                    .note_clips
+                    .iter()
+                    .filter(|clip| !selected_section.contains_playable_beat(clip.position_beats))
+                    .count();
+                let hidden_audio_count = content
+                    .clips
+                    .iter()
+                    .filter(|clip| {
+                        let beat = clip.position as f64 * self.state.transport.bpm
+                            / (self.state.transport.sample_rate.max(1) as f64 * 60.0);
+                        !selected_section.contains_playable_beat(beat)
+                    })
+                    .count();
+                let hidden_count = hidden_note_count + hidden_audio_count;
+                let has_content = clip_count > 0 || !content.automation.is_empty();
                 let track_id = track.id;
                 let type_label = if track.kind.is_midi() {
                     "MIDI"
@@ -191,10 +229,14 @@ impl App {
                                 } else {
                                     th::text_dim()
                                 }),
-                            text(format!(
-                                "{type_label} · {clip_count} CLIP{}",
-                                if clip_count == 1 { "" } else { "S" }
-                            ))
+                            text(if hidden_count > 0 {
+                                format!("{type_label} · {clip_count} CLIPS · {hidden_count} HIDDEN")
+                            } else {
+                                format!(
+                                    "{type_label} · {clip_count} CLIP{}",
+                                    if clip_count == 1 { "" } else { "S" }
+                                )
+                            })
                             .font(PERFORM_TECH)
                             .size(7)
                             .color(th::text_muted())
@@ -205,7 +247,7 @@ impl App {
                     .align_y(iced::Alignment::Center),
                 )
                 .on_press(Message::select_track(track_id))
-                .padding([4, 6])
+                .padding([2, 5])
                 .width(Length::Fill)
                 .style(move |_theme: &Theme, status| button::Style {
                     background: Some(
@@ -249,16 +291,82 @@ impl App {
                     )
                     .into()
                 } else {
-                    container(
-                        text("CARD 08")
+                    tooltip(
+                        container(
+                            icons::icon(icons::AUDIO_WAVEFORM)
+                                .size(10)
+                                .color(th::text_dim()),
+                        )
+                        .padding([5, 7]),
+                        text("Drag audio here from Browser")
                             .font(PERFORM_TECH)
-                            .size(6)
-                            .color(th::text_muted()),
+                            .size(8),
+                        tooltip::Position::Right,
                     )
-                    .padding([5, 3])
                     .into()
                 };
-                let gutter = container(row![identity, add_clip].align_y(iced::Alignment::Center))
+                let automation_open = self.state.automation_ui.expanded.contains(&track.id);
+                let automation_toggle = tooltip(
+                    button(icons::icon(icons::SLIDERS_VERTICAL).size(10).color(
+                        if automation_open {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        },
+                    ))
+                    .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                        track_id,
+                    )))
+                    .padding([2, 5])
+                    .style(|_theme: &Theme, status| button::Style {
+                        background: matches!(
+                            status,
+                            button::Status::Hovered | button::Status::Pressed
+                        )
+                        .then(|| th::bg_hover().into()),
+                        text_color: th::text_dim(),
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }),
+                    text("Automation lanes").font(PERFORM_TECH).size(8),
+                    tooltip::Position::Right,
+                );
+                let remove_content: Element<'_, Message> = if has_content {
+                    tooltip(
+                        button(icons::icon(icons::X).size(9).color(th::text_dim()))
+                            .on_press(Message::Perform(PerformMsg::RemoveTrackContent {
+                                section_id,
+                                track_id,
+                            }))
+                            .padding([2, 5])
+                            .style(|_theme: &Theme, status| button::Style {
+                                background: matches!(
+                                    status,
+                                    button::Status::Hovered | button::Status::Pressed
+                                )
+                                .then(|| th::with_alpha(th::danger(), 0.16).into()),
+                                text_color: th::text_dim(),
+                                border: iced::Border::default(),
+                                ..Default::default()
+                            }),
+                        text("Remove content from this Section")
+                            .font(PERFORM_TECH)
+                            .size(8),
+                        tooltip::Position::Right,
+                    )
+                    .into()
+                } else {
+                    horizontal_space().width(Length::Shrink).into()
+                };
+                let controls = row![
+                    horizontal_space(),
+                    add_clip,
+                    automation_toggle,
+                    remove_content
+                ]
+                .spacing(1)
+                .align_y(iced::Alignment::Center);
+                let gutter = container(column![identity, controls].spacing(0))
                     .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
                     .height(Length::Fixed(row_height))
                     .padding([2, 3])
@@ -314,16 +422,142 @@ impl App {
                     editor.selection_start_beats,
                     editor.selection_end_beats,
                     editor.time_selection_track,
-                    false,
-                    None,
-                    None,
+                    self.state.browser.drag_source.is_some(),
+                    browser_drag_duration,
+                    browser_drag_detail.clone(),
                 );
+                let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(2.0, 0.0);
+                let grid = self.state.view.grid_config();
+                let compatible = !track.kind.is_midi();
                 gutters = gutters.push(gutter);
                 lanes = lanes.push(
-                    canvas(clip_canvas)
-                        .width(Length::Fixed(timeline_width))
-                        .height(Length::Fixed(row_height)),
+                    mouse_area(
+                        canvas(clip_canvas)
+                            .width(Length::Fixed(timeline_width))
+                            .height(Length::Fixed(row_height)),
+                    )
+                    .on_move(move |point| {
+                        Message::Browser(BrowserMsg::DragHoverTrack {
+                            track_id,
+                            beat: grid
+                                .snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat())
+                                .max(0.0),
+                            compatible,
+                        })
+                    })
+                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget)),
                 );
+                content_height += row_height;
+
+                if automation_open {
+                    for lane in &content.automation {
+                        let label = crate::domains::automation::target_label_with_buses(
+                            &lane.target,
+                            track,
+                            &self.state.project_tracks.buses,
+                        );
+                        let lane_id = lane.id;
+                        let lane_header = container(
+                            row![
+                                text(label).font(PERFORM_TECH).size(8).color(th::text_dim()),
+                                horizontal_space(),
+                                button(icons::icon(icons::TRASH_2).size(8).color(th::text_dim()))
+                                    .on_press(Message::Automation(AutomationMsg::RemoveLane {
+                                        track_id,
+                                        lane_id,
+                                    }))
+                                    .padding([2, 4]),
+                            ]
+                            .align_y(iced::Alignment::Center),
+                        )
+                        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
+                        .height(Length::Fixed(LANE_HEIGHT))
+                        .padding([4, 7])
+                        .style(|_theme: &Theme| container::Style {
+                            background: Some(th::bg_surface().into()),
+                            border: iced::Border {
+                                color: th::perform_grid_line(),
+                                width: 1.0,
+                                radius: 0.0.into(),
+                            },
+                            ..Default::default()
+                        });
+                        let selected_point = match self.state.automation_ui.selected {
+                            Some((selected_track, selected_lane, index))
+                                if selected_track == track_id && selected_lane == lane_id =>
+                            {
+                                Some(index)
+                            }
+                            _ => None,
+                        };
+                        let (reference, min_label, max_label, ref_label) =
+                            super::views_arrangement::lane_scale(track, &lane.target);
+                        let lane_canvas = canvas(AutomationLaneWidget {
+                            track_id,
+                            lane_id,
+                            points: lane.points.clone(),
+                            color: track_color,
+                            zoom_level: 2.0,
+                            scroll_offset_beats: 0.0,
+                            grid: self.state.view.grid_config(),
+                            selected: selected_point,
+                            reference,
+                            min_label,
+                            max_label,
+                            ref_label,
+                        })
+                        .width(Length::Fixed(timeline_width))
+                        .height(Length::Fixed(LANE_HEIGHT));
+                        gutters = gutters.push(lane_header);
+                        lanes = lanes.push(lane_canvas);
+                        content_height += LANE_HEIGHT;
+                    }
+                    let volume_exists = content.automation.iter().any(|lane| {
+                        lane.target == vibez_core::automation::AutomationTarget::TrackGain
+                    });
+                    let pan_exists = content.automation.iter().any(|lane| {
+                        lane.target == vibez_core::automation::AutomationTarget::TrackPan
+                    });
+                    if !volume_exists || !pan_exists {
+                        let add_header = container(
+                            text("ADD AUTOMATION")
+                                .font(PERFORM_TECH)
+                                .size(7)
+                                .color(th::text_muted()),
+                        )
+                        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
+                        .height(Length::Fixed(32.0))
+                        .padding([10, 7]);
+                        let mut add_choices = row![].spacing(5).padding([3, 7]);
+                        if !volume_exists {
+                            add_choices = add_choices.push(
+                                button(text("+ Volume").size(9).color(th::text_dim())).on_press(
+                                    Message::Automation(AutomationMsg::AddLane {
+                                        track_id,
+                                        target: vibez_core::automation::AutomationTarget::TrackGain,
+                                    }),
+                                ),
+                            );
+                        }
+                        if !pan_exists {
+                            add_choices = add_choices.push(
+                                button(text("+ Pan").size(9).color(th::text_dim())).on_press(
+                                    Message::Automation(AutomationMsg::AddLane {
+                                        track_id,
+                                        target: vibez_core::automation::AutomationTarget::TrackPan,
+                                    }),
+                                ),
+                            );
+                        }
+                        gutters = gutters.push(add_header);
+                        lanes = lanes.push(
+                            container(add_choices)
+                                .width(Length::Fixed(timeline_width))
+                                .height(Length::Fixed(32.0)),
+                        );
+                        content_height += 32.0;
+                    }
+                }
             }
 
             let fixed_gutter =
@@ -344,11 +578,21 @@ impl App {
                 ),
             )
             .width(Length::Fill)
-            .height(Length::Fill);
-            row![fixed_gutter, scrolling_timeline]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+            .height(Length::Fixed(content_height));
+            scrollable::Scrollable::with_direction(
+                row![fixed_gutter, scrolling_timeline]
+                    .width(Length::Fill)
+                    .height(Length::Fixed(content_height)),
+                scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new()
+                        .width(5)
+                        .scroller_width(5)
+                        .spacing(1),
+                ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         };
 
         let construction = container(column![toolbar, timeline].height(Length::Fill))

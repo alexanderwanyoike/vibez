@@ -138,10 +138,27 @@ impl ArrangementState {
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
-            ArrangementMsg::RemoveTrack(track_id) => {
+            ArrangementMsg::RequestRemoveTrack(track_id) => {
+                if !track_id.is_master()
+                    && project_tracks
+                        .tracks
+                        .iter()
+                        .any(|track| track.id == track_id)
+                {
+                    self.pending_project_track_deletion = Some(track_id);
+                }
+            }
+            ArrangementMsg::CancelRemoveTrack => {
+                self.pending_project_track_deletion = None;
+            }
+            ArrangementMsg::ConfirmRemoveTrack(track_id) => {
                 if track_id.is_master() {
                     return action;
                 }
+                if self.pending_project_track_deletion != Some(track_id) {
+                    return action;
+                }
+                self.pending_project_track_deletion = None;
                 let removed_name = project_tracks
                     .tracks
                     .iter()

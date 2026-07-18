@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
-use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::id::{ClipId, EffectId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
@@ -176,6 +176,11 @@ pub enum BrowserImportTarget {
     ArrangementClip(Option<TrackId>),
     /// Drop a sample as an arrangement clip at a specific sample position.
     ArrangementClipAt {
+        track_id: TrackId,
+        position_samples: u64,
+    },
+    SectionClipAt {
+        section_id: SectionId,
         track_id: TrackId,
         position_samples: u64,
     },
@@ -615,7 +620,7 @@ impl Message {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SelectTrack(t))
     }
     pub fn remove_track(t: TrackId) -> Self {
-        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RemoveTrack(t))
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RequestRemoveTrack(t))
     }
     pub fn rename_track(t: TrackId, n: String) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RenameTrack(

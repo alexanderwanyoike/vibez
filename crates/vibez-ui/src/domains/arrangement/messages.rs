@@ -10,7 +10,9 @@ pub enum ArrangementMsg {
     AddTrack,
     AddMidiTrack,
     AddInstrumentTrack,
-    RemoveTrack(TrackId),
+    RequestRemoveTrack(TrackId),
+    CancelRemoveTrack,
+    ConfirmRemoveTrack(TrackId),
     SelectTrack(TrackId),
     RenameTrack(TrackId, String),
     RenameClip(TrackId, ClipId, String),
@@ -177,6 +179,8 @@ impl ArrangementMsg {
         !matches!(
             self,
             ArrangementMsg::SelectTrack(_)
+                | ArrangementMsg::RequestRemoveTrack(_)
+                | ArrangementMsg::CancelRemoveTrack
                 | ArrangementMsg::EngineTrackMeter { .. }
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }
