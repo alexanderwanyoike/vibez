@@ -2,8 +2,8 @@
 //! Section construction area. Musical behavior arrives in later cards.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, scrollable, stack, text,
-    text_input, tooltip,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
+    stack, text, text_input, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
@@ -37,39 +37,43 @@ fn perform_tool_button(
     } else {
         th::text_dim()
     };
-    let control = button(icons::icon(icon).size(12).color(color))
-        .on_press(message)
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(28.0))
-        .padding(0)
-        .style(move |_theme: &Theme, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: Some(
-                    if hovered {
-                        th::bg_hover()
-                    } else if active {
-                        th::bg_elevated()
-                    } else {
-                        th::bg_surface()
-                    }
-                    .into(),
-                ),
-                text_color: color,
-                border: iced::Border {
-                    color: if destructive && hovered {
-                        th::danger()
-                    } else if active {
-                        th::accent_dim()
-                    } else {
-                        th::border()
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
+    let control = button(
+        center(icons::icon(icon).size(12).color(color))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_press(message)
+    .width(Length::Fixed(30.0))
+    .height(Length::Fixed(28.0))
+    .padding(0)
+    .style(move |_theme: &Theme, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(
+                if hovered {
+                    th::bg_hover()
+                } else if active {
+                    th::bg_elevated()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: color,
+            border: iced::Border {
+                color: if destructive && hovered {
+                    th::danger()
+                } else if active {
+                    th::accent_dim()
+                } else {
+                    th::border()
                 },
-                ..Default::default()
-            }
-        });
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        }
+    });
     tooltip(
         control,
         text(help.into())
@@ -91,6 +95,7 @@ fn perform_tool_button(
     })
     .into()
 }
+
 fn perform_mode_tab_width(window_width: f32) -> f32 {
     ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
@@ -516,12 +521,6 @@ impl App {
         };
 
         let bars = section.length_beats / 4.0;
-        let quantization_index = vibez_project::SectionLaunchQuantization::ALL
-            .iter()
-            .position(|candidate| *candidate == section.launch_quantization)
-            .unwrap_or(0);
-        let next_quantization = vibez_project::SectionLaunchQuantization::ALL
-            [(quantization_index + 1) % vibez_project::SectionLaunchQuantization::ALL.len()];
         let duplicate_message = if self.state.perform.duplicate_source == Some(section.id) {
             PerformMsg::CancelDuplicateSection
         } else {
@@ -563,7 +562,7 @@ impl App {
             .into()
         };
         let shorten = perform_tool_button(
-            icons::CHEVRON_DOWN,
+            icons::MINUS,
             "Shorten Section by 1 bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
@@ -573,7 +572,7 @@ impl App {
             false,
         );
         let extend = perform_tool_button(
-            icons::CHEVRON_UP,
+            icons::PLUS,
             "Extend Section by 1 bar",
             Message::Perform(PerformMsg::SetSectionLengthBeats(
                 section.id,
@@ -582,53 +581,72 @@ impl App {
             false,
             false,
         );
-        let length = container(
-            row![
-                shorten,
-                container(
-                    text(format!("{bars:.0} BARS"))
-                        .font(PERFORM_TECH_STRONG)
-                        .size(9)
-                        .color(th::text())
-                )
-                .width(Length::Fixed(54.0))
-                .center_x(Length::Fill),
-                extend,
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding(2)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::perform_inset().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        });
-        let launch = row![
-            perform_tool_button(
-                icons::SKIP_FORWARD,
-                format!(
-                    "Launch quantization: {} (click to cycle)",
-                    section.launch_quantization.label()
-                ),
-                Message::Perform(PerformMsg::SetSectionLaunchQuantization(
-                    section.id,
-                    next_quantization,
-                )),
-                false,
-                false,
-            ),
-            text(section.launch_quantization.label().to_uppercase())
-                .font(PERFORM_TECH_STRONG)
-                .size(8)
-                .color(th::text_dim()),
+        let length: Element<'_, Message> = row![
+            shorten,
+            center(
+                text(format!("{bars:.0} BARS"))
+                    .font(PERFORM_TECH_STRONG)
+                    .size(9)
+                    .color(th::text())
+            )
+            .width(Length::Fixed(56.0))
+            .height(Length::Fixed(28.0)),
+            extend,
         ]
-        .spacing(6)
-        .align_y(iced::Alignment::Center);
+        .spacing(2)
+        .align_y(iced::Alignment::Center)
+        .into();
+        let section_id = section.id;
+        let launch: Element<'_, Message> = pick_list(
+            vibez_project::SectionLaunchQuantization::ALL,
+            Some(section.launch_quantization),
+            move |quantization| {
+                Message::Perform(PerformMsg::SetSectionLaunchQuantization(
+                    section_id,
+                    quantization,
+                ))
+            },
+        )
+        .width(Length::Fixed(132.0))
+        .padding([5, 8])
+        .text_size(9)
+        .style(|_theme: &Theme, status| {
+            let highlighted = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: th::text(),
+                placeholder_color: th::text_dim(),
+                handle_color: if highlighted {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::perform_inset().into(),
+                border: iced::Border {
+                    color: if highlighted {
+                        th::accent_dim()
+                    } else {
+                        th::border_light()
+                    },
+                    width: 1.0,
+                    radius: 1.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 1.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into();
         let loop_toggle = perform_tool_button(
             icons::REPEAT,
             if section.looping {
@@ -665,34 +683,50 @@ impl App {
         let divider = || {
             container(horizontal_space())
                 .width(Length::Fixed(1.0))
-                .height(Length::Fixed(30.0))
+                .height(Length::Fixed(22.0))
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::divider().into()),
                     ..Default::default()
                 })
         };
-        let toolbar = row![
-            column![
-                text("SECTION")
-                    .font(PERFORM_LABEL)
-                    .size(8)
-                    .color(th::accent()),
-                name
+        let controls = container(
+            row![
+                length,
+                divider(),
+                launch,
+                divider(),
+                loop_toggle,
+                divider(),
+                duplicate,
+                divider(),
+                delete,
             ]
-            .spacing(2)
-            .width(Length::FillPortion(3)),
-            divider(),
-            length,
-            divider(),
-            launch,
-            loop_toggle,
-            divider(),
-            duplicate,
-            delete,
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding(3)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::perform_inset().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+        let identity = column![
+            text(format!("SELECTED SECTION · {:02}", section.slot + 1))
+                .font(PERFORM_LABEL)
+                .size(7)
+                .color(th::text_dim()),
+            name
         ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center)
-        .padding([7, 12]);
+        .spacing(3)
+        .width(Length::Fill);
+        let toolbar = row![identity, controls]
+            .spacing(12)
+            .align_y(iced::Alignment::Center)
+            .padding([8, 12]);
 
         container(toolbar)
             .width(Length::Fill)

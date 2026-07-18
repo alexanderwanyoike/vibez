@@ -60,6 +60,12 @@ impl SectionLaunchQuantization {
     }
 }
 
+impl std::fmt::Display for SectionLaunchQuantization {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SectionInfo {
     pub id: SectionId,
