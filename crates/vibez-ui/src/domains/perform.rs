@@ -15,7 +15,7 @@ use super::EngineHandle;
 use crate::state::ProjectTrack;
 
 mod sections;
-pub use sections::{Section, SectionStore, SectionTimelineEditor};
+pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
 /// behavior and Capture semantics are defined.

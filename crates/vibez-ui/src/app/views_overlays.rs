@@ -23,32 +23,6 @@ use crate::theme as th;
 
 use super::*;
 
-fn track_deletion_locations(
-    arrangement: &crate::state::ArrangementTimeline,
-    sections: &crate::domains::perform::SectionStore,
-    track_id: vibez_core::id::TrackId,
-) -> Vec<String> {
-    let has_content = |timeline: &crate::state::ArrangementTimeline| {
-        timeline.get(track_id).is_some_and(|content| {
-            !content.clips.is_empty()
-                || !content.note_clips.is_empty()
-                || !content.automation.is_empty()
-        })
-    };
-    let mut locations = Vec::new();
-    if has_content(arrangement) {
-        locations.push("Arrange".to_string());
-    }
-    locations.extend(
-        sections
-            .sections
-            .iter()
-            .filter(|section| has_content(&section.timeline))
-            .map(|section| format!("Section {:02} · {}", section.slot + 1, section.name)),
-    );
-    locations
-}
-
 impl App {
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
         let track_id = self
@@ -62,11 +36,11 @@ impl App {
             .find(track_id)
             .map(|track| track.name.as_str())
             .unwrap_or("Missing Project Track");
-        let locations = track_deletion_locations(
-            &self.state.arrangement.timeline,
-            &self.state.perform.sections,
-            track_id,
-        );
+        let locations = self
+            .state
+            .perform
+            .sections
+            .track_content_locations(&self.state.arrangement.timeline, track_id);
         let mut location_list = column![].spacing(4);
         if locations.is_empty() {
             location_list = location_list.push(
@@ -76,6 +50,12 @@ impl App {
             );
         } else {
             for location in locations {
+                let label = match location {
+                    crate::domains::perform::TimelineContentLocation::Arrange => "Arrange".into(),
+                    crate::domains::perform::TimelineContentLocation::Section { slot, name } => {
+                        format!("Section {:02} · {name}", slot + 1)
+                    }
+                };
                 location_list = location_list.push(
                     container(
                         row![
@@ -86,7 +66,7 @@ impl App {
                                     background: Some(th::danger().into()),
                                     ..Default::default()
                                 }),
-                            text(location).size(11).color(th::text())
+                            text(label).size(11).color(th::text())
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
@@ -894,46 +874,5 @@ impl App {
         )
         .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
-    }
-}
-
-#[cfg(test)]
-mod track_deletion_tests {
-    use std::sync::Arc;
-
-    use super::track_deletion_locations;
-    use crate::domains::perform::{Section, SectionStore};
-    use crate::state::ArrangementTimeline;
-    use vibez_core::automation::{AutomationLane, AutomationTarget};
-    use vibez_core::id::TrackId;
-
-    #[test]
-    fn warning_lists_arrange_and_every_affected_section() {
-        let track_id = TrackId::new();
-        let mut arrange = ArrangementTimeline::default();
-        arrange
-            .ensure(track_id)
-            .automation
-            .push(AutomationLane::new(AutomationTarget::TrackGain));
-        let mut first = Section::new(0);
-        first.name = "Verse".into();
-        Arc::make_mut(&mut first.timeline)
-            .ensure(track_id)
-            .automation
-            .push(AutomationLane::new(AutomationTarget::TrackPan));
-        let mut second = Section::new(5);
-        second.name = "Fill".into();
-        Arc::make_mut(&mut second.timeline)
-            .ensure(track_id)
-            .automation
-            .push(AutomationLane::new(AutomationTarget::TrackGain));
-        let sections = SectionStore {
-            sections: vec![first, second],
-        };
-
-        assert_eq!(
-            track_deletion_locations(&arrange, &sections, track_id),
-            ["Arrange", "Section 01 · Verse", "Section 06 · Fill"]
-        );
     }
 }
