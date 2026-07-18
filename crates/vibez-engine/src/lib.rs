@@ -3,5 +3,6 @@ pub mod engine;
 pub mod events;
 pub mod metering;
 pub mod mixer;
+pub mod playback_source;
 pub mod render;
 pub mod transport;

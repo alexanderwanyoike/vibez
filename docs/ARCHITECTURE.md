@@ -210,6 +210,24 @@ flowchart LR
     MET -- "peaks, position" --> EV["EngineEvent ring"]
 ```
 
+`EngineTrack` is the shared project channel strip: it owns the instrument,
+effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
+Time-based Arrange content is now a separate `PreparedPlaybackSource` behind
+one owned pointer. `ArrangementPlaybackSource` is the first adapter and the
+same source renderer feeds the existing channel path, so there is no second
+clip, note, automation, instrument, or effect implementation. Prepared sources
+contain decoded clip `Arc`s and expose no loader or I/O API. Card 10 supplies
+the Section adapter and the first pointer transfer; the callback must exchange
+prepared ownership only and return superseded ownership for disposal outside
+the real-time thread rather than dropping it there.
+
+```mermaid
+flowchart LR
+    A["ArrangementPlaybackSource adapter"] --> P["PreparedPlaybackSource<br/>audio + note clips + automation"]
+    P -- "resident source pointer" --> C["EngineTrack channel strip<br/>instrument + effects + sends + mixer"]
+    C --> M["metering + master"]
+```
+
 ## Plugins (VST3 and CLAP)
 
 Third-party plugins are the least trustworthy code in the process, so they
