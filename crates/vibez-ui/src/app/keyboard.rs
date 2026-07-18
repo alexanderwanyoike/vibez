@@ -135,16 +135,15 @@ impl super::App {
         if let Some(msg) = perform_msg {
             let ctx = crate::domains::perform::PerformCtx {
                 workspace_visible: self.state.view.workspace == crate::state::Workspace::Perform,
+                project_tracks: &self.state.project_tracks.tracks,
             };
             let action = {
                 let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                 self.state.perform.update(msg, &mut engine, ctx)
             };
-            if action.persist_settings {
-                self.persist_ui_settings();
-                self.state.status_text = "Perform key mapping saved".into();
-            }
-            if action.keyboard_consumed {
+            let keyboard_consumed = action.keyboard_consumed;
+            self.apply_perform_action(action);
+            if keyboard_consumed {
                 return iced::Task::none();
             }
         }
@@ -184,6 +183,16 @@ pub(crate) fn global_key_handler(
         };
         if let Some(mode) = mode {
             return Some(Message::Perform(PerformMsg::SelectMode(mode)));
+        }
+        if let iced::keyboard::Key::Character(ref character) = key {
+            let bank = match character.as_str() {
+                "[" => Some(PerformMsg::PreviousBank),
+                "]" => Some(PerformMsg::NextBank),
+                _ => None,
+            };
+            if let Some(bank) = bank {
+                return Some(Message::Perform(bank));
+            }
         }
     }
 
@@ -433,6 +442,21 @@ mod tests {
         }
 
         assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn brackets_navigate_the_active_perform_mode_bank() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Character("[".into()), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::PreviousBank))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("]".into()), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::NextBank))
+        ));
+        assert!(global_key_handler(Key::Character("]".into()), Modifiers::SHIFT).is_none());
     }
 
     #[test]
