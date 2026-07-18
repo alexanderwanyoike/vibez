@@ -77,7 +77,7 @@ impl AudioEngine {
                     loop_end,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.clips.push(EngineClip {
+                        track.playback_source.clips.push(EngineClip {
                             id: clip_id,
                             audio,
                             position,
@@ -92,7 +92,7 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.clips.retain(|c| c.id != clip_id);
+                        track.playback_source.clips.retain(|c| c.id != clip_id);
                     }
                     self.recalculate_audio_length();
                 }
@@ -106,7 +106,12 @@ impl AudioEngine {
                     loop_end,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.audio = audio;
                             clip.duration = duration;
                             clip.source_offset = source_offset;
@@ -122,7 +127,12 @@ impl AudioEngine {
                     new_position,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.position = new_position;
                         }
                     }
@@ -135,15 +145,20 @@ impl AudioEngine {
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
                     if let Some(track) = self.channel_mut(track_id) {
-                        match track.automation.iter_mut().find(|l| l.id == lane.id) {
+                        match track
+                            .playback_source
+                            .automation
+                            .iter_mut()
+                            .find(|l| l.id == lane.id)
+                        {
                             Some(existing) => *existing = lane,
-                            None => track.automation.push(lane),
+                            None => track.playback_source.automation.push(lane),
                         }
                     }
                 }
                 EngineCommand::RemoveAutomationLane { track_id, lane_id } => {
                     if let Some(track) = self.channel_mut(track_id) {
-                        track.automation.retain(|l| l.id != lane_id);
+                        track.playback_source.automation.retain(|l| l.id != lane_id);
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
@@ -181,7 +196,7 @@ impl AudioEngine {
                     }
                     for track in &mut self.tracks {
                         track.sends.retain(|(bus_id, _)| *bus_id != id);
-                        track.automation.retain(|lane| {
+                        track.playback_source.automation.retain(|lane| {
                             lane.target
                                 != vibez_core::automation::AutomationTarget::Send { bus_id: id }
                         });
@@ -321,7 +336,12 @@ impl AudioEngine {
                     duration_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.duration_beats = duration_beats;
                         }
                         track.flush_notes();
@@ -338,7 +358,7 @@ impl AudioEngine {
                     loop_end_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.note_clips.push(EngineNoteClip {
+                        track.playback_source.note_clips.push(EngineNoteClip {
                             id: clip_id,
                             position_beats,
                             duration_beats,
@@ -352,7 +372,7 @@ impl AudioEngine {
                 }
                 EngineCommand::RemoveNoteClip(track_id, clip_id) => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.note_clips.retain(|c| c.id != clip_id);
+                        track.playback_source.note_clips.retain(|c| c.id != clip_id);
                         // Sounding notes get their note-offs from the
                         // clip's schedule; without the clip they hang
                         // forever.
@@ -366,7 +386,12 @@ impl AudioEngine {
                     new_position_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.position_beats = new_position_beats;
                         }
                     }
@@ -378,7 +403,12 @@ impl AudioEngine {
                     note,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.notes.push(note);
                         }
                     }
@@ -389,7 +419,12 @@ impl AudioEngine {
                     note_index,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             if note_index < clip.notes.len() {
                                 clip.notes.remove(note_index);
                             }
@@ -404,7 +439,12 @@ impl AudioEngine {
                     note,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             if note_index < clip.notes.len() {
                                 clip.notes[note_index] = note;
                             }
@@ -483,7 +523,12 @@ impl AudioEngine {
                     loop_end,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.loop_enabled = enabled;
                             clip.loop_start = loop_start;
                             clip.loop_end = loop_end;
@@ -498,7 +543,12 @@ impl AudioEngine {
                     loop_end_beats,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|c| c.id == clip_id)
+                        {
                             clip.loop_enabled = enabled;
                             clip.loop_start_beats = loop_start_beats;
                             clip.loop_end_beats = loop_end_beats;

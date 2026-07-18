@@ -303,7 +303,7 @@ fn removing_clip_kills_sounding_notes() {
     // track exercises the same path.
     let cid = {
         // recover clip id from engine state
-        engine.tracks()[0].note_clips[0].id
+        engine.tracks()[0].playback_source.note_clips[0].id
     };
     cmd_tx
         .push(EngineCommand::RemoveNoteClip(tid, cid))

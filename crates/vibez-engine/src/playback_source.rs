@@ -217,7 +217,7 @@ mod tests {
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
-        existing_path.clips.push(clip());
+        existing_path.playback_source.clips.push(clip());
         let mut prepared_path = EngineTrack::with_playback_source(
             TrackId::new(),
             PreparedPlaybackSource::new(vec![clip()], Vec::new(), Vec::new()),

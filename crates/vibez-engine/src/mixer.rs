@@ -1,4 +1,3 @@
-use std::ops::{Deref, DerefMut};
 #[cfg(test)]
 use std::sync::Arc;
 
@@ -81,8 +80,8 @@ impl EngineTrack {
         use vibez_core::automation::AutomationTarget;
         let mut gain = None;
         let mut pan = None;
-        for lane_idx in 0..self.automation.len() {
-            let lane = &self.automation[lane_idx];
+        for lane_idx in 0..self.playback_source.automation.len() {
+            let lane = &self.playback_source.automation[lane_idx];
             let Some(value) = lane.value_at(beat) else {
                 continue;
             };
@@ -512,23 +511,6 @@ impl EngineTrack {
     }
 }
 
-/// Compatibility at the channel boundary: existing render/command code sees
-/// the already-resolved source fields without learning its adapter identity.
-/// The content is owned exactly once by `PreparedPlaybackSource`.
-impl Deref for EngineTrack {
-    type Target = PreparedPlaybackSource;
-
-    fn deref(&self) -> &Self::Target {
-        &self.playback_source
-    }
-}
-
-impl DerefMut for EngineTrack {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.playback_source
-    }
-}
-
 /// Equal-power pan law.
 /// `pan` ranges from 0.0 (hard left) to 1.0 (hard right).
 /// Returns `(left_gain, right_gain)`.
@@ -611,7 +593,7 @@ mod tests {
     fn single_clip_render() {
         let audio = make_test_audio(64, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -642,7 +624,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -718,7 +700,7 @@ mod tests {
     fn clip_loop_renders_audio_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -755,7 +737,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -799,7 +781,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -837,7 +819,7 @@ mod tests {
     fn clip_no_loop_silence_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -879,7 +861,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -933,7 +915,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
