@@ -3,11 +3,60 @@ use std::sync::Arc;
 use vibez_core::id::{ClipId, LaneId, SectionId, TrackId};
 use vibez_project::SectionLaunchQuantization;
 
-use crate::state::ArrangementTimeline;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
+use crate::state::{
+    ArrangementTimeline, ResolvedTimeline, ResolvedTimelineMut, TimelineEditorState,
+};
 
 pub const DEFAULT_SECTION_LENGTH_BEATS: f64 = 16.0;
 pub const MIN_SECTION_LENGTH_BEATS: f64 = 4.0;
 pub const MAX_SECTION_LENGTH_BEATS: f64 = 1024.0;
+
+/// Runtime-only editor adapter for the selected Section.
+///
+/// Persisted Section content remains in [`Section::timeline`]. Selection,
+/// clipboard, and pointer interaction state stay outside the canonical Section
+/// store and are reset when a different Section is selected.
+#[derive(Debug, Default)]
+pub struct SectionTimelineEditor {
+    editor: TimelineEditorState,
+}
+
+impl SectionTimelineEditor {
+    pub fn load(&mut self, timeline: Arc<ArrangementTimeline>, selected_track: Option<TrackId>) {
+        self.editor = TimelineEditorState {
+            timeline,
+            selected_track,
+            ..TimelineEditorState::default()
+        };
+    }
+
+    pub fn clear(&mut self) {
+        self.editor = TimelineEditorState::default();
+    }
+
+    pub fn editor(&self) -> &TimelineEditorState {
+        &self.editor
+    }
+
+    pub fn editor_mut(&mut self) -> &mut TimelineEditorState {
+        &mut self.editor
+    }
+}
+
+impl TimelineEditorAdapter for SectionTimelineEditor {
+    fn resolve_timeline(&self) -> ResolvedTimeline<'_> {
+        ResolvedTimeline {
+            editor: &self.editor,
+        }
+    }
+
+    fn resolve_timeline_mut(&mut self) -> ResolvedTimelineMut<'_> {
+        ResolvedTimelineMut {
+            editor: &mut self.editor,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Section {
@@ -98,7 +147,8 @@ impl SectionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{TrackTimelineContent, UiNoteClip};
+    use crate::domains::timeline_editor::conformance::assert_timeline_editor_conformance;
+    use crate::state::{ArrangementState, TrackTimelineContent, UiNoteClip};
 
     #[test]
     fn duplicate_remints_every_editable_identity() {
@@ -142,5 +192,63 @@ mod tests {
         assert!(duplicate.timeline.get(track_id).unwrap().note_clips[0]
             .selected_notes
             .is_empty());
+    }
+
+    #[test]
+    fn section_adapter_satisfies_the_shared_editor_contract() {
+        assert_timeline_editor_conformance(SectionTimelineEditor::default());
+    }
+
+    #[test]
+    fn arrange_and_section_adapters_never_share_timeline_mutations() {
+        let track_id = TrackId::new();
+        let mut arrange = ArrangementState::default();
+        let mut section = SectionTimelineEditor::default();
+        section.load(Arc::new(ArrangementTimeline::default()), Some(track_id));
+
+        Arc::make_mut(&mut section.editor_mut().timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(UiNoteClip {
+                id: ClipId::new(),
+                name: "Section Pattern".into(),
+                position_beats: 0.0,
+                duration_beats: 4.0,
+                notes: Vec::new(),
+                selected_notes: Default::default(),
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+            });
+
+        assert!(arrange.editor.timeline.get(track_id).is_none());
+        assert_eq!(
+            section
+                .editor()
+                .timeline
+                .get(track_id)
+                .expect("Section track content")
+                .note_clips
+                .len(),
+            1
+        );
+
+        Arc::make_mut(&mut arrange.editor.timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(UiNoteClip {
+                id: ClipId::new(),
+                name: "Arrange Pattern".into(),
+                position_beats: 8.0,
+                duration_beats: 4.0,
+                notes: Vec::new(),
+                selected_notes: Default::default(),
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+            });
+        let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
+        assert_eq!(section_clip.name, "Section Pattern");
+        assert_eq!(section_clip.position_beats, 0.0);
     }
 }

@@ -134,7 +134,7 @@ pub enum ArrangementMsg {
 }
 
 impl ArrangementMsg {
-    pub(super) fn is_timeline_editor_message(&self) -> bool {
+    pub(crate) fn is_timeline_editor_message(&self) -> bool {
         matches!(
             self,
             Self::RenameClip(..)

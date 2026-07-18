@@ -37,6 +37,18 @@ impl EngineHandle for EngineTx<'_> {
     }
 }
 
+/// Editor target whose content is not currently resident in the audio engine.
+///
+/// Section authoring uses this until the Section playback adapter lands. The
+/// shared editor still performs the same state transitions, but its Arrange
+/// synchronization commands must not mutate the audible Arrange source.
+#[derive(Default)]
+pub struct DiscardingEngine;
+
+impl EngineHandle for DiscardingEngine {
+    fn send(&mut self, _cmd: EngineCommand) {}
+}
+
 #[cfg(test)]
 pub mod test_support {
     use super::*;

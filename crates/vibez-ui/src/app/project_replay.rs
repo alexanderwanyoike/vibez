@@ -107,6 +107,9 @@ impl App {
         self.state.arrangement.selected_clips = snapshot.selected_clips;
         self.state.arrangement.selected_note_clip = snapshot.selected_note_clip;
         self.state.perform.selected_section = snapshot.selected_section;
+        self.state
+            .perform
+            .sync_selected_section_editor(self.state.arrangement.selected_track);
         self.state.perform.section_name_edit = self
             .state
             .perform

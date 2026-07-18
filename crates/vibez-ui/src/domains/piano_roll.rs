@@ -254,19 +254,18 @@ impl PianoRollState {
                 let clip_id = ClipId::new();
                 let position_beats = 0.0;
                 let duration_beats = 16.0;
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    track.note_clips.push(UiNoteClip {
-                        id: clip_id,
-                        name: format!("Pattern {}", track.note_clips.len() + 1),
-                        position_beats,
-                        duration_beats,
-                        notes: Vec::new(),
-                        selected_notes: HashSet::new(),
-                        loop_enabled: true,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: duration_beats,
-                    });
-                }
+                let track = tracks.ensure(track_id);
+                track.note_clips.push(UiNoteClip {
+                    id: clip_id,
+                    name: format!("Pattern {}", track.note_clips.len() + 1),
+                    position_beats,
+                    duration_beats,
+                    notes: Vec::new(),
+                    selected_notes: HashSet::new(),
+                    loop_enabled: true,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: duration_beats,
+                });
                 engine.send(EngineCommand::AddNoteClip {
                     track_id,
                     clip_id,
@@ -755,6 +754,25 @@ mod tests {
         );
         assert_eq!(tracks.get(tid).unwrap().note_clips[0].notes.len(), 3);
         assert!(matches!(engine.0[0], EngineCommand::AddNote { .. }));
+    }
+
+    #[test]
+    fn add_note_clip_creates_missing_timeline_lane_for_a_shared_track() {
+        let track_id = TrackId::new();
+        let mut editor = TimelineEditorState::default();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        let action = piano_roll.update(
+            PianoRollMsg::AddNoteClipToTrack(track_id),
+            &mut engine,
+            &mut editor,
+            PianoRollCtx::default(),
+        );
+
+        assert_eq!(editor.timeline.get(track_id).unwrap().note_clips.len(), 1);
+        assert_eq!(action.select_note_clip.unwrap().0, track_id);
+        assert!(matches!(engine.0[0], EngineCommand::AddNoteClip { .. }));
     }
 
     #[test]

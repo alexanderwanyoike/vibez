@@ -212,16 +212,62 @@ impl App {
             self.state.view.context_menu = None;
         }
         if let Some(sel) = action.select_note_clip {
-            self.state.arrangement.selected_note_clip = Some(sel);
+            if self.state.view.workspace == crate::state::Workspace::Perform
+                && self.state.perform.selected_section.is_some()
+            {
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_note_clip = Some(sel);
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_clips
+                    .clear();
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_clips
+                    .insert(ArrangementSelection::NoteClip {
+                        track_id: sel.0,
+                        clip_id: sel.1,
+                    });
+            } else {
+                self.state.arrangement.selected_note_clip = Some(sel);
+            }
+            self.state.arrangement.selected_track = Some(sel.0);
+            self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
         if let Some(track_id) = action.select_track {
             self.state.arrangement.selected_track = Some(track_id);
+            if self.state.view.workspace == crate::state::Workspace::Perform
+                && self.state.perform.selected_section.is_some()
+            {
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_track = Some(track_id);
+            }
         }
         if let Some(beat) = action.scroll_to_beat {
             self.auto_scroll_to_beat(beat);
         }
         if action.drag_resize_active {
-            self.state.arrangement.drag_resize_active = true;
+            if self.state.view.workspace == crate::state::Workspace::Perform
+                && self.state.perform.selected_section.is_some()
+            {
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .drag_resize_active = true;
+            } else {
+                self.state.arrangement.drag_resize_active = true;
+            }
         }
         if let Some(status) = action.status {
             self.state.status_text = status;

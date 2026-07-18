@@ -2,7 +2,7 @@
 //!
 //! Adapters resolve their timeline once. Clip, note, automation, selection,
 //! and view code consume that resolved target without knowing whether it came
-//! from Arrange or, later, a Section.
+//! from Arrange or a Section.
 
 #[cfg(test)]
 use crate::state::TimelineEditorState;

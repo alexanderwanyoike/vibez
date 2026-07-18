@@ -341,6 +341,36 @@ fn section_crud_and_properties_update_the_ordered_store() {
 }
 
 #[test]
+fn selecting_a_section_preserves_project_track_selection_and_resets_clip_focus() {
+    let tracks = project_tracks(2);
+    let selected_track = tracks[1].id;
+    let mut state = PerformState::default();
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(selected_track),
+    };
+
+    state.update(PerformMsg::CreateSectionAt(0), &mut engine, ctx);
+    state.section_editor.editor_mut().selected_note_clip =
+        Some((selected_track, vibez_core::id::ClipId::new()));
+    let second = Section::new(1);
+    let second_id = second.id;
+    Arc::make_mut(&mut state.sections).insert(second);
+
+    state.update(PerformMsg::SelectSection(second_id), &mut engine, ctx);
+
+    assert_eq!(state.selected_section, Some(second_id));
+    assert_eq!(
+        state.section_editor.editor().selected_track,
+        Some(selected_track)
+    );
+    assert_eq!(state.section_editor.editor().selected_note_clip, None);
+    assert!(engine.0.is_empty());
+}
+
+#[test]
 fn track_mute_mode_resolves_keyboard_press_to_shared_track_request_once() {
     let tracks = project_tracks(2);
     let mut state = PerformState {
@@ -352,6 +382,7 @@ fn track_mute_mode_resolves_keyboard_press_to_shared_track_request_once() {
     let ctx = PerformCtx {
         workspace_visible: true,
         project_tracks: &tracks,
+        selected_project_track: None,
     };
 
     let press = state.update(
@@ -429,6 +460,7 @@ fn pointer_pad_uses_the_same_track_mute_resolution() {
         PerformCtx {
             workspace_visible: true,
             project_tracks: &tracks,
+            selected_project_track: None,
         },
     );
 
@@ -459,6 +491,7 @@ fn track_slots_survive_deletion_and_fill_without_scrambling_other_pads() {
         PerformCtx {
             workspace_visible: true,
             project_tracks: &tracks,
+            selected_project_track: None,
         },
     );
     assert_eq!(state.banks.track_mutes, 1);

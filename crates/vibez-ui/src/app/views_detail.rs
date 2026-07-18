@@ -25,9 +25,10 @@ impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
+        let editor = self.state.active_timeline_editor();
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
-            .arrangement
+            .active_timeline_editor()
             .selected_track
             .and_then(|id| self.state.find_track(id))
         {
@@ -97,11 +98,11 @@ impl App {
                     let is_midi = track.kind.is_midi();
                     // Check for note clip selection on this MIDI track
                     let has_note_clip = is_midi
-                        && (self.state.arrangement.selected_clips.iter().any(|s| {
+                        && (editor.selected_clips.iter().any(|s| {
                             matches!(s, ArrangementSelection::NoteClip { track_id: tid, .. } if *tid == track_id)
                         }) || self
                             .state
-                            .arrangement
+                            .active_timeline_editor()
                             .selected_note_clip
                             .is_some_and(|(tid, _)| tid == track_id));
 
@@ -109,22 +110,22 @@ impl App {
                         self.view_piano_roll_panel(track_id, track_color)
                     } else {
                         // Find a single selected audio clip on this track
-                        let audio_sel =
-                            self.state
-                                .arrangement
-                                .selected_clips
-                                .iter()
-                                .find_map(|s| match s {
-                                    ArrangementSelection::AudioClip {
-                                        track_id: tid,
-                                        clip_id: cid,
-                                    } if *tid == track_id => Some(*cid),
-                                    _ => None,
-                                });
+                        let audio_sel = self
+                            .state
+                            .active_timeline_editor()
+                            .selected_clips
+                            .iter()
+                            .find_map(|s| match s {
+                                ArrangementSelection::AudioClip {
+                                    track_id: tid,
+                                    clip_id: cid,
+                                } if *tid == track_id => Some(*cid),
+                                _ => None,
+                            });
                         if let Some(sel_cid) = audio_sel {
                             if let Some(clip) = self
                                 .state
-                                .arrange_content(track_id)
+                                .active_timeline_content(track_id)
                                 .and_then(|content| content.clips.iter().find(|c| c.id == sel_cid))
                             {
                                 self.view_audio_clip_panel(track_id, clip, track_color)
@@ -157,6 +158,10 @@ impl App {
         // cards or demanded ugly vertical scrollbars.
         let panel_height = if self.state.view.detail_panel_tab == DetailPanelTab::Devices {
             Length::Fixed(th::DEVICE_BODY_H + 96.0)
+        } else if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.section_timeline_expanded
+        {
+            Length::FillPortion(1)
         } else {
             Length::FillPortion(2)
         };
@@ -197,10 +202,10 @@ impl App {
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
         let clip_data: Option<(String, f64, f64, bool, TrackId, ClipId)> =
-            if let Some((tid, cid)) = self.state.arrangement.selected_note_clip {
+            if let Some((tid, cid)) = self.state.active_timeline_editor().selected_note_clip {
                 if tid == track_id {
                     self.state
-                        .arrange_content(track_id)
+                        .active_timeline_content(track_id)
                         .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
                         .map(|c| {
                             (
@@ -220,7 +225,7 @@ impl App {
             };
 
         let piano_widget = if let Some(ref cd) = clip_data {
-            if let Some(content) = self.state.arrange_content(track_id) {
+            if let Some(content) = self.state.active_timeline_content(track_id) {
                 if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.5) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
                     PianoRollWidget::from_clip(

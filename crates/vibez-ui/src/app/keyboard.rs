@@ -136,6 +136,7 @@ impl super::App {
             let ctx = crate::domains::perform::PerformCtx {
                 workspace_visible: self.state.view.workspace == crate::state::Workspace::Perform,
                 project_tracks: &self.state.project_tracks.tracks,
+                selected_project_track: self.state.arrangement.selected_track,
             };
             let action = {
                 let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);

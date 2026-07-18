@@ -1,9 +1,8 @@
-//! Perform workspace shell: mode selector, 4x4 Pad Surface, and the empty
-//! Section construction area. Musical behavior arrives in later cards.
+//! Perform workspace shell, Pad Surface, and shared Section Timeline Editor.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
-    stack, text, text_input, tooltip,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, text,
+    text_input, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
@@ -20,8 +19,8 @@ const MODE_SELECTOR_INSET: f32 = 17.0;
 const MODE_TAB_MIN_WIDTH: f32 = 108.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
-const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-const SECTION_BAR_WIDTH: f32 = 160.0;
+pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
+pub(super) const SECTION_BAR_WIDTH: f32 = 160.0;
 
 fn perform_tool_button(
     icon: char,
@@ -114,7 +113,13 @@ impl App {
 
         container(column![mode_selector, workspace].height(Length::Fill))
             .width(Length::Fill)
-            .height(Length::FillPortion(5))
+            .height(Length::FillPortion(
+                if self.state.perform.section_timeline_expanded {
+                    6
+                } else {
+                    5
+                },
+            ))
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_dark().into()),
                 border: iced::Border {
@@ -501,7 +506,7 @@ impl App {
         }
     }
 
-    fn view_section_toolbar(&self, section: Option<&Section>) -> Element<'_, Message> {
+    pub(super) fn view_section_toolbar(&self, section: Option<&Section>) -> Element<'_, Message> {
         let Some(section) = section else {
             return container(row![
                 column![
@@ -698,6 +703,17 @@ impl App {
             self.state.perform.duplicate_source == Some(section.id),
             false,
         );
+        let expand = perform_tool_button(
+            icons::LAYOUT_LIST,
+            if self.state.perform.section_timeline_expanded {
+                "Return to compact Section overview"
+            } else {
+                "Expand the Section timeline"
+            },
+            Message::Perform(PerformMsg::ToggleSectionTimelineExpanded),
+            self.state.perform.section_timeline_expanded,
+            false,
+        );
         let delete = perform_tool_button(
             icons::TRASH_2,
             "Delete Section",
@@ -721,6 +737,8 @@ impl App {
                 launch,
                 divider(),
                 loop_toggle,
+                divider(),
+                expand,
                 divider(),
                 duplicate,
                 divider(),
@@ -764,210 +782,6 @@ impl App {
                 },
                 ..Default::default()
             })
-            .into()
-    }
-
-    fn view_section_construction(&self) -> Element<'_, Message> {
-        let selected = self
-            .state
-            .perform
-            .selected_section
-            .and_then(|id| self.state.perform.sections.by_id(id));
-        let toolbar = self.view_section_toolbar(selected);
-
-        let bar_count = selected
-            .map(|section| (section.length_beats / 4.0).round() as usize)
-            .unwrap_or(4)
-            .max(1);
-        let timeline_width = SECTION_BAR_WIDTH * bar_count as f32;
-        let ruler_number_color = th::blend(th::text_dim(), th::text(), 0.36);
-        let ruler_gutter = container(
-            text("PROJECT TRACK")
-                .font(PERFORM_TECH)
-                .size(8)
-                .color(th::blend(th::text_dim(), th::text(), 0.16)),
-        )
-        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-        .height(Length::Fixed(30.0))
-        .padding([8, 10])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::perform_grid_line(),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-        let mut ruler_marks = row![]
-            .width(Length::Fixed(timeline_width))
-            .height(Length::Fixed(30.0));
-        for bar in 0..bar_count {
-            ruler_marks = ruler_marks.push(
-                container(
-                    text((bar + 1).to_string())
-                        .font(PERFORM_TECH_STRONG)
-                        .size(11)
-                        .color(ruler_number_color),
-                )
-                .width(Length::Fixed(SECTION_BAR_WIDTH))
-                .height(Length::Fixed(30.0))
-                .padding(8)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::perform_grid_line(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-            );
-        }
-
-        let mut track_gutters = column![].width(Length::Fill).height(Length::Fill);
-        let mut timeline_tracks = column![]
-            .width(Length::Fixed(timeline_width))
-            .height(Length::Fill);
-        for index in 0..6_u8 {
-            let marker = container(horizontal_space())
-                .width(Length::Fixed(3.0))
-                .height(Length::Fixed(18.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: Some(th::with_alpha(th::track_color(index), 0.38).into()),
-                    ..Default::default()
-                });
-            let gutter =
-                container(row![marker, horizontal_space()].align_y(iced::Alignment::Center))
-                    .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-                    .height(Length::Fill)
-                    .padding([0, 10])
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(th::bg_surface().into()),
-                        border: iced::Border {
-                            color: th::perform_grid_line(),
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    });
-            let mut lanes = row![]
-                .width(Length::Fixed(timeline_width))
-                .height(Length::Fill);
-            for _ in 0..bar_count {
-                lanes = lanes.push(
-                    container(horizontal_space())
-                        .width(Length::Fixed(SECTION_BAR_WIDTH))
-                        .height(Length::Fill)
-                        .style(|_theme: &Theme| container::Style {
-                            border: iced::Border {
-                                color: th::perform_grid_line(),
-                                width: 1.0,
-                                radius: 0.0.into(),
-                            },
-                            ..Default::default()
-                        }),
-                );
-            }
-            track_gutters = track_gutters.push(gutter.height(Length::FillPortion(1)));
-            timeline_tracks = timeline_tracks.push(lanes.height(Length::FillPortion(1)));
-        }
-        let fixed_gutter = column![ruler_gutter, track_gutters]
-            .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-            .height(Length::Fill);
-        let timeline_content =
-            container(column![ruler_marks, timeline_tracks].height(Length::Fill))
-                .width(Length::Fixed(timeline_width))
-                .height(Length::Fill)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::display_bg().into()),
-                    ..Default::default()
-                });
-        let scrolling_timeline = scrollable::Scrollable::with_direction(
-            timeline_content,
-            scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new()
-                    .width(5)
-                    .scroller_width(5)
-                    .spacing(1),
-            ),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
-        let timeline_grid = row![fixed_gutter, scrolling_timeline]
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        let (empty_title, empty_detail, empty_footnote) = if selected.is_some() {
-            (
-                format!("{bar_count} BAR SECTION"),
-                "This Section has its own local timeline",
-                "MUSICAL AUTHORING ARRIVES IN CARD 07",
-            )
-        } else {
-            (
-                "SELECT A SECTION".to_string(),
-                "Create one from an empty Pad Position",
-                "SECTION DATA IS SAVED WITH THE PROJECT",
-            )
-        };
-        let empty = center(
-            container(
-                column![
-                    text("SECTION SPACE")
-                        .font(PERFORM_LABEL)
-                        .size(9)
-                        .color(th::accent()),
-                    text(empty_title)
-                        .font(PERFORM_LABEL)
-                        .size(13)
-                        .color(th::text()),
-                    text(empty_detail).size(10).color(th::text_dim()),
-                    text(empty_footnote)
-                        .font(PERFORM_TECH)
-                        .size(8)
-                        .color(th::blend(th::text_dim(), th::text(), 0.1))
-                ]
-                .spacing(8)
-                .align_x(iced::Alignment::Center),
-            )
-            .padding([16, 22])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::perform_inset().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                shadow: Shadow {
-                    color: th::perform_shadow(),
-                    offset: Vector::new(0.0, 4.0),
-                    blur_radius: 10.0,
-                },
-                ..Default::default()
-            }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
-        let empty_timeline = stack![timeline_grid, empty];
-
-        let construction = container(column![toolbar, empty_timeline].height(Length::Fill))
-            .width(Length::FillPortion(3))
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
-
-        mouse_area(construction)
-            .on_press(Message::Perform(PerformMsg::FocusEditor(
-                PerformEditorFocus::SectionConstruction,
-            )))
             .into()
     }
 }

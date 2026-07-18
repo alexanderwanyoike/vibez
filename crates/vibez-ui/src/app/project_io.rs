@@ -58,6 +58,7 @@ impl App {
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
         self.state.perform.selected_section = None;
+        self.state.perform.section_editor.clear();
         self.state.perform.editing_section_name = None;
         self.state.perform.section_name_edit.clear();
         self.state.perform.duplicate_source = None;
@@ -786,6 +787,9 @@ impl App {
             .sections
             .first()
             .map(|section| section.id);
+        self.state
+            .perform
+            .sync_selected_section_editor(self.state.arrangement.selected_track);
         self.state.perform.section_name_edit = self
             .state
             .perform

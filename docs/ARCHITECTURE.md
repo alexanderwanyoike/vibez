@@ -154,8 +154,17 @@ state; clip operations, piano-roll editing, automation editing, and timeline
 view behavior receive this already-resolved target. `ArrangementState` is a
 thin adapter that retains Arrange's Project Track/channel controls and
 implements `TimelineEditorAdapter` to resolve its editor. The editor never
-asks which workspace is active and contains no `Arrange | Section` branch, so
-a Section can provide the same adapter in the later authoring slice.
+asks which workspace is active and contains no `Arrange | Section` branch.
+
+The selected Perform Section now provides that second adapter through a
+runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
+persisted Timeline Content into the adapter while preserving the project-wide
+Project Track selection; clip and piano-roll selection remain local to the
+resolved Section editor. Every edit commits the adapter's copy-on-write
+Timeline Content back into the selected Section store for undo and project
+persistence. Until the Section playback source lands, a discarding engine
+handle prevents shared editor synchronization commands from mutating the
+audible Arrange source.
 
 Every horizontal editor surface uses `TimelineGeometry` for beat-to-pixel,
 pixel-to-beat, fitted viewport, visible-range, and beat-width conversions.
@@ -170,9 +179,11 @@ flowchart LR
     AA["ArrangementState<br/>thin adapter + channel controls"]
     TE["TimelineEditorState<br/>selection + resolved TimelineContent"]
     SS["SectionStore<br/>Section → TimelineContent"]
+    SE["SectionTimelineEditor<br/>second editor adapter"]
     TG["TimelineGeometry<br/>one beat/pixel layer"]
     PT -- "shared TrackId" --> TE
     PT -- "shared TrackId" --> SS
+    SS -- "selected content" --> SE
     AA -- "resolves once" --> TE
     TG --> TE
 ```

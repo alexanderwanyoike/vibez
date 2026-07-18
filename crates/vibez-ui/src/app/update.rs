@@ -6,6 +6,7 @@ use iced::Task;
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::project::ProjectMsg;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use vibez_engine::commands::EngineCommand;
@@ -16,7 +17,6 @@ use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrume
 use crate::message::Message;
 
 use super::*;
-use crate::domains::timeline_editor::TimelineEditorAdapter;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
@@ -180,15 +180,7 @@ impl App {
                     playhead_samples: self.state.transport.position_samples,
                     playhead_beats: self.state.position_beats(),
                 };
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state.arrangement.update(
-                        Arc::make_mut(&mut self.state.project_tracks),
-                        msg,
-                        &mut engine,
-                        ctx,
-                    )
-                };
+                let action = self.route_arrangement_editor_message(msg, ctx);
                 self.state
                     .perform
                     .sync_project_tracks(&self.state.project_tracks.tracks);
@@ -202,15 +194,7 @@ impl App {
                         .grid_config()
                         .effective_grid(self.active_editor_pixels_per_beat()),
                 };
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state.piano_roll.update(
-                        msg,
-                        &mut engine,
-                        self.state.arrangement.resolve_timeline_mut().editor,
-                        ctx,
-                    )
-                };
+                let action = self.route_piano_roll_editor_message(msg, ctx);
                 self.apply_piano_roll_action(action);
             }
             Message::Browser(msg) => {
@@ -237,6 +221,7 @@ impl App {
                     workspace_visible: self.state.view.workspace
                         == crate::state::Workspace::Perform,
                     project_tracks: &self.state.project_tracks.tracks,
+                    selected_project_track: self.state.arrangement.selected_track,
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
