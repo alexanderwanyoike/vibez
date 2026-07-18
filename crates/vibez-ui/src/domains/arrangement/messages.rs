@@ -134,6 +134,44 @@ pub enum ArrangementMsg {
 }
 
 impl ArrangementMsg {
+    pub(super) fn is_timeline_editor_message(&self) -> bool {
+        matches!(
+            self,
+            Self::RenameClip(..)
+                | Self::RemoveClip(..)
+                | Self::SelectArrangementClip { .. }
+                | Self::MoveAudioClip { .. }
+                | Self::MoveNoteClipPosition { .. }
+                | Self::ResizeAudioClip { .. }
+                | Self::MoveClipToTrack { .. }
+                | Self::ToggleClipLoop(..)
+                | Self::SetClipLoopRegion { .. }
+                | Self::SetTimeSelection { .. }
+                | Self::SetTimeSelectionActive(_)
+                | Self::SetSelectionAsLoop
+                | Self::DeleteSelectedClip
+                | Self::DuplicateSelectedClip
+                | Self::CopySelectedClips
+                | Self::CutSelectedClips
+                | Self::PasteClipsAtPlayhead
+                | Self::ToggleSelectedClipLoop
+                | Self::ResizeSelectedClips { .. }
+                | Self::DuplicateNoteClip(..)
+                | Self::SplitAudioClip { .. }
+                | Self::SplitNoteClip { .. }
+                | Self::SplitSelectedAtPlayhead
+                | Self::JoinSelectedClips
+                | Self::DeleteClipsInRegion { .. }
+                | Self::SplitClipsAtRegion { .. }
+                | Self::CreateClipFromSelection
+                | Self::CreateNoteClipFromSelection(_)
+                | Self::ClipBpmInputChanged { .. }
+                | Self::SubmitClipBpm { .. }
+                | Self::SetClipNominalBpm { .. }
+                | Self::ClearClipWarp { .. }
+        )
+    }
+
     /// Whether this message edits the project (drives the dirty flag).
     pub fn marks_dirty(&self) -> bool {
         !matches!(

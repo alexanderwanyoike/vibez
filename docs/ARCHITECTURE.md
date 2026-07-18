@@ -134,19 +134,37 @@ Project Tracks exist once per project. `ProjectTracksState` owns their stable
 `TrackId`, channel name/type, instruments, effects, routing, sends, and mixer
 state. Arrange does not own or duplicate those channels.
 
-`ArrangementState` instead owns an `ArrangementTimeline`: a separate store
-keyed by the shared `TrackId`. Each `TrackTimelineContent` contains only the
-audio clips, note clips, and automation associated with that Project Track in
-Arrange. Track order is therefore independent from timeline storage, and a
-timeline edit cannot clone instruments, effects, routing, or mixer state.
+`TimelineContent` is the separate musical-content store keyed by shared
+`TrackId`. Each `TrackTimelineContent` contains only the audio clips, note
+clips, and automation associated with that Project Track in one timeline.
+Track order is therefore independent from timeline storage, and a timeline
+edit cannot clone instruments, effects, routing, or mixer state.
+
+`TimelineEditorState` is the shared editing boundary around that content. It
+owns clip/note selection, the clipboard, time selection, and other interaction
+state; clip operations, piano-roll editing, automation editing, and timeline
+view behavior receive this already-resolved target. `ArrangementState` is a
+thin adapter that retains Arrange's Project Track/channel controls and
+implements `TimelineEditorAdapter` to resolve its editor. The editor never
+asks which workspace is active and contains no `Arrange | Section` branch, so
+a Section can provide the same adapter in the later authoring slice.
+
+Every horizontal editor surface uses `TimelineGeometry` for beat-to-pixel,
+pixel-to-beat, fitted viewport, visible-range, and beat-width conversions.
+Ruler, clip lanes, automation, piano roll, minimap, drag/drop, and auto-scroll
+therefore share one geometry implementation even when they use different
+resolved scales. A generic conformance harness currently runs against the
+Arrange adapter and is reusable unchanged by the Section adapter.
 
 ```mermaid
 flowchart LR
     PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
-    AT["ArrangementTimeline<br/>TrackId → TrackTimelineContent"]
-    UI["Arrange editor selection/view state"]
-    PT -- "shared TrackId" --> AT
-    AT --> UI
+    AA["ArrangementState<br/>thin adapter + channel controls"]
+    TE["TimelineEditorState<br/>selection + resolved TimelineContent"]
+    TG["TimelineGeometry<br/>one beat/pixel layer"]
+    PT -- "shared TrackId" --> TE
+    AA -- "resolves once" --> TE
+    TG --> TE
 ```
 
 Undo snapshots retain the Project Track store and Arrange Timeline Content as

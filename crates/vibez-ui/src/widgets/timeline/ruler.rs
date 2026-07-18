@@ -10,6 +10,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig};
 use crate::theme;
+use crate::timeline_geometry::TimelineGeometry;
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
@@ -42,16 +43,20 @@ pub struct RulerInteractionState {
 }
 
 impl RulerWidget {
+    fn geometry(&self) -> TimelineGeometry {
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+    }
+
     fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.zoom_level
+        self.geometry().pixels_per_beat()
     }
 
     fn visible_beats(&self, width: f32) -> f64 {
-        width as f64 / self.pixels_per_beat() as f64
+        self.geometry().visible_beats(width)
     }
 
     fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
-        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        self.geometry().beat_to_x(beat)
     }
 
     fn snapped_beat(&self, beat: f64) -> f64 {
@@ -336,8 +341,7 @@ impl canvas::Program<Message> for RulerWidget {
             // Left-click: PendingSeek (may become RegionSelect on drag)
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    let ppb = self.pixels_per_beat();
-                    let beat = pos.x as f64 / ppb as f64 + self.scroll_offset_beats;
+                    let beat = self.geometry().x_to_beat(pos.x);
                     state.drag = Some(RulerDragAction::PendingSeek {
                         beat,
                         start_x: pos.x,
@@ -350,8 +354,7 @@ impl canvas::Program<Message> for RulerWidget {
                 if let Some(ref drag) = state.drag {
                     if let Some(pos) = cursor.position() {
                         let local_x = pos.x - bounds.x;
-                        let ppb = self.pixels_per_beat();
-                        let beat = local_x as f64 / ppb as f64 + self.scroll_offset_beats;
+                        let beat = self.geometry().x_to_beat(local_x);
 
                         // Auto-scroll when dragging near ruler edges
                         if matches!(drag, RulerDragAction::RegionSelect { .. }) {

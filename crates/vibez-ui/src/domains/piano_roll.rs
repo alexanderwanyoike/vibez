@@ -7,6 +7,7 @@
 //! [`PianoRollAction`] for app.rs to route.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
@@ -14,7 +15,8 @@ use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
 use crate::state::{
-    ArrangementTimeline, PianoRollState, SnapGrid, TrackTimelineContent, UiNoteClip,
+    PianoRollState, SnapGrid, TimelineContent, TimelineEditorState, TrackTimelineContent,
+    UiNoteClip,
 };
 
 /// Messages the piano roll domain handles.
@@ -116,12 +118,12 @@ pub struct PianoRollAction {
     pub close_context_menu: bool,
 }
 
-fn find_track(timeline: &ArrangementTimeline, track_id: TrackId) -> Option<&TrackTimelineContent> {
+fn find_track(timeline: &TimelineContent, track_id: TrackId) -> Option<&TrackTimelineContent> {
     timeline.get(track_id)
 }
 
 fn find_track_mut(
-    timeline: &mut ArrangementTimeline,
+    timeline: &mut TimelineContent,
     track_id: TrackId,
 ) -> Option<&mut TrackTimelineContent> {
     timeline.get_mut(track_id)
@@ -145,7 +147,7 @@ pub fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
 /// Snap every note start to the grid and sync changed notes to the
 /// engine.
 fn quantize_note_clip(
-    tracks: &mut ArrangementTimeline,
+    tracks: &mut TimelineContent,
     track_id: TrackId,
     clip_id: ClipId,
     grid: SnapGrid,
@@ -183,9 +185,10 @@ impl PianoRollState {
         &mut self,
         msg: PianoRollMsg,
         engine: &mut impl EngineHandle,
-        tracks: &mut ArrangementTimeline,
+        editor: &mut TimelineEditorState,
         ctx: PianoRollCtx,
     ) -> PianoRollAction {
+        let tracks = Arc::make_mut(&mut editor.timeline);
         let mut action = PianoRollAction::default();
         match msg {
             PianoRollMsg::ToggleNoteClipLoop(track_id, clip_id) => {
@@ -701,10 +704,10 @@ mod tests {
     use super::*;
     use crate::state::PianoRollEditMode;
 
-    fn midi_track_with_clip() -> (ArrangementTimeline, TrackId, ClipId) {
+    fn midi_track_with_clip() -> (TimelineEditorState, TrackId, ClipId) {
         let track_id = TrackId::new();
         let clip_id = ClipId::new();
-        let mut timeline = ArrangementTimeline::default();
+        let mut timeline = TimelineEditorState::default();
         let track = timeline.ensure(track_id);
         track.note_clips.push(UiNoteClip {
             id: clip_id,
@@ -840,7 +843,7 @@ mod tests {
     fn toggle_edit_mode_flips_and_reports() {
         let mut pr = PianoRollState::default();
         let mut engine = RecordingEngine::default();
-        let mut tracks = ArrangementTimeline::default();
+        let mut tracks = TimelineEditorState::default();
         let action = pr.update(
             PianoRollMsg::ToggleEditMode,
             &mut engine,

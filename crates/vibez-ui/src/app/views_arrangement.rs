@@ -10,6 +10,7 @@ use iced::widget::{
 use iced::{Element, Length, Theme};
 
 use crate::domains::browser::BrowserMsg;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, TrackId};
 
@@ -17,6 +18,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
+use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
 use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
 
@@ -24,6 +26,7 @@ use super::*;
 
 impl App {
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
+        let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
             let browser_drag_active = self.state.browser.drag_source.is_some();
             let empty_beat = match self.state.browser.drag_target {
@@ -61,14 +64,14 @@ impl App {
             }));
             if browser_drag_active {
                 let grid = self.state.view.grid_config();
-                let pixels_per_beat = 20.0 * self.state.view.zoom_level;
-                let scroll = self.state.view.scroll_offset_beats;
+                let geometry = TimelineGeometry::from_zoom(
+                    self.state.view.zoom_level,
+                    self.state.view.scroll_offset_beats,
+                );
                 area = area
                     .on_move(move |point| {
-                        let beat = grid.snap_beat(
-                            point.x as f64 / pixels_per_beat as f64 + scroll,
-                            pixels_per_beat,
-                        );
+                        let beat =
+                            grid.snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat());
                         Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
                             beat: beat.max(0.0),
                         })
@@ -83,6 +86,7 @@ impl App {
         let bpm = self.state.transport.bpm;
         let zoom_level = self.state.view.zoom_level;
         let scroll_offset = self.state.view.scroll_offset_beats;
+        let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 
         // Beat-based ruler across the top (offset by track header width)
@@ -96,9 +100,9 @@ impl App {
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
-            time_selection_active: self.state.arrangement.time_selection_active,
-            selection_start_beats: self.state.arrangement.selection_start_beats,
-            selection_end_beats: self.state.arrangement.selection_end_beats,
+            time_selection_active: timeline.time_selection_active,
+            selection_start_beats: timeline.selection_start_beats,
+            selection_end_beats: timeline.selection_end_beats,
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -140,7 +144,7 @@ impl App {
                 .iter()
                 .map(|t| {
                     let color = th::track_color(t.color_index);
-                    let content = self.state.arrange_content(t.id);
+                    let content = timeline.timeline.get(t.id);
                     let mut clips: Vec<(f64, f64)> = content
                         .into_iter()
                         .flat_map(|content| {
@@ -211,17 +215,12 @@ impl App {
         let empty_content = TrackTimelineContent::default();
 
         for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
-            let content = self
-                .state
-                .arrange_content(track.id)
-                .unwrap_or(&empty_content);
-            let selected = self.state.arrangement.selected_track == Some(track.id);
+            let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
+            let selected = timeline.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
 
             // Collect selected clip IDs for this track
-            let selected_clips: HashSet<ClipId> = self
-                .state
-                .arrangement
+            let selected_clips: HashSet<ClipId> = timeline
                 .selected_clips
                 .iter()
                 .filter_map(|sel| match sel {
@@ -272,10 +271,10 @@ impl App {
                 self.state.transport.loop_enabled,
                 self.state.transport.loop_start_beats,
                 self.state.transport.loop_end_beats,
-                self.state.arrangement.time_selection_active,
-                self.state.arrangement.selection_start_beats,
-                self.state.arrangement.selection_end_beats,
-                self.state.arrangement.time_selection_track,
+                timeline.time_selection_active,
+                timeline.selection_start_beats,
+                timeline.selection_end_beats,
+                timeline.time_selection_track,
                 self.state.browser.drag_source.is_some(),
                 browser_drag_duration,
                 browser_drag_detail.clone(),
@@ -283,8 +282,7 @@ impl App {
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
             let grid = self.state.view.grid_config();
-            let pixels_per_beat = 20.0 * zoom_level;
-            let scroll = scroll_offset;
+            let track_geometry = geometry;
             let clip_canvas: Element<'_, Message> = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
@@ -292,8 +290,8 @@ impl App {
             )
             .on_move(move |point| {
                 let beat = grid.snap_beat(
-                    point.x as f64 / pixels_per_beat as f64 + scroll,
-                    pixels_per_beat,
+                    track_geometry.x_to_beat(point.x),
+                    track_geometry.pixels_per_beat(),
                 );
                 Message::Browser(BrowserMsg::DragHoverTrack {
                     track_id,
@@ -309,14 +307,13 @@ impl App {
             track_rows = track_rows.push(track_row);
 
             if automation_open {
-                track_rows = self.push_automation_lanes(track_rows, track, track_color);
+                track_rows = self.push_automation_lanes(track_rows, timeline, track, track_color);
             }
         }
 
         if self.state.browser.drag_source.is_some() {
             let grid = self.state.view.grid_config();
-            let pixels_per_beat = 20.0 * self.state.view.zoom_level;
-            let scroll = self.state.view.scroll_offset_beats;
+            let empty_geometry = geometry;
             let empty_beat = match self.state.browser.drag_target {
                 Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
                 _ => None,
@@ -358,8 +355,8 @@ impl App {
             )
             .on_move(move |point| {
                 let beat = grid.snap_beat(
-                    point.x as f64 / pixels_per_beat as f64 + scroll,
-                    pixels_per_beat,
+                    empty_geometry.x_to_beat(point.x),
+                    empty_geometry.pixels_per_beat(),
                 );
                 Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
                     beat: beat.max(0.0),
@@ -388,7 +385,7 @@ impl App {
             } else {
                 th::track_color(channel.color_index)
             };
-            let selected = self.state.arrangement.selected_track == Some(channel.id);
+            let selected = timeline.selected_track == Some(channel.id);
             let expanded = self.state.automation_ui.expanded.contains(&channel.id);
 
             let toggle = button(
@@ -489,7 +486,7 @@ impl App {
 
             track_rows = track_rows.push(row![header, filler].height(Length::Fixed(26.0)));
             if expanded {
-                track_rows = self.push_automation_lanes(track_rows, channel, chan_color);
+                track_rows = self.push_automation_lanes(track_rows, timeline, channel, chan_color);
             }
         }
 
@@ -525,15 +522,16 @@ impl App {
     pub(super) fn push_automation_lanes<'a>(
         &'a self,
         mut rows: iced::widget::Column<'a, Message>,
+        timeline: &'a crate::state::TimelineEditorState,
         track: &'a crate::state::ProjectTrack,
         track_color: iced::Color,
     ) -> iced::widget::Column<'a, Message> {
         use crate::domains::automation::{target_label_with_buses, AutomationMsg};
         use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
 
-        let automation = self
-            .state
-            .arrange_content(track.id)
+        let automation = timeline
+            .timeline
+            .get(track.id)
             .map(|content| content.automation.as_slice())
             .unwrap_or(&[]);
         for lane in automation {
