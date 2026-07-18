@@ -190,13 +190,13 @@ pub enum SettingsTab {
 }
 
 /// A point-in-time snapshot of the editable project state, used to implement
-/// undo / redo. The two owned stores are independently shared so a timeline
-/// edit never clones Project Track instruments, effects, routing, or mixer
-/// state (and a mixer edit never clones Arrange clips).
+/// undo / redo. Project Tracks, Arrange, and the Section store are independently
+/// shared so edits clone only the project-owned structure they change.
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub project_tracks: Arc<ProjectTracksState>,
     pub arrange_timeline: Arc<ArrangementTimeline>,
+    pub sections: Arc<crate::domains::perform::SectionStore>,
     pub bpm: f64,
     pub bpm_text: String,
     pub loop_enabled: bool,
@@ -205,6 +205,7 @@ pub struct ProjectSnapshot {
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    pub selected_section: Option<vibez_core::id::SectionId>,
 }
 
 /// Runtime identity for one continuous pointer gesture. Every incremental
@@ -231,7 +232,7 @@ pub struct ProjectState {
     /// Clips whose media could not be hydrated at load time. Invisible in
     /// the arrangement, but serialized back into every save so unavailable
     /// media stays relinkable instead of silently vanishing.
-    pub unresolved_clips: Vec<vibez_core::track::ClipInfo>,
+    pub unresolved_clips: Vec<crate::message::UnresolvedTimelineClip>,
 }
 
 #[derive(Debug, Default)]

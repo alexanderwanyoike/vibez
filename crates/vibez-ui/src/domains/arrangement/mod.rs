@@ -165,6 +165,7 @@ impl ArrangementState {
                     | ArrangementSelection::NoteClip { track_id: id, .. } => *id != track_id,
                 });
                 action.close_track_guis = Some(track_id);
+                action.remove_track_from_sections = Some(track_id);
                 action.status = Some(format!(
                     "Removed {removed_name}. {} track(s) remain.",
                     project_tracks.tracks.len()
@@ -247,6 +248,7 @@ impl ArrangementState {
                     self.selected_track = project_tracks.tracks.first().map(|track| track.id);
                 }
                 action.close_track_guis = Some(bus_id);
+                action.remove_track_from_sections = Some(bus_id);
                 action.status = Some("Removed bus".to_string());
             }
             ArrangementMsg::SetSend {

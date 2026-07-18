@@ -105,6 +105,9 @@ impl App {
                 PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
             });
         }
+        if let Some(track_id) = action.remove_track_from_sections {
+            Arc::make_mut(&mut self.state.perform.sections).remove_track(track_id);
+        }
         if let Some(status) = action.status {
             self.state.status_text = status;
         }
@@ -599,6 +602,7 @@ mod perform_action_tests {
         ProjectSnapshot {
             project_tracks: Arc::clone(&state.project_tracks),
             arrange_timeline: Arc::clone(&state.arrangement.timeline),
+            sections: Arc::clone(&state.perform.sections),
             bpm: state.transport.bpm,
             bpm_text: state.transport.bpm_text.clone(),
             loop_enabled: state.transport.loop_enabled,
@@ -607,6 +611,7 @@ mod perform_action_tests {
             selected_track: state.arrangement.selected_track,
             selected_clips: state.arrangement.selected_clips.clone(),
             selected_note_clip: state.arrangement.selected_note_clip,
+            selected_section: state.perform.selected_section,
         }
     }
 

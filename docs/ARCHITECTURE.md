@@ -103,10 +103,16 @@ in the router layer as iced Tasks in topic modules under
 math happens in the domains.
 
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
-selection, and editor-focus state; `PerformMsg` changes that slice through the
-router and `EngineHandle`. Perform is a sibling of Arrange and Mix in the shared
-shell, and all three retain their interaction state when producers switch
-between them. Track Mute pad slots retain stable `TrackId` assignments across
+selection, and editor-focus state alongside an `Arc<SectionStore>` that enters
+project persistence and undo. Each Section owns its properties and an
+independent `ArrangementTimeline` keyed by the same shared Project `TrackId`s;
+duplicating a Section remints every editable content identity while immutable
+decoded audio remains shared. `PerformMsg` changes that slice through the
+router and `EngineHandle`. Creating and editing Sections does not send engine
+commands yet—Section playback belongs to the later launch slice. Perform is a
+sibling of Arrange and Mix in the shared shell, and all three retain their
+interaction state when producers switch between them. Track Mute pad slots
+retain stable `TrackId` assignments across
 track additions and deletions. A pad press resolves inside Perform to a narrow
 mute request; the router applies that request to the one project-owned mute
 field used by Arrange and Mix instead of storing a second Perform value.
@@ -138,7 +144,9 @@ state. Arrange does not own or duplicate those channels.
 `TrackId`. Each `TrackTimelineContent` contains only the audio clips, note
 clips, and automation associated with that Project Track in one timeline.
 Track order is therefore independent from timeline storage, and a timeline
-edit cannot clone instruments, effects, routing, or mixer state.
+edit cannot clone instruments, effects, routing, or mixer state. Arrange owns
+one `TimelineContent`, while every Perform Section owns another store with the
+same shape and shared Project `TrackId`s.
 
 `TimelineEditorState` is the shared editing boundary around that content. It
 owns clip/note selection, the clipboard, time selection, and other interaction
@@ -161,16 +169,19 @@ flowchart LR
     PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
     AA["ArrangementState<br/>thin adapter + channel controls"]
     TE["TimelineEditorState<br/>selection + resolved TimelineContent"]
+    SS["SectionStore<br/>Section → TimelineContent"]
     TG["TimelineGeometry<br/>one beat/pixel layer"]
     PT -- "shared TrackId" --> TE
+    PT -- "shared TrackId" --> SS
     AA -- "resolves once" --> TE
     TG --> TE
 ```
 
-Undo snapshots retain the Project Track store and Arrange Timeline Content as
-separate `Arc` values. Copy-on-write happens only in the store being edited.
-Meters, decoded device media, waveform/runtime caches, and UI selection are UI
-runtime state; they are not fields of persisted timeline content.
+Undo snapshots retain the Project Track store, Arrange Timeline Content, and
+Section store as separate `Arc` values. Copy-on-write happens only in the store
+being edited. Meters, decoded device media, waveform/runtime caches, and UI
+selection are UI runtime state; they are not fields of persisted timeline
+content.
 
 ## The audio engine
 
@@ -217,14 +228,22 @@ are handled in three stages:
 ## Projects, undo, and warping
 
 - Projects are JSON (`vibez-project`): Project Tracks remain in the existing
-  `tracks`/`master`/`buses` fields, while Arrange audio and note clips remain
-  in the existing `clips`/`note_clips` fields. Automation is projected between
-  Track Timeline Content and the compatible on-disk track record. Loading
-  rehydrates the two in-memory stores and replays them into the engine; legacy
-  project bytes remain loadable without a format migration.
-- Undo/redo keeps independently shared snapshots of Project Tracks and Arrange
-  Timeline Content (audio is also shared via `Arc`). Restoring a snapshot tears
-  down the engine side and replays both stores.
+  `tracks`/`master`/`buses` fields. The canonical document contains Arrange
+  Timeline Content plus an ordered Section store, with each Section carrying
+  its properties and Timeline Content. Arrange audio and note clips stay
+  flattened into the existing `clips`/`note_clips` keys for compatibility;
+  legacy track automation is migrated into Arrange Timeline Content on load.
+  Existing project bytes therefore load with an empty Section store and no
+  format migration.
+- Save, load, media collection and hydration, unresolved-media preservation,
+  ID discovery, and runtime projection consume the document's single timeline
+  traversal. A media source referenced by Arrange and Sections is embedded once
+  in the `.vzp` container. Only Arrange content is replayed to the engine until
+  Section launch/playback is implemented.
+- Undo/redo keeps independently shared snapshots of Project Tracks, Arrange
+  Timeline Content, and Sections (audio is also shared via `Arc`). Restoring a
+  snapshot tears down the engine side and replays the currently playable
+  Arrange store.
   Live plugin state is captured before teardown so undo does not reset
   plugin parameters.
 - Warping detects a clip's BPM, then time-stretches it to the project tempo

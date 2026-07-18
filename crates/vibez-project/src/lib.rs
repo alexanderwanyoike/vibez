@@ -1,10 +1,82 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use vibez_core::automation::AutomationLane;
+use vibez_core::id::{SectionId, TrackId};
 use vibez_core::midi::NoteClipInfo;
 use vibez_core::track::{ClipInfo, TrackInfo};
 
 pub mod project_format_v1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TimelineLocation {
+    Arrange,
+    Section(SectionId),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineAutomationInfo {
+    pub track_id: TrackId,
+    pub lanes: Vec<AutomationLane>,
+}
+
+/// Serializable musical content for one timeline, associated with shared
+/// Project Tracks by stable `TrackId`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TimelineInfo {
+    #[serde(default)]
+    pub clips: Vec<ClipInfo>,
+    #[serde(default)]
+    pub note_clips: Vec<NoteClipInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automation: Vec<TimelineAutomationInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionLaunchQuantization {
+    Immediate,
+    OneBeat,
+    #[default]
+    OneBar,
+    EndOfSection,
+}
+
+impl SectionLaunchQuantization {
+    pub const ALL: [Self; 4] = [
+        Self::Immediate,
+        Self::OneBeat,
+        Self::OneBar,
+        Self::EndOfSection,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Immediate => "Immediate",
+            Self::OneBeat => "1 Beat",
+            Self::OneBar => "1 Bar",
+            Self::EndOfSection => "End of Section",
+        }
+    }
+}
+
+impl std::fmt::Display for SectionLaunchQuantization {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionInfo {
+    pub id: SectionId,
+    pub slot: u16,
+    pub name: String,
+    pub length_beats: f64,
+    pub launch_quantization: SectionLaunchQuantization,
+    pub looping: bool,
+    #[serde(default)]
+    pub timeline: TimelineInfo,
+}
 
 /// A serializable project containing tracks and clips.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,9 +85,10 @@ pub struct Project {
     pub bpm: f64,
     pub sample_rate: u32,
     pub tracks: Vec<TrackInfo>,
-    pub clips: Vec<ClipInfo>,
-    #[serde(default)]
-    pub note_clips: Vec<NoteClipInfo>,
+    /// Flattening retains the legacy top-level `clips` / `note_clips` JSON
+    /// shape while giving Arrange and Sections one canonical timeline model.
+    #[serde(flatten)]
+    pub arrange: TimelineInfo,
     /// The master bus channel (gain + effect chain). Absent in
     /// projects saved before the master was a real channel.
     #[serde(default)]
@@ -23,6 +96,8 @@ pub struct Project {
     /// Return buses (mixer-only channels fed by track sends).
     #[serde(default)]
     pub buses: Vec<TrackInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<SectionInfo>,
 }
 
 impl Default for Project {
@@ -32,10 +107,10 @@ impl Default for Project {
             bpm: vibez_core::constants::DEFAULT_BPM,
             sample_rate: vibez_core::constants::DEFAULT_SAMPLE_RATE,
             tracks: Vec::new(),
-            clips: Vec::new(),
-            note_clips: Vec::new(),
+            arrange: TimelineInfo::default(),
             master: None,
             buses: Vec::new(),
+            sections: Vec::new(),
         }
     }
 }
@@ -78,6 +153,81 @@ impl From<serde_json::Error> for ProjectError {
 }
 
 impl Project {
+    pub fn timelines(&self) -> impl Iterator<Item = (TimelineLocation, &TimelineInfo)> + '_ {
+        std::iter::once((TimelineLocation::Arrange, &self.arrange)).chain(
+            self.sections
+                .iter()
+                .map(|section| (TimelineLocation::Section(section.id), &section.timeline)),
+        )
+    }
+
+    pub fn timelines_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (TimelineLocation, &mut TimelineInfo)> + '_ {
+        std::iter::once((TimelineLocation::Arrange, &mut self.arrange)).chain(
+            self.sections
+                .iter_mut()
+                .map(|section| (TimelineLocation::Section(section.id), &mut section.timeline)),
+        )
+    }
+
+    pub fn timeline(&self, location: TimelineLocation) -> Option<&TimelineInfo> {
+        match location {
+            TimelineLocation::Arrange => Some(&self.arrange),
+            TimelineLocation::Section(id) => self
+                .sections
+                .iter()
+                .find(|section| section.id == id)
+                .map(|section| &section.timeline),
+        }
+    }
+
+    pub fn timeline_mut(&mut self, location: TimelineLocation) -> Option<&mut TimelineInfo> {
+        match location {
+            TimelineLocation::Arrange => Some(&mut self.arrange),
+            TimelineLocation::Section(id) => self
+                .sections
+                .iter_mut()
+                .find(|section| section.id == id)
+                .map(|section| &mut section.timeline),
+        }
+    }
+
+    pub fn max_persisted_id(&self) -> u64 {
+        let mut maximum = 0;
+        for track in self
+            .tracks
+            .iter()
+            .chain(self.master.iter())
+            .chain(self.buses.iter())
+        {
+            maximum = maximum.max(track.id.raw());
+            for effect in &track.effects {
+                maximum = maximum.max(effect.id.raw());
+            }
+            for lane in &track.automation {
+                maximum = maximum.max(lane.id.raw());
+            }
+        }
+        for section in &self.sections {
+            maximum = maximum.max(section.id.raw());
+        }
+        for (_, timeline) in self.timelines() {
+            for clip in &timeline.clips {
+                maximum = maximum.max(clip.id.raw());
+            }
+            for clip in &timeline.note_clips {
+                maximum = maximum.max(clip.id.raw());
+            }
+            for automation in &timeline.automation {
+                for lane in &automation.lanes {
+                    maximum = maximum.max(lane.id.raw());
+                }
+            }
+        }
+        maximum
+    }
+
     /// Save the project to a JSON file.
     pub fn save_to_file(&self, path: &Path) -> Result<(), ProjectError> {
         let json = serde_json::to_string_pretty(self)?;
@@ -194,6 +344,8 @@ mod tests {
         }"#;
         let project: Project = serde_json::from_str(json).unwrap();
         assert!(project.buses.is_empty());
+        assert!(project.sections.is_empty());
+        assert!(project.arrange.clips.is_empty());
         assert!(project.tracks[0].sends.is_empty());
     }
 
@@ -209,25 +361,28 @@ mod tests {
             bpm: 140.0,
             sample_rate: 48_000,
             tracks: vec![TrackInfo::new("Synth"), TrackInfo::new("Bass")],
-            clips: vec![ClipInfo {
-                id: ClipId::new(),
-                track_id: TrackId::new(),
-                name: "loop.wav".into(),
-                position: 0,
-                source_offset: 0,
-                duration: 44100,
-                source: Some(MediaSourceRef::LocalFile {
-                    path: PathBuf::from("audio/loop.wav"),
-                }),
-                file_path: Some(PathBuf::from("audio/loop.wav")),
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-            }],
-            note_clips: Vec::new(),
+            arrange: TimelineInfo {
+                clips: vec![ClipInfo {
+                    id: ClipId::new(),
+                    track_id: TrackId::new(),
+                    name: "loop.wav".into(),
+                    position: 0,
+                    source_offset: 0,
+                    duration: 44100,
+                    source: Some(MediaSourceRef::LocalFile {
+                        path: PathBuf::from("audio/loop.wav"),
+                    }),
+                    file_path: Some(PathBuf::from("audio/loop.wav")),
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 0,
+                    original_bpm: None,
+                    warped: false,
+                    warped_to_bpm: None,
+                }],
+                ..TimelineInfo::default()
+            },
+            sections: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -238,8 +393,8 @@ mod tests {
         assert_eq!(loaded.sample_rate, 48_000);
         assert_eq!(loaded.tracks.len(), 2);
         assert_eq!(loaded.tracks[0].name, "Synth");
-        assert_eq!(loaded.clips.len(), 1);
-        assert_eq!(loaded.clips[0].name, "loop.wav");
+        assert_eq!(loaded.arrange.clips.len(), 1);
+        assert_eq!(loaded.arrange.clips[0].name, "loop.wav");
     }
 
     #[test]
@@ -253,7 +408,7 @@ mod tests {
 
         assert_eq!(loaded.name, "Untitled");
         assert!(loaded.tracks.is_empty());
-        assert!(loaded.clips.is_empty());
+        assert!(loaded.arrange.clips.is_empty());
     }
 
     #[test]
@@ -264,27 +419,30 @@ mod tests {
             bpm: 123.0,
             sample_rate: 44_100,
             tracks: vec![track.clone()],
-            clips: vec![ClipInfo {
-                id: ClipId::new(),
-                track_id: track.id,
-                name: "legacy.wav".into(),
-                position: 128,
-                source_offset: 32,
-                duration: 2_048,
-                source: Some(MediaSourceRef::LocalFile {
-                    path: PathBuf::from("audio/legacy.wav"),
-                }),
-                file_path: Some(PathBuf::from("audio/legacy.wav")),
-                loop_enabled: true,
-                loop_start: 32,
-                loop_end: 2_080,
-                original_bpm: Some(123.0),
-                warped: false,
-                warped_to_bpm: None,
-            }],
-            note_clips: Vec::new(),
+            arrange: TimelineInfo {
+                clips: vec![ClipInfo {
+                    id: ClipId::new(),
+                    track_id: track.id,
+                    name: "legacy.wav".into(),
+                    position: 128,
+                    source_offset: 32,
+                    duration: 2_048,
+                    source: Some(MediaSourceRef::LocalFile {
+                        path: PathBuf::from("audio/legacy.wav"),
+                    }),
+                    file_path: Some(PathBuf::from("audio/legacy.wav")),
+                    loop_enabled: true,
+                    loop_start: 32,
+                    loop_end: 2_080,
+                    original_bpm: Some(123.0),
+                    warped: false,
+                    warped_to_bpm: None,
+                }],
+                ..TimelineInfo::default()
+            },
             master: None,
             buses: Vec::new(),
+            sections: Vec::new(),
         };
         let legacy_bytes = serde_json::to_vec_pretty(&project).unwrap();
 
@@ -341,7 +499,7 @@ mod tests {
         }"#;
         let project: Project = serde_json::from_str(json).unwrap();
         assert_eq!(project.name, "Old Project");
-        assert!(project.note_clips.is_empty());
+        assert!(project.arrange.note_clips.is_empty());
     }
 
     #[test]
@@ -357,41 +515,44 @@ mod tests {
             bpm: 128.0,
             sample_rate: 44_100,
             tracks: vec![],
-            clips: vec![],
-            note_clips: vec![NoteClipInfo {
-                id: ClipId::new(),
-                track_id: tid,
-                name: "Pattern 1".into(),
-                position_beats: 0.0,
-                duration_beats: 4.0,
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-                notes: vec![
-                    MidiNote {
-                        pitch: 60,
-                        velocity: 100,
-                        start_beat: 0.0,
-                        duration_beats: 1.0,
-                    },
-                    MidiNote {
-                        pitch: 64,
-                        velocity: 80,
-                        start_beat: 1.0,
-                        duration_beats: 0.5,
-                    },
-                ],
-            }],
+            arrange: TimelineInfo {
+                note_clips: vec![NoteClipInfo {
+                    id: ClipId::new(),
+                    track_id: tid,
+                    name: "Pattern 1".into(),
+                    position_beats: 0.0,
+                    duration_beats: 4.0,
+                    loop_enabled: false,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: 0.0,
+                    notes: vec![
+                        MidiNote {
+                            pitch: 60,
+                            velocity: 100,
+                            start_beat: 0.0,
+                            duration_beats: 1.0,
+                        },
+                        MidiNote {
+                            pitch: 64,
+                            velocity: 80,
+                            start_beat: 1.0,
+                            duration_beats: 0.5,
+                        },
+                    ],
+                }],
+                ..TimelineInfo::default()
+            },
+            sections: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
         let loaded = Project::load_from_file(&path).unwrap();
 
-        assert_eq!(loaded.note_clips.len(), 1);
-        assert_eq!(loaded.note_clips[0].name, "Pattern 1");
-        assert_eq!(loaded.note_clips[0].notes.len(), 2);
-        assert_eq!(loaded.note_clips[0].notes[0].pitch, 60);
-        assert_eq!(loaded.note_clips[0].notes[1].pitch, 64);
+        assert_eq!(loaded.arrange.note_clips.len(), 1);
+        assert_eq!(loaded.arrange.note_clips[0].name, "Pattern 1");
+        assert_eq!(loaded.arrange.note_clips[0].notes.len(), 2);
+        assert_eq!(loaded.arrange.note_clips[0].notes[0].pitch, 60);
+        assert_eq!(loaded.arrange.note_clips[0].notes[1].pitch, 64);
     }
 
     #[test]
@@ -421,8 +582,8 @@ mod tests {
             bpm: 120.0,
             sample_rate: 44_100,
             tracks: vec![track],
-            clips: vec![],
-            note_clips: vec![],
+            arrange: TimelineInfo::default(),
+            sections: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();

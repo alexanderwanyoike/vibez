@@ -9,14 +9,14 @@ use iced::Task;
 
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
-use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
+use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
-use vibez_project::Project;
+use vibez_project::{Project, TimelineLocation};
 
 use crate::message::{Message, ProjectLoadResult};
-use crate::state::{ProjectTrack, UiClip, UiDrumPad, UiEffect, UiNoteClip};
+use crate::state::{ProjectTrack, UiDrumPad, UiEffect, UiNoteClip};
 use crate::ui_settings::UiSettings;
 
 use super::*;
@@ -56,6 +56,11 @@ impl App {
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
+        self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
+        self.state.perform.selected_section = None;
+        self.state.perform.editing_section_name = None;
+        self.state.perform.section_name_edit.clear();
+        self.state.perform.duplicate_source = None;
         self.reset_master_channel();
         // The engine drops all plugin instances with their tracks;
         // their GUI windows and stale raw pointers must go with them
@@ -299,11 +304,7 @@ impl App {
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
-            automation: self
-                .state
-                .arrange_content(track.id)
-                .map(|content| content.automation.clone())
-                .unwrap_or_default(),
+            automation: Vec::new(),
             sends: track.sends.clone(),
         }
     }
@@ -326,69 +327,6 @@ impl App {
             .map(|track| self.track_info_from_ui(track))
             .collect();
 
-        let clips = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .flat_map(|track| {
-                self.state
-                    .arrange_content(track.id)
-                    .into_iter()
-                    .flat_map(move |content| {
-                        content.clips.iter().map(move |clip| ClipInfo {
-                            id: clip.id,
-                            track_id: track.id,
-                            name: clip.name.clone(),
-                            position: clip.position,
-                            source_offset: clip.source_offset,
-                            duration: clip.duration,
-                            source: clip.source.clone(),
-                            file_path: clip.source.as_ref().and_then(|source| match source {
-                                MediaSourceRef::LocalFile { path } => Some(path.clone()),
-                                MediaSourceRef::StagedProjectMedia { .. }
-                                | MediaSourceRef::StagedRemoteProjectMedia { .. }
-                                | MediaSourceRef::ProjectMedia { .. }
-                                | MediaSourceRef::DropboxFile { .. } => None,
-                            }),
-                            loop_enabled: clip.loop_enabled,
-                            loop_start: clip.loop_start,
-                            loop_end: clip.loop_end,
-                            original_bpm: clip.original_bpm,
-                            warped: clip.warped,
-                            warped_to_bpm: clip.warped_to_bpm,
-                        })
-                    })
-            })
-            .collect();
-
-        let note_clips =
-            self.state
-                .project_tracks
-                .tracks
-                .iter()
-                .flat_map(|track| {
-                    self.state
-                        .arrange_content(track.id)
-                        .into_iter()
-                        .flat_map(move |content| {
-                            content.note_clips.iter().map(move |clip| {
-                                vibez_core::midi::NoteClipInfo {
-                                    id: clip.id,
-                                    track_id: track.id,
-                                    name: clip.name.clone(),
-                                    position_beats: clip.position_beats,
-                                    duration_beats: clip.duration_beats,
-                                    notes: clip.notes.clone(),
-                                    loop_enabled: clip.loop_enabled,
-                                    loop_start_beats: clip.loop_start_beats,
-                                    loop_end_beats: clip.loop_end_beats,
-                                }
-                            })
-                        })
-                })
-                .collect();
-
         Project {
             name: self
                 .state
@@ -401,8 +339,9 @@ impl App {
             bpm: self.state.transport.bpm,
             sample_rate: self.state.transport.sample_rate,
             tracks,
-            clips,
-            note_clips,
+            arrange: super::project_sections::timeline_info_from_ui(
+                &self.state.arrangement.timeline,
+            ),
             master: Some(self.track_info_from_ui(&self.state.project_tracks.master)),
             buses: self
                 .state
@@ -410,6 +349,14 @@ impl App {
                 .buses
                 .iter()
                 .map(|bus| self.track_info_from_ui(bus))
+                .collect(),
+            sections: self
+                .state
+                .perform
+                .sections
+                .sections
+                .iter()
+                .map(super::project_sections::section_info_from_ui)
                 .collect(),
         }
     }
@@ -420,22 +367,20 @@ impl App {
     /// clips have no audio to render.
     pub(super) fn project_for_save(&self) -> Project {
         let mut project = self.project_from_state();
-        project
-            .clips
-            .extend(self.state.project.unresolved_clips.iter().cloned());
+        for unresolved in &self.state.project.unresolved_clips {
+            if let Some(timeline) = project.timeline_mut(unresolved.location) {
+                timeline.clips.push(unresolved.info.clone());
+            }
+        }
         project
     }
 
     pub(super) fn apply_saved_project_sources(&mut self, project: &Project) {
-        for saved_clip in &project.clips {
-            if let Some(clip) = self
-                .state
-                .arrange_content_mut(saved_clip.track_id)
-                .clips
-                .iter_mut()
-                .find(|clip| clip.id == saved_clip.id)
+        for (location, saved) in project.timelines() {
+            if let Some(timeline) =
+                super::project_sections::runtime_timeline_mut(&mut self.state, location)
             {
-                clip.source = saved_clip.source.clone();
+                super::project_sections::apply_timeline_sources(Arc::make_mut(timeline), saved);
             }
         }
         for saved_track in &project.tracks {
@@ -460,31 +405,16 @@ impl App {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
+        self.state.perform.sections = Arc::new(
+            super::project_sections::section_store_from_project(&loaded.project.sections),
+        );
 
         // Seed the global id counter past every persisted id BEFORE
         // anything new is created: loaded ids come from a previous
         // session's counter, and a collision makes two objects
         // answer to the same id (double selection, engine commands
         // hitting both).
-        let max_loaded_id = loaded
-            .project
-            .tracks
-            .iter()
-            .flat_map(|t| std::iter::once(t.id.raw()).chain(t.effects.iter().map(|e| e.id.raw())))
-            .chain(loaded.project.clips.iter().map(|c| c.id.raw()))
-            .chain(loaded.project.note_clips.iter().map(|c| c.id.raw()))
-            .chain(
-                loaded
-                    .project
-                    .master
-                    .iter()
-                    .chain(loaded.project.buses.iter())
-                    .flat_map(|m| {
-                        std::iter::once(m.id.raw()).chain(m.effects.iter().map(|e| e.id.raw()))
-                    }),
-            )
-            .max()
-            .unwrap_or(0);
+        let max_loaded_id = loaded.project.max_persisted_id();
         vibez_core::id::ensure_ids_above(max_loaded_id);
         // Third-party plugin devices load asynchronously after the
         // built-in rebuild; collected here, spawned at the end.
@@ -512,8 +442,11 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
-            self.state.arrange_content_mut(track_info.id).automation =
-                track_info.automation.clone();
+            let automation = super::project_sections::legacy_automation_for_track(
+                &loaded.project,
+                track_info.id,
+            );
+            self.state.arrange_content_mut(track_info.id).automation = automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
             if let Some(dev) = &track_info.plugin_instrument {
@@ -582,7 +515,7 @@ impl App {
                 }
             }
 
-            for lane in &track_info.automation {
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track_info.id,
                     lane: lane.clone(),
@@ -698,9 +631,12 @@ impl App {
                 &mut plugin_effect_requests,
             );
             Arc::make_mut(&mut self.state.project_tracks).master.effects = effects;
-            self.state.arrange_content_mut(TrackId::MASTER).automation =
-                master_info.automation.clone();
-            for lane in &master_info.automation {
+            let automation = super::project_sections::legacy_automation_for_track(
+                &loaded.project,
+                TrackId::MASTER,
+            );
+            self.state.arrange_content_mut(TrackId::MASTER).automation = automation.clone();
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
                     lane: lane.clone(),
@@ -728,8 +664,10 @@ impl App {
                 bus_info.id,
                 &mut plugin_effect_requests,
             );
-            self.state.arrange_content_mut(bus_info.id).automation = bus_info.automation.clone();
-            for lane in &bus_info.automation {
+            let automation =
+                super::project_sections::legacy_automation_for_track(&loaded.project, bus_info.id);
+            self.state.arrange_content_mut(bus_info.id).automation = automation.clone();
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
                     lane: lane.clone(),
@@ -742,42 +680,31 @@ impl App {
         }
 
         for loaded_clip in loaded.clips {
-            self.send_command(EngineCommand::AddClip {
-                track_id: loaded_clip.info.track_id,
-                clip_id: loaded_clip.info.id,
-                audio: Arc::clone(&loaded_clip.audio),
-                position: loaded_clip.info.position,
-                source_offset: loaded_clip.info.source_offset,
-                duration: loaded_clip.info.duration,
-                loop_enabled: loaded_clip.info.loop_enabled,
-                loop_start: loaded_clip.info.loop_start,
-                loop_end: loaded_clip.info.loop_end,
-            });
-
-            if self.state.find_track(loaded_clip.info.track_id).is_some() {
-                self.state
-                    .arrange_content_mut(loaded_clip.info.track_id)
-                    .clips
-                    .push(UiClip {
-                        id: loaded_clip.info.id,
-                        name: loaded_clip.info.name,
-                        audio: loaded_clip.audio,
-                        source: loaded_clip.info.source.clone(),
-                        position: loaded_clip.info.position,
-                        source_offset: loaded_clip.info.source_offset,
-                        duration: loaded_clip.info.duration,
-                        loop_enabled: loaded_clip.info.loop_enabled,
-                        loop_start: loaded_clip.info.loop_start,
-                        loop_end: loaded_clip.info.loop_end,
-                        original_bpm: loaded_clip.info.original_bpm,
-                        warped: loaded_clip.info.warped,
-                        warped_to_bpm: loaded_clip.info.warped_to_bpm,
-                        original_audio: loaded_clip.original_audio,
-                    });
+            let location = loaded_clip.location;
+            let clip = loaded_clip.clip;
+            if location == TimelineLocation::Arrange {
+                self.send_command(EngineCommand::AddClip {
+                    track_id: clip.info.track_id,
+                    clip_id: clip.info.id,
+                    audio: Arc::clone(&clip.audio),
+                    position: clip.info.position,
+                    source_offset: clip.info.source_offset,
+                    duration: clip.info.duration,
+                    loop_enabled: clip.info.loop_enabled,
+                    loop_start: clip.info.loop_start,
+                    loop_end: clip.info.loop_end,
+                });
+            }
+            if self.state.find_track(clip.info.track_id).is_some() {
+                if let Some(timeline) =
+                    super::project_sections::runtime_timeline_mut(&mut self.state, location)
+                {
+                    super::project_sections::install_loaded_clip(Arc::make_mut(timeline), clip);
+                }
             }
         }
 
-        for note_clip in &loaded.project.note_clips {
+        for note_clip in &loaded.project.arrange.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
                 track_id: note_clip.track_id,
                 clip_id: note_clip.id,
@@ -852,6 +779,21 @@ impl App {
             .tracks
             .first()
             .map(|track| track.id);
+        self.state.perform.selected_section = self
+            .state
+            .perform
+            .sections
+            .sections
+            .first()
+            .map(|section| section.id);
+        self.state.perform.section_name_edit = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id))
+            .map(|section| section.name.clone())
+            .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
         self.state
             .perform
             .sync_project_tracks(&self.state.project_tracks.tracks);
@@ -920,8 +862,8 @@ impl App {
             tracks: project.tracks,
             master: project.master,
             buses: project.buses,
-            audio_clips: project.clips,
-            note_clips: project.note_clips,
+            audio_clips: project.arrange.clips,
+            note_clips: project.arrange.note_clips,
             clip_audio: assets.clips,
             sampler_audio: assets.samplers,
             drum_pad_audio: assets.pads,
@@ -947,8 +889,8 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
         sampler
     });
     project
-        .clips
-        .iter()
+        .timelines()
+        .flat_map(|(_, timeline)| timeline.clips.iter())
         .filter_map(|clip| clip.source.as_ref())
         .chain(track_sources)
         .filter_map(MediaSourceRef::provenance)

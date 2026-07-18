@@ -116,7 +116,8 @@ impl App {
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
-            || matches!(&message, Message::Automation(m) if m.marks_dirty());
+            || matches!(&message, Message::Automation(m) if m.marks_dirty())
+            || matches!(&message, Message::Perform(m) if m.marks_dirty());
         if should_mark_dirty {
             self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();

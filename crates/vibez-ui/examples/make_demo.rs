@@ -4,7 +4,7 @@
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, NoteClipInfo, TrackKind};
 use vibez_core::track::TrackInfo;
-use vibez_project::Project;
+use vibez_project::{Project, TimelineInfo};
 
 fn note(pitch: u8, velocity: u8, start_beat: f64, duration_beats: f64) -> MidiNote {
     MidiNote {
@@ -158,8 +158,11 @@ fn main() {
         bpm: 124.0,
         sample_rate: 48_000,
         tracks: vec![drums, bass, chords, lead],
-        clips: Vec::new(),
-        note_clips,
+        arrange: TimelineInfo {
+            note_clips,
+            ..TimelineInfo::default()
+        },
+        sections: Vec::new(),
     };
     let path = std::path::Path::new("assets/demo.vibez");
     project.save_to_file(path).expect("save demo project");

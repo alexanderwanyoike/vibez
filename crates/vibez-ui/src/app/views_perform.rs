@@ -2,11 +2,13 @@
 //! Section construction area. Musical behavior arrives in later cards.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, stack, text,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
+    stack, text, text_input, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
-use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
+use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg, Section};
+use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
@@ -18,6 +20,82 @@ const MODE_SELECTOR_INSET: f32 = 17.0;
 const MODE_TAB_MIN_WIDTH: f32 = 108.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_WIDTH_SHARE: f32 = 0.4;
+const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
+const SECTION_BAR_WIDTH: f32 = 160.0;
+
+fn perform_tool_button(
+    icon: char,
+    help: impl Into<String>,
+    message: Message,
+    active: bool,
+    destructive: bool,
+) -> Element<'static, Message> {
+    let color = if destructive {
+        th::danger()
+    } else if active {
+        th::accent()
+    } else {
+        th::text_dim()
+    };
+    let control = button(
+        center(icons::icon(icon).size(12).color(color))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_press(message)
+    .width(Length::Fixed(30.0))
+    .height(Length::Fixed(28.0))
+    .padding(0)
+    .style(move |_theme: &Theme, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(
+                if hovered {
+                    th::bg_hover()
+                } else if active {
+                    th::bg_elevated()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: color,
+            border: iced::Border {
+                color: if destructive && hovered {
+                    th::danger()
+                } else if active {
+                    th::accent_dim()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        }
+    });
+    tooltip(
+        control,
+        text(help.into())
+            .font(PERFORM_TECH)
+            .size(9)
+            .color(th::text()),
+        tooltip::Position::Bottom,
+    )
+    .gap(6)
+    .padding(6)
+    .style(|_theme: &Theme| container::Style {
+        background: Some(th::bg_elevated().into()),
+        border: iced::Border {
+            color: th::border_light(),
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
 fn perform_mode_tab_width(window_width: f32) -> f32 {
     ((window_width * PAD_SURFACE_WIDTH_SHARE - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
@@ -208,7 +286,7 @@ impl App {
                 .copied()
                 .filter(|position| position.row == row_index)
             {
-                pad_row = pad_row.push(self.view_empty_pad(position, mode));
+                pad_row = pad_row.push(self.view_perform_pad(position, mode));
             }
             grid = grid.push(pad_row);
         }
@@ -235,10 +313,15 @@ impl App {
             .into()
     }
 
-    fn view_empty_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
+    fn view_perform_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
         let ordinal = u16::from(position.ordinal(mode))
             + u16::from(self.state.perform.banks.for_mode(mode)) * 16;
-        let selected = self.state.perform.selected_pad == Some(position);
+        let section = (mode == PerformMode::Sections)
+            .then(|| self.state.perform.sections.at_slot(ordinal - 1))
+            .flatten();
+        let selected = section
+            .is_some_and(|section| self.state.perform.selected_section == Some(section.id))
+            || self.state.perform.selected_pad == Some(position);
         let pressed = self.state.perform.is_pad_pressed(position);
         let mute_track = (mode == PerformMode::TrackMutes)
             .then(|| {
@@ -248,12 +331,26 @@ impl App {
             })
             .flatten();
         let (title, detail, color, muted) = match mode {
-            PerformMode::Sections => (
-                "+ SECTION".to_string(),
-                "EMPTY".to_string(),
-                th::track_color((ordinal - 1) as u8),
-                false,
-            ),
+            PerformMode::Sections => match section {
+                Some(section) => (
+                    section.name.clone(),
+                    format!("AVAILABLE · {:.0} BARS", section.length_beats / 4.0),
+                    th::track_color((ordinal - 1) as u8),
+                    false,
+                ),
+                None if self.state.perform.duplicate_source.is_some() => (
+                    "+ DUPLICATE".to_string(),
+                    "CHOOSE EMPTY SLOT".to_string(),
+                    th::track_color((ordinal - 1) as u8),
+                    false,
+                ),
+                None => (
+                    "+ SECTION".to_string(),
+                    "EMPTY".to_string(),
+                    th::track_color((ordinal - 1) as u8),
+                    false,
+                ),
+            },
             PerformMode::TrackMutes => {
                 if let Some(track) = mute_track {
                     (
@@ -381,48 +478,60 @@ impl App {
             })
             .into();
 
-        if mute_track.is_some() {
-            mouse_area(pad)
+        match (mode, section) {
+            (PerformMode::Sections, Some(section)) => mouse_area(pad)
+                .on_press(Message::Perform(PerformMsg::SelectSection(section.id)))
+                .into(),
+            (PerformMode::Sections, None) if self.state.perform.duplicate_source.is_some() => {
+                mouse_area(pad)
+                    .on_press(Message::Perform(PerformMsg::DuplicateSectionTo(
+                        ordinal - 1,
+                    )))
+                    .into()
+            }
+            (PerformMode::Sections, None) => mouse_area(pad)
+                .on_press(Message::Perform(PerformMsg::CreateSectionAt(ordinal - 1)))
+                .into(),
+            (PerformMode::TrackMutes, _) if mute_track.is_some() => mouse_area(pad)
                 .on_press(Message::Perform(PerformMsg::ToggleTrackMuteFromPad(
                     position,
                 )))
-                .into()
-        } else {
-            pad
+                .into(),
+            _ => pad,
         }
     }
 
-    fn view_section_construction(&self) -> Element<'_, Message> {
-        let toolbar = row![
-            column![
-                text("SECTION CONSTRUCTION")
-                    .font(PERFORM_LABEL)
-                    .size(9)
-                    .color(th::accent()),
-                text("No Section selected")
-                    .font(PERFORM_DISPLAY)
-                    .size(19)
-                    .color(th::text())
-            ]
-            .spacing(4),
-            horizontal_space(),
-            column![
-                text("LOCAL TIMELINE")
-                    .font(PERFORM_LABEL)
-                    .size(9)
-                    .color(th::blend(th::text_dim(), th::text(), 0.28)),
-                text("— BARS").font(PERFORM_TECH).size(9).color(th::blend(
-                    th::text_dim(),
-                    th::text(),
-                    0.2
-                ))
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::End)
-        ]
-        .align_y(iced::Alignment::Center)
-        .padding([12, 16]);
-        let toolbar = container(toolbar)
+    fn view_section_toolbar(&self, section: Option<&Section>) -> Element<'_, Message> {
+        let Some(section) = section else {
+            return container(row![
+                column![
+                    text("SECTION CONSTRUCTION")
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(th::accent()),
+                    text("No Section selected")
+                        .font(PERFORM_DISPLAY)
+                        .size(19)
+                        .color(th::text())
+                ]
+                .spacing(4),
+                horizontal_space(),
+                column![
+                    text("LOCAL TIMELINE")
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(th::blend(th::text_dim(), th::text(), 0.28)),
+                    text("— BARS").font(PERFORM_TECH).size(9).color(th::blend(
+                        th::text_dim(),
+                        th::text(),
+                        0.2
+                    ))
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::End)
+            ])
+            .align_y(iced::Alignment::Center)
+            .padding([12, 16])
             .width(Length::Fill)
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
@@ -432,54 +541,294 @@ impl App {
                     radius: 0.0.into(),
                 },
                 ..Default::default()
-            });
+            })
+            .into();
+        };
 
-        let ruler_number_color = th::blend(th::text_dim(), th::text(), 0.36);
-        let ruler = row![
-            container(
-                text("PROJECT TRACK")
-                    .font(PERFORM_TECH)
-                    .size(8)
-                    .color(th::blend(th::text_dim(), th::text(), 0.16))
+        let bars = section.length_beats / 4.0;
+        let duplicate_message = if self.state.perform.duplicate_source == Some(section.id) {
+            PerformMsg::CancelDuplicateSection
+        } else {
+            PerformMsg::BeginDuplicateSection(section.id)
+        };
+        let editing_name = self.state.perform.editing_section_name == Some(section.id);
+        let name: Element<'_, Message> = if editing_name {
+            text_input("Section name", &self.state.perform.section_name_edit)
+                .on_input(|name| Message::Perform(PerformMsg::SectionNameInput(name)))
+                .on_submit(Message::Perform(PerformMsg::CommitSectionName(section.id)))
+                .font(PERFORM_DISPLAY)
+                .size(16)
+                .padding([4, 7])
+                .width(Length::Fill)
+                .into()
+        } else {
+            button(
+                text(section.name.clone())
+                    .font(PERFORM_DISPLAY)
+                    .size(17)
+                    .color(th::text()),
             )
-            .width(Length::Fixed(112.0))
-            .padding([8, 10]),
-            container(
-                text("1")
+            .on_press(Message::Perform(PerformMsg::StartEditingSectionName(
+                section.id,
+            )))
+            .padding([4, 6])
+            .width(Length::Fill)
+            .style(|_theme: &Theme, status| button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        Some(th::bg_hover().into())
+                    }
+                    _ => None,
+                },
+                text_color: th::text(),
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .into()
+        };
+        let shorten = perform_tool_button(
+            icons::MINUS,
+            "Shorten Section by 1 bar",
+            Message::Perform(PerformMsg::SetSectionLengthBeats(
+                section.id,
+                section.length_beats - 4.0,
+            )),
+            false,
+            false,
+        );
+        let extend = perform_tool_button(
+            icons::PLUS,
+            "Extend Section by 1 bar",
+            Message::Perform(PerformMsg::SetSectionLengthBeats(
+                section.id,
+                section.length_beats + 4.0,
+            )),
+            false,
+            false,
+        );
+        let length: Element<'_, Message> = row![
+            shorten,
+            center(
+                text(format!("{bars:.0} BARS"))
                     .font(PERFORM_TECH_STRONG)
-                    .size(11)
-                    .color(ruler_number_color)
+                    .size(9)
+                    .color(th::text())
             )
-            .width(Length::FillPortion(1))
-            .padding(8),
-            container(
-                text("2")
-                    .font(PERFORM_TECH_STRONG)
-                    .size(11)
-                    .color(ruler_number_color)
-            )
-            .width(Length::FillPortion(1))
-            .padding(8),
-            container(
-                text("3")
-                    .font(PERFORM_TECH_STRONG)
-                    .size(11)
-                    .color(ruler_number_color)
-            )
-            .width(Length::FillPortion(1))
-            .padding(8),
-            container(
-                text("4")
-                    .font(PERFORM_TECH_STRONG)
-                    .size(11)
-                    .color(ruler_number_color)
-            )
-            .width(Length::FillPortion(1))
-            .padding(8)
+            .width(Length::Fixed(56.0))
+            .height(Length::Fixed(28.0)),
+            extend,
         ]
-        .height(Length::Fixed(30.0));
+        .spacing(2)
+        .align_y(iced::Alignment::Center)
+        .into();
+        let section_id = section.id;
+        let launch: Element<'_, Message> = pick_list(
+            vibez_project::SectionLaunchQuantization::ALL,
+            Some(section.launch_quantization),
+            move |quantization| {
+                Message::Perform(PerformMsg::SetSectionLaunchQuantization(
+                    section_id,
+                    quantization,
+                ))
+            },
+        )
+        .width(Length::Fixed(132.0))
+        .padding([5, 8])
+        .text_size(9)
+        .style(|_theme: &Theme, status| {
+            let highlighted = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: th::text(),
+                placeholder_color: th::text_dim(),
+                handle_color: if highlighted {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::perform_inset().into(),
+                border: iced::Border {
+                    color: if highlighted {
+                        th::accent_dim()
+                    } else {
+                        th::border_light()
+                    },
+                    width: 1.0,
+                    radius: 1.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 1.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into();
+        let loop_toggle = perform_tool_button(
+            icons::REPEAT,
+            if section.looping {
+                "Disable Section looping"
+            } else {
+                "Enable Section looping"
+            },
+            Message::Perform(PerformMsg::ToggleSectionLoop(section.id)),
+            section.looping,
+            false,
+        );
+        let duplicate = perform_tool_button(
+            if self.state.perform.duplicate_source == Some(section.id) {
+                icons::X
+            } else {
+                icons::COPY
+            },
+            if self.state.perform.duplicate_source == Some(section.id) {
+                "Cancel duplicate"
+            } else {
+                "Duplicate Section into an empty pad"
+            },
+            Message::Perform(duplicate_message),
+            self.state.perform.duplicate_source == Some(section.id),
+            false,
+        );
+        let delete = perform_tool_button(
+            icons::TRASH_2,
+            "Delete Section",
+            Message::Perform(PerformMsg::DeleteSection(section.id)),
+            false,
+            true,
+        );
+        let divider = || {
+            container(horizontal_space())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(22.0))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::divider().into()),
+                    ..Default::default()
+                })
+        };
+        let controls = container(
+            row![
+                length,
+                divider(),
+                launch,
+                divider(),
+                loop_toggle,
+                divider(),
+                duplicate,
+                divider(),
+                delete,
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding(3)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::perform_inset().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+        let identity = column![
+            text(format!("SELECTED SECTION · {:02}", section.slot + 1))
+                .font(PERFORM_LABEL)
+                .size(7)
+                .color(th::text_dim()),
+            name
+        ]
+        .spacing(3)
+        .width(Length::Fill);
+        let toolbar = row![identity, controls]
+            .spacing(12)
+            .align_y(iced::Alignment::Center)
+            .padding([8, 12]);
 
-        let mut ghost_tracks = column![].width(Length::Fill).height(Length::Fill);
+        container(toolbar)
+            .width(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn view_section_construction(&self) -> Element<'_, Message> {
+        let selected = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id));
+        let toolbar = self.view_section_toolbar(selected);
+
+        let bar_count = selected
+            .map(|section| (section.length_beats / 4.0).round() as usize)
+            .unwrap_or(4)
+            .max(1);
+        let timeline_width = SECTION_BAR_WIDTH * bar_count as f32;
+        let ruler_number_color = th::blend(th::text_dim(), th::text(), 0.36);
+        let ruler_gutter = container(
+            text("PROJECT TRACK")
+                .font(PERFORM_TECH)
+                .size(8)
+                .color(th::blend(th::text_dim(), th::text(), 0.16)),
+        )
+        .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
+        .height(Length::Fixed(30.0))
+        .padding([8, 10])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::perform_grid_line(),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+        let mut ruler_marks = row![]
+            .width(Length::Fixed(timeline_width))
+            .height(Length::Fixed(30.0));
+        for bar in 0..bar_count {
+            ruler_marks = ruler_marks.push(
+                container(
+                    text((bar + 1).to_string())
+                        .font(PERFORM_TECH_STRONG)
+                        .size(11)
+                        .color(ruler_number_color),
+                )
+                .width(Length::Fixed(SECTION_BAR_WIDTH))
+                .height(Length::Fixed(30.0))
+                .padding(8)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::perform_grid_line(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }),
+            );
+        }
+
+        let mut track_gutters = column![].width(Length::Fill).height(Length::Fill);
+        let mut timeline_tracks = column![]
+            .width(Length::Fixed(timeline_width))
+            .height(Length::Fill);
         for index in 0..6_u8 {
             let marker = container(horizontal_space())
                 .width(Length::Fixed(3.0))
@@ -490,7 +839,7 @@ impl App {
                 });
             let gutter =
                 container(row![marker, horizontal_space()].align_y(iced::Alignment::Center))
-                    .width(Length::Fixed(112.0))
+                    .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
                     .height(Length::Fill)
                     .padding([0, 10])
                     .style(|_theme: &Theme| container::Style {
@@ -502,11 +851,13 @@ impl App {
                         },
                         ..Default::default()
                     });
-            let mut lanes = row![].width(Length::Fill).height(Length::Fill);
-            for _ in 0..4 {
+            let mut lanes = row![]
+                .width(Length::Fixed(timeline_width))
+                .height(Length::Fill);
+            for _ in 0..bar_count {
                 lanes = lanes.push(
                     container(horizontal_space())
-                        .width(Length::FillPortion(1))
+                        .width(Length::Fixed(SECTION_BAR_WIDTH))
                         .height(Length::Fill)
                         .style(|_theme: &Theme| container::Style {
                             border: iced::Border {
@@ -518,20 +869,48 @@ impl App {
                         }),
                 );
             }
-            ghost_tracks = ghost_tracks.push(
-                row![gutter, lanes]
-                    .width(Length::Fill)
-                    .height(Length::FillPortion(1)),
-            );
+            track_gutters = track_gutters.push(gutter.height(Length::FillPortion(1)));
+            timeline_tracks = timeline_tracks.push(lanes.height(Length::FillPortion(1)));
         }
-        let timeline_grid = container(ghost_tracks)
+        let fixed_gutter = column![ruler_gutter, track_gutters]
+            .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
+            .height(Length::Fill);
+        let timeline_content =
+            container(column![ruler_marks, timeline_tracks].height(Length::Fill))
+                .width(Length::Fixed(timeline_width))
+                .height(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::display_bg().into()),
+                    ..Default::default()
+                });
+        let scrolling_timeline = scrollable::Scrollable::with_direction(
+            timeline_content,
+            scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(5)
+                    .scroller_width(5)
+                    .spacing(1),
+            ),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let timeline_grid = row![fixed_gutter, scrolling_timeline]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::display_bg().into()),
-                ..Default::default()
-            });
+            .height(Length::Fill);
 
+        let (empty_title, empty_detail, empty_footnote) = if selected.is_some() {
+            (
+                format!("{bar_count} BAR SECTION"),
+                "This Section has its own local timeline",
+                "MUSICAL AUTHORING ARRIVES IN CARD 07",
+            )
+        } else {
+            (
+                "SELECT A SECTION".to_string(),
+                "Create one from an empty Pad Position",
+                "SECTION DATA IS SAVED WITH THE PROJECT",
+            )
+        };
         let empty = center(
             container(
                 column![
@@ -539,14 +918,12 @@ impl App {
                         .font(PERFORM_LABEL)
                         .size(9)
                         .color(th::accent()),
-                    text("SELECT A SECTION")
+                    text(empty_title)
                         .font(PERFORM_LABEL)
                         .size(13)
                         .color(th::text()),
-                    text("Its multitrack timeline will open here")
-                        .size(10)
-                        .color(th::text_dim()),
-                    text("CREATION + EDITING ARRIVE IN A LATER CARD")
+                    text(empty_detail).size(10).color(th::text_dim()),
+                    text(empty_footnote)
                         .font(PERFORM_TECH)
                         .size(8)
                         .color(th::blend(th::text_dim(), th::text(), 0.1))
@@ -574,7 +951,7 @@ impl App {
         .height(Length::Fill);
         let empty_timeline = stack![timeline_grid, empty];
 
-        let construction = container(column![toolbar, ruler, empty_timeline].height(Length::Fill))
+        let construction = container(column![toolbar, empty_timeline].height(Length::Fill))
             .width(Length::FillPortion(3))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {

@@ -16,6 +16,7 @@ impl App {
         crate::state::ProjectSnapshot {
             project_tracks: Arc::clone(&self.state.project_tracks),
             arrange_timeline: Arc::clone(&self.state.arrangement.timeline),
+            sections: Arc::clone(&self.state.perform.sections),
             bpm: self.state.transport.bpm,
             bpm_text: self.state.transport.bpm_text.clone(),
             loop_enabled: self.state.transport.loop_enabled,
@@ -24,6 +25,7 @@ impl App {
             selected_track: self.state.arrangement.selected_track,
             selected_clips: self.state.arrangement.selected_clips.clone(),
             selected_note_clip: self.state.arrangement.selected_note_clip,
+            selected_section: self.state.perform.selected_section,
         }
     }
 
@@ -95,6 +97,7 @@ impl App {
             .perform
             .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.arrangement.timeline = snapshot.arrange_timeline;
+        self.state.perform.sections = snapshot.sections;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;
         self.state.transport.loop_enabled = snapshot.loop_enabled;
@@ -103,6 +106,16 @@ impl App {
         self.state.arrangement.selected_track = snapshot.selected_track;
         self.state.arrangement.selected_clips = snapshot.selected_clips;
         self.state.arrangement.selected_note_clip = snapshot.selected_note_clip;
+        self.state.perform.selected_section = snapshot.selected_section;
+        self.state.perform.section_name_edit = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id))
+            .map(|section| section.name.clone())
+            .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
+        self.state.perform.duplicate_source = None;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
         self.send_command(EngineCommand::SetArrangementLoop(
