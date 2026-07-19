@@ -12,6 +12,43 @@ use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
 
+#[derive(Default)]
+pub(crate) struct EdgeShortcutState {
+    pressed_keys: std::collections::HashSet<String>,
+    released_at: std::collections::HashMap<String, std::time::Instant>,
+}
+
+impl EdgeShortcutState {
+    fn should_dispatch(
+        &mut self,
+        key_id: &str,
+        message: &Message,
+        occurred_at: std::time::Instant,
+    ) -> bool {
+        let edge_triggered = matches!(
+            message,
+            Message::Arrangement(ArrangementMsg::AddTrack | ArrangementMsg::AddInstrumentTrack)
+        );
+        if !edge_triggered {
+            return true;
+        }
+
+        let release_gap = self
+            .released_at
+            .get(key_id)
+            .map(|released_at| occurred_at.saturating_duration_since(*released_at));
+        let synthetic_repeat =
+            release_gap.is_some_and(|gap| gap <= std::time::Duration::from_millis(30));
+        let first_press = self.pressed_keys.insert(key_id.to_owned());
+        first_press && !synthetic_repeat
+    }
+
+    fn release(&mut self, key_id: &str, occurred_at: std::time::Instant) {
+        self.pressed_keys.remove(key_id);
+        self.released_at.insert(key_id.to_owned(), occurred_at);
+    }
+}
+
 pub(crate) fn keyboard_input_message(
     event: iced::keyboard::Event,
     status: iced::event::Status,
@@ -98,6 +135,7 @@ impl super::App {
                 modifiers,
                 ..
             } => {
+                let edge_key_id = runtime_key_id(&key);
                 if self.state.perform.key_rebind_target.is_some()
                     && matches!(key, iced::keyboard::Key::Named(Named::Escape))
                 {
@@ -110,25 +148,29 @@ impl super::App {
                                 key_id: runtime_key_id(&key),
                                 occurred_at,
                             }),
-                            Some((key, modifiers)),
+                            Some((key, modifiers, edge_key_id)),
                         )
                     } else {
-                        (None, Some((key, modifiers)))
+                        (None, Some((key, modifiers, edge_key_id)))
                     }
                 } else if self.state.perform.key_rebind_target.is_some() {
                     self.state.status_text = "Perform keys must be letters or numbers".into();
                     return iced::Task::none();
                 } else {
-                    (None, Some((key, modifiers)))
+                    (None, Some((key, modifiers, edge_key_id)))
                 }
             }
-            iced::keyboard::Event::KeyReleased { key, .. } => (
-                Some(PerformMsg::ComputerKeyReleased {
-                    key_id: runtime_key_id(&key),
-                    occurred_at,
-                }),
-                None,
-            ),
+            iced::keyboard::Event::KeyReleased { key, .. } => {
+                let key_id = runtime_key_id(&key);
+                self.edge_shortcuts.release(&key_id, occurred_at);
+                (
+                    Some(PerformMsg::ComputerKeyReleased {
+                        key_id,
+                        occurred_at,
+                    }),
+                    None,
+                )
+            }
             iced::keyboard::Event::ModifiersChanged(_) => return iced::Task::none(),
         };
 
@@ -150,7 +192,12 @@ impl super::App {
         }
 
         fallback
-            .and_then(|(key, modifiers)| global_key_handler(key, modifiers))
+            .and_then(|(key, modifiers, key_id)| {
+                let message = global_key_handler(key, modifiers)?;
+                self.edge_shortcuts
+                    .should_dispatch(&key_id, &message, occurred_at)
+                    .then_some(message)
+            })
             .map_or_else(iced::Task::none, iced::Task::done)
     }
 }
@@ -395,6 +442,37 @@ mod tests {
             Some(Message::Arrangement(
                 ArrangementMsg::CreateClipFromSelection
             ))
+        ));
+    }
+
+    #[test]
+    fn held_track_shortcut_dispatches_once_until_key_release() {
+        let mut state = EdgeShortcutState::default();
+        let add = Message::Arrangement(ArrangementMsg::AddInstrumentTrack);
+        let started = std::time::Instant::now();
+
+        assert!(state.should_dispatch("Character(\"T\")", &add, started));
+        assert!(!state.should_dispatch("Character(\"T\")", &add, started));
+
+        // X11 auto-repeat is delivered as a synthetic release/press pair.
+        state.release(
+            "Character(\"T\")",
+            started + std::time::Duration::from_millis(500),
+        );
+        assert!(!state.should_dispatch(
+            "Character(\"T\")",
+            &add,
+            started + std::time::Duration::from_millis(501),
+        ));
+
+        state.release(
+            "Character(\"T\")",
+            started + std::time::Duration::from_millis(900),
+        );
+        assert!(state.should_dispatch(
+            "Character(\"T\")",
+            &add,
+            started + std::time::Duration::from_millis(1_000),
         ));
     }
 
