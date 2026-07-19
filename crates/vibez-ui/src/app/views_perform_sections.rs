@@ -22,13 +22,13 @@ use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
 use super::*;
 
 impl App {
-    pub(super) fn view_section_construction(&self) -> Element<'_, Message> {
+    pub(super) fn view_section_construction(&self, section_width: f32) -> Element<'_, Message> {
         let selected = self
             .state
             .perform
             .selected_section
             .and_then(|id| self.state.perform.sections.by_id(id));
-        let toolbar = self.view_section_toolbar(selected);
+        let toolbar = self.view_section_toolbar(selected, section_width);
         let editor = self.state.perform.section_editor.editor();
         let bar_count = selected
             .map(|section| (section.length_beats / 4.0).round() as usize)

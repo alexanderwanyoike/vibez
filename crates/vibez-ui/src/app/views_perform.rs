@@ -20,6 +20,7 @@ const MODE_TAB_MIN_WIDTH: f32 = 92.0;
 const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
+const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
 pub(super) const SECTION_BAR_WIDTH: f32 = 160.0;
 
@@ -105,6 +106,10 @@ fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -
     preferred_width.clamp(minimum, maximum)
 }
 
+fn section_toolbar_stacks(section_width: f32) -> bool {
+    section_width < SECTION_TOOLBAR_INLINE_MIN_WIDTH
+}
+
 fn perform_pad_grid_height(window_height: f32) -> f32 {
     (window_height * 0.48).clamp(272.0, 480.0)
 }
@@ -114,9 +119,12 @@ impl App {
         let workspace_width = self.perform_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
+        let section_width =
+            (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
+                .max(0.0);
         let mode_selector = self.view_perform_mode_selector(surface_width);
         let pad_surface = self.view_pad_surface(surface_width);
-        let section_construction = self.view_section_construction();
+        let section_construction = self.view_section_construction(section_width);
 
         let workspace = row![
             pad_surface,
@@ -544,7 +552,11 @@ impl App {
         }
     }
 
-    pub(super) fn view_section_toolbar(&self, section: Option<&Section>) -> Element<'_, Message> {
+    pub(super) fn view_section_toolbar(
+        &self,
+        section: Option<&Section>,
+        section_width: f32,
+    ) -> Element<'_, Message> {
         let Some(section) = section else {
             return container(row![
                 column![
@@ -800,10 +812,18 @@ impl App {
         ]
         .spacing(3)
         .width(Length::Fill);
-        let toolbar = row![identity, controls]
-            .spacing(12)
-            .align_y(iced::Alignment::Center)
-            .padding([8, 12]);
+        let toolbar: Element<'_, Message> = if section_toolbar_stacks(section_width) {
+            column![identity, controls]
+                .spacing(8)
+                .padding([8, 12])
+                .into()
+        } else {
+            row![identity, controls]
+                .spacing(12)
+                .align_y(iced::Alignment::Center)
+                .padding([8, 12])
+                .into()
+        };
 
         container(toolbar)
             .width(Length::Fill)
@@ -849,5 +869,11 @@ mod tests {
         assert_eq!(effective_perform_surface_width(640.0, 1400.0), 640.0);
         assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 933.0);
         assert_eq!(effective_perform_surface_width(500.0, 820.0), 353.0);
+    }
+
+    #[test]
+    fn section_toolbar_stacks_before_identity_text_collapses() {
+        assert!(section_toolbar_stacks(SECTION_CONSTRUCTION_MIN_WIDTH));
+        assert!(!section_toolbar_stacks(760.0));
     }
 }
