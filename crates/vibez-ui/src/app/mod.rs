@@ -33,6 +33,7 @@ use crate::ui_settings::UiSettings;
 
 struct App {
     state: AppState,
+    edge_shortcuts: EdgeShortcutState,
     cmd_tx: Option<Producer<EngineCommand>>,
     event_rx: Option<Consumer<EngineEvent>>,
     /// Post-effects mono samples from the engine's spectrum tap,
@@ -303,6 +304,7 @@ impl App {
 
         let mut app = Self {
             state,
+            edge_shortcuts: EdgeShortcutState::default(),
             cmd_tx: Some(cmd_tx),
             event_rx: Some(event_rx),
             spectrum_rx,
