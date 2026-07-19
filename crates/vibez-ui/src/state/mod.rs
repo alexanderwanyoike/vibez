@@ -6,6 +6,8 @@ use std::sync::Arc;
 mod browser_results;
 mod browser_state;
 mod ui_types;
+
+use crate::remote_provider::RemoteCatalogSnapshot;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
 pub use ui_types::*;
@@ -16,8 +18,6 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
-
-use crate::remote_provider::RemoteCatalogSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuditionMode {
@@ -34,15 +34,14 @@ impl AuditionMode {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuditionImportInput {
     pub mode: AuditionMode,
     pub source_bpm: Option<f64>,
 }
-
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
 pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
+pub const DETAIL_PANEL_DEFAULT_HEIGHT: f32 = 280.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMediaDrag {
     pub source: MediaSourceRef,
@@ -69,12 +68,13 @@ pub enum BrowserDropTarget {
         pad_index: usize,
     },
 }
-/// View domain slice: everything about how the project is being
-/// looked at, none of it part of the project itself.
+/// View-domain state; none of it is part of the project itself.
 #[derive(Debug)]
 pub struct ViewState {
     pub workspace: Workspace,
     pub detail_panel_tab: DetailPanelTab,
+    pub detail_panel_height: f32,
+    pub detail_panel_resize_active: bool,
     pub perform_surface_width: f32,
     pub perform_surface_resize_active: bool,
     pub zoom_level: f32,
@@ -89,7 +89,6 @@ pub struct ViewState {
     pub cursor_y: f32,
     pub window_width: f32, // last known size for responsive view clamping
     pub window_height: f32,
-    // Inline renaming
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
@@ -99,6 +98,8 @@ impl Default for ViewState {
         Self {
             workspace: Workspace::Arrange,
             detail_panel_tab: DetailPanelTab::Clip,
+            detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
+            detail_panel_resize_active: false,
             perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
             perform_surface_resize_active: false,
             zoom_level: 1.0,
@@ -530,9 +531,7 @@ pub struct AppState {
     /// the selected track); drawn behind the channel EQ curve.
     pub spectrum: crate::spectrum::SpectrumState,
 
-    // UI
     pub status_text: String,
-    // View domain slice (workspace, zoom, snap, menus, renames).
     pub view: ViewState,
 
     pub piano_roll: PianoRollState,

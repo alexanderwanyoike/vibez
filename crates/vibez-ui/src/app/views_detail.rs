@@ -21,6 +21,15 @@ use crate::widgets::piano_roll::PianoRollWidget;
 
 use super::*;
 
+const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
+const STATUS_BAR_HEIGHT: f32 = 24.0;
+
+fn effective_detail_panel_height(preferred_height: f32, window_height: f32) -> f32 {
+    let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
+    preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
+}
+
 impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
@@ -151,23 +160,13 @@ impl App {
                 .into()
         };
 
-        // Ableton-style panel heights: the Devices tab is a FIXED
-        // strip that device cards are designed to fit exactly (the
-        // arrangement flexes instead); the Clip tab keeps flexible
-        // height for the piano roll. Window-fraction heights clipped
-        // cards or demanded ugly vertical scrollbars.
-        let panel_height = if self.state.view.detail_panel_tab == DetailPanelTab::Devices {
-            Length::Fixed(th::DEVICE_BODY_H + 96.0)
-        } else if self.state.view.workspace == crate::state::Workspace::Perform
-            && self.state.perform.section_timeline_expanded
-        {
-            Length::FillPortion(1)
-        } else {
-            Length::FillPortion(2)
-        };
+        let panel_height = effective_detail_panel_height(
+            self.state.view.detail_panel_height,
+            self.state.view.window_height,
+        );
         container(detail_content)
             .width(Length::Fill)
-            .height(panel_height)
+            .height(Length::Fixed(panel_height))
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_dark().into()),
                 border: iced::Border {
@@ -178,6 +177,13 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
+        effective_detail_panel_height(
+            self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
+            self.state.view.window_height,
+        )
     }
 
     pub(super) fn view_clip_placeholder(&self) -> Element<'_, Message> {
@@ -667,5 +673,18 @@ impl App {
         .spacing(6)
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_detail_panel_height;
+
+    #[test]
+    fn detail_panel_height_preserves_the_workspace_at_small_windows() {
+        assert_eq!(effective_detail_panel_height(80.0, 900.0), 180.0);
+        assert_eq!(effective_detail_panel_height(360.0, 900.0), 360.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0), 540.0);
+        assert_eq!(effective_detail_panel_height(320.0, 520.0), 180.0);
     }
 }
