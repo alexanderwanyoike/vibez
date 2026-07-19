@@ -729,7 +729,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // the piano roll's and won, deleting the clip while a
             // note was selected; it could even delete the whole track.
 
-            // -- Keyboard shortcuts (Ctrl+D/E/J/T) --
+            // -- Lane-local keyboard shortcuts (Ctrl+D/E/J) --
+            // Track creation is global and must not be handled here: this
+            // canvas is instantiated once per track, so one Ctrl+T event would
+            // otherwise publish one AddTrack message per existing lane.
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Character(ref c),
                 modifiers,
@@ -755,19 +758,6 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 Some(Message::join_selected_clips()),
                             );
                         }
-                        "t" | "T" => {
-                            if modifiers.shift() {
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack)),
-                                );
-                            } else {
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::Arrangement(ArrangementMsg::AddTrack)),
-                                );
-                            }
-                        }
                         _ => {}
                     }
                 }
@@ -782,6 +772,77 @@ impl canvas::Program<Message> for TrackClipCanvas {
         }
 
         (canvas::event::Status::Ignored, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::keyboard::key::{Code, Physical};
+    use iced::keyboard::{Event, Key, Location, Modifiers};
+    use iced::{Point, Size};
+
+    fn empty_track_canvas() -> TrackClipCanvas {
+        let track_id = TrackId::new();
+        let track = ProjectTrack::new(track_id, "Track 1".into(), 0);
+        TrackClipCanvas::from_track(
+            &track,
+            &TrackTimelineContent::default(),
+            0.0,
+            1.0,
+            GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
+            0.0,
+            16.0,
+            44_100,
+            true,
+            Color::BLACK,
+            120.0,
+            track_id,
+            0,
+            1,
+            vec![track_id],
+            vec![false],
+            HashSet::new(),
+            false,
+            0.0,
+            0.0,
+            false,
+            0.0,
+            0.0,
+            None,
+            false,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn per_track_canvas_ignores_global_track_creation_shortcuts() {
+        let canvas = empty_track_canvas();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+
+        for modifiers in [Modifiers::CTRL, Modifiers::CTRL | Modifiers::SHIFT] {
+            let event = canvas::Event::Keyboard(Event::KeyPressed {
+                key: Key::Character("t".into()),
+                modified_key: Key::Character("t".into()),
+                physical_key: Physical::Code(Code::KeyT),
+                location: Location::Standard,
+                modifiers,
+                text: None,
+            });
+            let mut state = ClipInteractionState::default();
+
+            let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+                &canvas,
+                &mut state,
+                event,
+                bounds,
+                mouse::Cursor::Unavailable,
+            );
+
+            assert_eq!(status, canvas::event::Status::Ignored);
+            assert!(message.is_none());
+        }
     }
 }
 

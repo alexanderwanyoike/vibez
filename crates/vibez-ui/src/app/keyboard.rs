@@ -573,4 +573,20 @@ mod tests {
             Some(Message::KeyboardInput { .. })
         ));
     }
+
+    #[test]
+    fn repeated_t_taps_dispatch_while_control_stays_held() {
+        let mut state = EdgeShortcutState::default();
+        let add = Message::Arrangement(ArrangementMsg::AddTrack);
+        let started = std::time::Instant::now();
+
+        for tap in 0..4 {
+            let pressed_at = started + std::time::Duration::from_millis(tap * 300);
+            assert!(state.should_dispatch("Character(\"t\")", &add, pressed_at));
+            state.release(
+                "Character(\"t\")",
+                pressed_at + std::time::Duration::from_millis(100),
+            );
+        }
+    }
 }
