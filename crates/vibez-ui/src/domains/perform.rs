@@ -311,6 +311,9 @@ pub struct PerformState {
     pub editing_section_name: Option<SectionId>,
     pub section_name_edit: String,
     pub duplicate_source: Option<SectionId>,
+    /// Engine-owned playback truth mirrored from Section events.
+    pub playing_section: Option<SectionId>,
+    pub section_playhead_samples: u64,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
     track_mute_slots: Vec<Option<TrackId>>,
 }
@@ -322,6 +325,7 @@ pub enum PerformMsg {
     BeginKeyRebind(PadPosition),
     CancelKeyRebind,
     SelectSection(SectionId),
+    LaunchSection(SectionId),
     CreateSectionAt(u16),
     BeginDuplicateSection(SectionId),
     CancelDuplicateSection,
@@ -393,6 +397,8 @@ pub struct PerformAction {
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
+    pub section_launch: Option<SectionId>,
+    pub section_content_changed: Option<SectionId>,
 }
 
 impl PerformState {
@@ -480,6 +486,18 @@ impl PerformState {
                     self.select_section(id, ctx.selected_project_track);
                 }
             }
+            PerformMsg::LaunchSection(id) => {
+                if ctx.workspace_visible
+                    && self.mode == PerformMode::Sections
+                    && self.sections.by_id(id).is_some()
+                {
+                    self.select_section(id, ctx.selected_project_track);
+                    return PerformAction {
+                        section_launch: Some(id),
+                        ..PerformAction::default()
+                    };
+                }
+            }
             PerformMsg::CreateSectionAt(slot) => {
                 if ctx.workspace_visible && self.sections.at_slot(slot).is_none() {
                     let section = Section::new(slot);
@@ -558,6 +576,10 @@ impl PerformState {
                             sections::MIN_SECTION_LENGTH_BEATS,
                             sections::MAX_SECTION_LENGTH_BEATS,
                         );
+                        return PerformAction {
+                            section_content_changed: Some(id),
+                            ..PerformAction::default()
+                        };
                     }
                 }
             }
@@ -572,6 +594,10 @@ impl PerformState {
                 if ctx.workspace_visible {
                     if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
                         section.looping = !section.looping;
+                        return PerformAction {
+                            section_content_changed: Some(id),
+                            ..PerformAction::default()
+                        };
                     }
                 }
             }
@@ -600,6 +626,10 @@ impl PerformState {
                         editor.selected_note_clip = None;
                     }
                     self.commit_selected_section_timeline();
+                    return PerformAction {
+                        section_content_changed: Some(section_id),
+                        ..PerformAction::default()
+                    };
                 }
             }
             PerformMsg::PreviousBank => {
@@ -656,6 +686,15 @@ impl PerformState {
                 let track_mute_request = (self.mode == PerformMode::TrackMutes)
                     .then(|| self.track_mute_request(position, ctx.project_tracks))
                     .flatten();
+                let section_launch = if self.mode == PerformMode::Sections {
+                    let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
+                    self.sections.at_slot(slot).map(|section| section.id)
+                } else {
+                    None
+                };
+                if let Some(section_id) = section_launch {
+                    self.select_section(section_id, ctx.selected_project_track);
+                }
                 return PerformAction {
                     keyboard_consumed: true,
                     persist_settings: false,
@@ -667,6 +706,8 @@ impl PerformState {
                         occurred_at,
                     }),
                     track_mute_request,
+                    section_launch,
+                    section_content_changed: None,
                 };
             }
             PerformMsg::ComputerKeyReleased {

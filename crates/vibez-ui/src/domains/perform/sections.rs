@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, LaneId, SectionId, TrackId};
+use vibez_engine::playback_source::{
+    EngineClip, EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
+};
 use vibez_project::SectionLaunchQuantization;
 
 use crate::domains::timeline_editor::TimelineEditorAdapter;
@@ -111,6 +114,56 @@ impl Section {
     /// playable boundary. Timeline content outside the boundary remains stored.
     pub fn contains_playable_beat(&self, beat: f64) -> bool {
         beat >= 0.0 && beat < self.length_beats
+    }
+
+    /// Resolve this Section into the engine's resident playback-source seam.
+    /// Every Project Track receives a source, including empty sources that
+    /// express intentional silence without resetting the shared channel.
+    pub fn prepare_playback_source(
+        &self,
+        project_tracks: &[crate::state::ProjectTrack],
+    ) -> PreparedSectionPlaybackSource {
+        let tracks = project_tracks
+            .iter()
+            .map(|track| {
+                let content = self.timeline.get(track.id);
+                let clips = content
+                    .into_iter()
+                    .flat_map(|content| content.clips.iter())
+                    .map(|clip| EngineClip {
+                        id: clip.id,
+                        audio: Arc::clone(&clip.audio),
+                        position: clip.position,
+                        source_offset: clip.source_offset,
+                        duration: clip.duration,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start: clip.loop_start,
+                        loop_end: clip.loop_end,
+                    })
+                    .collect();
+                let note_clips = content
+                    .into_iter()
+                    .flat_map(|content| content.note_clips.iter())
+                    .map(|clip| EngineNoteClip {
+                        id: clip.id,
+                        position_beats: clip.position_beats,
+                        duration_beats: clip.duration_beats,
+                        notes: clip.notes.clone(),
+                        loop_enabled: clip.loop_enabled,
+                        loop_start_beats: clip.loop_start_beats,
+                        loop_end_beats: clip.loop_end_beats,
+                    })
+                    .collect();
+                let automation = content
+                    .map(|content| content.automation.clone())
+                    .unwrap_or_default();
+                (
+                    track.id,
+                    PreparedPlaybackSource::new(clips, note_clips, automation),
+                )
+            })
+            .collect();
+        PreparedSectionPlaybackSource::new(self.id, self.length_beats, self.looping, tracks)
     }
 }
 
@@ -325,6 +378,42 @@ mod tests {
             section.timeline.get(track_id).unwrap().note_clips[0].id,
             hidden_clip.id
         );
+    }
+
+    #[test]
+    fn playback_adapter_prepares_every_project_track_for_intentional_silence() {
+        let populated_id = TrackId::new();
+        let silent_id = TrackId::new();
+        let mut section = Section::new(0);
+        Arc::make_mut(&mut section.timeline)
+            .ensure(populated_id)
+            .note_clips
+            .push(UiNoteClip {
+                id: ClipId::new(),
+                name: "Pattern".into(),
+                position_beats: 0.0,
+                duration_beats: 4.0,
+                notes: Vec::new(),
+                selected_notes: Default::default(),
+                loop_enabled: false,
+                loop_start_beats: 0.0,
+                loop_end_beats: 0.0,
+            });
+        let tracks = [
+            crate::state::ProjectTrack::new(populated_id, "Drums".into(), 0),
+            crate::state::ProjectTrack::new(silent_id, "Bass".into(), 1),
+        ];
+
+        let prepared = section.prepare_playback_source(&tracks);
+
+        assert_eq!(prepared.section_id, section.id);
+        assert_eq!(prepared.tracks().len(), 2);
+        assert_eq!(prepared.tracks()[0].track_id, populated_id);
+        assert_eq!(prepared.tracks()[0].source.note_clips.len(), 1);
+        assert_eq!(prepared.tracks()[1].track_id, silent_id);
+        assert!(prepared.tracks()[1].source.clips.is_empty());
+        assert!(prepared.tracks()[1].source.note_clips.is_empty());
+        assert!(prepared.tracks()[1].source.automation.is_empty());
     }
 
     #[test]

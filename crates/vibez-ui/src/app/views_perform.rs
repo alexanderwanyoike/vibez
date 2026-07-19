@@ -1,7 +1,7 @@
 //! Perform workspace shell, Pad Surface, and shared Section Timeline Editor.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, pick_list, row, text,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
     text_input, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
@@ -373,6 +373,16 @@ impl App {
         let selected = section
             .is_some_and(|section| self.state.perform.selected_section == Some(section.id))
             || self.state.perform.selected_pad == Some(position);
+        let playing =
+            section.is_some_and(|section| self.state.perform.playing_section == Some(section.id));
+        let playhead_fraction = section.filter(|_| playing).map(|section| {
+            super::views_perform_playhead::section_playhead_fraction(
+                self.state.perform.section_playhead_samples,
+                section.length_beats,
+                self.state.transport.bpm,
+                self.state.transport.sample_rate,
+            )
+        });
         let pressed = self.state.perform.is_pad_pressed(position);
         let mute_track = (mode == PerformMode::TrackMutes)
             .then(|| {
@@ -385,7 +395,11 @@ impl App {
             PerformMode::Sections => match section {
                 Some(section) => (
                     section.name.clone(),
-                    format!("AVAILABLE · {:.0} BARS", section.length_beats / 4.0),
+                    format!(
+                        "{} · {:.0} BARS",
+                        if playing { "PLAYING" } else { "AVAILABLE" },
+                        section.length_beats / 4.0
+                    ),
                     th::track_color((ordinal - 1) as u8),
                     false,
                 ),
@@ -475,7 +489,7 @@ impl App {
                 iced::gradient::Linear::new(2.35)
                     .add_stop(
                         0.0,
-                        if pressed {
+                        if pressed || playing {
                             th::blend(th::accent_dim(), color, 0.35)
                         } else if muted {
                             th::blend(th::mute_active(), color, 0.28)
@@ -489,8 +503,10 @@ impl App {
                     .into(),
             ),
             border: iced::Border {
-                color: if pressed || selected {
+                color: if pressed || playing {
                     th::accent()
+                } else if selected {
+                    th::accent_dim()
                 } else if muted {
                     th::mute_active()
                 } else {
@@ -530,9 +546,32 @@ impl App {
             .into();
 
         match (mode, section) {
-            (PerformMode::Sections, Some(section)) => mouse_area(pad)
-                .on_press(Message::Perform(PerformMsg::SelectSection(section.id)))
-                .into(),
+            (PerformMode::Sections, Some(section)) => {
+                let select = mouse_area(pad)
+                    .on_press(Message::Perform(PerformMsg::SelectSection(section.id)));
+                let launch = container(perform_tool_button(
+                    icons::PLAY,
+                    "Launch Section",
+                    Message::Perform(PerformMsg::LaunchSection(section.id)),
+                    playing,
+                    false,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Bottom)
+                .padding(8);
+                if let Some(fraction) = playhead_fraction {
+                    stack![
+                        select,
+                        super::views_perform_playhead::pad_playhead(fraction),
+                        launch
+                    ]
+                    .into()
+                } else {
+                    stack![select, launch].into()
+                }
+            }
             (PerformMode::Sections, None) if self.state.perform.duplicate_source.is_some() => {
                 mouse_area(pad)
                     .on_press(Message::Perform(PerformMsg::DuplicateSectionTo(

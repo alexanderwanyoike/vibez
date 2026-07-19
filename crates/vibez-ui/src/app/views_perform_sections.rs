@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
+    stack, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -453,12 +454,37 @@ impl App {
 
             let fixed_gutter =
                 column![ruler_gutter, gutters].width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH));
-            let timeline_content = container(column![ruler_marks, lanes])
+            let timeline_base: Element<'_, Message> = container(column![ruler_marks, lanes])
                 .width(Length::Fixed(timeline_width))
+                .height(Length::Fixed(content_height))
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::display_bg().into()),
                     ..Default::default()
-                });
+                })
+                .into();
+            let timeline_content: Element<'_, Message> =
+                if self.state.perform.playing_section == Some(section_id) {
+                    let fraction = super::views_perform_playhead::section_playhead_fraction(
+                        self.state.perform.section_playhead_samples,
+                        selected_section.length_beats,
+                        self.state.transport.bpm,
+                        self.state.transport.sample_rate,
+                    );
+                    let playhead = row![
+                        horizontal_space().width(Length::Fixed(timeline_width * fraction)),
+                        super::views_perform_playhead::section_playhead_line(Length::Fixed(
+                            content_height,
+                        )),
+                    ]
+                    .width(Length::Fixed(timeline_width))
+                    .height(Length::Fixed(content_height));
+                    stack![timeline_base, playhead]
+                        .width(Length::Fixed(timeline_width))
+                        .height(Length::Fixed(content_height))
+                        .into()
+                } else {
+                    timeline_base
+                };
             let scrolling_timeline = scrollable::Scrollable::with_direction(
                 timeline_content,
                 scrollable::Direction::Horizontal(

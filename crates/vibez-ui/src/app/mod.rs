@@ -157,6 +157,7 @@ mod views_devices;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_playhead;
 mod views_perform_sections;
 mod views_settings;
 mod views_settings_perform;

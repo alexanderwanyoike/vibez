@@ -724,6 +724,7 @@ impl App {
             self.state.status_text = "Section drop target no longer exists".into();
             return Task::none();
         }
+        self.refresh_playing_section_after_edit(section_id);
         self.state.arrangement.selected_track = Some(track_id);
         let beat = if self.state.transport.sample_rate > 0 && self.state.transport.bpm > 0.0 {
             position_samples as f64 * self.state.transport.bpm

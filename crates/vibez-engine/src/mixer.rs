@@ -26,6 +26,10 @@ pub struct EngineTrack {
     /// Time-based content feeding this shared channel strip. It is prepared
     /// outside the callback before any future source switch.
     pub playback_source: Box<PreparedPlaybackSource>,
+    /// Resident Perform source. The engine swaps this pointer with
+    /// `playback_source` only around Section rendering, preserving Arrange as
+    /// the editable source while sharing the exact same renderer.
+    pub section_playback_source: Box<PreparedPlaybackSource>,
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
@@ -61,6 +65,7 @@ impl EngineTrack {
         Self {
             id,
             playback_source: Box::new(playback_source),
+            section_playback_source: Box::new(PreparedPlaybackSource::default()),
             gain: DEFAULT_TRACK_GAIN,
             pan: DEFAULT_TRACK_PAN,
             mute: false,

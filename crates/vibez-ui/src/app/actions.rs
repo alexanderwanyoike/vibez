@@ -3,6 +3,7 @@
 use iced::Task;
 
 use vibez_core::effect::EffectType;
+use vibez_core::id::SectionId;
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::events::EngineEvent;
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -29,7 +30,30 @@ fn apply_track_mute_request(
     Some(track_name)
 }
 
+fn prepare_playing_section_refresh(
+    perform: &crate::domains::perform::PerformState,
+    project_tracks: &[crate::state::ProjectTrack],
+    changed_section: SectionId,
+) -> Option<vibez_engine::playback_source::PreparedSectionPlaybackSource> {
+    (perform.playing_section == Some(changed_section))
+        .then(|| perform.sections.by_id(changed_section))
+        .flatten()
+        .map(|section| section.prepare_playback_source(project_tracks))
+}
+
 impl App {
+    /// Refresh resident content only when the edited Section is still the one
+    /// the engine reports as active. Selection remains intentionally separate.
+    pub(super) fn refresh_playing_section_after_edit(&mut self, section_id: SectionId) {
+        if let Some(prepared) = prepare_playing_section_refresh(
+            &self.state.perform,
+            &self.state.project_tracks.tracks,
+            section_id,
+        ) {
+            self.send_command(EngineCommand::RefreshSection(Box::new(prepared)));
+        }
+    }
+
     /// Apply cross-domain effects requested by Perform without giving the
     /// Perform interaction slice ownership of Project Track state.
     pub(super) fn apply_perform_action(&mut self, action: crate::domains::perform::PerformAction) {
@@ -56,6 +80,21 @@ impl App {
                     if request.muted { "Muted" } else { "Unmuted" }
                 );
             }
+        }
+        if let Some(section_id) = action.section_launch {
+            if let Some(prepared) = self
+                .state
+                .perform
+                .sections
+                .by_id(section_id)
+                .map(|section| section.prepare_playback_source(&self.state.project_tracks.tracks))
+            {
+                self.send_command(EngineCommand::LaunchSection(Box::new(prepared)));
+                self.state.status_text = "Launching Section…".into();
+            }
+        }
+        if let Some(section_id) = action.section_content_changed {
+            self.refresh_playing_section_after_edit(section_id);
         }
     }
 
@@ -507,6 +546,8 @@ impl App {
                     }
                     EngineEvent::PlaybackStopped => {
                         self.state.transport.playing = false;
+                        self.state.perform.playing_section = None;
+                        self.state.perform.section_playhead_samples = 0;
                     }
                     EngineEvent::PlaybackStarted => {
                         self.state.transport.playing = true;
@@ -553,6 +594,28 @@ impl App {
                             track.mute = muted;
                         }
                     }
+                    EngineEvent::SectionTransitioned {
+                        section_id,
+                        effective_at_samples: _,
+                        retired,
+                    } => {
+                        self.state.perform.playing_section = Some(section_id);
+                        self.state.perform.section_playhead_samples = 0;
+                        drop(retired);
+                    }
+                    EngineEvent::SectionPlaybackPosition {
+                        section_id,
+                        position_samples,
+                    } => {
+                        if self.state.perform.playing_section == Some(section_id) {
+                            self.state.perform.section_playhead_samples = position_samples;
+                        }
+                    }
+                    EngineEvent::SectionSourceRefreshed {
+                        section_id: _,
+                        applied: _,
+                        retired,
+                    } => drop(retired),
                 }
             }
         }
@@ -716,5 +779,30 @@ mod perform_action_tests {
         assert_eq!(name, None);
         assert!(state.project.history.undo.is_empty());
         assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn section_refresh_is_prepared_only_for_the_currently_playing_section() {
+        let mut state = AppState::default();
+        let playing = crate::domains::perform::Section::new(0);
+        let playing_id = playing.id;
+        let other = crate::domains::perform::Section::new(1);
+        let other_id = other.id;
+        Arc::make_mut(&mut state.perform.sections).insert(playing);
+        Arc::make_mut(&mut state.perform.sections).insert(other);
+        state.perform.playing_section = Some(playing_id);
+
+        assert!(prepare_playing_section_refresh(
+            &state.perform,
+            &state.project_tracks.tracks,
+            playing_id,
+        )
+        .is_some());
+        assert!(prepare_playing_section_refresh(
+            &state.perform,
+            &state.project_tracks.tracks,
+            other_id,
+        )
+        .is_none());
     }
 }

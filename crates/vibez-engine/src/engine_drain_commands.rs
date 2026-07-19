@@ -14,6 +14,9 @@ impl AudioEngine {
                 }
                 EngineCommand::Stop => {
                     self.transport.stop();
+                    self.active_section = None;
+                    self.transport
+                        .set_audio_length(self.arrangement_audio_length);
                     for track in &mut self.tracks {
                         track.flush_notes();
                     }
@@ -29,13 +32,116 @@ impl AudioEngine {
                     self.transport.set_bpm(bpm);
                     self.recalculate_audio_length();
                 }
+                EngineCommand::LaunchSection(mut prepared) => {
+                    let section_id = prepared.section_id;
+                    let length_samples = if self.transport.bpm() > 0.0 {
+                        (prepared.length_beats * self.sample_rate as f64 * 60.0
+                            / self.transport.bpm())
+                        .round()
+                        .max(1.0) as u64
+                    } else {
+                        1
+                    };
+                    let looping = prepared.looping;
+                    for track in &mut self.tracks {
+                        track.flush_notes();
+                    }
+                    for incoming in prepared.tracks_mut() {
+                        if let Some(track) = self
+                            .tracks
+                            .iter_mut()
+                            .find(|track| track.id == incoming.track_id)
+                        {
+                            std::mem::swap(
+                                &mut track.section_playback_source,
+                                &mut incoming.source,
+                            );
+                        }
+                    }
+                    let effective_at_samples = self.transport.position();
+                    self.active_section = Some(ActiveSectionPlayback {
+                        section_id,
+                        position_samples: 0,
+                        length_samples,
+                        looping,
+                    });
+                    self.transport.set_audio_length(None);
+                    if !self.transport.is_playing() {
+                        self.transport.play();
+                        let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+                    }
+                    let event = EngineEvent::SectionTransitioned {
+                        section_id,
+                        effective_at_samples,
+                        retired: prepared,
+                    };
+                    if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                        // Never destroy Vec/Arc owners in the callback. Losing this
+                        // rare event leaks one retired source rather than glitching.
+                        std::mem::forget(event);
+                    }
+                }
+                EngineCommand::RefreshSection(mut prepared) => {
+                    let section_id = prepared.section_id;
+                    let mut applied = false;
+                    if let Some(active) = self
+                        .active_section
+                        .as_mut()
+                        .filter(|active| active.section_id == section_id)
+                    {
+                        let length_samples = if self.transport.bpm() > 0.0 {
+                            (prepared.length_beats * self.sample_rate as f64 * 60.0
+                                / self.transport.bpm())
+                            .round()
+                            .max(1.0) as u64
+                        } else {
+                            1
+                        };
+                        active.length_samples = length_samples;
+                        active.looping = prepared.looping;
+                        active.position_samples = if active.looping {
+                            active.position_samples % length_samples
+                        } else {
+                            active.position_samples.min(length_samples)
+                        };
+                        for track in &mut self.tracks {
+                            track.flush_notes();
+                        }
+                        for incoming in prepared.tracks_mut() {
+                            if let Some(track) = self
+                                .tracks
+                                .iter_mut()
+                                .find(|track| track.id == incoming.track_id)
+                            {
+                                std::mem::swap(
+                                    &mut track.section_playback_source,
+                                    &mut incoming.source,
+                                );
+                            }
+                        }
+                        applied = true;
+                    }
+                    let event = EngineEvent::SectionSourceRefreshed {
+                        section_id,
+                        applied,
+                        retired: prepared,
+                    };
+                    if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                        std::mem::forget(event);
+                    }
+                }
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
-                    self.transport.set_audio_length(Some(len));
+                    self.arrangement_audio_length = Some(len);
+                    if self.active_section.is_none() {
+                        self.transport.set_audio_length(Some(len));
+                    }
                 }
                 EngineCommand::UnloadAudio => {
                     self.audio = None;
+                    self.arrangement_audio_length = None;
+                    self.active_section = None;
                     self.transport.set_audio_length(None);
                     self.transport.stop();
                     let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
