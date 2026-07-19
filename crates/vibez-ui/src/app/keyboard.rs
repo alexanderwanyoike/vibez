@@ -12,19 +12,20 @@ use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
 
-#[derive(Default)]
 pub(crate) struct EdgeShortcutState {
-    pressed_keys: std::collections::HashSet<String>,
-    released_at: std::collections::HashMap<String, std::time::Instant>,
+    track_chord_armed: bool,
+}
+
+impl Default for EdgeShortcutState {
+    fn default() -> Self {
+        Self {
+            track_chord_armed: true,
+        }
+    }
 }
 
 impl EdgeShortcutState {
-    fn should_dispatch(
-        &mut self,
-        key_id: &str,
-        message: &Message,
-        occurred_at: std::time::Instant,
-    ) -> bool {
+    fn should_dispatch(&mut self, message: &Message) -> bool {
         let edge_triggered = matches!(
             message,
             Message::Arrangement(ArrangementMsg::AddTrack | ArrangementMsg::AddInstrumentTrack)
@@ -32,20 +33,13 @@ impl EdgeShortcutState {
         if !edge_triggered {
             return true;
         }
-
-        let release_gap = self
-            .released_at
-            .get(key_id)
-            .map(|released_at| occurred_at.saturating_duration_since(*released_at));
-        let synthetic_repeat =
-            release_gap.is_some_and(|gap| gap <= std::time::Duration::from_millis(30));
-        let first_press = self.pressed_keys.insert(key_id.to_owned());
-        first_press && !synthetic_repeat
+        std::mem::replace(&mut self.track_chord_armed, false)
     }
 
-    fn release(&mut self, key_id: &str, occurred_at: std::time::Instant) {
-        self.pressed_keys.remove(key_id);
-        self.released_at.insert(key_id.to_owned(), occurred_at);
+    fn observe_modifiers(&mut self, modifiers: iced::keyboard::Modifiers) {
+        if !modifiers.control() {
+            self.track_chord_armed = true;
+        }
     }
 }
 
@@ -135,7 +129,6 @@ impl super::App {
                 modifiers,
                 ..
             } => {
-                let edge_key_id = runtime_key_id(&key);
                 if self.state.perform.key_rebind_target.is_some()
                     && matches!(key, iced::keyboard::Key::Named(Named::Escape))
                 {
@@ -148,21 +141,21 @@ impl super::App {
                                 key_id: runtime_key_id(&key),
                                 occurred_at,
                             }),
-                            Some((key, modifiers, edge_key_id)),
+                            Some((key, modifiers)),
                         )
                     } else {
-                        (None, Some((key, modifiers, edge_key_id)))
+                        (None, Some((key, modifiers)))
                     }
                 } else if self.state.perform.key_rebind_target.is_some() {
                     self.state.status_text = "Perform keys must be letters or numbers".into();
                     return iced::Task::none();
                 } else {
-                    (None, Some((key, modifiers, edge_key_id)))
+                    (None, Some((key, modifiers)))
                 }
             }
-            iced::keyboard::Event::KeyReleased { key, .. } => {
+            iced::keyboard::Event::KeyReleased { key, modifiers, .. } => {
                 let key_id = runtime_key_id(&key);
-                self.edge_shortcuts.release(&key_id, occurred_at);
+                self.edge_shortcuts.observe_modifiers(modifiers);
                 (
                     Some(PerformMsg::ComputerKeyReleased {
                         key_id,
@@ -171,7 +164,10 @@ impl super::App {
                     None,
                 )
             }
-            iced::keyboard::Event::ModifiersChanged(_) => return iced::Task::none(),
+            iced::keyboard::Event::ModifiersChanged(modifiers) => {
+                self.edge_shortcuts.observe_modifiers(modifiers);
+                return iced::Task::none();
+            }
         };
 
         if let Some(msg) = perform_msg {
@@ -192,10 +188,10 @@ impl super::App {
         }
 
         fallback
-            .and_then(|(key, modifiers, key_id)| {
+            .and_then(|(key, modifiers)| {
                 let message = global_key_handler(key, modifiers)?;
                 self.edge_shortcuts
-                    .should_dispatch(&key_id, &message, occurred_at)
+                    .should_dispatch(&message)
                     .then_some(message)
             })
             .map_or_else(iced::Task::none, iced::Task::done)
@@ -446,34 +442,29 @@ mod tests {
     }
 
     #[test]
-    fn held_track_shortcut_dispatches_once_until_key_release() {
+    fn held_track_shortcut_dispatches_once_until_control_is_released() {
         let mut state = EdgeShortcutState::default();
         let add = Message::Arrangement(ArrangementMsg::AddInstrumentTrack);
-        let started = std::time::Instant::now();
 
-        assert!(state.should_dispatch("Character(\"T\")", &add, started));
-        assert!(!state.should_dispatch("Character(\"T\")", &add, started));
+        assert!(state.should_dispatch(&add));
+        assert!(!state.should_dispatch(&add));
 
-        // X11 auto-repeat is delivered as a synthetic release/press pair.
-        state.release(
-            "Character(\"T\")",
-            started + std::time::Duration::from_millis(500),
-        );
-        assert!(!state.should_dispatch(
-            "Character(\"T\")",
-            &add,
-            started + std::time::Duration::from_millis(501),
-        ));
+        // Repeated T release/press pairs keep the Ctrl chord held.
+        state.observe_modifiers(iced::keyboard::Modifiers::CTRL);
+        assert!(!state.should_dispatch(&add));
 
-        state.release(
-            "Character(\"T\")",
-            started + std::time::Duration::from_millis(900),
-        );
-        assert!(state.should_dispatch(
-            "Character(\"T\")",
-            &add,
-            started + std::time::Duration::from_millis(1_000),
-        ));
+        state.observe_modifiers(iced::keyboard::Modifiers::empty());
+        assert!(state.should_dispatch(&add));
+    }
+
+    #[test]
+    fn delayed_x11_repeat_does_not_duplicate_an_audio_track() {
+        let mut state = EdgeShortcutState::default();
+        let add = Message::Arrangement(ArrangementMsg::AddTrack);
+
+        assert!(state.should_dispatch(&add));
+        state.observe_modifiers(iced::keyboard::Modifiers::CTRL);
+        assert!(!state.should_dispatch(&add));
     }
 
     #[test]
