@@ -92,6 +92,75 @@ fn perform_tool_button(
         .into()
 }
 
+fn perform_bank_button(
+    label: &'static str,
+    tooltip_label: &'static str,
+    message: PerformMsg,
+) -> Element<'static, Message> {
+    let control = button(
+        center(
+            text(label)
+                .font(PERFORM_TECH_STRONG)
+                .size(13)
+                .color(th::text_dim()),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill),
+    )
+    .on_press(Message::Perform(message))
+    .width(Length::Fixed(20.0))
+    .height(Length::Fixed(20.0))
+    .padding(0)
+    .style(|_theme: &Theme, status| {
+        let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(
+                if engaged {
+                    th::bg_hover()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: if matches!(status, button::Status::Pressed) {
+                th::accent()
+            } else {
+                th::text_dim()
+            },
+            border: iced::Border {
+                color: if engaged {
+                    th::accent_dim()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        }
+    });
+    let hint = container(
+        text(tooltip_label)
+            .font(PERFORM_TECH)
+            .size(9)
+            .color(th::text()),
+    )
+    .padding([4, 6])
+    .style(|_theme: &Theme| container::Style {
+        background: Some(th::bg_elevated().into()),
+        border: iced::Border {
+            color: th::border_light(),
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    });
+    tooltip(control, hint, tooltip::Position::Bottom)
+        .gap(5)
+        .padding(0)
+        .into()
+}
+
 fn perform_mode_tab_width(surface_width: f32) -> f32 {
     ((surface_width - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
@@ -294,7 +363,7 @@ impl App {
                 .color(th::text())
         ]
         .spacing(5);
-        let origin = match mode {
+        let (bank, origin) = match mode {
             PerformMode::Sections => {
                 let pending = self
                     .state
@@ -306,30 +375,36 @@ impl App {
                         format!(" · QUEUED @ BEAT {beat:.2}")
                     })
                     .unwrap_or_default();
-                format!(
-                    "BANK {} · ORDER TOP-LEFT{pending} · [ ]",
-                    self.state.perform.banks.sections + 1
+                (
+                    self.state.perform.banks.sections + 1,
+                    format!("ORDER TOP-LEFT{pending}"),
                 )
             }
-            PerformMode::TrackMutes => format!(
-                "BANK {} · PROJECT TRACKS · [ ]",
-                self.state.perform.banks.track_mutes + 1
+            PerformMode::TrackMutes => (
+                self.state.perform.banks.track_mutes + 1,
+                "PROJECT TRACKS".to_string(),
             ),
-            PerformMode::Instrument => format!(
-                "BANK {} · ORDER BOTTOM-LEFT · [ ]",
-                self.state.perform.banks.instrument + 1
+            PerformMode::Instrument => (
+                self.state.perform.banks.instrument + 1,
+                "ORDER BOTTOM-LEFT".to_string(),
             ),
         };
-        let header = row![
-            heading,
-            horizontal_space(),
-            text(origin).font(PERFORM_TECH).size(9).color(th::blend(
-                th::text_dim(),
-                th::text(),
-                0.24
-            ))
+        let bank_navigation = row![
+            text(format!("BANK {bank}"))
+                .font(PERFORM_TECH_STRONG)
+                .size(9)
+                .color(th::blend(th::text_dim(), th::text(), 0.24)),
+            perform_bank_button("‹", "PREVIOUS BANK  [", PerformMsg::PreviousBank),
+            perform_bank_button("›", "NEXT BANK  ]", PerformMsg::NextBank),
+            text(format!("· {origin}"))
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(th::blend(th::text_dim(), th::text(), 0.24)),
         ]
-        .align_y(iced::Alignment::End);
+        .spacing(5)
+        .align_y(iced::Alignment::Center);
+        let header =
+            row![heading, horizontal_space(), bank_navigation,].align_y(iced::Alignment::End);
 
         let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
         let mut grid = column![]
