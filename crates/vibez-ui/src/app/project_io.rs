@@ -25,7 +25,7 @@ impl App {
     pub(super) fn clear_project_runtime(&mut self) {
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
-        self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
+        self.browser_import_request.cancel();
         self.stop_browser_audition();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
@@ -197,16 +197,8 @@ impl App {
     }
 
     pub(super) fn reset_to_new_project(&mut self) {
-        if let Some(handle) = self.remote_import_abort.take() {
-            handle.abort();
-            self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-            self.remote_import_in_flight = None;
-        }
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
+        self.remote_import_request.cancel();
+        self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
         let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
         self.clear_project_runtime();

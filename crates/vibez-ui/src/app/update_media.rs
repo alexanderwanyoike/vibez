@@ -294,11 +294,7 @@ impl App {
     }
 
     pub(super) fn on_stop_browser_preview(&mut self) -> Task<Message> {
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
+        self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
         self.state.browser.remote.preview_in_progress = false;
         self.stop_browser_audition();
@@ -311,11 +307,7 @@ impl App {
     pub(super) fn on_toggle_audition_enabled(&mut self) -> Task<Message> {
         let enabled = self.state.browser.toggle_audition_enabled();
         let maintenance = if !enabled {
-            if let Some(handle) = self.remote_materialization_abort.take() {
-                handle.abort();
-                self.remote_materialization_request_id =
-                    self.remote_materialization_request_id.saturating_add(1);
-            }
+            self.remote_materialization_request.cancel();
             self.remote_audition_cache_lease = None;
             self.stop_browser_audition();
             self.media_cache_maintenance_task()
@@ -418,13 +410,9 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
-        // Escape abandons any pending browser import at whatever stage
-        // it is in. The fetch/decode stage is covered by the abort
-        // handle below, but the WARP-preparation stage has no handle
-        // (remote_import_in_flight is already cleared), so only this
-        // generation bump stops BrowserImportPrepared from landing a
-        // clip after the user cancelled.
-        self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
+        // Escape abandons any pending browser import at whatever stage it is
+        // in; the shared tracker aborts attached work and rejects late output.
+        self.browser_import_request.cancel();
         if self.state.browser.audition_playing
             || self.state.browser.audition_loading
             || self.state.browser.audition_queued
@@ -432,11 +420,7 @@ impl App {
             self.stop_browser_audition();
             self.state.status_text = "Audition stopped".into();
         } else if self.remote_import_active() {
-            if let Some(handle) = self.remote_import_abort.take() {
-                handle.abort();
-            }
-            self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-            self.remote_import_in_flight = None;
+            self.remote_import_request.cancel();
             self.state.status_text = "Remote import cancelled; no project media added".into();
             let maintenance = self.media_cache_maintenance_task();
             if let Some(entry) = self.pending_remote_audition.take() {
@@ -634,8 +618,8 @@ impl App {
         name: String,
         source: MediaSourceRef,
     ) -> Task<Message> {
-        // The active import's own completion has already cleared
-        // `remote_import_in_flight` (RemoteImportReady). A remote
+        // The active import's own completion has already finished its
+        // TrackedRequest (RemoteImportReady). A remote
         // source decoded while another import is still running (e.g.
         // a dropped staged copy) must not run its cleanup or release
         // the queued audition.
@@ -674,15 +658,13 @@ impl App {
             String,
         >,
     ) -> Task<Message> {
-        if !dropbox_io::remote_import_result_is_current(self.remote_import_request_id, request_id) {
+        if !self.remote_import_request.finish(request_id) {
             // Staging copies are content-addressed, so a superseding
             // import of the same bytes shares this exact file;
             // deleting it here would break that import's next save.
             // The startup staging sweep owns orphan cleanup.
             return Task::none();
         }
-        self.remote_import_abort = None;
-        self.remote_import_in_flight = None;
         match result {
             Ok((audio, name, source)) => self.update(Message::BrowserSampleDecoded(
                 target, treatment, audio, name, source,
@@ -700,7 +682,7 @@ impl App {
         generation: u64,
         payload: crate::message::PreparedBrowserImport,
     ) -> Task<Message> {
-        if generation != self.browser_import_generation {
+        if !self.browser_import_request.finish(generation) {
             return Task::none();
         }
         self.apply_browser_import_prepared(target, payload)

@@ -59,22 +59,17 @@ struct App {
     dropbox_settings: DropboxSettings,
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
-    remote_materialization_abort: Option<iced::task::Handle>,
-    remote_import_abort: Option<iced::task::Handle>,
-    remote_import_request_id: u64,
-    remote_materialization_request_id: u64,
+    remote_materialization_request: tracked_request::TrackedRequest,
+    remote_import_request: tracked_request::TrackedRequest,
     remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
-    /// Request id of the active Remote import, if any. Completions for any
-    /// other generation must not clear it or release the queued audition.
-    remote_import_in_flight: Option<u64>,
     pending_remote_audition: Option<DropboxEntry>,
     /// Generation for the whole Browser import pipeline (local and
     /// remote). Bumped on cancellation and project reset so an
     /// in-flight WARP preparation cannot land a clip afterwards.
-    browser_import_generation: u64,
+    browser_import_request: tracked_request::TrackedRequest,
     /// Bumped on every refresh start and on disconnect, so catalog pages
     /// fetched for a previous connection are dropped instead of reconciled.
-    remote_catalog_generation: u64,
+    remote_catalog_request: tracked_request::TrackedRequest,
     /// Catalog changes accumulated since the last reconcile flush; applied in
     /// batches so each page does not re-sort the whole catalog in update().
     remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
@@ -134,6 +129,7 @@ mod audio_tasks;
 mod bounce;
 mod keyboard;
 mod local_watcher;
+mod tracked_request;
 
 use async_helpers::*;
 pub(crate) use audio_tasks::*;
@@ -321,15 +317,12 @@ impl App {
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
-            remote_materialization_abort: None,
-            remote_import_abort: None,
-            remote_import_request_id: 0,
-            remote_materialization_request_id: 0,
+            remote_materialization_request: Default::default(),
+            remote_import_request: Default::default(),
             remote_audition_cache_lease: None,
-            remote_import_in_flight: None,
             pending_remote_audition: None,
-            browser_import_generation: 0,
-            remote_catalog_generation: 0,
+            browser_import_request: Default::default(),
+            remote_catalog_request: Default::default(),
             remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),

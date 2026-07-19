@@ -466,8 +466,8 @@ impl App {
             AuditionMode::Warp => format!("Preparing WARP import: {name}"),
         };
         let retained_target = target.clone();
-        let generation = self.browser_import_generation;
-        Task::perform(
+        let generation = self.browser_import_request.begin();
+        let task = Task::perform(
             prepare_browser_import_audio_async(target, treatment, raw, source, project_bpm),
             move |result| match result {
                 Ok((audio, original_audio, source)) => Message::BrowserImportPrepared {
@@ -483,7 +483,8 @@ impl App {
                 },
                 Err(error) => Message::BrowserSampleDecodeError(error),
             },
-        )
+        );
+        self.browser_import_request.attach(task)
     }
 
     pub(super) fn apply_browser_import_prepared(
