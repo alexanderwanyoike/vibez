@@ -3,6 +3,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
@@ -34,6 +35,11 @@ pub enum EngineCommand {
     SetBpm(f64),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
+    /// Queue a complete resident Section for an engine-owned musical boundary.
+    QueueSection {
+        prepared: Box<PreparedSectionPlaybackSource>,
+        quantization: SectionLaunchQuantization,
+    },
     /// Replace the currently active Section's resident source in place.
     /// The engine preserves its local playhead and returns ownership of the
     /// displaced source through `SectionSourceRefreshed`.

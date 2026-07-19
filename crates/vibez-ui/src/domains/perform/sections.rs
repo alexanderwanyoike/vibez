@@ -123,10 +123,18 @@ impl Section {
         &self,
         project_tracks: &[crate::state::ProjectTrack],
     ) -> PreparedSectionPlaybackSource {
-        let tracks = project_tracks
+        let track_ids: Vec<_> = project_tracks.iter().map(|track| track.id).collect();
+        self.prepare_playback_source_for_tracks(&track_ids)
+    }
+
+    pub fn prepare_playback_source_for_tracks(
+        &self,
+        project_track_ids: &[TrackId],
+    ) -> PreparedSectionPlaybackSource {
+        let tracks = project_track_ids
             .iter()
-            .map(|track| {
-                let content = self.timeline.get(track.id);
+            .map(|track_id| {
+                let content = self.timeline.get(*track_id);
                 let clips = content
                     .into_iter()
                     .flat_map(|content| content.clips.iter())
@@ -158,7 +166,7 @@ impl Section {
                     .map(|content| content.automation.clone())
                     .unwrap_or_default();
                 (
-                    track.id,
+                    *track_id,
                     PreparedPlaybackSource::new(clips, note_clips, automation),
                 )
             })

@@ -145,6 +145,15 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                let stops_perform = matches!(&msg, crate::domains::transport::TransportMsg::Stop)
+                    || matches!(
+                        &msg,
+                        crate::domains::transport::TransportMsg::TogglePlayback
+                            if self.state.transport.playing
+                    );
+                if stops_perform {
+                    self.section_residency_request.cancel();
+                }
                 let ctx = crate::domains::transport::TransportCtx {
                     total_duration_samples: self.state.total_duration_samples(),
                     time_selection: if self.state.arrangement.time_selection_active {
@@ -155,6 +164,8 @@ impl App {
                     } else {
                         None
                     },
+                    perform_tempo_locked: self.state.perform.playing_section.is_some()
+                        || self.state.perform.queued_section.is_some(),
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -229,7 +240,25 @@ impl App {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                     self.state.perform.update(msg, &mut engine, ctx)
                 };
-                self.apply_perform_action(action);
+                return self.apply_perform_action(action);
+            }
+            Message::SectionResidencyReady {
+                request_id,
+                section_id,
+                quantization,
+                resident,
+            } => {
+                if self.section_residency_request.finish(request_id) {
+                    if let Some(prepared) = resident.take() {
+                        debug_assert_eq!(prepared.section_id, section_id);
+                        self.send_command(EngineCommand::QueueSection {
+                            prepared,
+                            quantization,
+                        });
+                        self.state.status_text =
+                            format!("Section ready · {}", quantization.label());
+                    }
+                }
             }
             Message::View(msg) => {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {

@@ -185,9 +185,9 @@ impl super::App {
                 self.state.perform.update(msg, &mut engine, ctx)
             };
             let keyboard_consumed = action.keyboard_consumed;
-            self.apply_perform_action(action);
+            let task = self.apply_perform_action(action);
             if keyboard_consumed {
-                return iced::Task::none();
+                return task;
             }
         }
 

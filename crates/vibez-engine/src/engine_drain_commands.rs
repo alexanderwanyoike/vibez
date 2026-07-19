@@ -14,6 +14,7 @@ impl AudioEngine {
                 }
                 EngineCommand::Stop => {
                     self.transport.stop();
+                    self.cancel_section_queue();
                     self.active_section = None;
                     self.transport
                         .set_audio_length(self.arrangement_audio_length);
@@ -29,58 +30,21 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetBpm(bpm) => {
-                    self.transport.set_bpm(bpm);
-                    self.recalculate_audio_length();
-                }
-                EngineCommand::LaunchSection(mut prepared) => {
-                    let section_id = prepared.section_id;
-                    let length_samples = if self.transport.bpm() > 0.0 {
-                        (prepared.length_beats * self.sample_rate as f64 * 60.0
-                            / self.transport.bpm())
-                        .round()
-                        .max(1.0) as u64
-                    } else {
-                        1
-                    };
-                    let looping = prepared.looping;
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                    for incoming in prepared.tracks_mut() {
-                        if let Some(track) = self
-                            .tracks
-                            .iter_mut()
-                            .find(|track| track.id == incoming.track_id)
-                        {
-                            std::mem::swap(
-                                &mut track.section_playback_source,
-                                &mut incoming.source,
-                            );
-                        }
-                    }
-                    let effective_at_samples = self.transport.position();
-                    self.active_section = Some(ActiveSectionPlayback {
-                        section_id,
-                        position_samples: 0,
-                        length_samples,
-                        looping,
-                    });
-                    self.transport.set_audio_length(None);
-                    if !self.transport.is_playing() {
-                        self.transport.play();
-                        let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
-                    }
-                    let event = EngineEvent::SectionTransitioned {
-                        section_id,
-                        effective_at_samples,
-                        retired: prepared,
-                    };
-                    if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
-                        // Never destroy Vec/Arc owners in the callback. Losing this
-                        // rare event leaks one retired source rather than glitching.
-                        std::mem::forget(event);
+                    // V1 Perform holds one project tempo from the first
+                    // Section transition until transport stop.
+                    if self.active_section.is_none() {
+                        self.transport.set_bpm(bpm);
+                        self.recalculate_audio_length();
                     }
                 }
+                EngineCommand::LaunchSection(prepared) => {
+                    self.cancel_section_queue();
+                    self.activate_section(prepared, self.transport.position());
+                }
+                EngineCommand::QueueSection {
+                    prepared,
+                    quantization,
+                } => self.queue_section(prepared, quantization),
                 EngineCommand::RefreshSection(mut prepared) => {
                     let section_id = prepared.section_id;
                     let mut applied = false;

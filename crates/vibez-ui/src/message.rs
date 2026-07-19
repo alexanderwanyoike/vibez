@@ -12,6 +12,35 @@ use vibez_plugin_host::PluginId;
 use vibez_project::project_format_v1::SaveObservation;
 use vibez_project::{Project, TimelineLocation};
 
+/// Cloneable UI-message holder for one prepared, uniquely-owned Section.
+/// The router takes the box exactly once before sending it to the engine.
+#[derive(Clone)]
+pub struct ResidentSection(
+    Arc<
+        std::sync::Mutex<Option<Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>>>,
+    >,
+);
+
+impl ResidentSection {
+    pub fn new(
+        prepared: Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>,
+    ) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Some(prepared))))
+    }
+
+    pub fn take(
+        &self,
+    ) -> Option<Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>> {
+        self.0.lock().ok()?.take()
+    }
+}
+
+impl std::fmt::Debug for ResidentSection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ResidentSection")
+    }
+}
+
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
     UndoGestureId,
@@ -242,6 +271,12 @@ pub enum Message {
     Project(crate::domains::project::ProjectMsg),
     Automation(crate::domains::automation::AutomationMsg),
     Perform(crate::domains::perform::PerformMsg),
+    SectionResidencyReady {
+        request_id: u64,
+        section_id: SectionId,
+        quantization: vibez_core::perform::SectionLaunchQuantization,
+        resident: ResidentSection,
+    },
     KeyboardInput {
         event: iced::keyboard::Event,
         occurred_at: std::time::Instant,

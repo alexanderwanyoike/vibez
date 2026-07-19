@@ -295,12 +295,30 @@ impl App {
         ]
         .spacing(5);
         let origin = match mode {
-            PerformMode::Sections => "ORDER · TOP-LEFT".to_string(),
+            PerformMode::Sections => {
+                let pending = self
+                    .state
+                    .perform
+                    .pending_section_boundary_samples
+                    .map(|samples| {
+                        let beat = samples as f64 * self.state.transport.bpm
+                            / (self.state.transport.sample_rate as f64 * 60.0);
+                        format!(" · QUEUED @ BEAT {beat:.2}")
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "BANK {} · ORDER TOP-LEFT{pending} · [ ]",
+                    self.state.perform.banks.sections + 1
+                )
+            }
             PerformMode::TrackMutes => format!(
                 "BANK {} · PROJECT TRACKS · [ ]",
                 self.state.perform.banks.track_mutes + 1
             ),
-            PerformMode::Instrument => "ORDER · BOTTOM-LEFT".to_string(),
+            PerformMode::Instrument => format!(
+                "BANK {} · ORDER BOTTOM-LEFT · [ ]",
+                self.state.perform.banks.instrument + 1
+            ),
         };
         let header = row![
             heading,
@@ -375,6 +393,8 @@ impl App {
             || self.state.perform.selected_pad == Some(position);
         let playing =
             section.is_some_and(|section| self.state.perform.playing_section == Some(section.id));
+        let queued =
+            section.is_some_and(|section| self.state.perform.queued_section == Some(section.id));
         let playhead_fraction = section.filter(|_| playing).map(|section| {
             super::views_perform_playhead::section_playhead_fraction(
                 self.state.perform.section_playhead_samples,
@@ -397,7 +417,13 @@ impl App {
                     section.name.clone(),
                     format!(
                         "{} · {:.0} BARS",
-                        if playing { "PLAYING" } else { "AVAILABLE" },
+                        if playing {
+                            "PLAYING"
+                        } else if queued {
+                            "QUEUED"
+                        } else {
+                            "AVAILABLE"
+                        },
                         section.length_beats / 4.0
                     ),
                     th::track_color((ordinal - 1) as u8),
@@ -491,6 +517,8 @@ impl App {
                         0.0,
                         if pressed || playing {
                             th::blend(th::accent_dim(), color, 0.35)
+                        } else if queued {
+                            th::blend(th::accent_dim(), th::bg_hover(), 0.42)
                         } else if muted {
                             th::blend(th::mute_active(), color, 0.28)
                         } else if selected {
@@ -505,7 +533,7 @@ impl App {
             border: iced::Border {
                 color: if pressed || playing {
                     th::accent()
-                } else if selected {
+                } else if queued || selected {
                     th::accent_dim()
                 } else if muted {
                     th::mute_active()

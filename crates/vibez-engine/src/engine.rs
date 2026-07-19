@@ -16,7 +16,7 @@ use crate::metering;
 use crate::mixer::{
     any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
 };
-use crate::playback_source::calculate_total_length;
+use crate::playback_source::{calculate_total_length, PreparedSectionPlaybackSource};
 use crate::transport::Transport;
 
 /// Capacity of the UI spectrum-analyser sample ring: roughly a third
@@ -69,6 +69,10 @@ pub struct AudioEngine {
     /// for that block (segment-2 notes are legitimately sounding).
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
+    queued_section: Option<QueuedSectionPlayback>,
+    /// When a transition lands partway through the current callback, only
+    /// these frames advance the newly active Section's local playhead.
+    section_advance_override: Option<u64>,
     arrangement_audio_length: Option<u64>,
 }
 
@@ -78,6 +82,11 @@ struct ActiveSectionPlayback {
     position_samples: u64,
     length_samples: u64,
     looping: bool,
+}
+
+struct QueuedSectionPlayback {
+    prepared: Box<PreparedSectionPlaybackSource>,
+    effective_at_samples: u64,
 }
 
 impl AudioEngine {
@@ -106,6 +115,8 @@ impl AudioEngine {
             event_tx,
             split_wrap_handled: false,
             active_section: None,
+            queued_section: None,
+            section_advance_override: None,
             arrangement_audio_length: None,
         };
 
@@ -270,7 +281,11 @@ impl AudioEngine {
         let mut section_ended = false;
         if was_playing {
             if let Some(section) = self.active_section.as_mut() {
-                let advanced = section.position_samples.saturating_add(frames as u64);
+                let section_frames = self
+                    .section_advance_override
+                    .take()
+                    .unwrap_or(frames as u64);
+                let advanced = section.position_samples.saturating_add(section_frames);
                 if section.looping && section.length_samples > 0 {
                     section.position_samples = advanced % section.length_samples;
                 } else {
@@ -375,8 +390,8 @@ impl AudioEngine {
             return;
         }
 
-        if let Some(section) = self.active_section {
-            self.process_section_multitrack(output, frames, channels, section);
+        if self.active_section.is_some() {
+            self.process_section_multitrack(output, frames, channels);
             return;
         }
 
@@ -417,54 +432,6 @@ impl AudioEngine {
             channels,
             self.transport.active_loop_region(),
         );
-    }
-
-    fn process_section_multitrack(
-        &mut self,
-        output: &mut [f32],
-        frames: usize,
-        channels: usize,
-        section: ActiveSectionPlayback,
-    ) {
-        for track in &mut self.tracks {
-            std::mem::swap(
-                &mut track.playback_source,
-                &mut track.section_playback_source,
-            );
-        }
-
-        let mut rendered_frames = 0usize;
-        let mut local_position = section.position_samples.min(section.length_samples);
-        while rendered_frames < frames && local_position < section.length_samples {
-            let available = (section.length_samples - local_position) as usize;
-            let segment_frames = available.min(frames - rendered_frames);
-            let start = rendered_frames * channels;
-            let end = (rendered_frames + segment_frames) * channels;
-            self.render_multitrack_segment(
-                &mut output[start..end],
-                local_position,
-                segment_frames,
-                channels,
-                None,
-            );
-            rendered_frames += segment_frames;
-            local_position += segment_frames as u64;
-            if rendered_frames < frames && section.looping {
-                for track in &mut self.tracks {
-                    track.flush_notes();
-                }
-                local_position = 0;
-            } else if local_position >= section.length_samples {
-                break;
-            }
-        }
-
-        for track in &mut self.tracks {
-            std::mem::swap(
-                &mut track.playback_source,
-                &mut track.section_playback_source,
-            );
-        }
     }
 
     fn render_multitrack_segment(
@@ -819,6 +786,9 @@ fn push_spectrum(tx: &mut Producer<f32>, buffer: &[f32], channels: usize) {
 #[path = "engine_drain_commands.rs"]
 mod drain_commands;
 
+#[path = "engine_section_queue.rs"]
+mod section_queue;
+
 #[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
@@ -834,3 +804,7 @@ mod mute_event_tests;
 #[cfg(test)]
 #[path = "engine_section_playback_tests.rs"]
 mod section_playback_tests;
+
+#[cfg(test)]
+#[path = "engine_section_queue_tests.rs"]
+mod section_queue_tests;

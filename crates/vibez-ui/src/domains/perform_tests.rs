@@ -407,6 +407,8 @@ fn keyboard_and_pointer_launch_select_the_target_then_allow_independent_selectio
         state.playing_section, None,
         "only engine events set playback truth"
     );
+    assert_eq!(state.queued_section, None);
+    assert_eq!(state.pending_section_boundary_samples, None);
 }
 
 #[test]
@@ -646,4 +648,39 @@ fn track_slots_survive_deletion_and_fill_without_scrambling_other_pads() {
             .map(|track| track.id),
         Some(second_id)
     );
+}
+
+#[test]
+fn sections_and_track_mutes_remember_independent_banks() {
+    let tracks = project_tracks(18);
+    let mut state = PerformState::default();
+    Arc::make_mut(&mut state.sections).insert(Section::new(0));
+    Arc::make_mut(&mut state.sections).insert(Section::new(16));
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: None,
+    };
+
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.banks.sections, 1);
+
+    state.update(
+        PerformMsg::SelectMode(PerformMode::TrackMutes),
+        &mut engine,
+        ctx,
+    );
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.banks.track_mutes, 1);
+
+    state.update(
+        PerformMsg::SelectMode(PerformMode::Sections),
+        &mut engine,
+        ctx,
+    );
+    state.update(PerformMsg::PreviousBank, &mut engine, ctx);
+    assert_eq!(state.banks.sections, 0);
+    assert_eq!(state.banks.track_mutes, 1);
+    assert!(engine.0.is_empty(), "bank changes never touch playback");
 }
