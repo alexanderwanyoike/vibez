@@ -262,14 +262,20 @@ Third-party plugins are the least trustworthy code in the process, so they
 are handled in three stages:
 
 1. **Scanning** runs in a separate `vibez-plugin-scan` subprocess. A plugin
-   that crashes during a scan kills the subprocess, not vibez.
+   that crashes during a scan kills the subprocess, not vibez. VST3 scanning
+   reads `IPluginFactory2::getClassInfo2` subcategories so `Instrument`
+   components enter the Track instrument slot while `Fx` components remain
+   inserts.
 2. **Loading** is two-phase: a background thread does the `dlopen` and
    factory lookup, then the UI thread finishes initialization. The UI-thread
    phase is mandatory because JUCE-based plugins bind their message loop to
    the initializing thread.
 3. **Running**: the audio thread processes the plugin like any built-in
    effect; the UI thread pumps plugin GUI run loops on the 60 fps tick and
-   captures plugin state for saving.
+   captures plugin state for saving. VST3 instruments receive the engine's
+   timed note queue through a callback-lifetime `IEventList`; events are sorted
+   by sample offset and preserve within-block note-on/note-off timing before
+   `IAudioProcessor::process` runs.
 
 ## Projects, undo, and warping
 
