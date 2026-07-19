@@ -100,7 +100,11 @@ the returned action, and the recorded engine commands.
 Anything asynchronous (file dialogs, decoding, saving, bounce renders) stays
 in the router layer as iced Tasks in topic modules under
 `crates/vibez-ui/src/app/`; the results come back as messages and the state
-math happens in the domains.
+math happens in the domains. Replaceable router work uses one `TrackedRequest`
+lifecycle for monotonic tokens, stale-result rejection, cancellation, optional
+iced task abortion, and abort-on-drop. Remote import, Remote materialization,
+Browser import preparation, and Remote catalog refresh keep separate tracker
+instances but do not duplicate request IDs, generations, or abort handles.
 
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
 selection, and editor-focus state alongside an `Arc<SectionStore>` that enters

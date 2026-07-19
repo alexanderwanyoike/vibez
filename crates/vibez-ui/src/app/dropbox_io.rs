@@ -16,10 +16,6 @@ fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxE
     *slot = Some(entry);
 }
 
-pub(super) fn remote_import_result_is_current(current: u64, result: u64) -> bool {
-    current == result
-}
-
 pub(super) fn remote_catalog_page_task(
     client: Arc<DropboxClient>,
     checkpoint: Option<String>,
@@ -74,7 +70,7 @@ pub(super) fn seed_remote_availability(
 
 impl App {
     pub(super) fn remote_import_active(&self) -> bool {
-        self.remote_import_in_flight.is_some()
+        self.remote_import_request.is_active()
     }
 
     pub(super) fn reseed_remote_availability(&mut self) {
@@ -112,7 +108,7 @@ impl App {
         &self,
         next_checkpoint: Option<String>,
     ) -> Task<Message> {
-        let generation = self.remote_catalog_generation;
+        let generation = self.remote_catalog_request.current().unwrap_or(0);
         let snapshot = self.state.browser.remote.catalog.clone();
         Task::perform(
             async move {
@@ -162,19 +158,10 @@ impl App {
         target: BrowserImportTarget,
         treatment: crate::state::AuditionImportInput,
     ) -> Task<Message> {
-        if let Some(handle) = self.remote_import_abort.take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
+        self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
         let maintenance = self.media_cache_maintenance_task();
-        self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-        let request_id = self.remote_import_request_id;
-        self.remote_import_in_flight = Some(request_id);
+        let request_id = self.remote_import_request.begin();
         self.state.browser.remote.availability.insert(
             entry.path_lower.clone(),
             if self
@@ -198,8 +185,7 @@ impl App {
                 result,
             },
         );
-        let (task, handle) = task.abortable();
-        self.remote_import_abort = Some(handle);
+        let task = self.remote_import_request.attach(task);
         Task::batch([task, maintenance])
     }
 
@@ -236,14 +222,14 @@ impl App {
                 };
             return Task::none();
         };
-        self.remote_catalog_generation = self.remote_catalog_generation.wrapping_add(1);
+        let generation = self.remote_catalog_request.begin();
         self.remote_catalog_pending.clear();
         self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Refreshing;
         self.state.browser.remote.refresh_pages = 0;
         self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
         self.state.status_text = "Refreshing Remote catalog…".into();
         let checkpoint = self.state.browser.remote.catalog.checkpoint.clone();
-        remote_catalog_page_task(client, checkpoint, 0, self.remote_catalog_generation)
+        remote_catalog_page_task(client, checkpoint, 0, generation)
     }
 
     pub(super) fn start_remote_audition(
@@ -262,14 +248,10 @@ impl App {
             self.state.status_text = "Remote Audition queued behind active import".into();
             return Task::none();
         }
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-        }
+        self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
         let maintenance = self.media_cache_maintenance_task();
-        self.remote_materialization_request_id =
-            self.remote_materialization_request_id.saturating_add(1);
-        let request_id = self.remote_materialization_request_id;
+        let request_id = self.remote_materialization_request.begin();
         let cached = self
             .dropbox_cache
             .is_cached(&entry.path_lower, entry.rev.as_deref());
@@ -284,6 +266,7 @@ impl App {
             self.state
                 .browser
                 .fail_waveform_load(&source, "Reconnect Required · uncached Remote media".into());
+            self.remote_materialization_request.finish(request_id);
             return Task::none();
         }
 
@@ -325,8 +308,7 @@ impl App {
                 result,
             },
         );
-        let (task, handle) = task.abortable();
-        self.remote_materialization_abort = Some(handle);
+        let task = self.remote_materialization_request.attach(task);
         Task::batch([task, maintenance])
     }
 
@@ -388,12 +370,5 @@ mod tests {
             pending.as_ref().map(|entry| entry.path_lower.as_str()),
             Some("/winner.wav")
         );
-    }
-
-    #[test]
-    fn cancelled_or_superseded_remote_import_results_cannot_create_project_media() {
-        assert!(remote_import_result_is_current(7, 7));
-        assert!(!remote_import_result_is_current(8, 7));
-        assert!(!remote_import_result_is_current(9, 7));
     }
 }
