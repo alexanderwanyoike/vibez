@@ -15,6 +15,7 @@ impl App {
         &mut self,
         msg: AutomationMsg,
     ) -> AutomationAction {
+        let section_content_changed = msg.marks_dirty();
         let editing_section = self.state.view.workspace == Workspace::Perform
             && self.state.perform.selected_section.is_some();
         let action = if editing_section {
@@ -36,6 +37,11 @@ impl App {
         };
         if editing_section {
             self.state.perform.commit_selected_section_timeline();
+            if section_content_changed {
+                if let Some(section_id) = self.state.perform.selected_section {
+                    self.refresh_playing_section_after_edit(section_id);
+                }
+            }
         }
         action
     }
@@ -45,6 +51,7 @@ impl App {
         msg: ArrangementMsg,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
+        let section_content_changed = msg.marks_dirty();
         let editing_section = self.state.view.workspace == Workspace::Perform
             && self.state.perform.selected_section.is_some();
         if editing_section {
@@ -67,6 +74,11 @@ impl App {
                 ctx,
             );
             self.state.perform.commit_selected_section_timeline();
+            if section_content_changed {
+                if let Some(section_id) = self.state.perform.selected_section {
+                    self.refresh_playing_section_after_edit(section_id);
+                }
+            }
             if let Some(track_id) = self.state.perform.section_editor.editor().selected_track {
                 self.state.arrangement.selected_track = Some(track_id);
             }
@@ -87,6 +99,7 @@ impl App {
         msg: PianoRollMsg,
         ctx: PianoRollCtx,
     ) -> PianoRollAction {
+        let section_content_changed = msg.marks_dirty();
         let editing_section = self.state.view.workspace == Workspace::Perform
             && self.state.perform.selected_section.is_some();
         if editing_section {
@@ -110,6 +123,11 @@ impl App {
                 ctx,
             );
             self.state.perform.commit_selected_section_timeline();
+            if section_content_changed {
+                if let Some(section_id) = self.state.perform.selected_section {
+                    self.refresh_playing_section_after_edit(section_id);
+                }
+            }
             action
         } else {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);

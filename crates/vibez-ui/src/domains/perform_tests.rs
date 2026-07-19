@@ -371,7 +371,7 @@ fn selecting_a_section_preserves_project_track_selection_and_resets_clip_focus()
 }
 
 #[test]
-fn keyboard_and_pointer_launch_match_while_selection_remains_independent() {
+fn keyboard_and_pointer_launch_select_the_target_then_allow_independent_selection() {
     let first = Section::new(0);
     let first_id = first.id;
     let second = Section::new(1);
@@ -386,6 +386,7 @@ fn keyboard_and_pointer_launch_match_while_selection_remains_independent() {
     };
 
     let pointer = state.update(PerformMsg::LaunchSection(first_id), &mut engine, ctx);
+    assert_eq!(state.selected_section, Some(first_id));
     let keyboard = state.update(
         PerformMsg::ComputerKeyPressed {
             key: ComputerKey::Digit1,
@@ -395,6 +396,7 @@ fn keyboard_and_pointer_launch_match_while_selection_remains_independent() {
         &mut engine,
         ctx,
     );
+    assert_eq!(state.selected_section, Some(first_id));
     let selection = state.update(PerformMsg::SelectSection(second_id), &mut engine, ctx);
 
     assert_eq!(pointer.section_launch, Some(first_id));
@@ -405,6 +407,27 @@ fn keyboard_and_pointer_launch_match_while_selection_remains_independent() {
         state.playing_section, None,
         "only engine events set playback truth"
     );
+}
+
+#[test]
+fn playback_affecting_section_edits_request_a_source_refresh() {
+    let section = Section::new(0);
+    let section_id = section.id;
+    let mut state = PerformState::default();
+    Arc::make_mut(&mut state.sections).insert(section);
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        ..PerformCtx::default()
+    };
+
+    let action = state.update(
+        PerformMsg::SetSectionLengthBeats(section_id, 8.0),
+        &mut engine,
+        ctx,
+    );
+
+    assert_eq!(action.section_content_changed, Some(section_id));
 }
 
 #[test]

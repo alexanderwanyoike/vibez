@@ -34,6 +34,10 @@ pub enum EngineCommand {
     SetBpm(f64),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
+    /// Replace the currently active Section's resident source in place.
+    /// The engine preserves its local playhead and returns ownership of the
+    /// displaced source through `SectionSourceRefreshed`.
+    RefreshSection(Box<PreparedSectionPlaybackSource>),
     /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
     /// Remove any loaded audio from the engine (legacy single-file).

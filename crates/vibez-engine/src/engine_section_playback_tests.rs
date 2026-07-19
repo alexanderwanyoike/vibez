@@ -147,6 +147,62 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
 }
 
 #[test]
+fn refreshing_the_active_section_changes_content_without_restarting_its_playhead() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+
+    let source = |value| {
+        Box::new(PreparedSectionPlaybackSource::new(
+            section_id,
+            4.0,
+            true,
+            vec![(
+                track_id,
+                PreparedPlaybackSource::new(
+                    vec![EngineClip {
+                        id: ClipId::new(),
+                        audio: constant_audio(32, value),
+                        position: 0,
+                        source_offset: 0,
+                        duration: 32,
+                        loop_enabled: false,
+                        loop_start: 0,
+                        loop_end: 0,
+                    }],
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            )],
+        ))
+    };
+
+    commands
+        .push(EngineCommand::LaunchSection(source(0.25)))
+        .unwrap();
+    let mut before = [0.0; 4];
+    engine.process(&mut before, 1);
+    assert_eq!(before, [0.25; 4]);
+
+    commands
+        .push(EngineCommand::RefreshSection(source(0.75)))
+        .unwrap();
+    let mut after = [0.0; 4];
+    engine.process(&mut after, 1);
+
+    assert_eq!(after, [0.75; 4]);
+    let position = engine
+        .active_section
+        .expect("Section remains active")
+        .position_samples;
+    assert_eq!(position, 8, "refresh preserves the four elapsed samples");
+}
+
+#[test]
 fn section_wraps_at_its_shortened_boundary_inside_one_callback() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();

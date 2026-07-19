@@ -398,6 +398,7 @@ pub struct PerformAction {
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
     pub section_launch: Option<SectionId>,
+    pub section_content_changed: Option<SectionId>,
 }
 
 impl PerformState {
@@ -490,6 +491,7 @@ impl PerformState {
                     && self.mode == PerformMode::Sections
                     && self.sections.by_id(id).is_some()
                 {
+                    self.select_section(id, ctx.selected_project_track);
                     return PerformAction {
                         section_launch: Some(id),
                         ..PerformAction::default()
@@ -574,6 +576,10 @@ impl PerformState {
                             sections::MIN_SECTION_LENGTH_BEATS,
                             sections::MAX_SECTION_LENGTH_BEATS,
                         );
+                        return PerformAction {
+                            section_content_changed: Some(id),
+                            ..PerformAction::default()
+                        };
                     }
                 }
             }
@@ -588,6 +594,10 @@ impl PerformState {
                 if ctx.workspace_visible {
                     if let Some(section) = Arc::make_mut(&mut self.sections).by_id_mut(id) {
                         section.looping = !section.looping;
+                        return PerformAction {
+                            section_content_changed: Some(id),
+                            ..PerformAction::default()
+                        };
                     }
                 }
             }
@@ -616,6 +626,10 @@ impl PerformState {
                         editor.selected_note_clip = None;
                     }
                     self.commit_selected_section_timeline();
+                    return PerformAction {
+                        section_content_changed: Some(section_id),
+                        ..PerformAction::default()
+                    };
                 }
             }
             PerformMsg::PreviousBank => {
@@ -678,6 +692,9 @@ impl PerformState {
                 } else {
                     None
                 };
+                if let Some(section_id) = section_launch {
+                    self.select_section(section_id, ctx.selected_project_track);
+                }
                 return PerformAction {
                     keyboard_consumed: true,
                     persist_settings: false,
@@ -690,6 +707,7 @@ impl PerformState {
                     }),
                     track_mute_request,
                     section_launch,
+                    section_content_changed: None,
                 };
             }
             PerformMsg::ComputerKeyReleased {

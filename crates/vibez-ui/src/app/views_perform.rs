@@ -375,6 +375,14 @@ impl App {
             || self.state.perform.selected_pad == Some(position);
         let playing =
             section.is_some_and(|section| self.state.perform.playing_section == Some(section.id));
+        let playhead_fraction = section.filter(|_| playing).map(|section| {
+            super::views_perform_playhead::section_playhead_fraction(
+                self.state.perform.section_playhead_samples,
+                section.length_beats,
+                self.state.transport.bpm,
+                self.state.transport.sample_rate,
+            )
+        });
         let pressed = self.state.perform.is_pad_pressed(position);
         let mute_track = (mode == PerformMode::TrackMutes)
             .then(|| {
@@ -553,7 +561,16 @@ impl App {
                 .align_x(iced::alignment::Horizontal::Right)
                 .align_y(iced::alignment::Vertical::Bottom)
                 .padding(8);
-                stack![select, launch].into()
+                if let Some(fraction) = playhead_fraction {
+                    stack![
+                        select,
+                        super::views_perform_playhead::pad_playhead(fraction),
+                        launch
+                    ]
+                    .into()
+                } else {
+                    stack![select, launch].into()
+                }
             }
             (PerformMode::Sections, None) if self.state.perform.duplicate_source.is_some() => {
                 mouse_area(pad)

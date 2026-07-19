@@ -89,6 +89,15 @@ pub enum EngineEvent {
         retired: Box<PreparedSectionPlaybackSource>,
     },
 
+    /// A Section source refresh was consumed by the engine. `applied` is
+    /// false when that Section stopped or changed before the command arrived.
+    /// In both cases `retired` returns ownership to the UI thread.
+    SectionSourceRefreshed {
+        section_id: SectionId,
+        applied: bool,
+        retired: Box<PreparedSectionPlaybackSource>,
+    },
+
     /// Current engine-owned local Section playhead.
     SectionPlaybackPosition {
         section_id: SectionId,
@@ -192,6 +201,22 @@ impl PartialEq for EngineEvent {
                     position_samples: right_position,
                 },
             ) => left_section == right_section && left_position == right_position,
+            (
+                Self::SectionSourceRefreshed {
+                    section_id: left_section,
+                    applied: left_applied,
+                    retired: left_retired,
+                },
+                Self::SectionSourceRefreshed {
+                    section_id: right_section,
+                    applied: right_applied,
+                    retired: right_retired,
+                },
+            ) => {
+                left_section == right_section
+                    && left_applied == right_applied
+                    && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
+            }
             (Self::PlaybackStarted, Self::PlaybackStarted)
             | (Self::PlaybackStopped, Self::PlaybackStopped)
             | (Self::AuditionStopped, Self::AuditionStopped)

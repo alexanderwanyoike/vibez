@@ -81,6 +81,55 @@ impl AudioEngine {
                         std::mem::forget(event);
                     }
                 }
+                EngineCommand::RefreshSection(mut prepared) => {
+                    let section_id = prepared.section_id;
+                    let mut applied = false;
+                    if let Some(active) = self
+                        .active_section
+                        .as_mut()
+                        .filter(|active| active.section_id == section_id)
+                    {
+                        let length_samples = if self.transport.bpm() > 0.0 {
+                            (prepared.length_beats * self.sample_rate as f64 * 60.0
+                                / self.transport.bpm())
+                            .round()
+                            .max(1.0) as u64
+                        } else {
+                            1
+                        };
+                        active.length_samples = length_samples;
+                        active.looping = prepared.looping;
+                        active.position_samples = if active.looping {
+                            active.position_samples % length_samples
+                        } else {
+                            active.position_samples.min(length_samples)
+                        };
+                        for track in &mut self.tracks {
+                            track.flush_notes();
+                        }
+                        for incoming in prepared.tracks_mut() {
+                            if let Some(track) = self
+                                .tracks
+                                .iter_mut()
+                                .find(|track| track.id == incoming.track_id)
+                            {
+                                std::mem::swap(
+                                    &mut track.section_playback_source,
+                                    &mut incoming.source,
+                                );
+                            }
+                        }
+                        applied = true;
+                    }
+                    let event = EngineEvent::SectionSourceRefreshed {
+                        section_id,
+                        applied,
+                        retired: prepared,
+                    };
+                    if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                        std::mem::forget(event);
+                    }
+                }
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
