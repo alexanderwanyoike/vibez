@@ -12,6 +12,7 @@ type NoteEventLog = Arc<Mutex<Vec<(bool, u8)>>>;
 /// Instrument that records every note event it receives.
 struct SpyInstrument {
     events: NoteEventLog,
+    batch_render: bool,
 }
 
 impl vibez_instruments::Instrument for SpyInstrument {
@@ -35,6 +36,9 @@ impl vibez_instruments::Instrument for SpyInstrument {
     }
     fn render(&mut self, _buffer: &mut [f32], _channels: usize) {}
     fn reset(&mut self) {}
+    fn supports_batch_render(&self) -> bool {
+        self.batch_render
+    }
 }
 
 /// Engine with one MIDI track holding a held note (0..8 beats in
@@ -57,6 +61,7 @@ fn engine_with_held_note() -> (
             track_id: tid,
             instrument: Box::new(SpyInstrument {
                 events: Arc::clone(&events),
+                batch_render: false,
             }),
         })
         .unwrap();
@@ -129,6 +134,7 @@ fn run_scenario(
             track_id: tid,
             instrument: Box::new(SpyInstrument {
                 events: Arc::clone(&events),
+                batch_render: false,
             }),
         })
         .unwrap();
@@ -183,6 +189,86 @@ fn dogfood_clip_loop_one_bar_in_two_bar_clip() {
         "expected several note-ons: {events:?}"
     );
     assert_no_hanging_notes(&events);
+}
+
+fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    cmd_tx.push(EngineCommand::SetSampleRate(44_100)).unwrap();
+    cmd_tx
+        .push(EngineCommand::AddMidiTrack(track_id, "kick".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetPluginInstrument {
+            track_id,
+            instrument: Box::new(SpyInstrument {
+                events: Arc::clone(&events),
+                batch_render,
+            }),
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddNoteClip {
+            track_id,
+            clip_id,
+            position_beats: 0.0,
+            duration_beats: 16.0,
+            loop_enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: 4.0,
+        })
+        .unwrap();
+    for step in 0..8 {
+        cmd_tx
+            .push(EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                note: MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: step as f64 * 0.5,
+                    duration_beats: 0.5,
+                },
+            })
+            .unwrap();
+    }
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    // At 44.1 kHz and 120 BPM, one four-beat bar is 88,200 frames. This
+    // production-rate boundary catches adjacent-frame retriggers that a tiny
+    // synthetic sample rate can mask through exact floating-point division.
+    let mut output = vec![0.0; 88_200 * 2];
+    let mut note_ons_per_bar = Vec::new();
+    for _ in 0..4 {
+        let before = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(is_on, pitch)| *is_on && *pitch == 36)
+            .count();
+        engine.process(&mut output, 2);
+        let after = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(is_on, pitch)| *is_on && *pitch == 36)
+            .count();
+        note_ons_per_bar.push(after - before);
+    }
+
+    note_ons_per_bar
+}
+
+#[test]
+fn built_in_instrument_note_loop_emits_each_note_once_across_four_bars() {
+    assert_eq!(looped_note_ons_per_bar(false), vec![8, 8, 8, 8]);
+}
+
+#[test]
+fn plugin_instrument_note_loop_emits_each_note_once_across_four_bars() {
+    assert_eq!(looped_note_ons_per_bar(true), vec![8, 8, 8, 8]);
 }
 
 #[test]
