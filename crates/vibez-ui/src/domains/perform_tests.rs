@@ -684,3 +684,27 @@ fn sections_and_track_mutes_remember_independent_banks() {
     assert_eq!(state.banks.track_mutes, 1);
     assert!(engine.0.is_empty(), "bank changes never touch playback");
 }
+
+#[test]
+fn full_first_section_bank_can_open_an_empty_bank_and_create_section_seventeen() {
+    let mut state = PerformState::default();
+    for slot in 0..16 {
+        Arc::make_mut(&mut state.sections).insert(Section::new(slot));
+    }
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &[],
+        selected_project_track: None,
+    };
+
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.banks.sections, 1, "] should expose empty bank 2");
+
+    state.update(PerformMsg::CreateSectionAt(16), &mut engine, ctx);
+    assert!(state.sections.at_slot(16).is_some());
+
+    state.update(PerformMsg::PreviousBank, &mut engine, ctx);
+    assert_eq!(state.banks.sections, 0);
+    assert!(engine.0.is_empty(), "bank changes never touch playback");
+}

@@ -661,15 +661,19 @@ impl PerformState {
                 if ctx.workspace_visible {
                     match self.mode {
                         PerformMode::Sections => {
-                            let last_bank = self
+                            let last_reachable_bank = self
                                 .sections
                                 .sections
                                 .iter()
                                 .map(|section| section.slot / 16)
                                 .max()
+                                .map(|bank| u8::try_from(bank.saturating_add(1)).unwrap_or(u8::MAX))
                                 .unwrap_or(0);
-                            self.banks.sections =
-                                self.banks.sections.saturating_add(1).min(last_bank as u8);
+                            self.banks.sections = self
+                                .banks
+                                .sections
+                                .saturating_add(1)
+                                .min(last_reachable_bank);
                         }
                         PerformMode::TrackMutes => {
                             let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
