@@ -5,7 +5,9 @@
 //! inside the real-time audio callback.
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -15,6 +17,29 @@ use cpal::{
 
 use vibez_core::constants::{DEFAULT_CHANNELS, DEFAULT_SAMPLE_RATE};
 use vibez_engine::engine::AudioEngine;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallbackAction {
+    Process,
+    SilenceAndYield,
+}
+
+#[derive(Clone, Default)]
+struct StreamHealth(Arc<AtomicBool>);
+
+impl StreamHealth {
+    fn mark_failed(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn callback_action(&self) -> CallbackAction {
+        if self.0.load(Ordering::Acquire) {
+            CallbackAction::SilenceAndYield
+        } else {
+            CallbackAction::Process
+        }
+    }
+}
 
 /// Errors from [`AudioOutputStream`].
 #[derive(Debug)]
@@ -235,10 +260,27 @@ impl AudioOutputStream {
         let mut rt_state: Option<Result<audio_thread_priority::RtPriorityHandle, ()>> = None;
 
         let slot = Arc::clone(&engine_slot);
+        let health = StreamHealth::default();
+        let callback_health = health.clone();
 
         let stream = device.build_output_stream(
             &config,
             move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+                if callback_health.callback_action() == CallbackAction::SilenceAndYield {
+                    if let Some(Ok(handle)) = rt_state.take() {
+                        if let Err(error) =
+                            audio_thread_priority::demote_current_thread_from_real_time(handle)
+                        {
+                            eprintln!("vibez: failed to demote disconnected audio thread: {error}");
+                        }
+                    }
+                    data.fill(0.0);
+                    // ALSA can hot-loop callbacks after a USB device disappears.
+                    // This path is already unrecoverable for the current stream;
+                    // yielding prevents CPU spin and Linux RLIMIT_RTTIME SIGXCPU.
+                    std::thread::sleep(Duration::from_millis(10));
+                    return;
+                }
                 if rt_state.is_none() {
                     rt_state = Some(
                         match audio_thread_priority::promote_current_thread_to_real_time(
@@ -269,6 +311,7 @@ impl AudioOutputStream {
                 data.fill(0.0);
             },
             move |err| {
+                health.mark_failed();
                 eprintln!("vibez: audio stream error: {err}");
             },
             None,
@@ -355,6 +398,17 @@ mod tests {
             None => cpal::BufferSize::Default,
         };
         assert!(matches!(buf, cpal::BufferSize::Fixed(1024)));
+    }
+
+    #[test]
+    fn stream_error_latches_callback_into_silence_and_yield_mode() {
+        let health = StreamHealth::default();
+        assert_eq!(health.callback_action(), CallbackAction::Process);
+
+        health.mark_failed();
+
+        assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
+        assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
     }
 
     /// Verify `BufferSize::Default` is used for `None`.
