@@ -254,6 +254,30 @@ impl App {
                         self.persist_ui_settings();
                     }
                 }
+                let detail_panel_resize = match &msg {
+                    ViewMsg::CursorMoved(_, y) if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::ResizeDetailPanel(
+                            self.detail_panel_drag_height(*y),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::EndDetailPanelResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = detail_panel_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
                 let perform_surface_resize = match &msg {
                     ViewMsg::CursorMoved(x, _) if self.state.view.perform_surface_resize_active => {
                         Some(ViewMsg::ResizePerformSurface(

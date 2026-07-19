@@ -246,6 +246,7 @@ impl App {
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
+                detail_panel_height: ui_settings.detail_panel_height,
                 ..Default::default()
             },
             browser: crate::state::BrowserState {

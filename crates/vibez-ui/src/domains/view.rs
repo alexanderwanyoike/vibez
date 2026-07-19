@@ -26,6 +26,9 @@ pub enum ViewMsg {
     ToggleTripletGrid,
     ToggleSnapToGrid,
     ToggleAdaptiveGrid,
+    BeginDetailPanelResize,
+    ResizeDetailPanel(f32),
+    EndDetailPanelResize,
     BeginPerformSurfaceResize,
     ResizePerformSurface(f32),
     EndPerformSurfaceResize,
@@ -147,6 +150,20 @@ impl ViewState {
             }
             ViewMsg::ToggleAdaptiveGrid => {
                 self.adaptive_grid = !self.adaptive_grid;
+            }
+            ViewMsg::BeginDetailPanelResize => {
+                self.detail_panel_resize_active = true;
+            }
+            ViewMsg::ResizeDetailPanel(height) => {
+                if self.detail_panel_resize_active {
+                    self.detail_panel_height = height;
+                }
+            }
+            ViewMsg::EndDetailPanelResize => {
+                if self.detail_panel_resize_active {
+                    self.detail_panel_resize_active = false;
+                    action.persist_settings = true;
+                }
             }
             ViewMsg::BeginPerformSurfaceResize => {
                 self.perform_surface_resize_active = true;
@@ -498,6 +515,38 @@ mod tests {
 
         assert_eq!(view.perform_surface_width, 720.0);
         assert!(!view.perform_surface_resize_active);
+        assert!(action.persist_settings);
+    }
+
+    #[test]
+    fn detail_panel_resize_commits_one_global_view_preference() {
+        let mut view = ViewState::default();
+        let timeline = TimelineEditorState::default();
+
+        view.update(
+            ViewMsg::ResizeDetailPanel(420.0),
+            &timeline,
+            ViewCtx::default(),
+        );
+        assert_eq!(
+            view.detail_panel_height,
+            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+        );
+
+        view.update(
+            ViewMsg::BeginDetailPanelResize,
+            &timeline,
+            ViewCtx::default(),
+        );
+        view.update(
+            ViewMsg::ResizeDetailPanel(420.0),
+            &timeline,
+            ViewCtx::default(),
+        );
+        let action = view.update(ViewMsg::EndDetailPanelResize, &timeline, ViewCtx::default());
+
+        assert_eq!(view.detail_panel_height, 420.0);
+        assert!(!view.detail_panel_resize_active);
         assert!(action.persist_settings);
     }
 }

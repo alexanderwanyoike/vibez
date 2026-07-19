@@ -17,6 +17,21 @@ use crate::theme as th;
 use super::*;
 
 pub(super) const HORIZONTAL_PANE_SPLITTER_WIDTH: f32 = 7.0;
+pub(super) const VERTICAL_PANE_SPLITTER_HEIGHT: f32 = 7.0;
+
+fn pane_splitter_style(active: bool) -> container::Style {
+    container::Style {
+        background: Some(
+            if active {
+                th::accent_dim()
+            } else {
+                th::divider()
+            }
+            .into(),
+        ),
+        ..Default::default()
+    }
+}
 
 pub(super) fn horizontal_pane_splitter(
     active: bool,
@@ -26,20 +41,22 @@ pub(super) fn horizontal_pane_splitter(
         container(text(""))
             .width(Length::Fixed(HORIZONTAL_PANE_SPLITTER_WIDTH))
             .height(Length::Fill)
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(
-                    if active {
-                        th::accent_dim()
-                    } else {
-                        th::divider()
-                    }
-                    .into(),
-                ),
-                ..Default::default()
-            }),
+            .style(move |_theme: &Theme| pane_splitter_style(active)),
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::ResizingHorizontally)
+    .into()
+}
+
+pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element<'static, Message> {
+    mouse_area(
+        container(text(""))
+            .width(Length::Fill)
+            .height(Length::Fixed(VERTICAL_PANE_SPLITTER_HEIGHT))
+            .style(move |_theme: &Theme| pane_splitter_style(active)),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::ResizingVertically)
     .into()
 }
 
@@ -70,11 +87,22 @@ impl App {
             workspace_content
         };
 
+        let detail_splitter = vertical_pane_splitter(
+            self.state.view.detail_panel_resize_active,
+            Message::View(ViewMsg::BeginDetailPanelResize),
+        );
         let detail_panel = self.view_detail_panel();
         let transport_bar = self.view_transport();
         let status_bar = self.view_status();
 
-        let layout = column![header, transport_bar, content, detail_panel, status_bar];
+        let layout = column![
+            header,
+            transport_bar,
+            content,
+            detail_splitter,
+            detail_panel,
+            status_bar
+        ];
 
         let layout_container = container(layout).width(Length::Fill).height(Length::Fill);
         // Outer mouse_area cancels an active sample-drag on any release

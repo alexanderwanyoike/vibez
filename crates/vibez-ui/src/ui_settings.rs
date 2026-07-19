@@ -14,6 +14,8 @@ pub struct UiSettings {
     pub sample_browser_width: f32,
     #[serde(default = "default_perform_surface_width")]
     pub perform_surface_width: f32,
+    #[serde(default = "default_detail_panel_height")]
+    pub detail_panel_height: f32,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -57,6 +59,7 @@ impl Default for UiSettings {
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
+            detail_panel_height: default_detail_panel_height(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             audition_loop: false,
@@ -117,6 +120,10 @@ fn default_perform_surface_width() -> f32 {
     crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
 }
 
+fn default_detail_panel_height() -> f32 {
+    crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+}
+
 fn default_audition_enabled() -> bool {
     true
 }
@@ -171,6 +178,23 @@ mod tests {
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(loaded.perform_surface_width, 704.0);
+    }
+
+    #[test]
+    fn detail_panel_height_defaults_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.detail_panel_height,
+            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+        );
+
+        let settings = UiSettings {
+            detail_panel_height: 412.0,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.detail_panel_height, 412.0);
     }
 
     #[test]
