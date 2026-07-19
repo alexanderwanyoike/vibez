@@ -229,6 +229,7 @@ impl App {
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,
+            perform_surface_width: self.state.view.perform_surface_width,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
             audition_loop: self.state.browser.audition_loop,
@@ -238,6 +239,7 @@ impl App {
             theme: Some(self.state.current_theme_name.clone()),
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
+            confirm_project_track_deletion: self.state.confirm_project_track_deletion,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");

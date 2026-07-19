@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::domains::arrangement::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+use crate::domains::automation::{AutomationAction, AutomationMsg};
 use crate::domains::piano_roll::{PianoRollAction, PianoRollCtx, PianoRollMsg};
 use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::state::Workspace;
@@ -10,6 +11,35 @@ use crate::state::Workspace;
 use super::*;
 
 impl App {
+    pub(super) fn route_automation_editor_message(
+        &mut self,
+        msg: AutomationMsg,
+    ) -> AutomationAction {
+        let editing_section = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.selected_section.is_some();
+        let action = if editing_section {
+            let mut engine = crate::domains::DiscardingEngine;
+            self.state.automation_ui.update(
+                msg,
+                &mut engine,
+                Arc::make_mut(&mut self.state.project_tracks),
+                self.state.perform.section_editor.editor_mut(),
+            )
+        } else {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            self.state.automation_ui.update(
+                msg,
+                &mut engine,
+                Arc::make_mut(&mut self.state.project_tracks),
+                self.state.arrangement.resolve_timeline_mut().editor,
+            )
+        };
+        if editing_section {
+            self.state.perform.commit_selected_section_timeline();
+        }
+        action
+    }
+
     pub(super) fn route_arrangement_editor_message(
         &mut self,
         msg: ArrangementMsg,

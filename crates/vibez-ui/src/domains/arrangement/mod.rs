@@ -90,6 +90,54 @@ impl TimelineEditorState {
 }
 
 impl ArrangementState {
+    fn remove_project_track(
+        &mut self,
+        project_tracks: &mut ProjectTracksState,
+        track_id: TrackId,
+        engine: &mut impl EngineHandle,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        if track_id.is_master()
+            || !project_tracks
+                .tracks
+                .iter()
+                .any(|track| track.id == track_id)
+        {
+            return action;
+        }
+
+        self.pending_project_track_deletion = None;
+        let removed_name = project_tracks
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .map(|track| track.name.clone())
+            .unwrap_or_else(|| format!("{track_id}"));
+        engine.send(EngineCommand::RemoveTrack(track_id));
+        project_tracks.tracks.retain(|track| track.id != track_id);
+        Arc::make_mut(&mut self.timeline).remove(track_id);
+        if self.selected_track == Some(track_id) {
+            self.selected_track = project_tracks.tracks.first().map(|track| track.id);
+        }
+        if self
+            .selected_note_clip
+            .is_some_and(|(id, _)| id == track_id)
+        {
+            self.selected_note_clip = None;
+        }
+        self.selected_clips.retain(|selection| match selection {
+            ArrangementSelection::AudioClip { track_id: id, .. }
+            | ArrangementSelection::NoteClip { track_id: id, .. } => *id != track_id,
+        });
+        action.close_track_guis = Some(track_id);
+        action.remove_track_from_sections = Some(track_id);
+        action.status = Some(format!(
+            "Removed {removed_name}. {} track(s) remain.",
+            project_tracks.tracks.len()
+        ));
+        action
+    }
+
     /// Arrange owns Project Track controls and resolves its local timeline
     /// before forwarding editor messages to the shared boundary.
     pub fn update(
@@ -138,38 +186,27 @@ impl ArrangementState {
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
-            ArrangementMsg::RemoveTrack(track_id) => {
-                if track_id.is_master() {
+            ArrangementMsg::RequestRemoveTrack(track_id) => {
+                if !track_id.is_master()
+                    && project_tracks
+                        .tracks
+                        .iter()
+                        .any(|track| track.id == track_id)
+                {
+                    self.pending_project_track_deletion = Some(track_id);
+                }
+            }
+            ArrangementMsg::CancelRemoveTrack => {
+                self.pending_project_track_deletion = None;
+            }
+            ArrangementMsg::ConfirmRemoveTrack(track_id) => {
+                if self.pending_project_track_deletion != Some(track_id) {
                     return action;
                 }
-                let removed_name = project_tracks
-                    .tracks
-                    .iter()
-                    .find(|track| track.id == track_id)
-                    .map(|track| track.name.clone())
-                    .unwrap_or_else(|| format!("{track_id}"));
-                engine.send(EngineCommand::RemoveTrack(track_id));
-                project_tracks.tracks.retain(|track| track.id != track_id);
-                Arc::make_mut(&mut self.timeline).remove(track_id);
-                if self.selected_track == Some(track_id) {
-                    self.selected_track = project_tracks.tracks.first().map(|track| track.id);
-                }
-                if self
-                    .selected_note_clip
-                    .is_some_and(|(id, _)| id == track_id)
-                {
-                    self.selected_note_clip = None;
-                }
-                self.selected_clips.retain(|selection| match selection {
-                    ArrangementSelection::AudioClip { track_id: id, .. }
-                    | ArrangementSelection::NoteClip { track_id: id, .. } => *id != track_id,
-                });
-                action.close_track_guis = Some(track_id);
-                action.remove_track_from_sections = Some(track_id);
-                action.status = Some(format!(
-                    "Removed {removed_name}. {} track(s) remain.",
-                    project_tracks.tracks.len()
-                ));
+                return self.remove_project_track(project_tracks, track_id, engine);
+            }
+            ArrangementMsg::RemoveTrack(track_id) => {
+                return self.remove_project_track(project_tracks, track_id, engine);
             }
             ArrangementMsg::SelectTrack(track_id) => self.selected_track = Some(track_id),
             ArrangementMsg::RenameTrack(track_id, new_name) => {

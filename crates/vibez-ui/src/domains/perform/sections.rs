@@ -106,11 +106,23 @@ impl Section {
             timeline: Arc::new(timeline),
         }
     }
+
+    /// Whether a beat is active inside this Section's non-destructive
+    /// playable boundary. Timeline content outside the boundary remains stored.
+    pub fn contains_playable_beat(&self, beat: f64) -> bool {
+        beat >= 0.0 && beat < self.length_beats
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SectionStore {
     pub sections: Vec<Section>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimelineContentLocation {
+    Arrange,
+    Section { slot: u16, name: String },
 }
 
 impl SectionStore {
@@ -141,6 +153,34 @@ impl SectionStore {
         for section in &mut self.sections {
             Arc::make_mut(&mut section.timeline).remove(track_id);
         }
+    }
+
+    pub fn track_content_locations(
+        &self,
+        arrangement: &ArrangementTimeline,
+        track_id: TrackId,
+    ) -> Vec<TimelineContentLocation> {
+        let has_content = |timeline: &ArrangementTimeline| {
+            timeline.get(track_id).is_some_and(|content| {
+                !content.clips.is_empty()
+                    || !content.note_clips.is_empty()
+                    || !content.automation.is_empty()
+            })
+        };
+        let mut locations = Vec::new();
+        if has_content(arrangement) {
+            locations.push(TimelineContentLocation::Arrange);
+        }
+        locations.extend(
+            self.sections
+                .iter()
+                .filter(|section| has_content(&section.timeline))
+                .map(|section| TimelineContentLocation::Section {
+                    slot: section.slot,
+                    name: section.name.clone(),
+                }),
+        );
+        locations
     }
 }
 
@@ -250,5 +290,86 @@ mod tests {
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
         assert_eq!(section_clip.position_beats, 0.0);
+    }
+
+    #[test]
+    fn shortening_only_changes_the_playable_boundary() {
+        let track_id = TrackId::new();
+        let mut section = Section::new(0);
+        let hidden_clip = UiNoteClip {
+            id: ClipId::new(),
+            name: "Fill".into(),
+            position_beats: 12.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        };
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .note_clips
+            .push(hidden_clip.clone());
+
+        section.length_beats = 8.0;
+        assert!(!section.contains_playable_beat(hidden_clip.position_beats));
+        assert_eq!(
+            section.timeline.get(track_id).unwrap().note_clips[0].id,
+            hidden_clip.id
+        );
+
+        section.length_beats = 16.0;
+        assert!(section.contains_playable_beat(hidden_clip.position_beats));
+        assert_eq!(
+            section.timeline.get(track_id).unwrap().note_clips[0].id,
+            hidden_clip.id
+        );
+    }
+
+    #[test]
+    fn content_locations_include_arrange_and_every_affected_section() {
+        let track_id = TrackId::new();
+        let mut arrange = ArrangementTimeline::default();
+        arrange
+            .ensure(track_id)
+            .automation
+            .push(vibez_core::automation::AutomationLane::new(
+                vibez_core::automation::AutomationTarget::TrackGain,
+            ));
+        let mut first = Section::new(0);
+        first.name = "Verse".into();
+        Arc::make_mut(&mut first.timeline)
+            .ensure(track_id)
+            .automation
+            .push(vibez_core::automation::AutomationLane::new(
+                vibez_core::automation::AutomationTarget::TrackPan,
+            ));
+        let mut second = Section::new(5);
+        second.name = "Fill".into();
+        Arc::make_mut(&mut second.timeline)
+            .ensure(track_id)
+            .automation
+            .push(vibez_core::automation::AutomationLane::new(
+                vibez_core::automation::AutomationTarget::TrackGain,
+            ));
+        let sections = SectionStore {
+            sections: vec![first, second],
+        };
+
+        assert_eq!(
+            sections.track_content_locations(&arrange, track_id),
+            [
+                TimelineContentLocation::Arrange,
+                TimelineContentLocation::Section {
+                    slot: 0,
+                    name: "Verse".into()
+                },
+                TimelineContentLocation::Section {
+                    slot: 5,
+                    name: "Fill".into()
+                }
+            ]
+        );
     }
 }

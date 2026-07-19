@@ -23,7 +23,137 @@ use crate::theme as th;
 
 use super::*;
 
+fn project_track_deletion_list_height(location_count: usize) -> f32 {
+    match location_count {
+        0 | 1 => 28.0,
+        count => (count as f32 * 28.0 + (count - 1) as f32 * 4.0).min(120.0),
+    }
+}
+
 impl App {
+    pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
+        let track_id = self
+            .state
+            .arrangement
+            .pending_project_track_deletion
+            .expect("track deletion overlay requires a pending track");
+        let track_name = self
+            .state
+            .project_tracks
+            .find(track_id)
+            .map(|track| track.name.as_str())
+            .unwrap_or("Missing Project Track");
+        let locations = self
+            .state
+            .perform
+            .sections
+            .track_content_locations(&self.state.arrangement.timeline, track_id);
+        let location_list_height = project_track_deletion_list_height(locations.len());
+        let mut location_list = column![].spacing(4);
+        if locations.is_empty() {
+            location_list = location_list.push(
+                text("No authored timeline content")
+                    .size(11)
+                    .color(th::text_dim()),
+            );
+        } else {
+            for location in locations {
+                let label = match location {
+                    crate::domains::perform::TimelineContentLocation::Arrange => "Arrange".into(),
+                    crate::domains::perform::TimelineContentLocation::Section { slot, name } => {
+                        format!("Section {:02} · {name}", slot + 1)
+                    }
+                };
+                location_list = location_list.push(
+                    container(
+                        row![
+                            container(horizontal_space())
+                                .width(Length::Fixed(3.0))
+                                .height(Length::Fixed(14.0))
+                                .style(|_theme: &Theme| container::Style {
+                                    background: Some(th::danger().into()),
+                                    ..Default::default()
+                                }),
+                            text(label).size(11).color(th::text())
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding([5, 8])
+                    .width(Length::Fill)
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::bg_elevated().into()),
+                        border: iced::Border {
+                            color: th::border(),
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+                );
+            }
+        }
+        let cancel = button(text("Cancel").size(12).color(th::text()))
+            .on_press(Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::CancelRemoveTrack,
+            ))
+            .padding([7, 14]);
+        let remove = button(text("Delete Project Track").size(12).color(th::bg_dark()))
+            .on_press(Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::ConfirmRemoveTrack(track_id),
+            ))
+            .padding([7, 14])
+            .style(|_theme: &Theme, status| button::Style {
+                background: Some(
+                    if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                        th::blend(th::danger(), th::text(), 0.18)
+                    } else {
+                        th::danger()
+                    }
+                    .into(),
+                ),
+                text_color: th::bg_dark(),
+                border: iced::Border::default(),
+                ..Default::default()
+            });
+        let card = container(
+            column![
+                text(format!("Delete {track_name}?"))
+                    .font(crate::typography::PERFORM_DISPLAY)
+                    .size(18)
+                    .color(th::text()),
+                text("This Project Track is shared. Its channel, devices, and authored content will be removed from:")
+                    .size(11)
+                    .color(th::text_dim()),
+                scrollable(location_list).height(Length::Fixed(location_list_height)),
+                text("One Undo restores the Track and every listed location.")
+                    .size(10)
+                    .color(th::text_dim()),
+                row![horizontal_space(), cancel, remove].spacing(8),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .width(Length::Fixed(440.0))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+        container(center(card))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.62).into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
     pub(super) fn view_edit_menu_overlay(&self) -> Element<'_, Message> {
         let item = |icon: char, label: &'static str, shortcut: &'static str, message: Message| {
             button(
@@ -752,5 +882,18 @@ impl App {
         )
         .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_track_deletion_list_height;
+
+    #[test]
+    fn deletion_location_list_grows_with_content_then_caps() {
+        assert_eq!(project_track_deletion_list_height(0), 28.0);
+        assert_eq!(project_track_deletion_list_height(1), 28.0);
+        assert_eq!(project_track_deletion_list_height(2), 60.0);
+        assert_eq!(project_track_deletion_list_height(8), 120.0);
     }
 }

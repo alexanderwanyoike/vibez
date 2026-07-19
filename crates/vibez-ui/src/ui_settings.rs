@@ -12,6 +12,8 @@ pub struct UiSettings {
     pub sample_browser_open: bool,
     #[serde(default = "default_sample_browser_width")]
     pub sample_browser_width: f32,
+    #[serde(default = "default_perform_surface_width")]
+    pub perform_surface_width: f32,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -41,6 +43,10 @@ pub struct UiSettings {
     pub media_cache_budget_bytes: u64,
     #[serde(default = "default_media_cache_automatic_eviction")]
     pub media_cache_automatic_eviction: bool,
+    /// Ask before deleting a Project Track and all of its Arrange and
+    /// Section content. Off by default because deletion is undoable.
+    #[serde(default)]
+    pub confirm_project_track_deletion: bool,
 }
 
 impl Default for UiSettings {
@@ -50,6 +56,7 @@ impl Default for UiSettings {
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
+            perform_surface_width: default_perform_surface_width(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             audition_loop: false,
@@ -59,6 +66,7 @@ impl Default for UiSettings {
             theme: None,
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
+            confirm_project_track_deletion: false,
         }
     }
 }
@@ -105,6 +113,10 @@ fn default_sample_browser_width() -> f32 {
     crate::state::BROWSER_DOCK_DEFAULT_WIDTH
 }
 
+fn default_perform_surface_width() -> f32 {
+    crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
+}
+
 fn default_audition_enabled() -> bool {
     true
 }
@@ -145,6 +157,23 @@ mod tests {
     }
 
     #[test]
+    fn perform_surface_width_defaults_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.perform_surface_width,
+            crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
+        );
+
+        let settings = UiSettings {
+            perform_surface_width: 704.0,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.perform_surface_width, 704.0);
+    }
+
+    #[test]
     fn old_settings_enable_audition_at_unity_by_default() {
         let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
         assert!(loaded.audition_enabled);
@@ -165,6 +194,20 @@ mod tests {
         assert!(!loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 0.42);
         assert!(loaded.audition_loop);
+    }
+
+    #[test]
+    fn project_track_deletion_confirmation_defaults_off_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert!(!old.confirm_project_track_deletion);
+
+        let settings = UiSettings {
+            confirm_project_track_deletion: true,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(loaded.confirm_project_track_deletion);
     }
 
     #[test]

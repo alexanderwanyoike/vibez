@@ -371,6 +371,59 @@ fn selecting_a_section_preserves_project_track_selection_and_resets_clip_focus()
 }
 
 #[test]
+fn removing_track_content_only_changes_the_selected_section() {
+    let tracks = project_tracks(1);
+    let track_id = tracks[0].id;
+    let mut first = Section::new(0);
+    let mut second = Section::new(1);
+    for section in [&mut first, &mut second] {
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .automation
+            .push(vibez_core::automation::AutomationLane::new(
+                vibez_core::automation::AutomationTarget::TrackGain,
+            ));
+    }
+    let first_id = first.id;
+    let second_id = second.id;
+    let mut state = PerformState::default();
+    Arc::make_mut(&mut state.sections).insert(first);
+    Arc::make_mut(&mut state.sections).insert(second);
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(track_id),
+    };
+    state.update(PerformMsg::SelectSection(first_id), &mut engine, ctx);
+    state.update(
+        PerformMsg::RemoveTrackContent {
+            section_id: first_id,
+            track_id,
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert_eq!(tracks.len(), 1);
+    assert!(state
+        .sections
+        .by_id(first_id)
+        .unwrap()
+        .timeline
+        .get(track_id)
+        .is_none());
+    assert!(state
+        .sections
+        .by_id(second_id)
+        .unwrap()
+        .timeline
+        .get(track_id)
+        .is_some());
+    assert!(engine.0.is_empty());
+}
+
+#[test]
 fn track_mute_mode_resolves_keyboard_press_to_shared_track_request_once() {
     let tracks = project_tracks(2);
     let mut state = PerformState {
@@ -437,6 +490,11 @@ fn only_section_document_edits_are_dirty() {
             .marks_dirty()
     );
     assert!(PerformMsg::ToggleSectionLoop(id).marks_dirty());
+    assert!(PerformMsg::RemoveTrackContent {
+        section_id: id,
+        track_id: TrackId::new(),
+    }
+    .marks_dirty());
     assert!(!PerformMsg::SelectSection(id).marks_dirty());
     assert!(!PerformMsg::SectionNameInput("Draft".into()).marks_dirty());
     assert!(!PerformMsg::StartEditingSectionName(id).marks_dirty());

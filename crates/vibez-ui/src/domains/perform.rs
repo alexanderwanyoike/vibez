@@ -15,7 +15,7 @@ use super::EngineHandle;
 use crate::state::ProjectTrack;
 
 mod sections;
-pub use sections::{Section, SectionStore, SectionTimelineEditor};
+pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
 /// behavior and Capture semantics are defined.
@@ -335,6 +335,10 @@ pub enum PerformMsg {
     SetSectionLaunchQuantization(SectionId, SectionLaunchQuantization),
     ToggleSectionLoop(SectionId),
     ToggleSectionTimelineExpanded,
+    RemoveTrackContent {
+        section_id: SectionId,
+        track_id: TrackId,
+    },
     PreviousBank,
     NextBank,
     ToggleTrackMuteFromPad(PadPosition),
@@ -360,6 +364,7 @@ impl PerformMsg {
                 | Self::SetSectionLengthBeats(..)
                 | Self::SetSectionLaunchQuantization(..)
                 | Self::ToggleSectionLoop(_)
+                | Self::RemoveTrackContent { .. }
         )
     }
 }
@@ -573,6 +578,28 @@ impl PerformState {
             PerformMsg::ToggleSectionTimelineExpanded => {
                 if ctx.workspace_visible && self.selected_section.is_some() {
                     self.section_timeline_expanded = !self.section_timeline_expanded;
+                }
+            }
+            PerformMsg::RemoveTrackContent {
+                section_id,
+                track_id,
+            } => {
+                if ctx.workspace_visible && self.selected_section == Some(section_id) {
+                    let editor = self.section_editor.editor_mut();
+                    Arc::make_mut(&mut editor.timeline).remove(track_id);
+                    editor.selected_clips.retain(|selection| match selection {
+                        crate::state::ArrangementSelection::AudioClip { track_id: id, .. }
+                        | crate::state::ArrangementSelection::NoteClip { track_id: id, .. } => {
+                            *id != track_id
+                        }
+                    });
+                    if editor
+                        .selected_note_clip
+                        .is_some_and(|(id, _)| id == track_id)
+                    {
+                        editor.selected_note_clip = None;
+                    }
+                    self.commit_selected_section_timeline();
                 }
             }
             PerformMsg::PreviousBank => {

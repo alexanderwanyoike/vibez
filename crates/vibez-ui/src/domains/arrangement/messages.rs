@@ -10,6 +10,10 @@ pub enum ArrangementMsg {
     AddTrack,
     AddMidiTrack,
     AddInstrumentTrack,
+    RequestRemoveTrack(TrackId),
+    CancelRemoveTrack,
+    ConfirmRemoveTrack(TrackId),
+    /// Delete immediately without opening the optional confirmation UI.
     RemoveTrack(TrackId),
     SelectTrack(TrackId),
     RenameTrack(TrackId, String),
@@ -177,6 +181,8 @@ impl ArrangementMsg {
         !matches!(
             self,
             ArrangementMsg::SelectTrack(_)
+                | ArrangementMsg::RequestRemoveTrack(_)
+                | ArrangementMsg::CancelRemoveTrack
                 | ArrangementMsg::EngineTrackMeter { .. }
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }

@@ -4,6 +4,7 @@ use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 
+use crate::domains::arrangement::{ArrangementCtx, ArrangementMsg};
 use crate::domains::perform::{PerformCtx, PerformMsg};
 use crate::domains::test_support::RecordingEngine;
 
@@ -225,4 +226,64 @@ fn section_crud_operations_are_individual_undo_steps() {
     undo_once(&mut state);
     assert!(state.perform.sections.sections.is_empty());
     assert!(engine.0.is_empty());
+}
+
+#[test]
+fn project_track_deletion_across_timelines_is_one_undo_step() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Shared".into(), 0));
+    Arc::make_mut(&mut state.arrangement.timeline)
+        .ensure(track_id)
+        .automation
+        .push(AutomationLane::new(AutomationTarget::TrackGain));
+    for slot in [0, 3] {
+        let mut section = crate::domains::perform::Section::new(slot);
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .automation
+            .push(AutomationLane::new(AutomationTarget::TrackPan));
+        Arc::make_mut(&mut state.perform.sections).insert(section);
+    }
+    let mut engine = RecordingEngine::default();
+    state.arrangement.update(
+        Arc::make_mut(&mut state.project_tracks),
+        ArrangementMsg::RequestRemoveTrack(track_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    state.project.history.push_edit(snapshot(&state), None);
+    let action = state.arrangement.update(
+        Arc::make_mut(&mut state.project_tracks),
+        ArrangementMsg::ConfirmRemoveTrack(track_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    Arc::make_mut(&mut state.perform.sections).remove_track(
+        action
+            .remove_track_from_sections
+            .expect("confirmed deletion spans Sections"),
+    );
+
+    assert_eq!(state.project.history.undo.len(), 1);
+    assert!(state.project_tracks.find(track_id).is_none());
+    assert!(state.arrangement.timeline.get(track_id).is_none());
+    assert!(state
+        .perform
+        .sections
+        .sections
+        .iter()
+        .all(|section| section.timeline.get(track_id).is_none()));
+
+    undo_once(&mut state);
+    assert!(state.project_tracks.find(track_id).is_some());
+    assert!(state.arrangement.timeline.get(track_id).is_some());
+    assert!(state
+        .perform
+        .sections
+        .sections
+        .iter()
+        .all(|section| section.timeline.get(track_id).is_some()));
 }

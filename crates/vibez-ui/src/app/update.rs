@@ -18,12 +18,23 @@ use crate::message::Message;
 
 use super::*;
 
+fn apply_project_track_deletion_policy(message: Message, confirm: bool) -> Message {
+    match message {
+        Message::Arrangement(ArrangementMsg::RequestRemoveTrack(track_id)) if !confirm => {
+            Message::Arrangement(ArrangementMsg::RemoveTrack(track_id))
+        }
+        message => message,
+    }
+}
+
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let (message, undo_gesture) = match message {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
+        let message =
+            apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
         if self.state.view.edit_menu_open {
             let keep_menu = matches!(
                 &message,
@@ -202,16 +213,7 @@ impl App {
                 return self.apply_browser_action(action);
             }
             Message::Automation(msg) => {
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                    self.state.automation_ui.update(
-                        msg,
-                        &mut engine,
-                        project_tracks,
-                        self.state.arrangement.resolve_timeline_mut().editor,
-                    )
-                };
+                let action = self.route_automation_editor_message(msg);
                 if let Some(status) = action.status {
                     self.state.status_text = status;
                 }
@@ -248,6 +250,30 @@ impl App {
                 };
                 if let Some(browser_msg) = browser_resize {
                     let action = self.state.browser.update(browser_msg);
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let perform_surface_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::ResizePerformSurface(
+                            self.perform_surface_drag_width(*x),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::EndPerformSurfaceResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = perform_surface_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
                     if action.persist_settings {
                         self.persist_ui_settings();
                     }
@@ -772,6 +798,11 @@ impl App {
                 self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
                 self.persist_ui_settings();
             }
+            Message::ToggleProjectTrackDeleteConfirmation => {
+                self.state.confirm_project_track_deletion =
+                    !self.state.confirm_project_track_deletion;
+                self.persist_ui_settings();
+            }
             Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
             Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
             Message::CloseMidiInput => {
@@ -957,5 +988,33 @@ impl App {
             }
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn project_track_deletion_policy_defaults_to_the_direct_undoable_command() {
+        let track_id = TrackId::new();
+        let direct = apply_project_track_deletion_policy(
+            Message::Arrangement(ArrangementMsg::RequestRemoveTrack(track_id)),
+            false,
+        );
+        assert!(matches!(
+            direct,
+            Message::Arrangement(ArrangementMsg::RemoveTrack(id)) if id == track_id
+        ));
+
+        let confirmed = apply_project_track_deletion_policy(
+            Message::Arrangement(ArrangementMsg::RequestRemoveTrack(track_id)),
+            true,
+        );
+        assert!(matches!(
+            confirmed,
+            Message::Arrangement(ArrangementMsg::RequestRemoveTrack(id)) if id == track_id
+        ));
     }
 }

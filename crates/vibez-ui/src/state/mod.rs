@@ -42,7 +42,7 @@ pub struct AuditionImportInput {
 }
 
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
-
+pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMediaDrag {
     pub source: MediaSourceRef,
@@ -69,13 +69,14 @@ pub enum BrowserDropTarget {
         pad_index: usize,
     },
 }
-
 /// View domain slice: everything about how the project is being
 /// looked at, none of it part of the project itself.
 #[derive(Debug)]
 pub struct ViewState {
     pub workspace: Workspace,
     pub detail_panel_tab: DetailPanelTab,
+    pub perform_surface_width: f32,
+    pub perform_surface_resize_active: bool,
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
@@ -84,23 +85,22 @@ pub struct ViewState {
     pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
     pub edit_menu_open: bool,
-    /// Cursor tracking (for right-click positioning from mouse_area).
-    pub cursor_x: f32,
+    pub cursor_x: f32, // globally tracked for popup positioning and pane drags
     pub cursor_y: f32,
-    /// Last known window size, for clamping popup menus on-screen.
-    pub window_width: f32,
+    pub window_width: f32, // last known size for responsive view clamping
     pub window_height: f32,
     // Inline renaming
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
 }
-
 impl Default for ViewState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Arrange,
             detail_panel_tab: DetailPanelTab::Clip,
+            perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
+            perform_surface_resize_active: false,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::EIGHTH,
@@ -491,8 +491,8 @@ impl std::ops::DerefMut for TimelineEditorState {
 #[derive(Debug, Default)]
 pub struct ArrangementState {
     pub(crate) editor: TimelineEditorState,
+    pub pending_project_track_deletion: Option<TrackId>,
 }
-
 impl std::ops::Deref for ArrangementState {
     type Target = TimelineEditorState;
 
@@ -555,7 +555,8 @@ pub struct AppState {
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
-    // Project domain slice (file menu, path, dirty flag, undo).
+    pub confirm_project_track_deletion: bool,
+    // Project domain slice: file menu, path, dirty flag, undo.
     pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
     /// import. Mirrored from `UiSettings::auto_warp_on_import`.
@@ -563,12 +564,10 @@ pub struct AppState {
     /// Minimum BPM-detect confidence required to auto-warp. Mirrored
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
-    // Automation domain slice (lane expansion, point selection).
     pub automation_ui: crate::domains::automation::AutomationState,
 
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
-
     // Appearance / themes
     pub current_theme_name: String,
     pub user_themes: Vec<crate::themes::UserTheme>,
@@ -604,6 +603,7 @@ impl Default for AppState {
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
+            confirm_project_track_deletion: false,
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,

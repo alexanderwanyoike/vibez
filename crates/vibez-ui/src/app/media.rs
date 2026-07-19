@@ -501,6 +501,11 @@ impl App {
                 track_id,
                 position_samples,
             } => self.add_audio_clip_to_track_at(track_id, position_samples, payload),
+            BrowserImportTarget::SectionClipAt {
+                section_id,
+                track_id,
+                position_samples,
+            } => self.add_audio_clip_to_section_at(section_id, track_id, position_samples, payload),
             BrowserImportTarget::ArrangementNewTrackAt { position_samples } => {
                 let track_id = self.ensure_audio_track_for_import(None);
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
@@ -627,6 +632,106 @@ impl App {
         };
         self.state.status_text = format!(
             "Imported '{name}' to {track_name} at beat {beat:.2} ({}){}",
+            treatment.mode.label(),
+            provenance
+                .map(|value| format!(" · source {value}"))
+                .unwrap_or_default()
+        );
+        Task::none()
+    }
+
+    pub(super) fn add_audio_clip_to_section_at(
+        &mut self,
+        section_id: vibez_core::id::SectionId,
+        track_id: TrackId,
+        position_samples: u64,
+        payload: PreparedBrowserImport,
+    ) -> Task<Message> {
+        let track_name = match self.state.find_track(track_id) {
+            Some(track) if matches!(track.kind, TrackKind::Audio) => track.name.clone(),
+            Some(track) => {
+                self.state.status_text = format!(
+                    "Can't drop audio on non-audio track '{}'; drag to an audio lane.",
+                    track.name
+                );
+                return Task::none();
+            }
+            None => {
+                self.state.status_text = "Drop target not found; drag cancelled".into();
+                return Task::none();
+            }
+        };
+        let PreparedBrowserImport {
+            treatment,
+            audio,
+            original_audio,
+            name,
+            source,
+        } = payload;
+        let provenance = source.provenance().map(|value| value.display_label());
+        let duration = audio.num_frames() as u64;
+        let (original_bpm, warped, warped_to_bpm) = match treatment.mode {
+            AuditionMode::Raw => (None, false, None),
+            AuditionMode::Warp => (treatment.source_bpm, true, Some(self.state.transport.bpm)),
+        };
+        let clip = UiClip {
+            id: ClipId::new(),
+            name: name.clone(),
+            audio,
+            source: Some(source),
+            position: position_samples,
+            source_offset: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            original_bpm,
+            warped,
+            warped_to_bpm,
+            original_audio,
+        };
+        if self.state.perform.selected_section == Some(section_id) {
+            let editor = self.state.perform.section_editor.editor_mut();
+            Arc::make_mut(&mut editor.timeline)
+                .ensure(track_id)
+                .clips
+                .push(clip);
+            editor.selected_track = Some(track_id);
+            editor.selected_clips.clear();
+            editor
+                .selected_clips
+                .insert(crate::state::ArrangementSelection::AudioClip {
+                    track_id,
+                    clip_id: editor
+                        .timeline
+                        .get(track_id)
+                        .unwrap()
+                        .clips
+                        .last()
+                        .unwrap()
+                        .id,
+                });
+            self.state.perform.commit_selected_section_timeline();
+        } else if let Some(section) =
+            Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
+        {
+            Arc::make_mut(&mut section.timeline)
+                .ensure(track_id)
+                .clips
+                .push(clip);
+        } else {
+            self.state.status_text = "Section drop target no longer exists".into();
+            return Task::none();
+        }
+        self.state.arrangement.selected_track = Some(track_id);
+        let beat = if self.state.transport.sample_rate > 0 && self.state.transport.bpm > 0.0 {
+            position_samples as f64 * self.state.transport.bpm
+                / (self.state.transport.sample_rate as f64 * 60.0)
+        } else {
+            0.0
+        };
+        self.state.status_text = format!(
+            "Imported '{name}' to Section · {track_name} at beat {beat:.2} ({}){}",
             treatment.mode.label(),
             provenance
                 .map(|value| format!(" · source {value}"))
