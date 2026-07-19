@@ -153,6 +153,16 @@ impl Transport {
 
         self.position
     }
+
+    /// Advance engine time without applying Arrangement loop or length
+    /// boundaries. Perform Sections own their local playback boundary while
+    /// active, but effective event timestamps must keep moving forward.
+    pub(crate) fn advance_unbounded(&mut self, frames: u64) -> u64 {
+        if self.playing {
+            self.position = self.position.saturating_add(frames);
+        }
+        self.position
+    }
 }
 
 impl Default for Transport {

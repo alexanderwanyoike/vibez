@@ -108,8 +108,9 @@ project persistence and undo. Each Section owns its properties and an
 independent `ArrangementTimeline` keyed by the same shared Project `TrackId`s;
 duplicating a Section remints every editable content identity while immutable
 decoded audio remains shared. `PerformMsg` changes that slice through the
-router and `EngineHandle`. Creating and editing Sections does not send engine
-commands yet—Section playback belongs to the later launch slice. Perform is a
+router and `EngineHandle`. A Section launch returns a semantic action; the
+router resolves the complete resident playback source and sends it to the
+engine without coupling the Perform interaction slice to engine storage. Perform is a
 sibling of Arrange and Mix in the shared shell, and all three retain their
 interaction state when producers switch between them. Track Mute pad slots
 retain stable `TrackId` assignments across
@@ -156,15 +157,15 @@ thin adapter that retains Arrange's Project Track/channel controls and
 implements `TimelineEditorAdapter` to resolve its editor. The editor never
 asks which workspace is active and contains no `Arrange | Section` branch.
 
-The selected Perform Section now provides that second adapter through a
+The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
 persisted Timeline Content into the adapter while preserving the project-wide
 Project Track selection; clip and piano-roll selection remain local to the
 resolved Section editor. Every edit commits the adapter's copy-on-write
 Timeline Content back into the selected Section store for undo and project
-persistence. Until the Section playback source lands, a discarding engine
-handle prevents shared editor synchronization commands from mutating the
-audible Arrange source.
+persistence. Section authoring still uses a discarding engine handle so edits
+to a selected, non-playing Section cannot mutate either resident audio source;
+a launch prepares a fresh resident adapter from canonical Section content.
 
 Every horizontal editor surface uses `TimelineGeometry` for beat-to-pixel,
 pixel-to-beat, fitted viewport, visible-range, and beat-width conversions.
@@ -223,20 +224,32 @@ flowchart LR
 
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
-Time-based Arrange content is now a separate `PreparedPlaybackSource` behind
-one owned pointer. `ArrangementPlaybackSource` is the first adapter and the
-same source renderer feeds the existing channel path, so there is no second
-clip, note, automation, instrument, or effect implementation. Prepared sources
-contain decoded clip `Arc`s and expose no loader or I/O API. Card 10 supplies
-the Section adapter and the first pointer transfer; the callback must exchange
-prepared ownership only and return superseded ownership for disposal outside
-the real-time thread rather than dropping it there.
+Time-based content is a separate `PreparedPlaybackSource` behind an owned
+pointer. `ArrangementPlaybackSource` and the active Section adapter feed the
+same channel renderer, so there is no second clip, note, automation,
+instrument, effect, or send implementation. A complete
+`PreparedSectionPlaybackSource` contains one resident source for every Project
+Track, including empty sources that mean intentional silence. It holds decoded
+clip `Arc`s and exposes no loader or I/O API.
+
+`EngineCommand::LaunchSection` swaps those prepared pointers into each shared
+channel at the next callback opportunity, resets the engine-owned local Section
+playhead, and emits a sample-timestamped `SectionTransitioned` event. The same
+command owner is returned in that event carrying the displaced sources, so
+their Vecs and Arcs are destroyed on the UI thread. The callback only swaps
+pointers: it never allocates, loads, locks, performs I/O, or drops a resident
+source. The UI sets playing-pad state only from engine events. Section loop
+wraps split inside a callback at the playable boundary, flush sounding notes,
+and continue from local sample zero. Empty sources still run the shared device
+chain, allowing existing effect tails to decay naturally.
 
 ```mermaid
 flowchart LR
-    A["ArrangementPlaybackSource adapter"] --> P["PreparedPlaybackSource<br/>audio + note clips + automation"]
-    P -- "resident source pointer" --> C["EngineTrack channel strip<br/>instrument + effects + sends + mixer"]
+    A["Arrange adapter"] --> P["PreparedPlaybackSource<br/>audio + note clips + automation"]
+    S["Section adapter<br/>one source per Project Track"] --> P
+    P -- "resident pointer swap" --> C["EngineTrack channel strip<br/>instrument + effects + sends + mixer"]
     C --> M["metering + master"]
+    C -- "timestamped transition + retired owners" --> U["UI mirror + off-thread drop"]
 ```
 
 ## Plugins (VST3 and CLAP)

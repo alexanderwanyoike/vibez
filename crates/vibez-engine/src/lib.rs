@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod engine;
+mod engine_audition;
 pub mod events;
 pub mod metering;
 pub mod mixer;

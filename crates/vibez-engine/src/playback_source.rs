@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::automation::AutomationLane;
-use vibez_core::id::ClipId;
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 
 /// A resident audio clip on a prepared timeline.
@@ -68,6 +68,66 @@ pub struct PreparedPlaybackSource {
     pub clips: Vec<EngineClip>,
     pub note_clips: Vec<EngineNoteClip>,
     pub automation: Vec<AutomationLane>,
+}
+
+/// One Project Track's resident content for a prepared Section.
+pub struct PreparedTrackPlaybackSource {
+    pub track_id: TrackId,
+    pub source: Box<PreparedPlaybackSource>,
+}
+
+/// A complete, resident Section source prepared outside the audio callback.
+///
+/// The engine swaps each boxed track source in place. The same owner is then
+/// returned through an engine event carrying the displaced sources, so no
+/// source allocation or destruction occurs on the real-time thread.
+pub struct PreparedSectionPlaybackSource {
+    pub section_id: SectionId,
+    pub length_beats: f64,
+    pub looping: bool,
+    tracks: Vec<PreparedTrackPlaybackSource>,
+}
+
+impl PreparedSectionPlaybackSource {
+    pub fn new(
+        section_id: SectionId,
+        length_beats: f64,
+        looping: bool,
+        tracks: Vec<(TrackId, PreparedPlaybackSource)>,
+    ) -> Self {
+        Self {
+            section_id,
+            length_beats,
+            looping,
+            tracks: tracks
+                .into_iter()
+                .map(|(track_id, source)| PreparedTrackPlaybackSource {
+                    track_id,
+                    source: Box::new(source),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn tracks(&self) -> &[PreparedTrackPlaybackSource] {
+        &self.tracks
+    }
+
+    pub(crate) fn tracks_mut(&mut self) -> &mut [PreparedTrackPlaybackSource] {
+        &mut self.tracks
+    }
+}
+
+impl std::fmt::Debug for PreparedSectionPlaybackSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedSectionPlaybackSource")
+            .field("section_id", &self.section_id)
+            .field("length_beats", &self.length_beats)
+            .field("looping", &self.looping)
+            .field("track_count", &self.tracks.len())
+            .finish()
+    }
 }
 
 impl PreparedPlaybackSource {

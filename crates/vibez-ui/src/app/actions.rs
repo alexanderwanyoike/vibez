@@ -57,6 +57,18 @@ impl App {
                 );
             }
         }
+        if let Some(section_id) = action.section_launch {
+            if let Some(prepared) = self
+                .state
+                .perform
+                .sections
+                .by_id(section_id)
+                .map(|section| section.prepare_playback_source(&self.state.project_tracks.tracks))
+            {
+                self.send_command(EngineCommand::LaunchSection(Box::new(prepared)));
+                self.state.status_text = "Launching Section…".into();
+            }
+        }
     }
 
     /// Route cross-domain effects requested by the arrangement domain.
@@ -507,6 +519,8 @@ impl App {
                     }
                     EngineEvent::PlaybackStopped => {
                         self.state.transport.playing = false;
+                        self.state.perform.playing_section = None;
+                        self.state.perform.section_playhead_samples = 0;
                     }
                     EngineEvent::PlaybackStarted => {
                         self.state.transport.playing = true;
@@ -551,6 +565,23 @@ impl App {
                     } => {
                         if let Some(track) = self.state.find_track_mut(track_id) {
                             track.mute = muted;
+                        }
+                    }
+                    EngineEvent::SectionTransitioned {
+                        section_id,
+                        effective_at_samples: _,
+                        retired,
+                    } => {
+                        self.state.perform.playing_section = Some(section_id);
+                        self.state.perform.section_playhead_samples = 0;
+                        drop(retired);
+                    }
+                    EngineEvent::SectionPlaybackPosition {
+                        section_id,
+                        position_samples,
+                    } => {
+                        if self.state.perform.playing_section == Some(section_id) {
+                            self.state.perform.section_playhead_samples = position_samples;
                         }
                     }
                 }

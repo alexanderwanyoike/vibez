@@ -311,6 +311,9 @@ pub struct PerformState {
     pub editing_section_name: Option<SectionId>,
     pub section_name_edit: String,
     pub duplicate_source: Option<SectionId>,
+    /// Engine-owned playback truth mirrored from Section events.
+    pub playing_section: Option<SectionId>,
+    pub section_playhead_samples: u64,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
     track_mute_slots: Vec<Option<TrackId>>,
 }
@@ -322,6 +325,7 @@ pub enum PerformMsg {
     BeginKeyRebind(PadPosition),
     CancelKeyRebind,
     SelectSection(SectionId),
+    LaunchSection(SectionId),
     CreateSectionAt(u16),
     BeginDuplicateSection(SectionId),
     CancelDuplicateSection,
@@ -393,6 +397,7 @@ pub struct PerformAction {
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
+    pub section_launch: Option<SectionId>,
 }
 
 impl PerformState {
@@ -478,6 +483,17 @@ impl PerformState {
             PerformMsg::SelectSection(id) => {
                 if ctx.workspace_visible {
                     self.select_section(id, ctx.selected_project_track);
+                }
+            }
+            PerformMsg::LaunchSection(id) => {
+                if ctx.workspace_visible
+                    && self.mode == PerformMode::Sections
+                    && self.sections.by_id(id).is_some()
+                {
+                    return PerformAction {
+                        section_launch: Some(id),
+                        ..PerformAction::default()
+                    };
                 }
             }
             PerformMsg::CreateSectionAt(slot) => {
@@ -656,6 +672,12 @@ impl PerformState {
                 let track_mute_request = (self.mode == PerformMode::TrackMutes)
                     .then(|| self.track_mute_request(position, ctx.project_tracks))
                     .flatten();
+                let section_launch = if self.mode == PerformMode::Sections {
+                    let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
+                    self.sections.at_slot(slot).map(|section| section.id)
+                } else {
+                    None
+                };
                 return PerformAction {
                     keyboard_consumed: true,
                     persist_settings: false,
@@ -667,6 +689,7 @@ impl PerformState {
                         occurred_at,
                     }),
                     track_mute_request,
+                    section_launch,
                 };
             }
             PerformMsg::ComputerKeyReleased {

@@ -7,6 +7,8 @@ use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
+use crate::playback_source::PreparedSectionPlaybackSource;
+
 /// Quantization policy for the next Browser Audition start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditionSync {
@@ -30,6 +32,8 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
+    /// Immediately activate a complete resident Section playback source.
+    LaunchSection(Box<PreparedSectionPlaybackSource>),
     /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
     /// Remove any loaded audio from the engine (legacy single-file).

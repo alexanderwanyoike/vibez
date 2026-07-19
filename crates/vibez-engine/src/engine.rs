@@ -3,13 +3,14 @@ use std::sync::Arc;
 use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
-use vibez_core::id::TrackId;
+use vibez_core::id::{SectionId, TrackId};
 
 use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
 use vibez_instruments::create_instrument;
 
 use crate::commands::{AuditionSync, EngineCommand};
+use crate::engine_audition::{audition_fade_frames, next_audition_boundary, AuditionBus};
 use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
@@ -67,110 +68,16 @@ pub struct AudioEngine {
     /// loop boundary; suppresses the post-advance discontinuity flush
     /// for that block (segment-2 notes are legitimately sounding).
     split_wrap_handled: bool,
+    active_section: Option<ActiveSectionPlayback>,
+    arrangement_audio_length: Option<u64>,
 }
 
-/// How many replaced voices can fade out simultaneously. With tiny
-/// audio buffers a retrigger can arrive before the previous ~5ms fade
-/// finishes; a couple of fixed slots absorb the overlap without
-/// clicking or allocating on the audio thread.
-const AUDITION_OUTGOING_VOICES: usize = 3;
-
-/// Dedicated Browser signal path mixed after project master processing.
-struct AuditionBus {
-    active: Option<AuditionVoice>,
-    outgoing: [Option<AuditionVoice>; AUDITION_OUTGOING_VOICES],
-    queued: Option<QueuedAudition>,
-    gain: f32,
-}
-
-struct AuditionVoice {
-    audio: Arc<DecodedAudio>,
-    position: u64,
-    fade_in_frames: usize,
-    fade_out_remaining: Option<usize>,
-    looped: bool,
-}
-
-struct QueuedAudition {
-    audio: Arc<DecodedAudio>,
-    target_position: u64,
-    looped: bool,
-}
-
-impl AuditionBus {
-    fn new() -> Self {
-        Self {
-            active: None,
-            outgoing: std::array::from_fn(|_| None),
-            queued: None,
-            gain: 1.0,
-        }
-    }
-
-    fn start(&mut self, audio: Arc<DecodedAudio>, fade_frames: usize, looped: bool) {
-        self.queued = None;
-        self.stop_active(fade_frames);
-        self.active = Some(AuditionVoice {
-            audio,
-            position: 0,
-            fade_in_frames: fade_frames,
-            fade_out_remaining: None,
-            looped,
-        });
-    }
-
-    fn queue(
-        &mut self,
-        audio: Arc<DecodedAudio>,
-        target_position: u64,
-        fade_frames: usize,
-        looped: bool,
-    ) {
-        self.stop_active(fade_frames);
-        self.queued = Some(QueuedAudition {
-            audio,
-            target_position,
-            looped,
-        });
-    }
-
-    fn stop(&mut self, fade_frames: usize) {
-        self.queued = None;
-        self.stop_active(fade_frames);
-    }
-
-    fn stop_active(&mut self, fade_frames: usize) {
-        if let Some(mut active) = self.active.take() {
-            if active.position > 0 {
-                active.fade_out_remaining = Some(fade_frames);
-                // Prefer a free slot; when a rapid retrigger burst has
-                // every slot fading, replace the voice closest to done
-                // (the smallest possible click).
-                let slot = self
-                    .outgoing
-                    .iter_mut()
-                    .min_by_key(|slot| {
-                        slot.as_ref()
-                            .map_or(0, |voice| voice.fade_out_remaining.unwrap_or(0))
-                    })
-                    .expect("outgoing slots are non-empty");
-                *slot = Some(active);
-            }
-        }
-    }
-
-    fn has_outgoing(&self) -> bool {
-        self.outgoing.iter().any(Option::is_some)
-    }
-
-    fn set_looped(&mut self, looped: bool) {
-        if let Some(active) = self.active.as_mut() {
-            active.looped = looped;
-        }
-        if let Some(queued) = self.queued.as_mut() {
-            queued.looped = looped;
-        }
-    }
+#[derive(Debug, Clone, Copy)]
+struct ActiveSectionPlayback {
+    section_id: SectionId,
+    position_samples: u64,
+    length_samples: u64,
+    looping: bool,
 }
 
 impl AudioEngine {
@@ -198,6 +105,8 @@ impl AudioEngine {
             cmd_rx,
             event_tx,
             split_wrap_handled: false,
+            active_section: None,
+            arrangement_audio_length: None,
         };
 
         (engine, cmd_tx, event_rx)
@@ -340,12 +249,49 @@ impl AudioEngine {
         }
 
         // ---- 4.5 Audition Bus (post-master, outside project graph) ------
-        self.process_audition(output, frames, channels);
+        self.audition.process(
+            output,
+            frames,
+            channels,
+            &self.transport,
+            self.sample_rate,
+            &mut self.event_tx,
+        );
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
         let pos_before = self.transport.position();
-        let new_pos = self.transport.advance(frames as u64);
+        let new_pos = if self.active_section.is_some() {
+            self.transport.advance_unbounded(frames as u64)
+        } else {
+            self.transport.advance(frames as u64)
+        };
+
+        let mut section_ended = false;
+        if was_playing {
+            if let Some(section) = self.active_section.as_mut() {
+                let advanced = section.position_samples.saturating_add(frames as u64);
+                if section.looping && section.length_samples > 0 {
+                    section.position_samples = advanced % section.length_samples;
+                } else {
+                    section.position_samples = advanced.min(section.length_samples);
+                    if advanced >= section.length_samples {
+                        self.transport.stop();
+                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                        section_ended = true;
+                    }
+                }
+                let _ = self.event_tx.push(EngineEvent::SectionPlaybackPosition {
+                    section_id: section.section_id,
+                    position_samples: section.position_samples,
+                });
+            }
+        }
+        if section_ended {
+            self.active_section = None;
+            self.transport
+                .set_audio_length(self.arrangement_audio_length);
+        }
 
         // Discontinuous jump NOT already handled by the loop-boundary
         // split (auto-stop at project end, loop region moved behind
@@ -429,6 +375,11 @@ impl AudioEngine {
             return;
         }
 
+        if let Some(section) = self.active_section {
+            self.process_section_multitrack(output, frames, channels, section);
+            return;
+        }
+
         let pos = self.transport.position();
         if let Some((loop_start, loop_end)) = self.transport.active_loop_region() {
             if pos < loop_end && pos + frames as u64 > loop_end {
@@ -439,6 +390,7 @@ impl AudioEngine {
                     pos,
                     first,
                     channels,
+                    self.transport.active_loop_region(),
                 );
                 // Kill anything sounding across the boundary, then
                 // continue sample-accurately from the loop start.
@@ -451,13 +403,68 @@ impl AudioEngine {
                         loop_start,
                         rest,
                         channels,
+                        self.transport.active_loop_region(),
                     );
                 }
                 self.split_wrap_handled = true;
                 return;
             }
         }
-        self.render_multitrack_segment(output, pos, frames, channels);
+        self.render_multitrack_segment(
+            output,
+            pos,
+            frames,
+            channels,
+            self.transport.active_loop_region(),
+        );
+    }
+
+    fn process_section_multitrack(
+        &mut self,
+        output: &mut [f32],
+        frames: usize,
+        channels: usize,
+        section: ActiveSectionPlayback,
+    ) {
+        for track in &mut self.tracks {
+            std::mem::swap(
+                &mut track.playback_source,
+                &mut track.section_playback_source,
+            );
+        }
+
+        let mut rendered_frames = 0usize;
+        let mut local_position = section.position_samples.min(section.length_samples);
+        while rendered_frames < frames && local_position < section.length_samples {
+            let available = (section.length_samples - local_position) as usize;
+            let segment_frames = available.min(frames - rendered_frames);
+            let start = rendered_frames * channels;
+            let end = (rendered_frames + segment_frames) * channels;
+            self.render_multitrack_segment(
+                &mut output[start..end],
+                local_position,
+                segment_frames,
+                channels,
+                None,
+            );
+            rendered_frames += segment_frames;
+            local_position += segment_frames as u64;
+            if rendered_frames < frames && section.looping {
+                for track in &mut self.tracks {
+                    track.flush_notes();
+                }
+                local_position = 0;
+            } else if local_position >= section.length_samples {
+                break;
+            }
+        }
+
+        for track in &mut self.tracks {
+            std::mem::swap(
+                &mut track.playback_source,
+                &mut track.section_playback_source,
+            );
+        }
     }
 
     fn render_multitrack_segment(
@@ -466,6 +473,7 @@ impl AudioEngine {
         pos: u64,
         frames: usize,
         channels: usize,
+        loop_region: Option<(u64, u64)>,
     ) {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
@@ -509,7 +517,6 @@ impl AudioEngine {
             };
             let (auto_gain, auto_pan) = track.apply_automation(beat);
 
-            let loop_region = self.transport.active_loop_region();
             let rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 track.render_instrument(pos, frames, channels, &tempo_map)
@@ -517,15 +524,20 @@ impl AudioEngine {
                 track.render(pos, frames, channels, loop_region)
             };
 
-            if rendered {
-                track.process_effects(frames, channels);
-                if self.spectrum_track == Some(track.id) {
-                    push_spectrum(
-                        &mut self.spectrum_tx,
-                        &track.mix_buffer[..frames * channels],
-                        channels,
-                    );
-                }
+            // Always run the shared device chain. A silent new Section stops
+            // source material while already-produced effect tails continue.
+            track.process_effects(frames, channels);
+            let rendered = rendered
+                || track.mix_buffer[..frames * channels]
+                    .iter()
+                    .any(|sample| *sample != 0.0);
+
+            if rendered && self.spectrum_track == Some(track.id) {
+                push_spectrum(
+                    &mut self.spectrum_tx,
+                    &track.mix_buffer[..frames * channels],
+                    channels,
+                );
             }
 
             if !rendered {
@@ -616,54 +628,6 @@ impl AudioEngine {
                 peak_l: track_peak_l,
                 peak_r: track_peak_r,
             });
-        }
-    }
-
-    fn process_audition(&mut self, output: &mut [f32], frames: usize, channels: usize) {
-        let mut had_voice = self.audition.active.is_some() || self.audition.has_outgoing();
-        let mut start_offset = 0;
-        let queued_ready = self.audition.queued.as_ref().is_some_and(|queued| {
-            if !self.transport.is_playing() {
-                return true;
-            }
-            let block_start = self.transport.position();
-            queued.target_position < block_start.saturating_add(frames as u64)
-        });
-        if queued_ready {
-            let queued = self.audition.queued.take().expect("queued audition exists");
-            if self.transport.is_playing() {
-                start_offset = queued
-                    .target_position
-                    .saturating_sub(self.transport.position())
-                    .min(frames as u64) as usize;
-            }
-            self.audition.start(
-                queued.audio,
-                audition_fade_frames(self.sample_rate),
-                queued.looped,
-            );
-            had_voice = true;
-            let _ = self.event_tx.push(EngineEvent::AuditionStarted);
-        }
-        let gain = self.audition.gain;
-        for slot in self.audition.outgoing.iter_mut() {
-            if slot.as_mut().is_some_and(|voice| {
-                render_audition_voice(voice, output, frames, channels, gain, 0)
-            }) {
-                *slot = None;
-            }
-        }
-        if self.audition.active.as_mut().is_some_and(|voice| {
-            render_audition_voice(voice, output, frames, channels, gain, start_offset)
-        }) {
-            self.audition.active = None;
-        }
-        if had_voice
-            && self.audition.active.is_none()
-            && !self.audition.has_outgoing()
-            && self.audition.queued.is_none()
-        {
-            let _ = self.event_tx.push(EngineEvent::AuditionStopped);
         }
     }
 
@@ -824,100 +788,16 @@ impl AudioEngine {
                 .map(|track| track.playback_source.as_ref()),
             samples_per_beat,
         );
-        if total > 0 {
-            self.transport.set_audio_length(Some(total));
-        } else if self.audio.is_none() {
-            // Only clear audio length if no legacy audio is loaded
-            self.transport.set_audio_length(None);
-        }
-    }
-}
-
-const AUDITION_FADE_MS: usize = 5;
-
-fn audition_fade_frames(sample_rate: u32) -> usize {
-    ((sample_rate as usize * AUDITION_FADE_MS) / 1_000).max(1)
-}
-
-fn next_audition_boundary(position: u64, bpm: f64, sample_rate: u32, beats: u64) -> u64 {
-    if bpm <= 0.0 || sample_rate == 0 {
-        return position;
-    }
-    let boundary_frames = sample_rate as f64 * 60.0 / bpm * beats.max(1) as f64;
-    let boundary_index = (position as f64 / boundary_frames).floor() + 1.0;
-    (boundary_index * boundary_frames).round() as u64
-}
-
-/// Mix one RAW audition voice. Returns true once its source or fade is done.
-fn render_audition_voice(
-    voice: &mut AuditionVoice,
-    output: &mut [f32],
-    frames: usize,
-    channels: usize,
-    bus_gain: f32,
-    output_frame_offset: usize,
-) -> bool {
-    let audio_channels = voice.audio.num_channels();
-    let audio_frames = voice.audio.num_frames();
-    if audio_channels == 0 || audio_frames == 0 || channels == 0 {
-        return true;
-    }
-
-    let render_frames = frames.saturating_sub(output_frame_offset);
-    for frame in 0..render_frames {
-        let mut source = voice.position as usize;
-        if source >= audio_frames {
-            if !voice.looped {
-                return true;
-            }
-            let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
-            source = crossfade_frames;
-            voice.position = source as u64;
-        }
-        let attack = if source < voice.fade_in_frames {
-            (source + 1) as f32 / voice.fade_in_frames as f32
+        self.arrangement_audio_length = if total > 0 {
+            Some(total)
         } else {
-            1.0
+            self.audio.as_ref().map(|audio| audio.num_frames() as u64)
         };
-        let remaining_source = audio_frames.saturating_sub(source + 1);
-        let natural_release = if voice.looped {
-            1.0
-        } else {
-            (remaining_source as f32 / voice.fade_in_frames as f32).clamp(0.0, 1.0)
-        };
-        let commanded_release = match voice.fade_out_remaining {
-            Some(remaining) => {
-                let envelope = remaining.saturating_sub(1) as f32 / voice.fade_in_frames as f32;
-                voice.fade_out_remaining = Some(remaining.saturating_sub(1));
-                envelope
-            }
-            None => 1.0,
-        };
-        let envelope = attack.min(natural_release) * commanded_release * bus_gain;
-        let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
-        let crossfade_offset = source.saturating_sub(audio_frames - crossfade_frames);
-        for ch in 0..channels {
-            let source_channel = ch.min(audio_channels - 1);
-            let sample = if voice.looped
-                && crossfade_frames > 0
-                && source >= audio_frames - crossfade_frames
-            {
-                let head_gain = crossfade_offset as f32 / crossfade_frames as f32;
-                let tail_gain = 1.0 - head_gain;
-                voice.audio.sample(source_channel, source) * tail_gain
-                    + voice.audio.sample(source_channel, crossfade_offset) * head_gain
-            } else {
-                voice.audio.sample(source_channel, source)
-            };
-            output[(output_frame_offset + frame) * channels + ch] += sample * envelope;
-        }
-        voice.position = voice.position.saturating_add(1);
-        if voice.fade_out_remaining == Some(0) {
-            return true;
+        if self.active_section.is_none() {
+            self.transport
+                .set_audio_length(self.arrangement_audio_length);
         }
     }
-
-    !voice.looped && voice.position as usize >= audio_frames
 }
 
 /// Stream a block to the UI spectrum analyser as mono samples.
@@ -950,3 +830,7 @@ mod stuck_note_tests;
 #[cfg(test)]
 #[path = "engine_mute_event_tests.rs"]
 mod mute_event_tests;
+
+#[cfg(test)]
+#[path = "engine_section_playback_tests.rs"]
+mod section_playback_tests;

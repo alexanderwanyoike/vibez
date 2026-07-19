@@ -1,4 +1,6 @@
-use vibez_core::id::TrackId;
+use vibez_core::id::{SectionId, TrackId};
+
+use crate::playback_source::PreparedSectionPlaybackSource;
 
 /// Events sent from the audio engine back to the UI thread (via rtrb).
 ///
@@ -41,7 +43,7 @@ impl<T: ?Sized> std::fmt::Debug for DisposalCell<T> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum EngineEvent {
     /// A device removed from the audio graph, handed back so the UI
     /// thread performs the teardown. Plugin destructors run dlclose
@@ -79,6 +81,20 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
+    /// A resident Section became active at this exact transport sample.
+    /// `retired` carries displaced sources to the UI thread for destruction.
+    SectionTransitioned {
+        section_id: SectionId,
+        effective_at_samples: u64,
+        retired: Box<PreparedSectionPlaybackSource>,
+    },
+
+    /// Current engine-owned local Section playhead.
+    SectionPlaybackPosition {
+        section_id: SectionId,
+        position_samples: u64,
+    },
+
     /// Playback has started (transport entered playing state).
     PlaybackStarted,
 
@@ -91,6 +107,99 @@ pub enum EngineEvent {
     AuditionQueued,
     /// Audition crossed its requested boundary and began rendering.
     AuditionStarted,
+}
+
+impl PartialEq for EngineEvent {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
+            (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
+            (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
+            (
+                Self::Metering {
+                    peak_l: left_peak_l,
+                    peak_r: left_peak_r,
+                    rms_l: left_rms_l,
+                    rms_r: left_rms_r,
+                },
+                Self::Metering {
+                    peak_l: right_peak_l,
+                    peak_r: right_peak_r,
+                    rms_l: right_rms_l,
+                    rms_r: right_rms_r,
+                },
+            ) => {
+                left_peak_l == right_peak_l
+                    && left_peak_r == right_peak_r
+                    && left_rms_l == right_rms_l
+                    && left_rms_r == right_rms_r
+            }
+            (
+                Self::TrackMeter {
+                    track_id: left_track,
+                    peak_l: left_peak_l,
+                    peak_r: left_peak_r,
+                },
+                Self::TrackMeter {
+                    track_id: right_track,
+                    peak_l: right_peak_l,
+                    peak_r: right_peak_r,
+                },
+            ) => {
+                left_track == right_track
+                    && left_peak_l == right_peak_l
+                    && left_peak_r == right_peak_r
+            }
+            (
+                Self::TrackMuteChanged {
+                    track_id: left_track,
+                    muted: left_muted,
+                    effective_at_samples: left_effective,
+                },
+                Self::TrackMuteChanged {
+                    track_id: right_track,
+                    muted: right_muted,
+                    effective_at_samples: right_effective,
+                },
+            ) => {
+                left_track == right_track
+                    && left_muted == right_muted
+                    && left_effective == right_effective
+            }
+            (
+                Self::SectionTransitioned {
+                    section_id: left_section,
+                    effective_at_samples: left_effective,
+                    retired: left_retired,
+                },
+                Self::SectionTransitioned {
+                    section_id: right_section,
+                    effective_at_samples: right_effective,
+                    retired: right_retired,
+                },
+            ) => {
+                left_section == right_section
+                    && left_effective == right_effective
+                    && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
+            }
+            (
+                Self::SectionPlaybackPosition {
+                    section_id: left_section,
+                    position_samples: left_position,
+                },
+                Self::SectionPlaybackPosition {
+                    section_id: right_section,
+                    position_samples: right_position,
+                },
+            ) => left_section == right_section && left_position == right_position,
+            (Self::PlaybackStarted, Self::PlaybackStarted)
+            | (Self::PlaybackStopped, Self::PlaybackStopped)
+            | (Self::AuditionStopped, Self::AuditionStopped)
+            | (Self::AuditionQueued, Self::AuditionQueued)
+            | (Self::AuditionStarted, Self::AuditionStarted) => true,
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -139,8 +248,14 @@ mod tests {
             .unwrap();
         producer.push(EngineEvent::PlaybackStopped).unwrap();
 
-        assert_eq!(consumer.pop().unwrap(), EngineEvent::PlaybackStarted);
-        assert_eq!(consumer.pop().unwrap(), EngineEvent::PlaybackPosition(512));
+        assert!(matches!(
+            consumer.pop().unwrap(),
+            EngineEvent::PlaybackStarted
+        ));
+        assert!(matches!(
+            consumer.pop().unwrap(),
+            EngineEvent::PlaybackPosition(512)
+        ));
 
         match consumer.pop().unwrap() {
             EngineEvent::Metering {
@@ -157,7 +272,10 @@ mod tests {
             other => panic!("expected Metering, got {other:?}"),
         }
 
-        assert_eq!(consumer.pop().unwrap(), EngineEvent::PlaybackStopped);
+        assert!(matches!(
+            consumer.pop().unwrap(),
+            EngineEvent::PlaybackStopped
+        ));
     }
 
     #[test]
@@ -188,16 +306,13 @@ mod tests {
     }
 
     #[test]
-    fn event_debug_and_clone() {
+    fn event_debug() {
         let event = EngineEvent::Metering {
             peak_l: 1.0,
             peak_r: 0.0,
             rms_l: 0.5,
             rms_r: 0.5,
         };
-        let cloned = event.clone();
-        assert_eq!(event, cloned);
-
         let debug = format!("{event:?}");
         assert!(debug.contains("Metering"));
     }
