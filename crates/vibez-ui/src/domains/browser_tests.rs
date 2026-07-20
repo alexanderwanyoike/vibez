@@ -894,7 +894,7 @@ fn selecting_any_visible_local_node_from_remote_activates_that_exact_local_sourc
 }
 
 #[test]
-fn local_folder_disclosure_from_remote_only_changes_expansion() {
+fn local_folder_disclosure_from_remote_activates_the_disclosed_folder() {
     let current_folder = PathBuf::from("/samples/selected");
     let disclosed_folder = PathBuf::from("/samples/drums");
     let mut browser = BrowserState {
@@ -912,8 +912,8 @@ fn local_folder_disclosure_from_remote_only_changes_expansion() {
             browser.expanded_local_folders
         ),
         (
-            SampleBrowserMode::Remote,
-            Some(current_folder),
+            SampleBrowserMode::Local,
+            Some(disclosed_folder.clone()),
             std::collections::HashSet::from([disclosed_folder])
         )
     );
