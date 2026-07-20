@@ -137,21 +137,7 @@ impl App {
                 "ORDER BOTTOM-LEFT".to_string(),
             ),
         };
-        let bank_navigation = row![
-            text(format!("BANK {bank}"))
-                .font(PERFORM_TECH_STRONG)
-                .size(9)
-                .color(th::blend(th::text_dim(), th::text(), 0.24)),
-            perform_bank_button("‹", "PREVIOUS BANK  [", PerformMsg::PreviousBank),
-            perform_bank_button("›", "NEXT BANK  ]", PerformMsg::NextBank),
-            text(format!("· {origin}"))
-                .font(PERFORM_TECH)
-                .size(9)
-                .color(th::blend(th::text_dim(), th::text(), 0.24)),
-        ]
-        .spacing(5)
-        .align_y(iced::Alignment::Center);
-        let target_selector = (mode == PerformMode::Instrument).then(|| {
+        let header: Element<'_, Message> = if mode == PerformMode::Instrument {
             let targets: Vec<_> = self
                 .state
                 .project_tracks
@@ -169,18 +155,91 @@ impl App {
                     .find(|target| target.track_id == selected)
                     .cloned()
             });
-            pick_list(targets, selected, |target| {
+            let selector = pick_list(targets, selected, |target| {
                 Message::Perform(PerformMsg::SelectInstrumentTarget(target.track_id))
             })
-            .placeholder("Select Instrument Target")
-            .width(Length::Fixed(170.0))
+            .placeholder("CHOOSE PLAYABLE MIDI TARGET")
+            .width(Length::Fill)
+            .padding([5, 8])
             .text_size(10)
-        });
-        let mut header = row![heading, horizontal_space()].align_y(iced::Alignment::End);
-        if let Some(selector) = target_selector {
-            header = header.push(selector);
-        }
-        let header = header.push(bank_navigation);
+            .style(|_theme: &Theme, status| {
+                let engaged = matches!(
+                    status,
+                    pick_list::Status::Hovered | pick_list::Status::Opened
+                );
+                pick_list::Style {
+                    text_color: th::text(),
+                    placeholder_color: th::text_dim(),
+                    handle_color: if engaged {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    },
+                    background: th::perform_pad_lowlight().into(),
+                    border: iced::Border {
+                        color: if engaged {
+                            th::accent_dim()
+                        } else {
+                            th::border_light()
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                }
+            })
+            .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+                background: th::bg_elevated().into(),
+                border: iced::Border {
+                    color: th::border_light(),
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: th::text(),
+                selected_text_color: th::accent(),
+                selected_background: th::bg_hover().into(),
+            });
+            let target_navigation = row![
+                text("INSTRUMENT TARGET")
+                    .font(PERFORM_LABEL)
+                    .size(8)
+                    .color(th::text_muted()),
+                horizontal_space(),
+                text(format!("TARGET BANK {bank}"))
+                    .font(PERFORM_TECH_STRONG)
+                    .size(8)
+                    .color(th::blend(th::text_dim(), th::text(), 0.24)),
+                perform_bank_button("‹", "PREVIOUS TARGET BANK  [", PerformMsg::PreviousBank),
+                perform_bank_button("›", "NEXT TARGET BANK  ]", PerformMsg::NextBank),
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+            let target_panel = column![target_navigation, selector]
+                .spacing(4)
+                .width(Length::Fill);
+
+            row![heading, target_panel]
+                .spacing(20)
+                .align_y(iced::Alignment::End)
+                .into()
+        } else {
+            let bank_navigation = row![
+                text(format!("BANK {bank}"))
+                    .font(PERFORM_TECH_STRONG)
+                    .size(9)
+                    .color(th::blend(th::text_dim(), th::text(), 0.24)),
+                perform_bank_button("‹", "PREVIOUS BANK  [", PerformMsg::PreviousBank),
+                perform_bank_button("›", "NEXT BANK  ]", PerformMsg::NextBank),
+                text(format!("· {origin}"))
+                    .font(PERFORM_TECH)
+                    .size(9)
+                    .color(th::blend(th::text_dim(), th::text(), 0.24)),
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+            row![heading, horizontal_space(), bank_navigation]
+                .align_y(iced::Alignment::End)
+                .into()
+        };
 
         let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
         let mut grid = column![]
