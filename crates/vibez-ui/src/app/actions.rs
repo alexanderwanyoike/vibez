@@ -118,6 +118,19 @@ impl App {
                 );
             }
         }
+        if let Some(request) = action.track_swing_request {
+            if let Some(track) =
+                Arc::make_mut(&mut self.state.project_tracks).find_mut(request.track_id)
+            {
+                track.swing_offset = request.swing_offset;
+                self.state.status_text = match request.swing_offset {
+                    Some(offset) => {
+                        format!("{} Swing offset {:+.0}%", track.name, offset.get() * 100.0)
+                    }
+                    None => format!("{} Swing follows Project", track.name),
+                };
+            }
+        }
         if let Some(track_id) = action.select_project_track {
             self.state.arrangement.selected_track = Some(track_id);
             self.state.perform.sync_instrument_target_from_selection(
@@ -649,6 +662,10 @@ impl App {
                             track.mute = muted;
                         }
                     }
+                    EngineEvent::NoteRepeated { .. } => {
+                        // Engine-owned timing evidence is consumed by later
+                        // Section Record/Capture cards, not mirrored as UI state.
+                    }
                     EngineEvent::SectionTransitioned {
                         section_id,
                         effective_at_samples,
@@ -791,6 +808,7 @@ mod perform_action_tests {
             sections: Arc::clone(&state.perform.sections),
             bpm: state.transport.bpm,
             bpm_text: state.transport.bpm_text.clone(),
+            project_swing: state.perform.project_swing(),
             loop_enabled: state.transport.loop_enabled,
             loop_start_beats: state.transport.loop_start_beats,
             loop_end_beats: state.transport.loop_end_beats,

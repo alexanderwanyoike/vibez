@@ -18,6 +18,8 @@ pub(super) struct ActiveInstrumentNote {
     pub(super) track_id: TrackId,
     pub(super) pitch: u8,
     pub(super) velocity: u8,
+    pub(super) repeat_id: u8,
+    pub(super) repeating: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +300,8 @@ impl PerformState {
             track_id,
             pitch: preview.pitch,
             velocity: preview.velocity,
+            repeat_id: position.index() as u8,
+            repeating: false,
         }
     }
 

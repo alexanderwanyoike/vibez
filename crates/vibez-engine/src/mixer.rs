@@ -7,12 +7,18 @@ use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 #[cfg(test)]
 use vibez_core::id::ClipId;
 use vibez_core::id::{EffectId, TrackId};
+use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::time::TempoMap;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
+use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::{ArrangementPlaybackSource, PreparedPlaybackSource};
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
+mod note_repeat;
+mod render_context;
+use render_context::InstrumentRenderBlock;
+pub(crate) use render_context::InstrumentRenderContext;
 
 #[inline]
 fn crossed_beat(previous: f64, current: f64, event: f64) -> bool {
@@ -39,6 +45,7 @@ pub struct EngineTrack {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    pub swing_offset: Option<SwingOffset>,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
@@ -51,8 +58,8 @@ pub struct EngineTrack {
     timed_note_ons: Vec<(u32, u8, u8)>,
     /// Scratch storage for batch rendering: (frame_offset, pitch)
     timed_note_offs: Vec<(u32, u8)>,
-    /// Bitmask of MIDI pitches currently sounding on the instrument,
-    /// maintained by the note schedulers. Lets the engine kill
+    note_repeats: TrackNoteRepeats,
+    /// Clip pitches sounding on the instrument. Lets the engine kill
     /// hanging notes when the playhead jumps discontinuously
     /// (arrangement-loop wrap, seek, stop): the schedulers only see
     /// adjacent sample positions, so a jump would otherwise strand
@@ -75,12 +82,14 @@ impl EngineTrack {
             pan: DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            swing_offset: None,
             mix_buffer: Vec::new(),
             effects: Vec::new(),
             sends: Vec::new(),
             instrument: None,
             timed_note_ons: Vec::new(),
             timed_note_offs: Vec::new(),
+            note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
         }
     }
@@ -144,23 +153,6 @@ impl EngineTrack {
         for s in self.mix_buffer[..buf_size].iter_mut() {
             *s = 0.0;
         }
-    }
-
-    /// Render the instrument with no clip events (transport stopped):
-    /// lets auditioned/held notes sound and plugin event queues drain.
-    /// Returns true when the buffer has signal.
-    pub fn render_instrument_idle(&mut self, frames: usize, channels: usize) -> bool {
-        if self.instrument.is_none() {
-            return false;
-        }
-        let buf_size = frames * channels;
-        self.ensure_buffer(buf_size);
-        for s in self.mix_buffer[..buf_size].iter_mut() {
-            *s = 0.0;
-        }
-        let instrument = self.instrument.as_mut().unwrap();
-        instrument.render(&mut self.mix_buffer[..buf_size], channels);
-        self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0)
     }
 
     /// Send note-offs for every sounding note. Call whenever the
@@ -230,13 +222,19 @@ impl EngineTrack {
         }
     }
 
-    pub fn render_instrument(
+    pub(crate) fn render_instrument(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        tempo_map: &TempoMap,
+        context: InstrumentRenderContext<'_>,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
+        let InstrumentRenderContext {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            tempo_map,
+            project_swing,
+        } = context;
         if self.instrument.is_none() {
             return false;
         }
@@ -253,11 +251,22 @@ impl EngineTrack {
         }
 
         let batch = self.instrument.as_ref().unwrap().supports_batch_render();
+        let swing = self.effective_swing(project_swing);
+        let block = InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm: tempo_map.bpm,
+            sample_rate: tempo_map.sample_rate,
+            swing,
+        };
 
         if batch {
-            self.render_instrument_batch(pos, frames, channels, spb)
+            self.render_instrument_batch(block, on_repeat)
         } else {
-            self.render_instrument_per_frame(pos, frames, channels, spb)
+            self.render_instrument_per_frame(block, on_repeat)
         }
     }
 
@@ -267,11 +276,19 @@ impl EngineTrack {
     /// larger blocks.
     fn render_instrument_batch(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        spb: f64,
+        block: InstrumentRenderBlock,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
+        let InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm,
+            sample_rate,
+            swing,
+        } = block;
         let buf_size = frames * channels;
         let beat_step = 1.0 / spb;
         let mut rendered = false;
@@ -279,6 +296,16 @@ impl EngineTrack {
         // Pre-scan: collect all events with frame offsets
         for frame in 0..frames {
             let sample_pos = pos + frame as u64;
+            let (triggers, count) =
+                self.note_repeats
+                    .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
+            for trigger in triggers.into_iter().take(count).flatten() {
+                let instrument = self.instrument.as_mut().unwrap();
+                instrument.note_off_at(trigger.pitch, frame as u32);
+                instrument.note_on_at(trigger.pitch, trigger.velocity, frame as u32);
+                on_repeat(trigger);
+                rendered = true;
+            }
             let current_beat = sample_pos as f64 / spb;
             let prev_beat = if sample_pos > 0 {
                 (sample_pos - 1) as f64 / spb
@@ -402,11 +429,19 @@ impl EngineTrack {
     /// which handle per-frame rendering efficiently.
     fn render_instrument_per_frame(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        spb: f64,
+        block: InstrumentRenderBlock,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
+        let InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm,
+            sample_rate,
+            swing,
+        } = block;
         let buf_size = frames * channels;
         let mut rendered = false;
         let mut note_ons: Vec<(u8, u8)> = Vec::new();
@@ -415,6 +450,9 @@ impl EngineTrack {
 
         for frame in 0..frames {
             let sample_pos = pos + frame as u64;
+            let (repeat_triggers, repeat_count) =
+                self.note_repeats
+                    .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
             let current_beat = sample_pos as f64 / spb;
             let prev_beat = if sample_pos > 0 {
                 (sample_pos - 1) as f64 / spb
@@ -503,6 +541,12 @@ impl EngineTrack {
             for (pitch, vel) in &note_ons {
                 instrument.note_on(*pitch, *vel);
                 self.active_notes |= 1u128 << *pitch;
+                rendered = true;
+            }
+            for trigger in repeat_triggers.into_iter().take(repeat_count).flatten() {
+                instrument.note_off(trigger.pitch);
+                instrument.note_on(trigger.pitch, trigger.velocity);
+                on_repeat(trigger);
                 rendered = true;
             }
 

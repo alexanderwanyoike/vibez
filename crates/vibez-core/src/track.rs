@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
+use crate::perform::SwingOffset;
 
 /// Credential-free identity retained after external media becomes project-owned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +146,10 @@ pub struct TrackInfo {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    /// Optional adjustment combined with the Project Swing amount for
+    /// generated events on this Project Track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swing_offset: Option<SwingOffset>,
     #[serde(default)]
     pub effects: Vec<EffectInfo>,
     #[serde(default)]
@@ -175,6 +180,7 @@ impl TrackInfo {
             pan: crate::constants::DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::default(),
             color_index: 0,

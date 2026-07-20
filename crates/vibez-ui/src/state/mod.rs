@@ -200,6 +200,7 @@ pub struct ProjectSnapshot {
     pub sections: Arc<crate::domains::perform::SectionStore>,
     pub bpm: f64,
     pub bpm_text: String,
+    pub project_swing: vibez_core::perform::SwingAmount,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,

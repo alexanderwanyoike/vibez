@@ -23,6 +23,7 @@ use vibez_instruments::create_instrument;
 
 use crate::mixer::{
     any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
+    InstrumentRenderContext,
 };
 
 /// What to render offline.
@@ -289,7 +290,17 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             }
 
             let produced = if track.instrument.is_some() {
-                track.render_instrument(pos, block, CHANNELS, &tempo)
+                track.render_instrument(
+                    InstrumentRenderContext {
+                        pos,
+                        repeat_pos: pos,
+                        frames: block,
+                        channels: CHANNELS,
+                        tempo_map: &tempo,
+                        project_swing: vibez_core::perform::SwingAmount::default(),
+                    },
+                    &mut |_| {},
+                )
             } else {
                 // Offline bounce never loops the arrangement — it
                 // walks the timeline linearly from `range.0` to
@@ -414,6 +425,7 @@ mod tests {
             pan: DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::Audio,
             color_index: 0,
@@ -733,6 +745,7 @@ mod tests {
             pan: DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::Instrument(InstrumentKind::SubtractiveSynth),
             color_index: 0,
@@ -786,6 +799,7 @@ mod tests {
             pan: DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::Midi,
             color_index: 0,

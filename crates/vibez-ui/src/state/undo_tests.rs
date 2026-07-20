@@ -20,6 +20,7 @@ fn snapshot(state: &AppState) -> ProjectSnapshot {
         sections: Arc::clone(&state.perform.sections),
         bpm: state.transport.bpm,
         bpm_text: state.transport.bpm_text.clone(),
+        project_swing: state.perform.project_swing(),
         loop_enabled: state.transport.loop_enabled,
         loop_start_beats: state.transport.loop_start_beats,
         loop_end_beats: state.transport.loop_end_beats,
@@ -34,6 +35,7 @@ fn apply_snapshot(state: &mut AppState, snapshot: ProjectSnapshot) {
     state.project_tracks = snapshot.project_tracks;
     state.arrangement.timeline = snapshot.arrange_timeline;
     state.perform.sections = snapshot.sections;
+    state.perform.set_project_swing(snapshot.project_swing);
     state.perform.selected_section = snapshot.selected_section;
 }
 

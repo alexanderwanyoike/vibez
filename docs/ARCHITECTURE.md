@@ -154,6 +154,22 @@ resolved Track and pitch, so changing a range, assignment, or Instrument Target
 cannot redirect its eventual note-off. These controls and their source memory
 are runtime performance state rather than project content.
 
+Instrument Note Repeat crosses the same input boundary without introducing a
+UI clock. Holding `N` or a future mapped control, or enabling the on-screen
+latch, starts fixed-capacity repeat voices in the audio engine after the source
+note has sounded. The engine schedules straight and triplet subdivisions on its
+sample clock, accepts rate changes without an immediate retrigger, and emits
+`NoteRepeated` events with authoritative sample timestamps. Pad release owns the
+matching stop and note-off even when the latch remains enabled.
+
+Project Swing and optional Project Track Swing offsets are canonical project
+data and undo state. Their clamped effective value delays only odd steps of
+generated straight-grid events toward a 2:1 feel; triplets ignore Swing.
+Existing clip notes keep their persisted absolute beat positions and never
+enter this transform. The engine retains Swing beside its generated-event
+scheduler so later Section Record quantization can share the contract without
+changing clip playback.
+
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project

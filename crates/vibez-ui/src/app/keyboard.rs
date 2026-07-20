@@ -122,6 +122,17 @@ fn runtime_key_id(key: &iced::keyboard::Key) -> String {
     format!("{key:?}")
 }
 
+fn is_note_repeat_key(physical: iced::keyboard::key::Physical) -> bool {
+    matches!(
+        physical,
+        iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::KeyN)
+    )
+}
+
+fn is_note_repeat_release(key: &iced::keyboard::Key) -> bool {
+    matches!(key, iced::keyboard::Key::Character(value) if value.eq_ignore_ascii_case("n"))
+}
+
 impl super::App {
     pub(super) fn handle_keyboard_input(
         &mut self,
@@ -142,6 +153,17 @@ impl super::App {
                     && matches!(key, iced::keyboard::Key::Named(Named::Escape))
                 {
                     (Some(PerformMsg::CancelKeyRebind), None)
+                } else if self.state.perform.key_rebind_target.is_some()
+                    && is_note_repeat_key(physical_key)
+                {
+                    self.state.status_text = "N is reserved for Note Repeat".into();
+                    return iced::Task::none();
+                } else if is_note_repeat_key(physical_key)
+                    && modifiers.is_empty()
+                    && self.state.view.workspace == crate::state::Workspace::Perform
+                    && self.state.perform.mode == PerformMode::Instrument
+                {
+                    (Some(PerformMsg::SetNoteRepeatMomentary(true)), None)
                 } else if let Some(computer_key) = computer_key_from_physical(physical_key) {
                     if modifiers.is_empty()
                         || (self.state.perform.instrument_target_overlay
@@ -170,13 +192,17 @@ impl super::App {
             iced::keyboard::Event::KeyReleased { key, .. } => {
                 let key_id = runtime_key_id(&key);
                 self.edge_shortcuts.release(&key_id, occurred_at);
-                (
-                    Some(PerformMsg::ComputerKeyReleased {
-                        key_id,
-                        occurred_at,
-                    }),
-                    None,
-                )
+                if is_note_repeat_release(&key) {
+                    (Some(PerformMsg::SetNoteRepeatMomentary(false)), None)
+                } else {
+                    (
+                        Some(PerformMsg::ComputerKeyReleased {
+                            key_id,
+                            occurred_at,
+                        }),
+                        None,
+                    )
+                }
             }
             iced::keyboard::Event::ModifiersChanged(modifiers) => (
                 Some(PerformMsg::SetInstrumentTargetOverlay(modifiers.shift())),
@@ -561,6 +587,17 @@ mod tests {
             Some(Message::Perform(PerformMsg::NextBank))
         ));
         assert!(global_key_handler(Key::Character("]".into()), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn physical_n_is_the_momentary_note_repeat_control() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::Key;
+
+        assert!(is_note_repeat_key(Physical::Code(Code::KeyN)));
+        assert!(!is_note_repeat_key(Physical::Code(Code::KeyM)));
+        assert!(is_note_repeat_release(&Key::Character("n".into())));
+        assert!(is_note_repeat_release(&Key::Character("N".into())));
     }
 
     #[test]

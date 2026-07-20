@@ -4,6 +4,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
 use vibez_core::id::{SectionId, TrackId};
+use vibez_core::perform::SwingAmount;
 
 use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
@@ -15,7 +16,9 @@ use crate::events::EngineEvent;
 use crate::metering;
 use crate::mixer::{
     any_solo, equal_power_pan, EffectSlot, EngineClip, EngineNoteClip, EngineTrack,
+    InstrumentRenderContext,
 };
+use crate::note_repeat::{NoteRepeatClock, NoteRepeatStart};
 use crate::playback_source::{calculate_total_length, PreparedSectionPlaybackSource};
 use crate::transport::Transport;
 
@@ -74,6 +77,12 @@ pub struct AudioEngine {
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
     arrangement_audio_length: Option<u64>,
+    /// Project Swing is engine state because generated-event consumers share
+    /// it while existing playback remains untouched.
+    project_swing: SwingAmount,
+    /// Continues Note Repeat timing while transport is stopped. While playing,
+    /// this is kept aligned with the absolute transport position.
+    performance_position: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +127,8 @@ impl AudioEngine {
             queued_section: None,
             section_advance_override: None,
             arrangement_audio_length: None,
+            project_swing: SwingAmount::default(),
+            performance_position: 0,
         };
 
         (engine, cmd_tx, event_rx)
@@ -277,6 +288,11 @@ impl AudioEngine {
         } else {
             self.transport.advance(frames as u64)
         };
+        self.performance_position = if was_playing {
+            new_pos
+        } else {
+            self.performance_position.saturating_add(frames as u64)
+        };
 
         let mut section_ended = false;
         if was_playing {
@@ -356,6 +372,16 @@ impl AudioEngine {
         &self.tracks
     }
 
+    fn reschedule_note_repeats(&mut self) {
+        let position = self.performance_position;
+        let bpm = self.transport.bpm();
+        let sample_rate = self.sample_rate;
+        let project_swing = self.project_swing;
+        for track in &mut self.tracks {
+            track.reschedule_note_repeats(position, bpm, sample_rate, project_swing);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
@@ -386,7 +412,7 @@ impl AudioEngine {
             // Stopped transport still renders instruments so
             // auditioned notes (piano-roll keys, drum pads) and
             // plugin-queued events are audible, like any DAW.
-            self.render_idle_instruments(output, frames, channels);
+            self.render_idle_instruments(output, frames, channels, self.performance_position);
             return;
         }
 
@@ -403,6 +429,7 @@ impl AudioEngine {
                 self.render_multitrack_segment(
                     &mut output[..first * channels],
                     pos,
+                    pos,
                     first,
                     channels,
                     self.transport.active_loop_region(),
@@ -416,6 +443,7 @@ impl AudioEngine {
                     self.render_multitrack_segment(
                         &mut output[first * channels..],
                         loop_start,
+                        loop_start,
                         rest,
                         channels,
                         self.transport.active_loop_region(),
@@ -428,6 +456,7 @@ impl AudioEngine {
         self.render_multitrack_segment(
             output,
             pos,
+            pos,
             frames,
             channels,
             self.transport.active_loop_region(),
@@ -438,6 +467,7 @@ impl AudioEngine {
         &mut self,
         output: &mut [f32],
         pos: u64,
+        repeat_pos: u64,
         frames: usize,
         channels: usize,
         loop_region: Option<(u64, u64)>,
@@ -486,7 +516,27 @@ impl AudioEngine {
 
             let rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
-                track.render_instrument(pos, frames, channels, &tempo_map)
+                let track_id = track.id;
+                let event_tx = &mut self.event_tx;
+                let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
+                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        effective_at_samples: trigger.effective_at_samples,
+                    });
+                };
+                track.render_instrument(
+                    InstrumentRenderContext {
+                        pos,
+                        repeat_pos,
+                        frames,
+                        channels,
+                        tempo_map: &tempo_map,
+                        project_swing: self.project_swing,
+                    },
+                    &mut on_repeat,
+                )
             } else {
                 track.render(pos, frames, channels, loop_region)
             };
@@ -628,7 +678,13 @@ impl AudioEngine {
     /// Recalculate transport audio length from all track clips.
     /// Render instruments with no clip scheduling (transport stopped)
     /// so auditioned notes sound. Effects and gain/pan still apply.
-    fn render_idle_instruments(&mut self, output: &mut [f32], frames: usize, channels: usize) {
+    fn render_idle_instruments(
+        &mut self,
+        output: &mut [f32],
+        frames: usize,
+        channels: usize,
+        repeat_pos: u64,
+    ) {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {
@@ -641,7 +697,25 @@ impl AudioEngine {
             // changes (knob edits, automation) actually reach the
             // plugin instead of waiting for play.
             let has_signal = if track.instrument.is_some() {
-                track.render_instrument_idle(frames, channels)
+                let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
+                let track_id = track.id;
+                let event_tx = &mut self.event_tx;
+                let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
+                    let _ = event_tx.push(EngineEvent::NoteRepeated {
+                        track_id,
+                        pitch: trigger.pitch,
+                        velocity: trigger.velocity,
+                        effective_at_samples: trigger.effective_at_samples,
+                    });
+                };
+                track.render_instrument_idle(
+                    repeat_pos,
+                    frames,
+                    channels,
+                    &tempo_map,
+                    self.project_swing,
+                    &mut on_repeat,
+                )
             } else {
                 false
             };
@@ -800,6 +874,10 @@ mod stuck_note_tests;
 #[cfg(test)]
 #[path = "engine_mute_event_tests.rs"]
 mod mute_event_tests;
+
+#[cfg(test)]
+#[path = "engine_note_repeat_tests.rs"]
+mod note_repeat_tests;
 
 #[cfg(test)]
 #[path = "engine_section_playback_tests.rs"]
