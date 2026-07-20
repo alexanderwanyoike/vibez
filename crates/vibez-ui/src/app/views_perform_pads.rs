@@ -1,12 +1,14 @@
 //! Pad Surface rendering for the Perform workspace.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
-    tooltip,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, slider, stack,
+    text, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
-use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
+use crate::domains::perform::{
+    PadPosition, PerformEditorFocus, PerformMode, PerformMsg, SixteenLevelsParameter,
+};
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
@@ -97,7 +99,234 @@ fn perform_bank_button(
         .into()
 }
 
+fn instrument_toggle(
+    label: &'static str,
+    active: bool,
+    enabled: bool,
+    message: PerformMsg,
+) -> Element<'static, Message> {
+    let content = center(text(label).font(PERFORM_LABEL).size(9).color(if enabled {
+        if active {
+            th::accent()
+        } else {
+            th::text_dim()
+        }
+    } else {
+        th::text_muted()
+    }))
+    .width(Length::Fill)
+    .height(Length::Fill);
+    let control = button(content)
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(27.0))
+        .padding(0)
+        .style(move |_theme: &Theme, status| {
+            let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: Some(
+                    if !enabled {
+                        th::bg_dark()
+                    } else if active {
+                        th::perform_active_surface()
+                    } else if engaged {
+                        th::bg_hover()
+                    } else {
+                        th::bg_surface()
+                    }
+                    .into(),
+                ),
+                text_color: if active && enabled {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                border: iced::Border {
+                    color: if active && enabled {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+    if enabled {
+        control.on_press(Message::Perform(message)).into()
+    } else {
+        control.into()
+    }
+}
+
 impl App {
+    fn view_instrument_controls(&self) -> Element<'_, Message> {
+        let full_level_enabled = self.state.perform.full_level_enabled();
+        let full_level_available = self.state.perform.full_level_available();
+        let levels_enabled = self.state.perform.sixteen_levels_enabled();
+        let parameter = self.state.perform.sixteen_levels_parameter();
+        let range = self.state.perform.sixteen_levels_range();
+        let bounds = self.state.perform.sixteen_levels_bounds();
+        let choosing_source = self.state.perform.choosing_sixteen_levels_source();
+        let source = self
+            .state
+            .perform
+            .sixteen_levels_source_pitch()
+            .map(crate::widgets::piano_roll::pitch_name);
+
+        let toggles = row![
+            instrument_toggle(
+                "FULL LEVEL",
+                full_level_enabled && full_level_available,
+                full_level_available,
+                PerformMsg::ToggleFullLevel,
+            ),
+            instrument_toggle(
+                "16 LEVELS",
+                levels_enabled,
+                true,
+                PerformMsg::ToggleSixteenLevels,
+            ),
+        ]
+        .spacing(5);
+
+        let assignment = pick_list(
+            SixteenLevelsParameter::ALL.to_vec(),
+            Some(parameter),
+            |parameter| Message::Perform(PerformMsg::SelectSixteenLevelsParameter(parameter)),
+        )
+        .width(Length::FillPortion(1))
+        .padding([4, 7])
+        .text_size(9)
+        .style(|_theme: &Theme, status| {
+            let engaged = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: th::text(),
+                placeholder_color: th::text_dim(),
+                handle_color: if engaged {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::perform_pad_lowlight().into(),
+                border: iced::Border {
+                    color: if engaged {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+            }
+        });
+        let source_label = if choosing_source {
+            "CHOOSE SOURCE · PRESS PAD".to_string()
+        } else if let Some(source) = source {
+            format!("SOURCE · {source}")
+        } else {
+            "SOURCE · PLAY A PAD".to_string()
+        };
+        let source_button = button(
+            center(text(source_label).font(PERFORM_TECH_STRONG).size(8).color(
+                if choosing_source {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
+        .width(Length::FillPortion(2))
+        .height(Length::Fixed(27.0))
+        .padding(0)
+        .style(move |_theme: &Theme, status| button::Style {
+            background: Some(
+                if choosing_source {
+                    th::perform_active_surface()
+                } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    th::bg_hover()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: th::text_dim(),
+            border: iced::Border {
+                color: if choosing_source {
+                    th::accent_dim()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+        let source_button: Element<'_, Message> = if levels_enabled {
+            source_button
+                .on_press(Message::Perform(PerformMsg::ChooseSixteenLevelsSource))
+                .into()
+        } else {
+            source_button.into()
+        };
+
+        let range_units = match parameter {
+            SixteenLevelsParameter::Pitch => "ST",
+            SixteenLevelsParameter::Velocity => "VEL",
+        };
+        let minimum = row![
+            text(format!("MIN {} {range_units}", range.minimum))
+                .font(PERFORM_TECH)
+                .size(8)
+                .color(th::text_dim()),
+            slider(bounds.minimum..=range.maximum, range.minimum, |value| {
+                Message::Perform(PerformMsg::SetSixteenLevelsMinimum(value))
+            })
+            .step(1_i16),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .width(Length::FillPortion(1));
+        let maximum = row![
+            text(format!("MAX {} {range_units}", range.maximum))
+                .font(PERFORM_TECH)
+                .size(8)
+                .color(th::text_dim()),
+            slider(range.minimum..=bounds.maximum, range.maximum, |value| {
+                Message::Perform(PerformMsg::SetSixteenLevelsMaximum(value))
+            })
+            .step(1_i16),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .width(Length::FillPortion(1));
+
+        container(
+            column![
+                toggles,
+                row![assignment, source_button].spacing(5),
+                row![minimum, maximum].spacing(10)
+            ]
+            .spacing(5),
+        )
+        .padding([6, 7])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_dark().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+    }
+
     pub(super) fn view_pad_surface(&self, surface_width: f32) -> Element<'_, Message> {
         let mode = self.state.perform.mode;
         let heading = column![
@@ -201,6 +430,16 @@ impl App {
             let target_overlay = self.state.perform.instrument_target_overlay;
             let range_or_bank = if target_overlay {
                 format!("TARGET BANK {bank}")
+            } else if self.state.perform.choosing_sixteen_levels_source() {
+                "16 LEVELS · CHOOSE SOURCE".to_string()
+            } else if self.state.perform.sixteen_levels_enabled() {
+                let range = self.state.perform.sixteen_levels_range();
+                format!(
+                    "16 LEVELS · {} {}–{}",
+                    self.state.perform.sixteen_levels_parameter(),
+                    range.minimum,
+                    range.maximum
+                )
             } else {
                 let low = crate::widgets::piano_roll::pitch_name(
                     self.state.perform.instrument_pitch(PadPosition::ALL[12]),
@@ -266,7 +505,13 @@ impl App {
                 .into()
         };
 
-        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
+        let pad_grid_height = (perform_pad_grid_height(self.state.view.window_height)
+            - if mode == PerformMode::Instrument {
+                82.0
+            } else {
+                0.0
+            })
+        .max(200.0);
         let mut grid = column![]
             .width(Length::Fill)
             .height(Length::Fixed(pad_grid_height))
@@ -289,7 +534,12 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fixed(pad_grid_height));
 
-        let surface = container(column![header, grid].spacing(12))
+        let content = if mode == PerformMode::Instrument {
+            column![header, self.view_instrument_controls(), grid].spacing(8)
+        } else {
+            column![header, grid].spacing(12)
+        };
+        let surface = container(content)
             .width(Length::Fixed(surface_width))
             .height(Length::Fill)
             .padding(14)
@@ -436,12 +686,25 @@ impl App {
                 }
             }
             PerformMode::Instrument => {
-                let pitch = self.state.perform.instrument_pitch(position);
+                let preview = self.state.perform.instrument_pad_preview(position);
+                let choosing_source = self.state.perform.choosing_sixteen_levels_source();
+                let levels_enabled = self.state.perform.sixteen_levels_enabled();
+                let parameter = self.state.perform.sixteen_levels_parameter();
+                let target = selected_instrument
+                    .map(|track| track.name.clone())
+                    .unwrap_or_else(|| "NO INSTRUMENT TARGET".to_string());
+                let detail = if choosing_source {
+                    format!("CHOOSE SOURCE · {target}")
+                } else if levels_enabled && parameter == SixteenLevelsParameter::Velocity {
+                    format!("VELOCITY {} · {target}", preview.velocity)
+                } else if levels_enabled {
+                    format!("PITCH LEVEL · {target}")
+                } else {
+                    target
+                };
                 (
-                    crate::widgets::piano_roll::pitch_name(pitch),
-                    selected_instrument
-                        .map(|track| track.name.clone())
-                        .unwrap_or_else(|| "NO INSTRUMENT TARGET".to_string()),
+                    crate::widgets::piano_roll::pitch_name(preview.pitch),
+                    detail,
                     selected_instrument
                         .map(|track| th::track_color(track.color_index))
                         .unwrap_or_else(|| th::track_color((ordinal - 1) as u8)),

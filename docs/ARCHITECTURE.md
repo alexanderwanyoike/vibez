@@ -144,6 +144,16 @@ Widget-captured presses are not forwarded, so text fields suppress pad input.
 The mapping and fixed computer-key velocity (default 100) persist in the user's
 `ui.json` settings and are absent from the project document and undo snapshots.
 
+Instrument Pad Gestures resolve through one live note-transform boundary before
+they become paired engine note commands. Full Level supplies the effective
+velocity there for every input adapter. A 16 Levels Assignment combines one
+remembered source pitch, one generic sixteen-step range, and a data descriptor
+whose apply function owns either pitch or velocity; adding a future parameter
+does not add branches to Pad Surface semantics. The held-note record retains the
+resolved Track and pitch, so changing a range, assignment, or Instrument Target
+cannot redirect its eventual note-off. These controls and their source memory
+are runtime performance state rather than project content.
+
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project
