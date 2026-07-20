@@ -130,11 +130,17 @@ computer-key adapter maps physical key codes through the global
 `PerformInputMapping`, suppresses auto-repeat, pairs releases with the original
 press, and emits a timestamped `PadGesture` containing Pad Position, state,
 optional velocity, and source identity. The domain consumes the gesture
-synchronously to mirror pressed state in the Pad Surface; later musical slices
-consume the same gesture action without deriving input from rendered state or
-the 60 fps engine-event pump. Widget-captured presses are not forwarded, so
-text fields suppress pad input. The mapping persists in the user's `ui.json`
-settings and is absent from the project document and undo snapshots.
+synchronously to mirror pressed state in the Pad Surface. Instrument mode also
+resolves the project-wide selected Track through the playable MIDI Project
+Track filter and sends paired live note commands through `EngineHandle`,
+without deriving input from rendered state or the 60 fps engine-event pump.
+Each held key remembers its original Track and pitch so target changes, mode
+changes, and Section transitions cannot redirect its note-off. The Shift target
+overlay and on-screen selector update the same selection used by the Section
+overview, while per-mode target banks remain runtime interaction state.
+Widget-captured presses are not forwarded, so text fields suppress pad input.
+The mapping and fixed computer-key velocity (default 100) persist in the user's
+`ui.json` settings and are absent from the project document and undo snapshots.
 
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and

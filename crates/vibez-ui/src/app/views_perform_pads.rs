@@ -1,7 +1,8 @@
 //! Pad Surface rendering for the Perform workspace.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, stack, text, tooltip,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
+    tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
@@ -10,9 +11,22 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use vibez_core::id::TrackId;
 
 use super::views_perform::{perform_pad_grid_height, perform_tool_button};
 use super::*;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstrumentTargetOption {
+    track_id: TrackId,
+    label: String,
+}
+
+impl std::fmt::Display for InstrumentTargetOption {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
+}
 
 fn perform_bank_button(
     label: &'static str,
@@ -137,8 +151,36 @@ impl App {
         ]
         .spacing(5)
         .align_y(iced::Alignment::Center);
-        let header =
-            row![heading, horizontal_space(), bank_navigation,].align_y(iced::Alignment::End);
+        let target_selector = (mode == PerformMode::Instrument).then(|| {
+            let targets: Vec<_> = self
+                .state
+                .project_tracks
+                .tracks
+                .iter()
+                .filter(|track| track.is_playable_midi_target())
+                .map(|track| InstrumentTargetOption {
+                    track_id: track.id,
+                    label: track.name.clone(),
+                })
+                .collect();
+            let selected = self.state.arrangement.selected_track.and_then(|selected| {
+                targets
+                    .iter()
+                    .find(|target| target.track_id == selected)
+                    .cloned()
+            });
+            pick_list(targets, selected, |target| {
+                Message::Perform(PerformMsg::SelectInstrumentTarget(target.track_id))
+            })
+            .placeholder("Select Instrument Target")
+            .width(Length::Fixed(170.0))
+            .text_size(10)
+        });
+        let mut header = row![heading, horizontal_space()].align_y(iced::Alignment::End);
+        if let Some(selector) = target_selector {
+            header = header.push(selector);
+        }
+        let header = header.push(bank_navigation);
 
         let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
         let mut grid = column![]
@@ -213,6 +255,24 @@ impl App {
                     .track_for_mute_pad(position, &self.state.project_tracks.tracks)
             })
             .flatten();
+        let instrument_target = (mode == PerformMode::Instrument
+            && self.state.perform.instrument_target_overlay)
+            .then(|| {
+                self.state
+                    .perform
+                    .track_for_instrument_target_pad(position, &self.state.project_tracks.tracks)
+            })
+            .flatten();
+        let selected_instrument = self.state.arrangement.selected_track.and_then(|track_id| {
+            self.state
+                .project_tracks
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id && track.is_playable_midi_target())
+        });
+        let selected = selected
+            || instrument_target
+                .is_some_and(|track| self.state.arrangement.selected_track == Some(track.id));
         let (title, detail, color, muted) = match mode {
             PerformMode::Sections => match section {
                 Some(section) => (
@@ -269,12 +329,36 @@ impl App {
                     )
                 }
             }
-            PerformMode::Instrument => (
-                "SELECT MIDI".to_string(),
-                "NO INSTRUMENT TARGET".to_string(),
-                th::track_color((ordinal - 1) as u8),
-                false,
-            ),
+            PerformMode::Instrument if self.state.perform.instrument_target_overlay => {
+                if let Some(track) = instrument_target {
+                    (
+                        track.name.clone(),
+                        "SELECT INSTRUMENT TARGET".to_string(),
+                        th::track_color(track.color_index),
+                        false,
+                    )
+                } else {
+                    (
+                        "—".to_string(),
+                        "NO PLAYABLE MIDI TARGET".to_string(),
+                        th::text_muted(),
+                        false,
+                    )
+                }
+            }
+            PerformMode::Instrument => {
+                let pitch = 35 + position.ordinal(PerformMode::Instrument);
+                (
+                    crate::widgets::piano_roll::pitch_name(pitch),
+                    selected_instrument
+                        .map(|track| track.name.clone())
+                        .unwrap_or_else(|| "NO INSTRUMENT TARGET".to_string()),
+                    selected_instrument
+                        .map(|track| th::track_color(track.color_index))
+                        .unwrap_or_else(|| th::track_color((ordinal - 1) as u8)),
+                    false,
+                )
+            }
         };
         let number_color = th::blend(color, th::text(), 0.3);
         let coordinate_color = th::blend(th::text_dim(), th::text(), 0.2);
@@ -417,6 +501,14 @@ impl App {
                     position,
                 )))
                 .into(),
+            (PerformMode::Instrument, _) if instrument_target.is_some() => {
+                let track_id = instrument_target.expect("checked target").id;
+                mouse_area(pad)
+                    .on_press(Message::Perform(PerformMsg::SelectInstrumentTarget(
+                        track_id,
+                    )))
+                    .into()
+            }
             _ => pad,
         }
     }

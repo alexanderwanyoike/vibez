@@ -1,6 +1,6 @@
 //! Global Perform input preferences.
 
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{button, column, container, row, slider, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{PadPosition, PerformMsg};
@@ -17,6 +17,24 @@ impl App {
         )
         .size(11)
         .color(th::text_dim());
+        let velocity = self.state.perform.fixed_computer_velocity();
+        let velocity_control = column![
+            row![
+                text("Fixed computer-key velocity")
+                    .size(12)
+                    .color(th::text()),
+                iced::widget::horizontal_space(),
+                text(format!("{velocity}")).size(12).color(th::accent())
+            ],
+            slider(1..=127, velocity, |value| {
+                Message::Perform(PerformMsg::SetFixedComputerVelocity(value))
+            })
+            .step(1_u8),
+            text("Applies immediately to Instrument pads and is remembered globally.")
+                .size(10)
+                .color(th::text_dim())
+        ]
+        .spacing(5);
 
         let mut grid = column![].spacing(6);
         for row_index in 0..4 {
@@ -128,6 +146,7 @@ impl App {
         column![
             title,
             hint,
+            velocity_control,
             container(grid).width(Length::Fill).padding([6, 0]),
             text(status).size(10).color(th::text_dim()),
             container(column![])

@@ -96,7 +96,7 @@ impl App {
         let mut tasks = Vec::new();
         if action.persist_settings {
             self.persist_ui_settings();
-            self.state.status_text = "Perform key mapping saved".into();
+            self.state.status_text = "Perform settings saved".into();
         }
         if let Some(request) = action.track_mute_request {
             let pre_edit_snapshot = self.take_snapshot();
@@ -116,6 +116,19 @@ impl App {
                     "{} {track_name}",
                     if request.muted { "Muted" } else { "Unmuted" }
                 );
+            }
+        }
+        if let Some(track_id) = action.select_project_track {
+            self.state.arrangement.selected_track = Some(track_id);
+            if self.state.perform.selected_section.is_some() {
+                self.state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .selected_track = Some(track_id);
+            }
+            if let Some(track) = self.state.find_track(track_id) {
+                self.state.status_text = format!("Instrument Target: {}", track.name);
             }
         }
         if let Some(section_id) = action.section_launch {
@@ -533,7 +546,7 @@ impl App {
         let has_instrument = self
             .state
             .find_track(track_id)
-            .map(|t| t.instrument_kind.is_some())
+            .map(|track| track.is_playable_midi_target())
             .unwrap_or(false);
         if !has_instrument {
             return;

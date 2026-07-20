@@ -235,6 +235,10 @@ pub struct ProjectTrack {
 pub type UiTrack = ProjectTrack;
 
 impl ProjectTrack {
+    pub fn is_playable_midi_target(&self) -> bool {
+        self.kind.is_midi() && self.has_instrument
+    }
+
     pub fn new(id: TrackId, name: String, color_index: u8) -> Self {
         Self {
             id,

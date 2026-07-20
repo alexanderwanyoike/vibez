@@ -266,6 +266,9 @@ impl App {
             ..Default::default()
         };
         state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
+        state
+            .perform
+            .set_fixed_computer_velocity(ui_settings.fixed_computer_velocity);
 
         // Themes: scan the user's .vzt collection, then restore the
         // saved selection (built-in name or user theme name).

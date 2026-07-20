@@ -219,6 +219,7 @@ impl App {
     pub(super) fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
             perform_input_mapping: self.state.perform.input_mapping.clone(),
+            fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,

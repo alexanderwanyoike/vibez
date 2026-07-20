@@ -58,7 +58,9 @@ pub(crate) fn keyboard_input_message(
         // A release must clear a press that began before focus moved into a
         // text field. Unpaired releases are harmless in the adapter.
         iced::keyboard::Event::KeyReleased { .. } => true,
-        iced::keyboard::Event::ModifiersChanged(_) => false,
+        iced::keyboard::Event::ModifiersChanged(modifiers) => {
+            status == iced::event::Status::Ignored || !modifiers.shift()
+        }
     };
     should_forward.then(|| Message::KeyboardInput {
         event,
@@ -141,7 +143,12 @@ impl super::App {
                 {
                     (Some(PerformMsg::CancelKeyRebind), None)
                 } else if let Some(computer_key) = computer_key_from_physical(physical_key) {
-                    if modifiers.is_empty() || self.state.perform.key_rebind_target.is_some() {
+                    if modifiers.is_empty()
+                        || (self.state.perform.instrument_target_overlay
+                            && self.state.perform.mode == PerformMode::Instrument
+                            && modifiers == iced::keyboard::Modifiers::SHIFT)
+                        || self.state.perform.key_rebind_target.is_some()
+                    {
                         (
                             Some(PerformMsg::ComputerKeyPressed {
                                 key: computer_key,
@@ -171,7 +178,10 @@ impl super::App {
                     None,
                 )
             }
-            iced::keyboard::Event::ModifiersChanged(_) => return iced::Task::none(),
+            iced::keyboard::Event::ModifiersChanged(modifiers) => (
+                Some(PerformMsg::SetInstrumentTargetOverlay(modifiers.shift())),
+                None,
+            ),
         };
 
         if let Some(msg) = perform_msg {
@@ -572,6 +582,27 @@ mod tests {
             keyboard_input_message(event, iced::event::Status::Ignored),
             Some(Message::KeyboardInput { .. })
         ));
+    }
+
+    #[test]
+    fn uncaptured_shift_changes_reach_the_instrument_target_overlay() {
+        use iced::keyboard::{Event, Modifiers};
+
+        assert!(matches!(
+            keyboard_input_message(
+                Event::ModifiersChanged(Modifiers::SHIFT),
+                iced::event::Status::Ignored,
+            ),
+            Some(Message::KeyboardInput {
+                event: Event::ModifiersChanged(modifiers),
+                ..
+            }) if modifiers.shift()
+        ));
+        assert!(keyboard_input_message(
+            Event::ModifiersChanged(Modifiers::SHIFT),
+            iced::event::Status::Captured,
+        )
+        .is_none());
     }
 
     #[test]
