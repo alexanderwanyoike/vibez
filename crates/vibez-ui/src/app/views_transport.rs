@@ -6,6 +6,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Theme};
 
+use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
@@ -144,6 +145,71 @@ impl App {
 
         let bpm_label = text("BPM").size(12).color(th::text_dim());
 
+        let project_swing = self.state.perform.project_swing();
+        let swing_nudge = |label: &'static str, delta: f32| {
+            button(text(label).size(11).color(th::text_dim()))
+                .on_press(Message::Perform(PerformMsg::SetProjectSwing(
+                    project_swing.get() + delta,
+                )))
+                .width(Length::Fixed(20.0))
+                .height(Length::Fixed(22.0))
+                .padding(0)
+                .style(|_theme: &Theme, status| {
+                    let engaged =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: Some(
+                            if engaged {
+                                th::bg_hover()
+                            } else {
+                                th::bg_surface()
+                            }
+                            .into(),
+                        ),
+                        text_color: if engaged {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        },
+                        border: iced::Border {
+                            color: if engaged {
+                                th::accent_dim()
+                            } else {
+                                th::border()
+                            },
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                })
+        };
+        let swing_control = container(
+            row![
+                column![
+                    text("SWING").size(8).color(th::text_muted()),
+                    text(format!("{:.0}%", project_swing.get() * 100.0))
+                        .size(11)
+                        .color(th::text()),
+                ]
+                .spacing(1),
+                swing_nudge("−", -0.01),
+                swing_nudge("+", 0.01),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([3, 6])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
         let grid_picker = pick_list(
             crate::state::SnapGrid::all(),
             Some(
@@ -264,6 +330,7 @@ impl App {
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             bpm_label,
+            swing_control,
             grid_controls,
         ]
         .spacing(12)

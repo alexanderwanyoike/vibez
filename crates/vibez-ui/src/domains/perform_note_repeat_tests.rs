@@ -28,8 +28,16 @@ fn momentary_repeat_starts_with_resolved_note_and_pad_release_stops_it() {
     };
     let at = Instant::now();
 
-    let action = state.update(PerformMsg::SetNoteRepeatMomentary(true), &mut engine, ctx);
+    let action = state.update(
+        PerformMsg::SetNoteRepeatMomentary {
+            active: true,
+            key_id: Some("physical-n".into()),
+        },
+        &mut engine,
+        ctx,
+    );
     assert!(action.keyboard_consumed);
+    assert_eq!(state.note_repeat_momentary_key_id(), Some("physical-n"));
     state.update(
         PerformMsg::ComputerKeyPressed {
             key: ComputerKey::Z,
@@ -131,6 +139,70 @@ fn onscreen_latch_can_start_held_pad_and_unlatch_without_retriggering() {
         ]
     ));
     assert!(!state.note_repeat_latched());
+}
+
+#[test]
+fn repeated_sixteen_level_velocity_uses_the_resolved_pad_velocity() {
+    let tracks = vec![playable_track()];
+    let mut state = instrument_state();
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(tracks[0].id),
+    };
+    let at = Instant::now();
+
+    state.update(PerformMsg::ToggleSixteenLevels, &mut engine, ctx);
+    state.update(
+        PerformMsg::SelectSixteenLevelsParameter(SixteenLevelsParameter::Velocity),
+        &mut engine,
+        ctx,
+    );
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        ctx,
+    );
+    state.update(
+        PerformMsg::ComputerKeyReleased {
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        ctx,
+    );
+    engine.0.clear();
+
+    state.update(
+        PerformMsg::SetNoteRepeatMomentary {
+            active: true,
+            key_id: Some("physical-n".into()),
+        },
+        &mut engine,
+        ctx,
+    );
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::X,
+            key_id: "x".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert!(matches!(
+        engine.0.as_slice(),
+        [
+            vibez_engine::commands::EngineCommand::ExternalNoteOn { velocity: 16, .. },
+            vibez_engine::commands::EngineCommand::StartNoteRepeat { velocity: 16, .. },
+        ]
+    ));
 }
 
 #[test]

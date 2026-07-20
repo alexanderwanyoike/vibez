@@ -16,8 +16,8 @@ impl PerformState {
         engine: &mut impl EngineHandle,
         ctx: PerformCtx<'_>,
     ) -> PerformAction {
-        let Some(track_id) = ctx
-            .selected_project_track
+        let Some(track_id) = self
+            .instrument_target()
             .filter(|track_id| ctx.project_tracks.iter().any(|track| track.id == *track_id))
         else {
             return PerformAction::default();
@@ -62,10 +62,12 @@ impl PerformState {
     pub(super) fn update_note_repeat_momentary(
         &mut self,
         active: bool,
+        key_id: Option<String>,
         engine: &mut impl EngineHandle,
     ) -> PerformAction {
         let was_active = self.note_repeat_active();
         self.note_repeat_momentary = active;
+        self.note_repeat_momentary_key_id = active.then_some(key_id).flatten();
         self.sync_note_repeat_activation(was_active, engine);
         PerformAction {
             keyboard_consumed: true,
@@ -114,6 +116,10 @@ impl PerformState {
 
     pub const fn note_repeat_active(&self) -> bool {
         self.note_repeat_momentary || self.note_repeat_latched
+    }
+
+    pub fn note_repeat_momentary_key_id(&self) -> Option<&str> {
+        self.note_repeat_momentary_key_id.as_deref()
     }
 
     pub fn set_project_swing(&mut self, swing: SwingAmount) {

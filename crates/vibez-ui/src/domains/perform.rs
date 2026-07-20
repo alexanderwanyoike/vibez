@@ -169,6 +169,7 @@ pub struct PerformState {
     project_swing: SwingAmount,
     note_repeat_rate: NoteRepeatRate,
     note_repeat_momentary: bool,
+    note_repeat_momentary_key_id: Option<String>,
     note_repeat_latched: bool,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
@@ -227,7 +228,10 @@ pub enum PerformMsg {
     SetProjectSwing(f32),
     SetTrackSwingOffset(Option<f32>),
     SetNoteRepeatRate(NoteRepeatRate),
-    SetNoteRepeatMomentary(bool),
+    SetNoteRepeatMomentary {
+        active: bool,
+        key_id: Option<String>,
+    },
     ToggleNoteRepeatLatch,
     ComputerKeyPressed {
         key: ComputerKey,
@@ -691,8 +695,8 @@ impl PerformState {
             PerformMsg::SetNoteRepeatRate(rate) => {
                 self.update_note_repeat_rate(rate, engine);
             }
-            PerformMsg::SetNoteRepeatMomentary(active) => {
-                return self.update_note_repeat_momentary(active, engine);
+            PerformMsg::SetNoteRepeatMomentary { active, key_id } => {
+                return self.update_note_repeat_momentary(active, key_id, engine);
             }
             PerformMsg::ToggleNoteRepeatLatch => {
                 self.toggle_note_repeat_latch(engine);
@@ -734,25 +738,24 @@ impl PerformState {
                 if let Some(track_id) = selected_instrument_target {
                     self.sync_instrument_target(Some(track_id));
                 }
-                let instrument_note = if self.mode == PerformMode::Instrument
-                    && !self.instrument_target_overlay
-                {
-                    let velocity = self.fixed_computer_velocity();
-                    self.instrument_target()
-                        .filter(|track_id| {
-                            ctx.project_tracks.iter().any(|track| {
-                                track.id == *track_id && track.is_playable_midi_target()
+                let instrument_note =
+                    if self.mode == PerformMode::Instrument && !self.instrument_target_overlay {
+                        let velocity = self.fixed_computer_velocity();
+                        self.instrument_target()
+                            .filter(|track_id| {
+                                ctx.project_tracks.iter().any(|track| {
+                                    track.id == *track_id && track.is_playable_midi_target()
+                                })
                             })
-                        })
-                        .map(|track_id| {
-                            let mut note =
-                                self.resolve_instrument_note(position, velocity, track_id);
-                            note.repeating = self.note_repeat_active();
-                            note
-                        })
-                } else {
-                    None
-                };
+                            .map(|track_id| {
+                                let mut note =
+                                    self.resolve_instrument_note(position, velocity, track_id);
+                                note.repeating = self.note_repeat_active();
+                                note
+                            })
+                    } else {
+                        None
+                    };
                 if let Some(note) = instrument_note {
                     engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
                         track_id: note.track_id,
@@ -828,6 +831,7 @@ impl PerformState {
             PerformMsg::WindowUnfocused => {
                 self.instrument_target_overlay = false;
                 self.note_repeat_momentary = false;
+                self.note_repeat_momentary_key_id = None;
                 for (_, (_, _, instrument_note)) in self.active_computer_keys.drain() {
                     if let Some(note) = instrument_note {
                         if note.repeating {

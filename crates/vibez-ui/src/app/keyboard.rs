@@ -129,8 +129,13 @@ fn is_note_repeat_key(physical: iced::keyboard::key::Physical) -> bool {
     )
 }
 
-fn is_note_repeat_release(key: &iced::keyboard::Key) -> bool {
-    matches!(key, iced::keyboard::Key::Character(value) if value.eq_ignore_ascii_case("n"))
+fn is_note_repeat_release(
+    key: &iced::keyboard::Key,
+    key_id: &str,
+    momentary_key_id: Option<&str>,
+) -> bool {
+    momentary_key_id == Some(key_id)
+        || matches!(key, iced::keyboard::Key::Character(value) if value.eq_ignore_ascii_case("n"))
 }
 
 impl super::App {
@@ -163,7 +168,13 @@ impl super::App {
                     && self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.mode == PerformMode::Instrument
                 {
-                    (Some(PerformMsg::SetNoteRepeatMomentary(true)), None)
+                    (
+                        Some(PerformMsg::SetNoteRepeatMomentary {
+                            active: true,
+                            key_id: Some(edge_key_id),
+                        }),
+                        None,
+                    )
                 } else if let Some(computer_key) = computer_key_from_physical(physical_key) {
                     if modifiers.is_empty()
                         || (self.state.perform.instrument_target_overlay
@@ -192,8 +203,18 @@ impl super::App {
             iced::keyboard::Event::KeyReleased { key, .. } => {
                 let key_id = runtime_key_id(&key);
                 self.edge_shortcuts.release(&key_id, occurred_at);
-                if is_note_repeat_release(&key) {
-                    (Some(PerformMsg::SetNoteRepeatMomentary(false)), None)
+                if is_note_repeat_release(
+                    &key,
+                    &key_id,
+                    self.state.perform.note_repeat_momentary_key_id(),
+                ) {
+                    (
+                        Some(PerformMsg::SetNoteRepeatMomentary {
+                            active: false,
+                            key_id: None,
+                        }),
+                        None,
+                    )
                 } else {
                     (
                         Some(PerformMsg::ComputerKeyReleased {
@@ -596,8 +617,25 @@ mod tests {
 
         assert!(is_note_repeat_key(Physical::Code(Code::KeyN)));
         assert!(!is_note_repeat_key(Physical::Code(Code::KeyM)));
-        assert!(is_note_repeat_release(&Key::Character("n".into())));
-        assert!(is_note_repeat_release(&Key::Character("N".into())));
+        let n = Key::Character("n".into());
+        let n_id = runtime_key_id(&n);
+        assert!(is_note_repeat_release(&n, &n_id, None));
+        let upper_n = Key::Character("N".into());
+        let upper_n_id = runtime_key_id(&upper_n);
+        assert!(is_note_repeat_release(&upper_n, &upper_n_id, None));
+
+        let non_qwerty_logical_key = Key::Character("j".into());
+        let non_qwerty_id = runtime_key_id(&non_qwerty_logical_key);
+        assert!(is_note_repeat_release(
+            &non_qwerty_logical_key,
+            &non_qwerty_id,
+            Some(&non_qwerty_id),
+        ));
+        assert!(!is_note_repeat_release(
+            &non_qwerty_logical_key,
+            &non_qwerty_id,
+            None,
+        ));
     }
 
     #[test]
