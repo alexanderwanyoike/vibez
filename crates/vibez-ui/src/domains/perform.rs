@@ -265,6 +265,25 @@ pub struct PadGesture {
     pub occurred_at: Instant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveInstrumentNote {
+    track_id: TrackId,
+    pitch: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ComputerKeyVelocity(u8);
+
+const INSTRUMENT_BASE_PITCH: u8 = 35;
+const MIN_INSTRUMENT_OCTAVE: i8 = -3;
+const MAX_INSTRUMENT_OCTAVE: i8 = 6;
+
+impl Default for ComputerKeyVelocity {
+    fn default() -> Self {
+        Self(100)
+    }
+}
+
 /// Which part of Perform owns keyboard/editor focus. This remains runtime UI
 /// state and is deliberately not persisted in the project document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -274,8 +293,9 @@ pub enum PerformEditorFocus {
     SectionConstruction,
 }
 
-/// Per-mode bank cursors are UI interaction state. Bracket navigation updates
-/// only the active mode's cursor and never touches engine playback.
+/// Per-mode bank cursors are UI interaction state. Instrument target banks are
+/// paged only while its target overlay is visible; normal Instrument bracket
+/// navigation changes the separate octave range instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PerformBanks {
     pub sections: u8,
@@ -294,8 +314,8 @@ impl PerformBanks {
 }
 
 /// Perform state combines project-owned Sections with runtime interaction.
-/// Input mapping, mode, banks, focus, and edit buffers remain global/runtime;
-/// only the Section store enters project persistence and undo.
+/// Input mapping, mode, banks, Instrument octave, focus, and edit buffers remain
+/// global/runtime; only the Section store enters project persistence and undo.
 #[derive(Default)]
 pub struct PerformState {
     pub mode: PerformMode,
@@ -304,6 +324,9 @@ pub struct PerformState {
     pub editor_focus: PerformEditorFocus,
     pub input_mapping: PerformInputMapping,
     pub key_rebind_target: Option<PadPosition>,
+    pub instrument_target_overlay: bool,
+    instrument_octave: i8,
+    computer_key_velocity: ComputerKeyVelocity,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
     pub section_editor: SectionTimelineEditor,
@@ -316,7 +339,8 @@ pub struct PerformState {
     pub queued_section: Option<SectionId>,
     pub pending_section_boundary_samples: Option<u64>,
     pub section_playhead_samples: u64,
-    active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
+    active_computer_keys:
+        HashMap<String, (PadPosition, PadGestureSource, Option<ActiveInstrumentNote>)>,
     track_mute_slots: Vec<Option<TrackId>>,
 }
 
@@ -348,6 +372,9 @@ pub enum PerformMsg {
     PreviousBank,
     NextBank,
     ToggleTrackMuteFromPad(PadPosition),
+    SetInstrumentTargetOverlay(bool),
+    SelectInstrumentTarget(TrackId),
+    SetFixedComputerVelocity(u8),
     ComputerKeyPressed {
         key: ComputerKey,
         key_id: String,
@@ -357,6 +384,7 @@ pub enum PerformMsg {
         key_id: String,
         occurred_at: Instant,
     },
+    WindowUnfocused,
 }
 
 impl PerformMsg {
@@ -399,6 +427,7 @@ pub struct PerformAction {
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
+    pub select_project_track: Option<TrackId>,
     pub section_launch: Option<SectionId>,
     pub section_content_changed: Option<SectionId>,
 }
@@ -433,6 +462,12 @@ impl PerformState {
 
         let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
         self.banks.track_mutes = self.banks.track_mutes.min(last_bank as u8);
+        let playable_targets = tracks
+            .iter()
+            .filter(|track| track.is_playable_midi_target())
+            .count();
+        let last_instrument_bank = playable_targets.saturating_sub(1) / 16;
+        self.banks.instrument = self.banks.instrument.min(last_instrument_bank as u8);
     }
 
     fn track_mute_request(
@@ -459,10 +494,23 @@ impl PerformState {
         tracks.iter().find(|track| track.id == track_id)
     }
 
+    pub fn track_for_instrument_target_pad<'a>(
+        &self,
+        position: PadPosition,
+        tracks: &'a [ProjectTrack],
+    ) -> Option<&'a ProjectTrack> {
+        let slot = usize::from(self.banks.instrument) * 16
+            + usize::from(position.ordinal(PerformMode::Instrument) - 1);
+        tracks
+            .iter()
+            .filter(|track| track.is_playable_midi_target())
+            .nth(slot)
+    }
+
     pub fn update(
         &mut self,
         msg: PerformMsg,
-        _engine: &mut impl EngineHandle,
+        engine: &mut impl EngineHandle,
         ctx: PerformCtx<'_>,
     ) -> PerformAction {
         self.sync_track_mute_slots(ctx.project_tracks);
@@ -652,7 +700,14 @@ impl PerformState {
                             self.banks.track_mutes = self.banks.track_mutes.saturating_sub(1)
                         }
                         PerformMode::Instrument => {
-                            self.banks.instrument = self.banks.instrument.saturating_sub(1)
+                            if self.instrument_target_overlay {
+                                self.banks.instrument = self.banks.instrument.saturating_sub(1);
+                            } else {
+                                self.instrument_octave = self
+                                    .instrument_octave
+                                    .saturating_sub(1)
+                                    .max(MIN_INSTRUMENT_OCTAVE);
+                            }
                         }
                     }
                 }
@@ -684,14 +739,21 @@ impl PerformState {
                                 .min(last_bank as u8);
                         }
                         PerformMode::Instrument => {
-                            let playable = ctx
-                                .project_tracks
-                                .iter()
-                                .filter(|track| track.kind.is_midi() && track.has_instrument)
-                                .count();
-                            let last_bank = playable.saturating_sub(1) / 16;
-                            self.banks.instrument =
-                                self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                            if self.instrument_target_overlay {
+                                let playable = ctx
+                                    .project_tracks
+                                    .iter()
+                                    .filter(|track| track.is_playable_midi_target())
+                                    .count();
+                                let last_bank = playable.saturating_sub(1) / 16;
+                                self.banks.instrument =
+                                    self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                            } else {
+                                self.instrument_octave = self
+                                    .instrument_octave
+                                    .saturating_add(1)
+                                    .min(MAX_INSTRUMENT_OCTAVE);
+                            }
                         }
                     }
                 }
@@ -703,6 +765,31 @@ impl PerformState {
                         ..PerformAction::default()
                     };
                 }
+            }
+            PerformMsg::SetInstrumentTargetOverlay(visible) => {
+                if ctx.workspace_visible || !visible {
+                    self.instrument_target_overlay = visible;
+                }
+            }
+            PerformMsg::SelectInstrumentTarget(track_id) => {
+                if ctx.workspace_visible
+                    && ctx
+                        .project_tracks
+                        .iter()
+                        .any(|track| track.id == track_id && track.is_playable_midi_target())
+                {
+                    return PerformAction {
+                        select_project_track: Some(track_id),
+                        ..PerformAction::default()
+                    };
+                }
+            }
+            PerformMsg::SetFixedComputerVelocity(velocity) => {
+                self.computer_key_velocity = ComputerKeyVelocity(velocity.clamp(1, 127));
+                return PerformAction {
+                    persist_settings: true,
+                    ..PerformAction::default()
+                };
             }
             PerformMsg::ComputerKeyPressed {
                 key,
@@ -731,7 +818,37 @@ impl PerformState {
                     return PerformAction::default();
                 };
                 let source = PadGestureSource::ComputerKeyboard { key };
-                self.active_computer_keys.insert(key_id, (position, source));
+                let selected_instrument_target = (self.mode == PerformMode::Instrument
+                    && self.instrument_target_overlay)
+                    .then(|| {
+                        self.track_for_instrument_target_pad(position, ctx.project_tracks)
+                            .map(|track| track.id)
+                    })
+                    .flatten();
+                let instrument_note = if self.mode == PerformMode::Instrument
+                    && !self.instrument_target_overlay
+                {
+                    ctx.selected_project_track.and_then(|track_id| {
+                        ctx.project_tracks
+                            .iter()
+                            .find(|track| track.id == track_id && track.is_playable_midi_target())
+                            .map(|_| ActiveInstrumentNote {
+                                track_id,
+                                pitch: self.instrument_pitch(position),
+                            })
+                    })
+                } else {
+                    None
+                };
+                if let Some(note) = instrument_note {
+                    engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                        track_id: note.track_id,
+                        pitch: note.pitch,
+                        velocity: self.computer_key_velocity.0,
+                    });
+                }
+                self.active_computer_keys
+                    .insert(key_id, (position, source, instrument_note));
                 let track_mute_request = (self.mode == PerformMode::TrackMutes)
                     .then(|| self.track_mute_request(position, ctx.project_tracks))
                     .flatten();
@@ -755,6 +872,7 @@ impl PerformState {
                         occurred_at,
                     }),
                     track_mute_request,
+                    select_project_track: selected_instrument_target,
                     section_launch,
                     section_content_changed: None,
                 };
@@ -763,9 +881,17 @@ impl PerformState {
                 key_id,
                 occurred_at,
             } => {
-                let Some((position, source)) = self.active_computer_keys.remove(&key_id) else {
+                let Some((position, source, instrument_note)) =
+                    self.active_computer_keys.remove(&key_id)
+                else {
                     return PerformAction::default();
                 };
+                if let Some(note) = instrument_note {
+                    engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOff {
+                        track_id: note.track_id,
+                        pitch: note.pitch,
+                    });
+                }
                 return PerformAction {
                     keyboard_consumed: true,
                     persist_settings: false,
@@ -779,6 +905,17 @@ impl PerformState {
                     ..PerformAction::default()
                 };
             }
+            PerformMsg::WindowUnfocused => {
+                self.instrument_target_overlay = false;
+                for (_, (_, _, instrument_note)) in self.active_computer_keys.drain() {
+                    if let Some(note) = instrument_note {
+                        engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOff {
+                            track_id: note.track_id,
+                            pitch: note.pitch,
+                        });
+                    }
+                }
+            }
         }
         PerformAction::default()
     }
@@ -786,7 +923,24 @@ impl PerformState {
     pub fn is_pad_pressed(&self, position: PadPosition) -> bool {
         self.active_computer_keys
             .values()
-            .any(|(pressed, _)| *pressed == position)
+            .any(|(pressed, _, _)| *pressed == position)
+    }
+
+    pub const fn fixed_computer_velocity(&self) -> u8 {
+        self.computer_key_velocity.0
+    }
+
+    pub const fn instrument_octave(&self) -> i8 {
+        self.instrument_octave
+    }
+
+    pub fn instrument_pitch(&self, position: PadPosition) -> u8 {
+        let base = i16::from(INSTRUMENT_BASE_PITCH + position.ordinal(PerformMode::Instrument));
+        (base + i16::from(self.instrument_octave) * 12).clamp(0, 127) as u8
+    }
+
+    pub fn set_fixed_computer_velocity(&mut self, velocity: u8) {
+        self.computer_key_velocity = ComputerKeyVelocity(velocity.clamp(1, 127));
     }
 
     fn select_section(&mut self, id: SectionId, selected_track: Option<TrackId>) {
@@ -828,3 +982,7 @@ impl PerformState {
 #[cfg(test)]
 #[path = "perform_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "perform_focus_tests.rs"]
+mod focus_tests;

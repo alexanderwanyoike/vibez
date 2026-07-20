@@ -4,6 +4,7 @@ use std::sync::Arc;
 use iced::{Subscription, Task, Theme};
 
 use crate::domains::browser::BrowserMsg;
+use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
@@ -266,6 +267,9 @@ impl App {
             ..Default::default()
         };
         state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
+        state
+            .perform
+            .set_fixed_computer_velocity(ui_settings.fixed_computer_velocity);
 
         // Themes: scan the user's .vzt collection, then restore the
         // saved selection (built-in name or user theme name).
@@ -519,6 +523,9 @@ impl App {
                 iced::Event::Window(iced::window::Event::Resized(size)) => Some(Message::View(
                     ViewMsg::WindowResized(size.width, size.height),
                 )),
+                iced::Event::Window(iced::window::Event::Unfocused) => {
+                    Some(Message::Perform(PerformMsg::WindowUnfocused))
+                }
                 _ => None,
             }),
         ])

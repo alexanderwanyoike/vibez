@@ -7,6 +7,13 @@ fn project_tracks(count: usize) -> Vec<ProjectTrack> {
         .collect()
 }
 
+fn playable_midi_track(name: &str) -> ProjectTrack {
+    let mut track = ProjectTrack::new(TrackId::new(), name.into(), 0);
+    track.kind = vibez_core::midi::TrackKind::Midi;
+    track.has_instrument = true;
+    track
+}
+
 #[test]
 fn exposes_exactly_the_three_settled_v1_modes() {
     assert_eq!(
@@ -171,6 +178,263 @@ fn one_hold_produces_exactly_one_press_and_release() {
     assert!(extra_release.gesture.is_none());
     assert!(!state.is_pad_pressed(position));
     assert!(engine.0.is_empty());
+}
+
+#[test]
+fn instrument_pad_hold_uses_the_selected_target_and_octave() {
+    let tracks = vec![playable_midi_track("Drums")];
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(tracks[0].id),
+    };
+    let at = Instant::now();
+
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        ctx,
+    );
+    state.update(
+        PerformMsg::ComputerKeyReleased {
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert!(matches!(
+        engine.0.as_slice(),
+        [
+            vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                track_id,
+                pitch: 48,
+                velocity: 100,
+            },
+            vibez_engine::commands::EngineCommand::ExternalNoteOff {
+                track_id: released_track,
+                pitch: 48,
+            },
+        ] if *track_id == tracks[0].id && *released_track == tracks[0].id
+    ));
+}
+
+#[test]
+fn instrument_octave_navigation_stays_inside_the_midi_range() {
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        ..PerformCtx::default()
+    };
+
+    for _ in 0..12 {
+        state.update(PerformMsg::NextBank, &mut engine, ctx);
+    }
+    assert_eq!(state.instrument_octave(), 6);
+    assert_eq!(state.instrument_pitch(PadPosition::ALL[3]), 123);
+
+    for _ in 0..12 {
+        state.update(PerformMsg::PreviousBank, &mut engine, ctx);
+    }
+    assert_eq!(state.instrument_octave(), -3);
+    assert_eq!(state.instrument_pitch(PadPosition::ALL[12]), 0);
+}
+
+#[test]
+fn held_note_release_stays_paired_when_range_target_and_mode_change() {
+    let tracks = vec![playable_midi_track("Drums"), playable_midi_track("Surge")];
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let at = Instant::now();
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            project_tracks: &tracks,
+            selected_project_track: Some(tracks[0].id),
+        },
+    );
+    state.update(
+        PerformMsg::NextBank,
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            ..PerformCtx::default()
+        },
+    );
+    state.mode = PerformMode::Sections;
+    state.update(
+        PerformMsg::ComputerKeyReleased {
+            key_id: "z".into(),
+            occurred_at: at,
+        },
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            project_tracks: &tracks,
+            selected_project_track: Some(tracks[1].id),
+        },
+    );
+
+    assert!(matches!(
+        engine.0.as_slice(),
+        [
+            vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                track_id,
+                pitch: 36,
+                ..
+            },
+            vibez_engine::commands::EngineCommand::ExternalNoteOff {
+                track_id: released_track,
+                pitch: 36,
+            }
+        ] if *track_id == tracks[0].id && *released_track == tracks[0].id
+    ));
+}
+
+#[test]
+fn shift_overlay_selects_only_playable_midi_targets_in_bottom_left_order() {
+    let mut tracks = project_tracks(1);
+    let first = playable_midi_track("Drums");
+    let first_id = first.id;
+    tracks.push(first);
+    let mut uninstrumented = playable_midi_track("Empty MIDI");
+    uninstrumented.has_instrument = false;
+    tracks.push(uninstrumented);
+    let second = playable_midi_track("Dexed");
+    let second_id = second.id;
+    tracks.push(second);
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(first_id),
+    };
+
+    state.update(
+        PerformMsg::SetInstrumentTargetOverlay(true),
+        &mut engine,
+        ctx,
+    );
+    let action = state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::X,
+            key_id: "x".into(),
+            occurred_at: Instant::now(),
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert_eq!(action.select_project_track, Some(second_id));
+    assert!(engine.0.is_empty(), "target selection must not play a note");
+}
+
+#[test]
+fn shift_release_clears_the_overlay_after_focus_leaves_perform() {
+    let mut state = PerformState::default();
+    let mut engine = RecordingEngine::default();
+    state.update(
+        PerformMsg::SetInstrumentTargetOverlay(true),
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            ..PerformCtx::default()
+        },
+    );
+
+    state.update(
+        PerformMsg::SetInstrumentTargetOverlay(false),
+        &mut engine,
+        PerformCtx {
+            workspace_visible: false,
+            ..PerformCtx::default()
+        },
+    );
+
+    assert!(!state.instrument_target_overlay);
+}
+
+#[test]
+fn on_screen_target_selection_retargets_the_project_track() {
+    let tracks = vec![playable_midi_track("Surge")];
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+
+    let action = state.update(
+        PerformMsg::SelectInstrumentTarget(tracks[0].id),
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            project_tracks: &tracks,
+            selected_project_track: None,
+        },
+    );
+
+    assert_eq!(action.select_project_track, Some(tracks[0].id));
+    assert!(engine.0.is_empty());
+}
+
+#[test]
+fn changing_fixed_velocity_persists_and_affects_the_next_note_immediately() {
+    let tracks = vec![playable_midi_track("Drums")];
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(tracks[0].id),
+    };
+
+    let setting = state.update(PerformMsg::SetFixedComputerVelocity(73), &mut engine, ctx);
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: Instant::now(),
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert!(setting.persist_settings);
+    assert!(matches!(
+        engine.0.as_slice(),
+        [vibez_engine::commands::EngineCommand::ExternalNoteOn { velocity: 73, .. }]
+    ));
 }
 
 #[test]
@@ -651,8 +915,12 @@ fn track_slots_survive_deletion_and_fill_without_scrambling_other_pads() {
 }
 
 #[test]
-fn sections_and_track_mutes_remember_independent_banks() {
-    let tracks = project_tracks(18);
+fn each_perform_mode_remembers_its_own_navigation_state() {
+    let mut tracks = project_tracks(18);
+    for track in &mut tracks {
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        track.has_instrument = true;
+    }
     let mut state = PerformState::default();
     Arc::make_mut(&mut state.sections).insert(Section::new(0));
     Arc::make_mut(&mut state.sections).insert(Section::new(16));
@@ -675,6 +943,22 @@ fn sections_and_track_mutes_remember_independent_banks() {
     assert_eq!(state.banks.track_mutes, 1);
 
     state.update(
+        PerformMsg::SelectMode(PerformMode::Instrument),
+        &mut engine,
+        ctx,
+    );
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.instrument_octave(), 1);
+    assert_eq!(state.banks.instrument, 0);
+    state.update(
+        PerformMsg::SetInstrumentTargetOverlay(true),
+        &mut engine,
+        ctx,
+    );
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.banks.instrument, 1);
+
+    state.update(
         PerformMsg::SelectMode(PerformMode::Sections),
         &mut engine,
         ctx,
@@ -682,6 +966,8 @@ fn sections_and_track_mutes_remember_independent_banks() {
     state.update(PerformMsg::PreviousBank, &mut engine, ctx);
     assert_eq!(state.banks.sections, 0);
     assert_eq!(state.banks.track_mutes, 1);
+    assert_eq!(state.banks.instrument, 1);
+    assert_eq!(state.instrument_octave(), 1);
     assert!(engine.0.is_empty(), "bank changes never touch playback");
 }
 

@@ -419,6 +419,62 @@ fn switching_sections_releases_notes_from_the_previous_source() {
 }
 
 #[test]
+fn live_instrument_note_releases_after_a_section_transition() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let note_events = Arc::new(Mutex::new(Vec::new()));
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetPluginInstrument {
+            track_id,
+            instrument: Box::new(NoteLogInstrument(Arc::clone(&note_events))),
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(Box::new(
+            PreparedSectionPlaybackSource::new(
+                SectionId::new(),
+                4.0,
+                true,
+                vec![(track_id, PreparedPlaybackSource::default())],
+            ),
+        )))
+        .unwrap();
+    commands
+        .push(EngineCommand::ExternalNoteOn {
+            track_id,
+            pitch: 48,
+            velocity: 100,
+        })
+        .unwrap();
+    let mut output = [0.0; 1];
+    engine.process(&mut output, 1);
+
+    commands
+        .push(EngineCommand::LaunchSection(Box::new(
+            PreparedSectionPlaybackSource::new(
+                SectionId::new(),
+                4.0,
+                true,
+                vec![(track_id, PreparedPlaybackSource::default())],
+            ),
+        )))
+        .unwrap();
+    engine.process(&mut output, 1);
+    commands
+        .push(EngineCommand::ExternalNoteOff {
+            track_id,
+            pitch: 48,
+        })
+        .unwrap();
+    engine.process(&mut output, 1);
+
+    assert_eq!(*note_events.lock().unwrap(), vec![(true, 48), (false, 48)]);
+}
+
+#[test]
 fn absent_track_stops_source_content_without_resetting_effect_tail() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();

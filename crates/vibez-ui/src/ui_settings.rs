@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct UiSettings {
     #[serde(default)]
     pub perform_input_mapping: crate::domains::perform::PerformInputMapping,
+    #[serde(default = "default_fixed_computer_velocity")]
+    pub fixed_computer_velocity: u8,
     #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
@@ -55,6 +57,7 @@ impl Default for UiSettings {
     fn default() -> Self {
         Self {
             perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
+            fixed_computer_velocity: default_fixed_computer_velocity(),
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
@@ -102,6 +105,10 @@ impl UiSettings {
 
 fn default_sample_browser_open() -> bool {
     true
+}
+
+const fn default_fixed_computer_velocity() -> u8 {
+    100
 }
 
 fn default_media_cache_budget_bytes() -> u64 {
@@ -292,6 +299,20 @@ mod tests {
             loaded.input_mapping_key(PadPosition::ALL[0]),
             ComputerKey::Y
         );
+    }
+
+    #[test]
+    fn fixed_computer_velocity_defaults_and_roundtrips_globally() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.fixed_computer_velocity, 100);
+
+        let settings = UiSettings {
+            fixed_computer_velocity: 73,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.fixed_computer_velocity, 73);
     }
 
     #[test]
