@@ -382,6 +382,7 @@ impl BrowserState {
                 self.remote.connection_expanded = !self.remote.connection_expanded;
             }
             BrowserMsg::SelectRemoteFolder(path) => {
+                self.mode = SampleBrowserMode::Remote;
                 self.remote.current_path = path;
                 if !self.remote.current_path.is_empty() {
                     self.remote
