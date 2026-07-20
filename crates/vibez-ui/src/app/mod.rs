@@ -70,6 +70,8 @@ struct App {
     /// Bumped on every refresh start and on disconnect, so catalog pages
     /// fetched for a previous connection are dropped instead of reconciled.
     remote_catalog_request: tracked_request::TrackedRequest,
+    /// Cancellable preparation for the next resident Section launch.
+    section_residency_request: tracked_request::TrackedRequest,
     /// Catalog changes accumulated since the last reconcile flush; applied in
     /// batches so each page does not re-sort the whole catalog in update().
     remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
@@ -157,6 +159,7 @@ mod views_devices;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_pads;
 mod views_perform_playhead;
 mod views_perform_sections;
 mod views_settings;
@@ -324,6 +327,7 @@ impl App {
             pending_remote_audition: None,
             browser_import_request: Default::default(),
             remote_catalog_request: Default::default(),
+            section_residency_request: Default::default(),
             remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),

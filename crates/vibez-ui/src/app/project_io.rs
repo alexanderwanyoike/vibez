@@ -26,6 +26,7 @@ impl App {
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
         self.browser_import_request.cancel();
+        self.section_residency_request.cancel();
         self.stop_browser_audition();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;

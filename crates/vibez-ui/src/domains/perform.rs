@@ -274,8 +274,8 @@ pub enum PerformEditorFocus {
     SectionConstruction,
 }
 
-/// Per-mode bank cursors are UI interaction state. Navigation is added by a
-/// later card; Card 02 establishes the ownership boundary only.
+/// Per-mode bank cursors are UI interaction state. Bracket navigation updates
+/// only the active mode's cursor and never touches engine playback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PerformBanks {
     pub sections: u8,
@@ -313,6 +313,8 @@ pub struct PerformState {
     pub duplicate_source: Option<SectionId>,
     /// Engine-owned playback truth mirrored from Section events.
     pub playing_section: Option<SectionId>,
+    pub queued_section: Option<SectionId>,
+    pub pending_section_boundary_samples: Option<u64>,
     pub section_playhead_samples: u64,
     active_computer_keys: HashMap<String, (PadPosition, PadGestureSource)>,
     track_mute_slots: Vec<Option<TrackId>>,
@@ -540,6 +542,14 @@ impl PerformState {
                     if self.duplicate_source == Some(id) {
                         self.duplicate_source = None;
                     }
+                    let last_bank = self
+                        .sections
+                        .sections
+                        .iter()
+                        .map(|section| section.slot / 16)
+                        .max()
+                        .unwrap_or(0);
+                    self.banks.sections = self.banks.sections.min(last_bank as u8);
                 }
             }
             PerformMsg::StartEditingSectionName(id) => {
@@ -633,18 +643,57 @@ impl PerformState {
                 }
             }
             PerformMsg::PreviousBank => {
-                if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
-                    self.banks.track_mutes = self.banks.track_mutes.saturating_sub(1);
+                if ctx.workspace_visible {
+                    match self.mode {
+                        PerformMode::Sections => {
+                            self.banks.sections = self.banks.sections.saturating_sub(1)
+                        }
+                        PerformMode::TrackMutes => {
+                            self.banks.track_mutes = self.banks.track_mutes.saturating_sub(1)
+                        }
+                        PerformMode::Instrument => {
+                            self.banks.instrument = self.banks.instrument.saturating_sub(1)
+                        }
+                    }
                 }
             }
             PerformMsg::NextBank => {
-                if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
-                    let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
-                    self.banks.track_mutes = self
-                        .banks
-                        .track_mutes
-                        .saturating_add(1)
-                        .min(last_bank as u8);
+                if ctx.workspace_visible {
+                    match self.mode {
+                        PerformMode::Sections => {
+                            let last_reachable_bank = self
+                                .sections
+                                .sections
+                                .iter()
+                                .map(|section| section.slot / 16)
+                                .max()
+                                .map(|bank| u8::try_from(bank.saturating_add(1)).unwrap_or(u8::MAX))
+                                .unwrap_or(0);
+                            self.banks.sections = self
+                                .banks
+                                .sections
+                                .saturating_add(1)
+                                .min(last_reachable_bank);
+                        }
+                        PerformMode::TrackMutes => {
+                            let last_bank = self.track_mute_slots.len().saturating_sub(1) / 16;
+                            self.banks.track_mutes = self
+                                .banks
+                                .track_mutes
+                                .saturating_add(1)
+                                .min(last_bank as u8);
+                        }
+                        PerformMode::Instrument => {
+                            let playable = ctx
+                                .project_tracks
+                                .iter()
+                                .filter(|track| track.kind.is_midi() && track.has_instrument)
+                                .count();
+                            let last_bank = playable.saturating_sub(1) / 16;
+                            self.banks.instrument =
+                                self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                        }
+                    }
                 }
             }
             PerformMsg::ToggleTrackMuteFromPad(position) => {

@@ -42,6 +42,39 @@ fn prepare_playing_section_refresh(
 }
 
 impl App {
+    fn begin_section_residency(&mut self, section_id: SectionId) -> Task<Message> {
+        let Some(section) = self.state.perform.sections.by_id(section_id).cloned() else {
+            return Task::none();
+        };
+        let quantization = section.launch_quantization;
+        let track_ids: Vec<_> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|track| track.id)
+            .collect();
+        let request_id = self.section_residency_request.begin();
+        let task = Task::perform(
+            async move {
+                let prepared = tokio::task::spawn_blocking(move || {
+                    section.prepare_playback_source_for_tracks(&track_ids)
+                })
+                .await
+                .expect("Section residency worker panicked");
+                crate::message::ResidentSection::new(Box::new(prepared))
+            },
+            move |resident| Message::SectionResidencyReady {
+                request_id,
+                section_id,
+                quantization,
+                resident,
+            },
+        );
+        self.state.status_text = "Preparing Section…".into();
+        self.section_residency_request.attach(task)
+    }
+
     /// Refresh resident content only when the edited Section is still the one
     /// the engine reports as active. Selection remains intentionally separate.
     pub(super) fn refresh_playing_section_after_edit(&mut self, section_id: SectionId) {
@@ -56,7 +89,11 @@ impl App {
 
     /// Apply cross-domain effects requested by Perform without giving the
     /// Perform interaction slice ownership of Project Track state.
-    pub(super) fn apply_perform_action(&mut self, action: crate::domains::perform::PerformAction) {
+    pub(super) fn apply_perform_action(
+        &mut self,
+        action: crate::domains::perform::PerformAction,
+    ) -> Task<Message> {
+        let mut tasks = Vec::new();
         if action.persist_settings {
             self.persist_ui_settings();
             self.state.status_text = "Perform key mapping saved".into();
@@ -82,20 +119,15 @@ impl App {
             }
         }
         if let Some(section_id) = action.section_launch {
-            if let Some(prepared) = self
-                .state
-                .perform
-                .sections
-                .by_id(section_id)
-                .map(|section| section.prepare_playback_source(&self.state.project_tracks.tracks))
-            {
-                self.send_command(EngineCommand::LaunchSection(Box::new(prepared)));
-                self.state.status_text = "Launching Section…".into();
-            }
+            tasks.push(self.begin_section_residency(section_id));
         }
         if let Some(section_id) = action.section_content_changed {
             self.refresh_playing_section_after_edit(section_id);
+            if self.state.perform.queued_section == Some(section_id) {
+                tasks.push(self.begin_section_residency(section_id));
+            }
         }
+        Task::batch(tasks)
     }
 
     /// Route cross-domain effects requested by the arrangement domain.
@@ -349,6 +381,10 @@ impl App {
             TransportAction::TempoChanged { old_bpm, new_bpm } => {
                 self.follow_tempo_change(old_bpm, new_bpm)
             }
+            TransportAction::TempoRejected => {
+                self.state.status_text = "Stop Perform playback to change BPM".into();
+                Task::none()
+            }
         }
     }
 
@@ -547,6 +583,8 @@ impl App {
                     EngineEvent::PlaybackStopped => {
                         self.state.transport.playing = false;
                         self.state.perform.playing_section = None;
+                        self.state.perform.queued_section = None;
+                        self.state.perform.pending_section_boundary_samples = None;
                         self.state.perform.section_playhead_samples = 0;
                     }
                     EngineEvent::PlaybackStarted => {
@@ -596,11 +634,30 @@ impl App {
                     }
                     EngineEvent::SectionTransitioned {
                         section_id,
-                        effective_at_samples: _,
+                        effective_at_samples,
                         retired,
                     } => {
                         self.state.perform.playing_section = Some(section_id);
+                        self.state.perform.queued_section = None;
+                        self.state.perform.pending_section_boundary_samples = None;
                         self.state.perform.section_playhead_samples = 0;
+                        self.state.status_text =
+                            format!("Section playing at sample {effective_at_samples}");
+                        drop(retired);
+                    }
+                    EngineEvent::SectionQueued {
+                        section_id,
+                        effective_at_samples,
+                        retired,
+                    } => {
+                        self.state.perform.queued_section = Some(section_id);
+                        self.state.perform.pending_section_boundary_samples =
+                            Some(effective_at_samples);
+                        drop(retired);
+                    }
+                    EngineEvent::SectionQueueCancelled { retired } => {
+                        self.state.perform.queued_section = None;
+                        self.state.perform.pending_section_boundary_samples = None;
                         drop(retired);
                     }
                     EngineEvent::SectionPlaybackPosition {

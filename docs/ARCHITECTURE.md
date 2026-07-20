@@ -103,8 +103,9 @@ in the router layer as iced Tasks in topic modules under
 math happens in the domains. Replaceable router work uses one `TrackedRequest`
 lifecycle for monotonic tokens, stale-result rejection, cancellation, optional
 iced task abortion, and abort-on-drop. Remote import, Remote materialization,
-Browser import preparation, and Remote catalog refresh keep separate tracker
-instances but do not duplicate request IDs, generations, or abort handles.
+Browser import preparation, Remote catalog refresh, and Section residency keep
+separate tracker instances but do not duplicate request IDs, generations, or
+abort handles.
 
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
 selection, and editor-focus state alongside an `Arc<SectionStore>` that enters
@@ -113,9 +114,11 @@ independent `ArrangementTimeline` keyed by the same shared Project `TrackId`s;
 duplicating a Section remints every editable content identity while immutable
 decoded audio remains shared. `PerformMsg` changes that slice through the
 router and `EngineHandle`. A Section launch returns a semantic action; the
-router resolves the complete resident playback source and sends it to the
-engine without coupling the Perform interaction slice to engine storage. Perform is a
-sibling of Arrange and Mix in the shared shell, and all three retain their
+router prepares the complete playback source on a cancellable background task,
+then sends only the resident owner and launch policy to the engine. A newer
+launch cancels and invalidates stale residency work without coupling the
+Perform interaction slice to engine storage. Perform is a sibling of Arrange
+and Mix in the shared shell, and all three retain their
 interaction state when producers switch between them. Track Mute pad slots
 retain stable `TrackId` assignments across
 track additions and deletions. A pad press resolves inside Perform to a narrow
@@ -236,16 +239,20 @@ instrument, effect, or send implementation. A complete
 Track, including empty sources that mean intentional silence. It holds decoded
 clip `Arc`s and exposes no loader or I/O API.
 
-`EngineCommand::LaunchSection` swaps those prepared pointers into each shared
-channel at the next callback opportunity, resets the engine-owned local Section
-playhead, and emits a sample-timestamped `SectionTransitioned` event. The same
-command owner is returned in that event carrying the displaced sources, so
-their Vecs and Arcs are destroyed on the UI thread. The callback only swaps
-pointers: it never allocates, loads, locks, performs I/O, or drops a resident
-source. The UI sets playing-pad state only from engine events. Section loop
-wraps split inside a callback at the playable boundary, flush sounding notes,
-and continue from local sample zero. Empty sources still run the shared device
-chain, allowing existing effect tails to decay naturally.
+`EngineCommand::LaunchSection` retains the immediate Card 10 path.
+`EngineCommand::QueueSection` transfers a prepared owner plus its Immediate,
+beat, bar, or end-of-Section policy. The engine computes and owns the pending
+absolute sample boundary, returns displaced queued owners to the UI thread, and
+splits rendering when that boundary falls partway through a callback. Only then
+does it swap the resident pointers, reset the local Section playhead, and emit a
+sample-timestamped `SectionTransitioned` event. `SectionQueued` is likewise the
+only source of queued-pad and pending-boundary UI state. The callback never
+loads, locks, performs I/O, or drops a resident source. Section loop wraps split
+inside a callback at the playable boundary, flush sounding notes, and continue
+from local sample zero. Empty sources still run the shared device chain,
+allowing existing effect tails to decay naturally. Live Project Track mutes
+remain channel state across transitions, and the engine plus Transport domain
+hold one Project BPM until Perform playback stops.
 
 ```mermaid
 flowchart LR

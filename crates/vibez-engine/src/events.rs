@@ -81,6 +81,19 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
+    /// A resident Section is queued for this exact transport sample.
+    /// Re-queueing returns the displaced resident owner for UI-thread drop.
+    SectionQueued {
+        section_id: SectionId,
+        effective_at_samples: u64,
+        retired: Option<Box<PreparedSectionPlaybackSource>>,
+    },
+
+    /// A queued resident owner was cancelled by transport stop.
+    SectionQueueCancelled {
+        retired: Box<PreparedSectionPlaybackSource>,
+    },
+
     /// A resident Section became active at this exact transport sample.
     /// `retired` carries displaced sources to the UI thread for destruction.
     SectionTransitioned {
@@ -175,6 +188,34 @@ impl PartialEq for EngineEvent {
                     && left_muted == right_muted
                     && left_effective == right_effective
             }
+            (
+                Self::SectionQueued {
+                    section_id: left_section,
+                    effective_at_samples: left_effective,
+                    retired: left_retired,
+                },
+                Self::SectionQueued {
+                    section_id: right_section,
+                    effective_at_samples: right_effective,
+                    retired: right_retired,
+                },
+            ) => {
+                left_section == right_section
+                    && left_effective == right_effective
+                    && match (left_retired, right_retired) {
+                        (Some(left), Some(right)) => std::ptr::eq(left.as_ref(), right.as_ref()),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            }
+            (
+                Self::SectionQueueCancelled {
+                    retired: left_retired,
+                },
+                Self::SectionQueueCancelled {
+                    retired: right_retired,
+                },
+            ) => std::ptr::eq(left_retired.as_ref(), right_retired.as_ref()),
             (
                 Self::SectionTransitioned {
                     section_id: left_section,

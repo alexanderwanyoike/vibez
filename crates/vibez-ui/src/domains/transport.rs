@@ -45,6 +45,8 @@ pub struct TransportCtx {
     pub total_duration_samples: u64,
     /// Active time selection in beats, if any (loop-enable copies it).
     pub time_selection: Option<(f64, f64)>,
+    /// Perform holds one project BPM until its Section transport stops.
+    pub perform_tempo_locked: bool,
 }
 
 /// Cross-domain effects the transport cannot perform itself. The
@@ -59,6 +61,7 @@ pub enum TransportAction {
         old_bpm: f64,
         new_bpm: f64,
     },
+    TempoRejected,
 }
 
 impl TransportState {
@@ -123,6 +126,10 @@ impl TransportState {
                 TransportAction::None
             }
             TransportMsg::BpmSubmit => match self.bpm_text.parse::<f64>() {
+                Ok(_) if ctx.perform_tempo_locked => {
+                    self.bpm_text = format!("{:.0}", self.bpm);
+                    TransportAction::TempoRejected
+                }
                 Ok(bpm) => self.set_bpm(bpm, engine),
                 Err(_) => {
                     self.bpm_text = format!("{:.0}", self.bpm);
@@ -130,6 +137,10 @@ impl TransportState {
                 }
             },
             TransportMsg::NudgeBpm(delta) => {
+                if ctx.perform_tempo_locked {
+                    self.bpm_text = format!("{:.0}", self.bpm);
+                    return TransportAction::TempoRejected;
+                }
                 let bpm = self.bpm + delta;
                 self.set_bpm(bpm, engine)
             }
@@ -263,12 +274,34 @@ mod tests {
     }
 
     #[test]
+    fn perform_playback_rejects_bpm_submit() {
+        let mut t = transport();
+        t.bpm_text = "140".into();
+        let mut engine = RecordingEngine::default();
+
+        let action = t.update(
+            TransportMsg::BpmSubmit,
+            &mut engine,
+            TransportCtx {
+                perform_tempo_locked: true,
+                ..TransportCtx::default()
+            },
+        );
+
+        assert_eq!(t.bpm, 120.0);
+        assert_eq!(t.bpm_text, "120");
+        assert_eq!(action, TransportAction::TempoRejected);
+        assert!(engine.0.is_empty());
+    }
+
+    #[test]
     fn seek_clamps_and_requests_selection_clear() {
         let mut t = transport();
         let mut engine = RecordingEngine::default();
         let ctx = TransportCtx {
             total_duration_samples: 1000,
             time_selection: None,
+            ..TransportCtx::default()
         };
         let action = t.update(TransportMsg::Seek(2.0), &mut engine, ctx);
         assert_eq!(t.position_samples, 1000);
@@ -298,6 +331,7 @@ mod tests {
         let ctx = TransportCtx {
             total_duration_samples: 0,
             time_selection: Some((4.0, 8.0)),
+            ..TransportCtx::default()
         };
         t.update(TransportMsg::ToggleArrangementLoop, &mut engine, ctx);
         assert!(t.loop_enabled);
