@@ -358,6 +358,11 @@ impl App {
         } else {
             Task::none()
         };
+        let plugin_catalog_startup_task = if app.state.plugin_settings.cache_needs_refresh() {
+            Task::done(Message::ScanPlugins)
+        } else {
+            Task::none()
+        };
 
         // Staged Project Media copies are content-addressed and shared, so
         // saves and aborted imports never delete them eagerly; this sweep
@@ -381,7 +386,12 @@ impl App {
 
         (
             app,
-            Task::batch([local_startup_task, remote_startup_task, open_task]),
+            Task::batch([
+                local_startup_task,
+                remote_startup_task,
+                plugin_catalog_startup_task,
+                open_task,
+            ]),
         )
     }
 
