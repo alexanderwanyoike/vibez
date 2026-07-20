@@ -181,7 +181,7 @@ fn one_hold_produces_exactly_one_press_and_release() {
 }
 
 #[test]
-fn instrument_pad_hold_plays_and_releases_the_selected_target() {
+fn instrument_pad_hold_uses_the_selected_target_and_octave() {
     let tracks = vec![playable_midi_track("Drums")];
     let mut state = PerformState {
         mode: PerformMode::Instrument,
@@ -195,6 +195,7 @@ fn instrument_pad_hold_plays_and_releases_the_selected_target() {
     };
     let at = Instant::now();
 
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
     state.update(
         PerformMsg::ComputerKeyPressed {
             key: ComputerKey::Z,
@@ -218,19 +219,44 @@ fn instrument_pad_hold_plays_and_releases_the_selected_target() {
         [
             vibez_engine::commands::EngineCommand::ExternalNoteOn {
                 track_id,
-                pitch: 36,
+                pitch: 48,
                 velocity: 100,
             },
             vibez_engine::commands::EngineCommand::ExternalNoteOff {
                 track_id: released_track,
-                pitch: 36,
+                pitch: 48,
             },
         ] if *track_id == tracks[0].id && *released_track == tracks[0].id
     ));
 }
 
 #[test]
-fn held_note_release_stays_paired_when_the_target_and_mode_change() {
+fn instrument_octave_navigation_stays_inside_the_midi_range() {
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        ..PerformCtx::default()
+    };
+
+    for _ in 0..12 {
+        state.update(PerformMsg::NextBank, &mut engine, ctx);
+    }
+    assert_eq!(state.instrument_octave(), 6);
+    assert_eq!(state.instrument_pitch(PadPosition::ALL[3]), 123);
+
+    for _ in 0..12 {
+        state.update(PerformMsg::PreviousBank, &mut engine, ctx);
+    }
+    assert_eq!(state.instrument_octave(), -3);
+    assert_eq!(state.instrument_pitch(PadPosition::ALL[12]), 0);
+}
+
+#[test]
+fn held_note_release_stays_paired_when_range_target_and_mode_change() {
     let tracks = vec![playable_midi_track("Drums"), playable_midi_track("Surge")];
     let mut state = PerformState {
         mode: PerformMode::Instrument,
@@ -251,6 +277,14 @@ fn held_note_release_stays_paired_when_the_target_and_mode_change() {
             selected_project_track: Some(tracks[0].id),
         },
     );
+    state.update(
+        PerformMsg::NextBank,
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            ..PerformCtx::default()
+        },
+    );
     state.mode = PerformMode::Sections;
     state.update(
         PerformMsg::ComputerKeyReleased {
@@ -268,10 +302,14 @@ fn held_note_release_stays_paired_when_the_target_and_mode_change() {
     assert!(matches!(
         engine.0.as_slice(),
         [
-            vibez_engine::commands::EngineCommand::ExternalNoteOn { track_id, .. },
+            vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                track_id,
+                pitch: 36,
+                ..
+            },
             vibez_engine::commands::EngineCommand::ExternalNoteOff {
                 track_id: released_track,
-                ..
+                pitch: 36,
             }
         ] if *track_id == tracks[0].id && *released_track == tracks[0].id
     ));
@@ -877,7 +915,7 @@ fn track_slots_survive_deletion_and_fill_without_scrambling_other_pads() {
 }
 
 #[test]
-fn each_perform_mode_remembers_its_own_bank() {
+fn each_perform_mode_remembers_its_own_navigation_state() {
     let mut tracks = project_tracks(18);
     for track in &mut tracks {
         track.kind = vibez_core::midi::TrackKind::Midi;
@@ -910,6 +948,14 @@ fn each_perform_mode_remembers_its_own_bank() {
         ctx,
     );
     state.update(PerformMsg::NextBank, &mut engine, ctx);
+    assert_eq!(state.instrument_octave(), 1);
+    assert_eq!(state.banks.instrument, 0);
+    state.update(
+        PerformMsg::SetInstrumentTargetOverlay(true),
+        &mut engine,
+        ctx,
+    );
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
     assert_eq!(state.banks.instrument, 1);
 
     state.update(
@@ -921,6 +967,7 @@ fn each_perform_mode_remembers_its_own_bank() {
     assert_eq!(state.banks.sections, 0);
     assert_eq!(state.banks.track_mutes, 1);
     assert_eq!(state.banks.instrument, 1);
+    assert_eq!(state.instrument_octave(), 1);
     assert!(engine.0.is_empty(), "bank changes never touch playback");
 }
 

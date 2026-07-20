@@ -274,6 +274,10 @@ struct ActiveInstrumentNote {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ComputerKeyVelocity(u8);
 
+const INSTRUMENT_BASE_PITCH: u8 = 35;
+const MIN_INSTRUMENT_OCTAVE: i8 = -3;
+const MAX_INSTRUMENT_OCTAVE: i8 = 6;
+
 impl Default for ComputerKeyVelocity {
     fn default() -> Self {
         Self(100)
@@ -289,8 +293,9 @@ pub enum PerformEditorFocus {
     SectionConstruction,
 }
 
-/// Per-mode bank cursors are UI interaction state. Bracket navigation updates
-/// only the active mode's cursor and never touches engine playback.
+/// Per-mode bank cursors are UI interaction state. Instrument target banks are
+/// paged only while its target overlay is visible; normal Instrument bracket
+/// navigation changes the separate octave range instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PerformBanks {
     pub sections: u8,
@@ -309,8 +314,8 @@ impl PerformBanks {
 }
 
 /// Perform state combines project-owned Sections with runtime interaction.
-/// Input mapping, mode, banks, focus, and edit buffers remain global/runtime;
-/// only the Section store enters project persistence and undo.
+/// Input mapping, mode, banks, Instrument octave, focus, and edit buffers remain
+/// global/runtime; only the Section store enters project persistence and undo.
 #[derive(Default)]
 pub struct PerformState {
     pub mode: PerformMode,
@@ -320,6 +325,7 @@ pub struct PerformState {
     pub input_mapping: PerformInputMapping,
     pub key_rebind_target: Option<PadPosition>,
     pub instrument_target_overlay: bool,
+    instrument_octave: i8,
     computer_key_velocity: ComputerKeyVelocity,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
@@ -693,7 +699,14 @@ impl PerformState {
                             self.banks.track_mutes = self.banks.track_mutes.saturating_sub(1)
                         }
                         PerformMode::Instrument => {
-                            self.banks.instrument = self.banks.instrument.saturating_sub(1)
+                            if self.instrument_target_overlay {
+                                self.banks.instrument = self.banks.instrument.saturating_sub(1);
+                            } else {
+                                self.instrument_octave = self
+                                    .instrument_octave
+                                    .saturating_sub(1)
+                                    .max(MIN_INSTRUMENT_OCTAVE);
+                            }
                         }
                     }
                 }
@@ -725,14 +738,21 @@ impl PerformState {
                                 .min(last_bank as u8);
                         }
                         PerformMode::Instrument => {
-                            let playable = ctx
-                                .project_tracks
-                                .iter()
-                                .filter(|track| track.is_playable_midi_target())
-                                .count();
-                            let last_bank = playable.saturating_sub(1) / 16;
-                            self.banks.instrument =
-                                self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                            if self.instrument_target_overlay {
+                                let playable = ctx
+                                    .project_tracks
+                                    .iter()
+                                    .filter(|track| track.is_playable_midi_target())
+                                    .count();
+                                let last_bank = playable.saturating_sub(1) / 16;
+                                self.banks.instrument =
+                                    self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                            } else {
+                                self.instrument_octave = self
+                                    .instrument_octave
+                                    .saturating_add(1)
+                                    .min(MAX_INSTRUMENT_OCTAVE);
+                            }
                         }
                     }
                 }
@@ -813,7 +833,7 @@ impl PerformState {
                             .find(|track| track.id == track_id && track.is_playable_midi_target())
                             .map(|_| ActiveInstrumentNote {
                                 track_id,
-                                pitch: 35 + position.ordinal(PerformMode::Instrument),
+                                pitch: self.instrument_pitch(position),
                             })
                     })
                 } else {
@@ -896,6 +916,15 @@ impl PerformState {
 
     pub const fn fixed_computer_velocity(&self) -> u8 {
         self.computer_key_velocity.0
+    }
+
+    pub const fn instrument_octave(&self) -> i8 {
+        self.instrument_octave
+    }
+
+    pub fn instrument_pitch(&self, position: PadPosition) -> u8 {
+        let base = i16::from(INSTRUMENT_BASE_PITCH + position.ordinal(PerformMode::Instrument));
+        (base + i16::from(self.instrument_octave) * 12).clamp(0, 127) as u8
     }
 
     pub fn set_fixed_computer_velocity(&mut self, velocity: u8) {

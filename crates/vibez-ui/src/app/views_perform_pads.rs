@@ -198,18 +198,43 @@ impl App {
                 selected_text_color: th::accent(),
                 selected_background: th::bg_hover().into(),
             });
+            let target_overlay = self.state.perform.instrument_target_overlay;
+            let range_or_bank = if target_overlay {
+                format!("TARGET BANK {bank}")
+            } else {
+                let low = crate::widgets::piano_roll::pitch_name(
+                    self.state.perform.instrument_pitch(PadPosition::ALL[12]),
+                );
+                let high = crate::widgets::piano_roll::pitch_name(
+                    self.state.perform.instrument_pitch(PadPosition::ALL[3]),
+                );
+                format!(
+                    "OCTAVE {:+} · {low}–{high}",
+                    self.state.perform.instrument_octave()
+                )
+            };
+            let previous_hint = if target_overlay {
+                "PREVIOUS TARGET BANK"
+            } else {
+                "OCTAVE DOWN  ["
+            };
+            let next_hint = if target_overlay {
+                "NEXT TARGET BANK"
+            } else {
+                "OCTAVE UP  ]"
+            };
             let target_navigation = row![
                 text("INSTRUMENT TARGET")
                     .font(PERFORM_LABEL)
                     .size(8)
                     .color(th::text_muted()),
                 horizontal_space(),
-                text(format!("TARGET BANK {bank}"))
+                text(range_or_bank)
                     .font(PERFORM_TECH_STRONG)
                     .size(8)
                     .color(th::blend(th::text_dim(), th::text(), 0.24)),
-                perform_bank_button("‹", "PREVIOUS TARGET BANK  [", PerformMsg::PreviousBank),
-                perform_bank_button("›", "NEXT TARGET BANK  ]", PerformMsg::NextBank),
+                perform_bank_button("‹", previous_hint, PerformMsg::PreviousBank),
+                perform_bank_button("›", next_hint, PerformMsg::NextBank),
             ]
             .spacing(5)
             .align_y(iced::Alignment::Center);
@@ -286,8 +311,13 @@ impl App {
     }
 
     fn view_perform_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
-        let ordinal = u16::from(position.ordinal(mode))
-            + u16::from(self.state.perform.banks.for_mode(mode)) * 16;
+        let visible_bank =
+            if mode == PerformMode::Instrument && !self.state.perform.instrument_target_overlay {
+                0
+            } else {
+                self.state.perform.banks.for_mode(mode)
+            };
+        let ordinal = u16::from(position.ordinal(mode)) + u16::from(visible_bank) * 16;
         let section = (mode == PerformMode::Sections)
             .then(|| self.state.perform.sections.at_slot(ordinal - 1))
             .flatten();
@@ -406,7 +436,7 @@ impl App {
                 }
             }
             PerformMode::Instrument => {
-                let pitch = 35 + position.ordinal(PerformMode::Instrument);
+                let pitch = self.state.perform.instrument_pitch(position);
                 (
                     crate::widgets::piano_roll::pitch_name(pitch),
                     selected_instrument
