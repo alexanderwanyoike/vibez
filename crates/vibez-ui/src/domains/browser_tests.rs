@@ -865,6 +865,107 @@ fn selecting_a_folder_expands_it_and_resets_the_result_window() {
 }
 
 #[test]
+fn selecting_any_visible_local_node_from_remote_activates_that_exact_local_source() {
+    let targets = [
+        None,
+        Some(PathBuf::from("/samples")),
+        Some(PathBuf::from("/samples/drums")),
+    ];
+
+    let actual: Vec<_> = targets
+        .iter()
+        .map(|target| {
+            let mut browser = BrowserState {
+                mode: SampleBrowserMode::Remote,
+                ..BrowserState::default()
+            };
+
+            browser.update(BrowserMsg::SelectLocalFolder(target.clone()));
+
+            (browser.mode, browser.current_folder)
+        })
+        .collect();
+    let expected: Vec<_> = targets
+        .into_iter()
+        .map(|target| (SampleBrowserMode::Local, target))
+        .collect();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn local_folder_disclosure_from_remote_only_changes_expansion() {
+    let current_folder = PathBuf::from("/samples/selected");
+    let disclosed_folder = PathBuf::from("/samples/drums");
+    let mut browser = BrowserState {
+        mode: SampleBrowserMode::Remote,
+        current_folder: Some(current_folder.clone()),
+        ..BrowserState::default()
+    };
+
+    browser.update(BrowserMsg::ToggleLocalFolder(disclosed_folder.clone()));
+
+    assert_eq!(
+        (
+            browser.mode,
+            browser.current_folder,
+            browser.expanded_local_folders
+        ),
+        (
+            SampleBrowserMode::Remote,
+            Some(current_folder),
+            std::collections::HashSet::from([disclosed_folder])
+        )
+    );
+}
+
+#[test]
+fn direct_local_navigation_preserves_browser_context_contracts() {
+    let root = PathBuf::from("/samples");
+    let target = root.join("drums");
+    let selected_source = MediaSourceRef::DropboxFile {
+        path_lower: "/megalodon/kick.wav".into(),
+        display_path: "/Megalodon/Kick.wav".into(),
+        rev: Some("rev-7".into()),
+    };
+    let mut browser = BrowserState {
+        mode: SampleBrowserMode::Remote,
+        search: "kick".into(),
+        selected_source: Some(selected_source.clone()),
+        search_scope: crate::state::BrowserSearchScope::Everywhere,
+        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 4,
+        root_watch_errors: std::collections::HashMap::from([(
+            root.clone(),
+            "watch limit reached".into(),
+        )]),
+        ..BrowserState::default()
+    };
+
+    browser.update(BrowserMsg::SelectLocalFolder(Some(target.clone())));
+
+    assert_eq!(
+        (
+            browser.mode,
+            browser.current_folder,
+            browser.search,
+            browser.selected_source,
+            browser.search_scope,
+            browser.results_visible_limit,
+            browser.root_watch_errors,
+        ),
+        (
+            SampleBrowserMode::Local,
+            Some(target),
+            "kick".into(),
+            Some(selected_source),
+            crate::state::BrowserSearchScope::SelectedFolder,
+            crate::state::BROWSER_RESULTS_PAGE_SIZE,
+            std::collections::HashMap::from([(root, "watch limit reached".into())]),
+        )
+    );
+}
+
+#[test]
 fn large_results_are_rendered_in_bounded_windows_without_losing_total() {
     let mut browser = BrowserState::default();
     let total = 25_000;
