@@ -37,6 +37,7 @@ impl App {
     ) -> Task<Message> {
         let count = report.plugins.len();
         self.state.plugin_settings.cache = report.plugins;
+        self.state.plugin_settings.mark_cache_refreshed();
         self.state.plugin_scan_in_progress = false;
         self.state.plugin_scan_status = if report.failed.is_empty() {
             format!("Found {count} plugins")
