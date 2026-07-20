@@ -379,23 +379,123 @@ fn remote_navigation_cycles_folder_connection_and_everywhere_scopes() {
 }
 
 #[test]
+fn selecting_visible_remote_folder_from_local_activates_that_folder_in_one_click() {
+    let mut browser = BrowserState {
+        mode: SampleBrowserMode::Local,
+        search: "kick".into(),
+        search_scope: crate::state::BrowserSearchScope::Everywhere,
+        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 2,
+        selected_source: Some(MediaSourceRef::LocalFile {
+            path: PathBuf::from("/samples/kick.wav"),
+        }),
+        ..BrowserState::default()
+    };
+    browser.remote.catalog.entries = vec![
+        RemoteCatalogEntry {
+            provider_item_id: "/megalodon".into(),
+            path: "/Megalodon".into(),
+            parent_path: String::new(),
+            name: "Megalodon".into(),
+            is_folder: true,
+            revision: None,
+            size: None,
+            derived_metadata: None,
+        },
+        RemoteCatalogEntry {
+            provider_item_id: "/megalodon/drums".into(),
+            path: "/Megalodon/Drums".into(),
+            parent_path: "/megalodon".into(),
+            name: "Drums".into(),
+            is_folder: true,
+            revision: None,
+            size: None,
+            derived_metadata: None,
+        },
+    ];
+    browser.remote.rebuild_catalog_children();
+    browser.remote.expanded.insert("/megalodon".into());
+    assert_eq!(browser.remote.catalog_child_indices("").len(), 1);
+    assert_eq!(browser.remote.catalog_child_indices("/megalodon").len(), 1);
+
+    browser.update(BrowserMsg::SelectRemoteFolder("/megalodon/drums".into()));
+
+    assert_eq!(browser.mode, SampleBrowserMode::Remote);
+    assert_eq!(browser.remote.current_path, "/megalodon/drums");
+    assert!(browser.remote.expanded.contains("/megalodon"));
+    assert!(browser.remote.expanded.contains("/megalodon/drums"));
+    assert_eq!(
+        browser.search_scope,
+        crate::state::BrowserSearchScope::SelectedFolder
+    );
+    assert_eq!(browser.search, "kick");
+    assert_eq!(browser.remote.catalog.entries.len(), 2);
+    assert_eq!(
+        browser.results_visible_limit,
+        crate::state::BROWSER_RESULTS_PAGE_SIZE
+    );
+    assert!(browser.selected_source.is_none());
+}
+
+#[test]
+fn selecting_visible_remote_connection_from_local_activates_its_root_in_one_click() {
+    let mut browser = BrowserState {
+        mode: SampleBrowserMode::Local,
+        search: "snare".into(),
+        search_scope: crate::state::BrowserSearchScope::Everywhere,
+        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 2,
+        selected_source: Some(MediaSourceRef::DropboxFile {
+            path_lower: "/megalodon/snare.wav".into(),
+            display_path: "/Megalodon/Snare.wav".into(),
+            rev: Some("rev-7".into()),
+        }),
+        ..BrowserState::default()
+    };
+    browser.remote.current_path = "/megalodon".into();
+    browser.remote.selected_path = Some("/megalodon/snare.wav".into());
+    browser.remote.expanded.insert("/megalodon".into());
+
+    browser.update(BrowserMsg::SelectRemoteFolder(String::new()));
+
+    assert_eq!(browser.mode, SampleBrowserMode::Remote);
+    assert!(browser.remote.current_path.is_empty());
+    assert!(browser.remote.expanded.contains("/megalodon"));
+    assert_eq!(
+        browser.search_scope,
+        crate::state::BrowserSearchScope::SelectedFolder
+    );
+    assert_eq!(browser.search, "snare");
+    assert_eq!(
+        browser.results_visible_limit,
+        crate::state::BROWSER_RESULTS_PAGE_SIZE
+    );
+    assert!(browser.remote.selected_path.is_none());
+    assert!(browser.selected_source.is_none());
+}
+
+#[test]
 fn remote_place_and_connection_collapse_without_losing_navigation_state() {
     let mut browser = BrowserState::default();
     browser.remote.current_path = "/megalodon/drums".into();
     browser.remote.expanded.insert("/megalodon".into());
 
+    browser.update(BrowserMsg::ToggleRemoteFolder("/megalodon".into()));
     browser.update(BrowserMsg::ToggleRemoteConnection);
     browser.update(BrowserMsg::ToggleRemotePlace);
 
+    assert_eq!(browser.mode, SampleBrowserMode::Local);
     assert!(!browser.remote.connection_expanded);
     assert!(!browser.remote.place_expanded);
     assert_eq!(browser.remote.current_path, "/megalodon/drums");
-    assert!(browser.remote.expanded.contains("/megalodon"));
+    assert!(!browser.remote.expanded.contains("/megalodon"));
 
     browser.update(BrowserMsg::ToggleRemotePlace);
     browser.update(BrowserMsg::ToggleRemoteConnection);
+    browser.update(BrowserMsg::ToggleRemoteFolder("/megalodon".into()));
     assert!(browser.remote.place_expanded);
     assert!(browser.remote.connection_expanded);
+    assert!(browser.remote.expanded.contains("/megalodon"));
+    assert_eq!(browser.mode, SampleBrowserMode::Local);
+    assert_eq!(browser.remote.current_path, "/megalodon/drums");
 }
 
 #[test]
