@@ -384,6 +384,7 @@ pub enum PerformMsg {
         key_id: String,
         occurred_at: Instant,
     },
+    WindowUnfocused,
 }
 
 impl PerformMsg {
@@ -904,6 +905,17 @@ impl PerformState {
                     ..PerformAction::default()
                 };
             }
+            PerformMsg::WindowUnfocused => {
+                self.instrument_target_overlay = false;
+                for (_, (_, _, instrument_note)) in self.active_computer_keys.drain() {
+                    if let Some(note) = instrument_note {
+                        engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOff {
+                            track_id: note.track_id,
+                            pitch: note.pitch,
+                        });
+                    }
+                }
+            }
         }
         PerformAction::default()
     }
@@ -970,3 +982,7 @@ impl PerformState {
 #[cfg(test)]
 #[path = "perform_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "perform_focus_tests.rs"]
+mod focus_tests;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use iced::{Subscription, Task, Theme};
 
 use crate::domains::browser::BrowserMsg;
+use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
 use rtrb::{Consumer, Producer};
 use vibez_audio_io::audio_stream::AudioOutputStream;
@@ -522,6 +523,9 @@ impl App {
                 iced::Event::Window(iced::window::Event::Resized(size)) => Some(Message::View(
                     ViewMsg::WindowResized(size.width, size.height),
                 )),
+                iced::Event::Window(iced::window::Event::Unfocused) => {
+                    Some(Message::Perform(PerformMsg::WindowUnfocused))
+                }
                 _ => None,
             }),
         ])
