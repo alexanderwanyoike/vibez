@@ -162,13 +162,15 @@ sample clock, accepts rate changes without an immediate retrigger, and emits
 `NoteRepeated` events with authoritative sample timestamps. Pad release owns the
 matching stop and note-off even when the latch remains enabled.
 
-Project Swing and optional Project Track Swing offsets are canonical project
-data and undo state. Their clamped effective value delays only odd steps of
-generated straight-grid events toward a 2:1 feel; triplets ignore Swing.
-Existing clip notes keep their persisted absolute beat positions and never
-enter this transform. The engine retains Swing beside its generated-event
-scheduler so later Section Record quantization can share the contract without
-changing clip playback.
+The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
+Project Swing, and optional Project Track Swing offsets as canonical project
+data and undo state. Swing uses the profile's native `50..75%` long/short pair
+ratio and the Project Track offset adds percentage points before clamping to
+that range. Generated `1/8` and `1/16` events resolve on the profile's 96 PPQN
+clock; `1/4`, `1/32`, and triplet rates remain exact. Existing clip notes keep
+their persisted absolute beat positions and never enter this transform. The
+engine retains Swing beside its generated-event scheduler so later Section
+Record quantization can share the contract without changing clip playback.
 
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
@@ -326,6 +328,8 @@ are handled in three stages:
   its properties and Timeline Content. Arrange audio and note clips stay
   flattened into the existing `clips`/`note_clips` keys for compatibility;
   legacy track automation is migrated into Arrange Timeline Content on load.
+  Project Groove data persists as the versioned `groove_profile`, native
+  `swing` ratio, and optional Project Track `swing_offset` fields.
   Existing project bytes therefore load with an empty Section store and no
   format migration.
 - Save, load, media collection and hydration, unresolved-media preservation,

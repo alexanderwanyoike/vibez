@@ -1,16 +1,44 @@
 use serde::{Deserialize, Serialize};
 
-/// Project-wide Swing amount. `0.0` is straight and `1.0` delays every
-/// generated offbeat to a 2:1 triplet feel.
+/// Immutable timing-model identity used to interpret Project Swing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GrooveProfile {
+    #[default]
+    #[serde(rename = "mpc_2000xl_v1")]
+    Mpc2000XlV1,
+}
+
+impl GrooveProfile {
+    pub const MPC2000XL_PPQN: u32 = 96;
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Mpc2000XlV1 => "MPC2000XL",
+        }
+    }
+
+    pub const fn swings(self, rate: NoteRepeatRate) -> bool {
+        match self {
+            Self::Mpc2000XlV1 => {
+                matches!(rate, NoteRepeatRate::Eighth | NoteRepeatRate::Sixteenth)
+            }
+        }
+    }
+}
+
+/// Project-wide MPC2000XL Swing ratio. `0.50` is straight, approximately
+/// `0.66` is triplet feel, and `0.75` produces a 3:1 long/short pair.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SwingAmount(f32);
 
 impl SwingAmount {
-    pub const STRAIGHT: Self = Self(0.0);
+    pub const MIN: f32 = 0.50;
+    pub const MAX: f32 = 0.75;
+    pub const STRAIGHT: Self = Self(Self::MIN);
 
     pub fn new(value: f32) -> Self {
-        Self(value.clamp(0.0, 1.0))
+        Self(value.clamp(Self::MIN, Self::MAX))
     }
 
     pub const fn get(self) -> f32 {
@@ -42,14 +70,17 @@ impl<'de> Deserialize<'de> for SwingAmount {
     }
 }
 
-/// Optional Project Track adjustment combined with Project Swing.
+/// Optional percentage-point adjustment combined with Project Swing.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SwingOffset(f32);
 
 impl SwingOffset {
+    pub const MIN: f32 = -0.25;
+    pub const MAX: f32 = 0.25;
+
     pub fn new(value: f32) -> Self {
-        Self(value.clamp(-1.0, 1.0))
+        Self(value.clamp(Self::MIN, Self::MAX))
     }
 
     pub const fn get(self) -> f32 {
@@ -150,6 +181,39 @@ impl NoteRepeatRate {
 impl std::fmt::Display for NoteRepeatRate {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.label())
+    }
+}
+
+#[cfg(test)]
+mod groove_tests {
+    use super::*;
+
+    #[test]
+    fn mpc2000xl_profile_has_a_stable_persisted_identity() {
+        assert_eq!(
+            serde_json::to_string(&GrooveProfile::Mpc2000XlV1).unwrap(),
+            "\"mpc_2000xl_v1\""
+        );
+        assert_eq!(GrooveProfile::default(), GrooveProfile::Mpc2000XlV1);
+    }
+
+    #[test]
+    fn mpc2000xl_swing_and_track_offsets_use_percentage_point_semantics() {
+        assert_eq!(SwingAmount::new(0.0), SwingAmount::STRAIGHT);
+        assert_eq!(SwingAmount::new(1.0).get(), 0.75);
+        assert_eq!(SwingAmount::new(0.56).get(), 0.56);
+        assert_eq!(
+            SwingAmount::new(0.56)
+                .effective(Some(SwingOffset::new(0.04)))
+                .get(),
+            0.60
+        );
+        assert_eq!(
+            SwingAmount::new(0.70)
+                .effective(Some(SwingOffset::new(0.20)))
+                .get(),
+            0.75
+        );
     }
 }
 

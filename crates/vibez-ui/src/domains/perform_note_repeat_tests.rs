@@ -216,21 +216,21 @@ fn swing_edits_are_project_dirty_engine_commands_with_track_inheritance() {
         selected_project_track: Some(tracks[0].id),
     };
 
-    state.update(PerformMsg::SetProjectSwing(0.4), &mut engine, ctx);
+    state.update(PerformMsg::SetProjectSwing(0.60), &mut engine, ctx);
     let action = state.update(
-        PerformMsg::SetTrackSwingOffset(Some(-0.1)),
+        PerformMsg::SetTrackSwingOffset(Some(-0.04)),
         &mut engine,
         ctx,
     );
-    assert_eq!(state.project_swing(), SwingAmount::new(0.4));
+    assert_eq!(state.project_swing(), SwingAmount::new(0.60));
     assert_eq!(
         action.track_swing_request,
         Some(TrackSwingRequest {
             track_id: tracks[0].id,
-            swing_offset: Some(SwingOffset::new(-0.1)),
+            swing_offset: Some(SwingOffset::new(-0.04)),
         })
     );
-    assert!(PerformMsg::SetProjectSwing(0.4).marks_dirty());
+    assert!(PerformMsg::SetProjectSwing(0.60).marks_dirty());
     assert!(PerformMsg::SetTrackSwingOffset(None).marks_dirty());
     assert!(matches!(
         engine.0.as_slice(),
@@ -240,8 +240,8 @@ fn swing_edits_are_project_dirty_engine_commands_with_track_inheritance() {
                 track_id,
                 Some(offset),
             ),
-        ] if *amount == SwingAmount::new(0.4)
+        ] if *amount == SwingAmount::new(0.60)
             && *track_id == tracks[0].id
-            && *offset == SwingOffset::new(-0.1)
+            && *offset == SwingOffset::new(-0.04)
     ));
 }

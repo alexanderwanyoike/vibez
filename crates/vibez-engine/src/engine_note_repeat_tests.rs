@@ -1,7 +1,7 @@
 use super::*;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
-use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
+use vibez_core::perform::{GrooveProfile, NoteRepeatRate, SwingAmount, SwingOffset};
 
 fn repeat_engine() -> (
     AudioEngine,
@@ -47,12 +47,12 @@ fn project_and_track_swing_shift_straight_repeat_timestamps() {
     let (mut engine, mut commands, mut events, track_id) = repeat_engine();
     while events.pop().is_ok() {}
     commands
-        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.5)))
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.56)))
         .unwrap();
     commands
         .push(EngineCommand::SetTrackSwingOffset(
             track_id,
-            Some(SwingOffset::new(0.5)),
+            Some(SwingOffset::new(0.10)),
         ))
         .unwrap();
     commands
@@ -68,7 +68,9 @@ fn project_and_track_swing_shift_straight_repeat_timestamps() {
     let mut output = vec![0.0; 120 * 2];
     engine.process(&mut output, 2);
 
-    assert_eq!(repeat_timestamps(&mut events), vec![67, 100]);
+    // At 100 Hz and 60 BPM, MPC tick 63 lands at sample 66 and the next
+    // 96-tick pair boundary lands at sample 100.
+    assert_eq!(repeat_timestamps(&mut events), vec![66, 100]);
 }
 
 #[test]
@@ -76,7 +78,7 @@ fn triplet_repeat_timestamps_ignore_swing() {
     let (mut engine, mut commands, mut events, track_id) = repeat_engine();
     while events.pop().is_ok() {}
     commands
-        .push(EngineCommand::SetProjectSwing(SwingAmount::new(1.0)))
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.75)))
         .unwrap();
     commands
         .push(EngineCommand::StartNoteRepeat {
@@ -200,6 +202,11 @@ fn render_clip_with_swing(swing: SwingAmount) -> Vec<f32> {
 fn swing_does_not_change_existing_clip_playback() {
     assert_eq!(
         render_clip_with_swing(SwingAmount::STRAIGHT),
-        render_clip_with_swing(SwingAmount::new(1.0))
+        render_clip_with_swing(SwingAmount::new(0.75))
     );
+}
+
+#[test]
+fn engine_ships_the_versioned_mpc2000xl_profile() {
+    assert_eq!(AudioEngine::groove_profile(), GrooveProfile::Mpc2000XlV1);
 }

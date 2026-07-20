@@ -4,7 +4,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::RING_BUFFER_CAPACITY;
 use vibez_core::id::{SectionId, TrackId};
-use vibez_core::perform::SwingAmount;
+use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
@@ -99,6 +99,11 @@ struct QueuedSectionPlayback {
 }
 
 impl AudioEngine {
+    /// Timing profile compiled into V1 generated-event scheduling.
+    pub const fn groove_profile() -> GrooveProfile {
+        GrooveProfile::Mpc2000XlV1
+    }
+
     /// Create a new audio engine.
     ///
     /// Returns `(engine, command_producer, event_consumer)`.  The caller

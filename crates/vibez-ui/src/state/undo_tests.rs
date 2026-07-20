@@ -245,7 +245,7 @@ fn project_and_track_swing_edits_restore_through_undo() {
     Arc::make_mut(&mut state.project_tracks).tracks.push(track);
     state.arrangement.selected_track = Some(track_id);
 
-    perform_edit(&mut state, &mut engine, PerformMsg::SetProjectSwing(0.37));
+    perform_edit(&mut state, &mut engine, PerformMsg::SetProjectSwing(0.63));
     let action = perform_edit(
         &mut state,
         &mut engine,
@@ -258,7 +258,7 @@ fn project_and_track_swing_edits_restore_through_undo() {
         .swing_offset = request.swing_offset;
 
     assert_eq!(state.project.history.undo.len(), 2);
-    assert_eq!(state.perform.project_swing().get(), 0.37);
+    assert_eq!(state.perform.project_swing().get(), 0.63);
     assert_eq!(
         state.project_tracks.find(track_id).unwrap().swing_offset,
         Some(vibez_core::perform::SwingOffset::new(0.08))
@@ -269,7 +269,7 @@ fn project_and_track_swing_edits_restore_through_undo() {
         state.project_tracks.find(track_id).unwrap().swing_offset,
         None
     );
-    assert_eq!(state.perform.project_swing().get(), 0.37);
+    assert_eq!(state.perform.project_swing().get(), 0.63);
 
     undo_once(&mut state);
     assert_eq!(

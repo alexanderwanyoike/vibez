@@ -157,6 +157,7 @@ fn main() {
         buses: Vec::new(),
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
+        groove_profile: vibez_core::perform::GrooveProfile::default(),
         swing: vibez_core::perform::SwingAmount::default(),
         sample_rate: 48_000,
         tracks: vec![drums, bass, chords, lead],

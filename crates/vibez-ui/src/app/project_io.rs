@@ -342,6 +342,7 @@ impl App {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Untitled".to_string()),
             bpm: self.state.transport.bpm,
+            groove_profile: vibez_core::perform::GrooveProfile::default(),
             swing: self.state.perform.project_swing(),
             sample_rate: self.state.transport.sample_rate,
             tracks,

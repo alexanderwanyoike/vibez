@@ -9,6 +9,7 @@ use crate::message::Message;
 use crate::state::UndoGestureId;
 use crate::theme;
 use crate::widgets::drag::ValueDrag;
+use vibez_core::perform::{SwingAmount, SwingOffset};
 
 #[derive(Debug, Clone, Copy)]
 enum SwingTarget {
@@ -25,21 +26,21 @@ impl SwingFaderWidget {
     pub fn project(value: f32) -> Self {
         Self {
             target: SwingTarget::Project,
-            value: value.clamp(0.0, 1.0),
+            value: value.clamp(SwingAmount::MIN, SwingAmount::MAX),
         }
     }
 
     pub fn track(value: f32) -> Self {
         Self {
             target: SwingTarget::Track,
-            value: value.clamp(-1.0, 1.0),
+            value: value.clamp(SwingOffset::MIN, SwingOffset::MAX),
         }
     }
 
     fn range(&self) -> (f32, f32) {
         match self.target {
-            SwingTarget::Project => (0.0, 1.0),
-            SwingTarget::Track => (-1.0, 1.0),
+            SwingTarget::Project => (SwingAmount::MIN, SwingAmount::MAX),
+            SwingTarget::Track => (SwingOffset::MIN, SwingOffset::MAX),
         }
     }
 
@@ -159,8 +160,8 @@ impl canvas::Program<Message> for SwingFaderWidget {
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let (minimum, maximum) = self.range();
-                // One horizontal pixel is one percentage point. This keeps
-                // exact values reachable even in the narrow Instrument rail.
+                // Dragging changes one native percentage point per pixel. A
+                // click still maps the complete profile range onto the rail.
                 if let Some(value) = state.drag.drag_to(cursor, 0.01, 0.0, minimum..=maximum) {
                     let gesture = *state.undo_gesture.get_or_insert_with(UndoGestureId::new);
                     return (
@@ -213,7 +214,7 @@ mod tests {
 
     #[test]
     fn project_click_maps_the_hundred_pixel_track_to_exact_percentages() {
-        for (x, expected) in [(63.0, 0.59), (79.0, 0.75)] {
+        for (x, expected) in [(40.0, 0.59), (104.0, 0.75)] {
             let message = click(&SwingFaderWidget::project(0.0), x);
             assert!(matches!(
                 perform_edit(message),

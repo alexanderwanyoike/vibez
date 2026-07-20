@@ -1,6 +1,6 @@
 //! Allocation-free Note Repeat scheduling on the engine clock.
 
-use vibez_core::perform::{NoteRepeatRate, SwingAmount};
+use vibez_core::perform::{GrooveProfile, NoteRepeatRate, SwingAmount};
 
 pub const MAX_NOTE_REPEATS: usize = 16;
 
@@ -136,8 +136,8 @@ impl TrackNoteRepeats {
     }
 }
 
-/// First subdivision strictly after `after_sample`. Straight-grid odd steps
-/// are delayed toward the triplet position; triplet grids ignore Swing.
+/// First MPC2000XL subdivision strictly after `after_sample`. The profile uses
+/// a 96 PPQN clock and interprets Swing as the long side of a two-step ratio.
 pub fn next_repeat_sample(
     after_sample: u64,
     rate: NoteRepeatRate,
@@ -148,22 +148,33 @@ pub fn next_repeat_sample(
     if !bpm.is_finite() || bpm <= 0.0 || sample_rate == 0 {
         return after_sample.saturating_add(1);
     }
-    let interval = rate.interval_beats() * f64::from(sample_rate) * 60.0 / bpm;
-    if !interval.is_finite() || interval <= 0.0 {
+    let profile = GrooveProfile::Mpc2000XlV1;
+    let samples_per_tick =
+        f64::from(sample_rate) * 60.0 / (bpm * f64::from(GrooveProfile::MPC2000XL_PPQN));
+    let ticks_per_step = rate.interval_beats() * f64::from(GrooveProfile::MPC2000XL_PPQN);
+    if !samples_per_tick.is_finite()
+        || samples_per_tick <= 0.0
+        || !ticks_per_step.is_finite()
+        || ticks_per_step <= 0.0
+    {
         return after_sample.saturating_add(1);
     }
-    let approximate_step = (after_sample as f64 / interval).floor().max(0.0) as u64;
+    let approximate_step = (after_sample as f64 / samples_per_tick / ticks_per_step)
+        .floor()
+        .max(0.0) as u64;
     for step in approximate_step..approximate_step.saturating_add(4) {
-        let mut position = step as f64 * interval;
-        if !rate.is_triplet() && step % 2 == 1 {
-            position += f64::from(swing.get()) * interval / 3.0;
-        }
-        let sample = position.round().max(0.0) as u64;
+        let position_ticks = if profile.swings(rate) && step % 2 == 1 {
+            let pair_start = step.saturating_sub(1) as f64 * ticks_per_step;
+            pair_start + (2.0 * ticks_per_step * f64::from(swing.get())).round()
+        } else {
+            step as f64 * ticks_per_step
+        };
+        let sample = (position_ticks * samples_per_tick).round().max(0.0) as u64;
         if sample > after_sample {
             return sample;
         }
     }
-    after_sample.saturating_add(interval.round().max(1.0) as u64)
+    after_sample.saturating_add((ticks_per_step * samples_per_tick).round().max(1.0) as u64)
 }
 
 #[cfg(test)]
@@ -171,39 +182,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn straight_swing_delays_only_offbeats() {
-        let swing = SwingAmount::new(1.0);
-        assert_eq!(
-            next_repeat_sample(0, NoteRepeatRate::Eighth, 60.0, 100, swing),
-            67
-        );
-        assert_eq!(
-            next_repeat_sample(67, NoteRepeatRate::Eighth, 60.0, 100, swing),
-            100
-        );
-        assert_eq!(
-            next_repeat_sample(100, NoteRepeatRate::Eighth, 60.0, 100, swing),
-            167
-        );
+    fn mpc2000xl_swing_uses_native_ratios_on_a_96_ppqn_clock() {
+        for (rate, straight, near_triplet, three_to_one, pair_end) in [
+            (NoteRepeatRate::Eighth, 48, 63, 72, 96),
+            (NoteRepeatRate::Sixteenth, 24, 32, 36, 48),
+        ] {
+            assert_eq!(
+                next_repeat_sample(0, rate, 60.0, 96, SwingAmount::new(0.50)),
+                straight
+            );
+            assert_eq!(
+                next_repeat_sample(0, rate, 60.0, 96, SwingAmount::new(0.66)),
+                near_triplet
+            );
+            assert_eq!(
+                next_repeat_sample(0, rate, 60.0, 96, SwingAmount::new(0.75)),
+                three_to_one
+            );
+            assert_eq!(
+                next_repeat_sample(three_to_one, rate, 60.0, 96, SwingAmount::new(0.75)),
+                pair_end
+            );
+        }
+    }
+
+    #[test]
+    fn mpc2000xl_swing_only_applies_to_eighth_and_sixteenth_grids() {
+        for rate in [NoteRepeatRate::Quarter, NoteRepeatRate::ThirtySecond] {
+            let straight = next_repeat_sample(0, rate, 60.0, 96, SwingAmount::STRAIGHT);
+            let swung = next_repeat_sample(0, rate, 60.0, 96, SwingAmount::new(0.75));
+            assert_eq!(swung, straight, "{rate} must remain unswung");
+        }
     }
 
     #[test]
     fn triplets_are_exact_at_every_swing_amount() {
-        let straight = next_repeat_sample(
-            0,
+        for rate in [
+            NoteRepeatRate::QuarterTriplet,
             NoteRepeatRate::EighthTriplet,
-            60.0,
-            300,
-            SwingAmount::STRAIGHT,
-        );
-        let swung = next_repeat_sample(
-            0,
-            NoteRepeatRate::EighthTriplet,
-            60.0,
-            300,
-            SwingAmount::new(1.0),
-        );
-        assert_eq!(straight, 100);
-        assert_eq!(swung, straight);
+            NoteRepeatRate::SixteenthTriplet,
+            NoteRepeatRate::ThirtySecondTriplet,
+        ] {
+            let straight = next_repeat_sample(0, rate, 60.0, 300, SwingAmount::STRAIGHT);
+            let swung = next_repeat_sample(0, rate, 60.0, 300, SwingAmount::new(0.75));
+            assert_eq!(swung, straight, "{rate} must remain unswung");
+        }
     }
 }

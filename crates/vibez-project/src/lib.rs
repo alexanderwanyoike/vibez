@@ -7,7 +7,7 @@ use vibez_core::midi::NoteClipInfo;
 use vibez_core::track::{ClipInfo, TrackInfo};
 
 pub use vibez_core::perform::SectionLaunchQuantization;
-use vibez_core::perform::SwingAmount;
+use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 pub mod project_format_v1;
 
@@ -52,6 +52,9 @@ pub struct SectionInfo {
 pub struct Project {
     pub name: String,
     pub bpm: f64,
+    /// Immutable timing-model identity used to interpret Project Swing.
+    #[serde(default)]
+    pub groove_profile: GrooveProfile,
     /// Project-wide Swing applied only to generated events.
     #[serde(default)]
     pub swing: SwingAmount,
@@ -77,6 +80,7 @@ impl Default for Project {
         Self {
             name: "Untitled".to_string(),
             bpm: vibez_core::constants::DEFAULT_BPM,
+            groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: vibez_core::constants::DEFAULT_SAMPLE_RATE,
             tracks: Vec::new(),
@@ -226,30 +230,35 @@ mod tests {
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
 
     #[test]
-    fn swing_values_roundtrip_and_old_documents_default_to_straight() {
+    fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {
         let mut project = Project {
-            swing: SwingAmount::new(0.42),
+            groove_profile: GrooveProfile::Mpc2000XlV1,
+            swing: SwingAmount::new(0.56),
             ..Project::default()
         };
         let mut track = TrackInfo::new("Hats");
-        track.swing_offset = Some(vibez_core::perform::SwingOffset::new(-0.12));
+        track.swing_offset = Some(vibez_core::perform::SwingOffset::new(-0.04));
         project.tracks.push(track);
 
         let json = serde_json::to_value(&project).unwrap();
+        assert_eq!(json["groove_profile"], "mpc_2000xl_v1");
         let loaded: Project = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(loaded.swing, SwingAmount::new(0.42));
+        assert_eq!(loaded.groove_profile, GrooveProfile::Mpc2000XlV1);
+        assert_eq!(loaded.swing, SwingAmount::new(0.56));
         assert_eq!(
             loaded.tracks[0].swing_offset,
-            Some(vibez_core::perform::SwingOffset::new(-0.12))
+            Some(vibez_core::perform::SwingOffset::new(-0.04))
         );
 
         let mut legacy = json;
+        legacy.as_object_mut().unwrap().remove("groove_profile");
         legacy.as_object_mut().unwrap().remove("swing");
         legacy["tracks"][0]
             .as_object_mut()
             .unwrap()
             .remove("swing_offset");
         let loaded: Project = serde_json::from_value(legacy).unwrap();
+        assert_eq!(loaded.groove_profile, GrooveProfile::Mpc2000XlV1);
         assert_eq!(loaded.swing, SwingAmount::STRAIGHT);
         assert_eq!(loaded.tracks[0].swing_offset, None);
     }
@@ -361,6 +370,7 @@ mod tests {
             buses: Vec::new(),
             name: "Test Project".into(),
             bpm: 140.0,
+            groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: 48_000,
             tracks: vec![TrackInfo::new("Synth"), TrackInfo::new("Bass")],
@@ -420,6 +430,7 @@ mod tests {
         let project = Project {
             name: "Legacy Layout".into(),
             bpm: 123.0,
+            groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: 44_100,
             tracks: vec![track.clone()],
@@ -517,6 +528,7 @@ mod tests {
             buses: Vec::new(),
             name: "Note Test".into(),
             bpm: 128.0,
+            groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: 44_100,
             tracks: vec![],
@@ -585,6 +597,7 @@ mod tests {
             buses: Vec::new(),
             name: "FX Test".into(),
             bpm: 120.0,
+            groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: 44_100,
             tracks: vec![track],
