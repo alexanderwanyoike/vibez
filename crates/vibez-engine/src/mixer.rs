@@ -14,6 +14,11 @@ use vibez_instruments::Instrument;
 use crate::playback_source::{ArrangementPlaybackSource, PreparedPlaybackSource};
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
 
+#[inline]
+fn crossed_beat(previous: f64, current: f64, event: f64) -> bool {
+    previous < event && event <= current
+}
+
 pub struct EffectSlot {
     pub id: EffectId,
     pub effect: Box<dyn AudioEffect>,
@@ -333,21 +338,20 @@ impl EngineTrack {
                         self.timed_note_offs.push((frame as u32, note.pitch));
                     }
                     for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
+                        if note.start_beat >= clip.loop_start_beats
+                            && note.start_beat <= effective_local
+                        {
                             self.timed_note_ons
                                 .push((frame as u32, note.pitch, note.velocity));
                         }
                     }
                 } else {
                     for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
+                        if crossed_beat(prev_effective_local, effective_local, note.start_beat) {
                             self.timed_note_ons
                                 .push((frame as u32, note.pitch, note.velocity));
                         }
-                        let end_diff = effective_local - note.end_beat();
-                        if end_diff >= 0.0 && end_diff < beat_step {
+                        if crossed_beat(prev_effective_local, effective_local, note.end_beat()) {
                             self.timed_note_offs.push((frame as u32, note.pitch));
                         }
                     }
@@ -473,19 +477,18 @@ impl EngineTrack {
                         note_offs.push(note.pitch);
                     }
                     for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
+                        if note.start_beat >= clip.loop_start_beats
+                            && note.start_beat <= effective_local
+                        {
                             note_ons.push((note.pitch, note.velocity));
                         }
                     }
                 } else {
                     for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
+                        if crossed_beat(prev_effective_local, effective_local, note.start_beat) {
                             note_ons.push((note.pitch, note.velocity));
                         }
-                        let end_diff = effective_local - note.end_beat();
-                        if end_diff >= 0.0 && end_diff < beat_step {
+                        if crossed_beat(prev_effective_local, effective_local, note.end_beat()) {
                             note_offs.push(note.pitch);
                         }
                     }
