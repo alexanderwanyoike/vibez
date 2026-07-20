@@ -4,6 +4,8 @@ use std::fmt;
 
 use vibez_core::id::TrackId;
 
+use crate::state::ProjectTrack;
+
 use super::{PadPosition, PerformMode, PerformState};
 
 const INSTRUMENT_BASE_PITCH: u8 = 35;
@@ -173,6 +175,25 @@ pub(super) struct InstrumentPerformanceState {
 }
 
 impl PerformState {
+    pub(crate) const fn instrument_target(&self) -> Option<TrackId> {
+        self.instrument.target
+    }
+
+    pub(crate) fn sync_instrument_target_from_selection(
+        &mut self,
+        selected: Option<TrackId>,
+        project_tracks: &[ProjectTrack],
+    ) {
+        let playable_target = selected.filter(|track_id| {
+            project_tracks
+                .iter()
+                .any(|track| track.id == *track_id && track.is_playable_midi_target())
+        });
+        if playable_target.is_some() {
+            self.sync_instrument_target(playable_target);
+        }
+    }
+
     pub(crate) fn sync_instrument_target(&mut self, target: Option<TrackId>) {
         if self.instrument.target != target {
             self.instrument.target = target;

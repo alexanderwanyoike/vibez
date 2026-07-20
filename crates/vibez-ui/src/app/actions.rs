@@ -120,7 +120,10 @@ impl App {
         }
         if let Some(track_id) = action.select_project_track {
             self.state.arrangement.selected_track = Some(track_id);
-            self.state.perform.sync_instrument_target(Some(track_id));
+            self.state.perform.sync_instrument_target_from_selection(
+                Some(track_id),
+                &self.state.project_tracks.tracks,
+            );
             if self.state.perform.selected_section.is_some() {
                 self.state
                     .perform

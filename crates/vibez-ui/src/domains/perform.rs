@@ -504,7 +504,7 @@ impl PerformState {
         ctx: PerformCtx<'_>,
     ) -> PerformAction {
         self.sync_track_mute_slots(ctx.project_tracks);
-        self.sync_instrument_target(ctx.selected_project_track);
+        self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
@@ -850,7 +850,7 @@ impl PerformState {
                     && !self.instrument_target_overlay
                 {
                     let velocity = self.fixed_computer_velocity();
-                    ctx.selected_project_track
+                    self.instrument_target()
                         .filter(|track_id| {
                             ctx.project_tracks.iter().any(|track| {
                                 track.id == *track_id && track.is_playable_midi_target()

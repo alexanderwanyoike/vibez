@@ -139,6 +139,56 @@ fn choose_source_and_target_changes_have_an_explicit_lifecycle() {
 }
 
 #[test]
+fn selecting_a_non_playable_track_preserves_the_last_instrument_target_and_source() {
+    let mut first_instrument = ProjectTrack::new(TrackId::new(), "Keys".into(), 0);
+    first_instrument.kind = vibez_core::midi::TrackKind::Midi;
+    first_instrument.has_instrument = true;
+    let audio_track = ProjectTrack::new(TrackId::new(), "Vocal".into(), 1);
+    let mut second_instrument = ProjectTrack::new(TrackId::new(), "Bass".into(), 2);
+    second_instrument.kind = vibez_core::midi::TrackKind::Midi;
+    second_instrument.has_instrument = true;
+    let tracks = vec![first_instrument, audio_track, second_instrument];
+    let mut state = PerformState::default();
+
+    state.sync_instrument_target_from_selection(Some(tracks[0].id), &tracks);
+    assert_eq!(state.instrument_target(), Some(tracks[0].id));
+    state.resolve_instrument_note(position(4), 70, tracks[0].id);
+    state.toggle_sixteen_levels();
+    assert_eq!(state.sixteen_levels_source_pitch(), Some(40));
+
+    state.sync_instrument_target_from_selection(Some(tracks[1].id), &tracks);
+    assert_eq!(state.instrument_target(), Some(tracks[0].id));
+    assert_eq!(state.sixteen_levels_source_pitch(), Some(40));
+    assert!(!state.choosing_sixteen_levels_source());
+
+    state.mode = PerformMode::Instrument;
+    let mut engine = RecordingEngine::default();
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: std::time::Instant::now(),
+        },
+        &mut engine,
+        PerformCtx {
+            workspace_visible: true,
+            project_tracks: &tracks,
+            selected_project_track: Some(tracks[1].id),
+        },
+    );
+    assert!(matches!(
+        engine.0.last(),
+        Some(vibez_engine::commands::EngineCommand::ExternalNoteOn { track_id, .. })
+            if *track_id == tracks[0].id
+    ));
+
+    state.sync_instrument_target_from_selection(Some(tracks[2].id), &tracks);
+    assert_eq!(state.instrument_target(), Some(tracks[2].id));
+    assert_eq!(state.sixteen_levels_source_pitch(), None);
+    assert!(state.choosing_sixteen_levels_source());
+}
+
+#[test]
 fn range_edits_apply_to_the_next_note_immediately() {
     let track_id = TrackId::new();
     let mut state = PerformState::default();

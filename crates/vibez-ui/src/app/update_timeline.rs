@@ -62,7 +62,10 @@ impl App {
                     .section_editor
                     .editor_mut()
                     .selected_track = Some(*track_id);
-                self.state.perform.sync_instrument_target(Some(*track_id));
+                self.state.perform.sync_instrument_target_from_selection(
+                    Some(*track_id),
+                    &self.state.project_tracks.tracks,
+                );
                 return ArrangementAction::default();
             }
         }
@@ -83,9 +86,10 @@ impl App {
             if let Some(track_id) = self.state.perform.section_editor.editor().selected_track {
                 self.state.arrangement.selected_track = Some(track_id);
             }
-            self.state
-                .perform
-                .sync_instrument_target(self.state.arrangement.selected_track);
+            self.state.perform.sync_instrument_target_from_selection(
+                self.state.arrangement.selected_track,
+                &self.state.project_tracks.tracks,
+            );
             action
         } else {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -95,9 +99,10 @@ impl App {
                 &mut engine,
                 ctx,
             );
-            self.state
-                .perform
-                .sync_instrument_target(self.state.arrangement.selected_track);
+            self.state.perform.sync_instrument_target_from_selection(
+                self.state.arrangement.selected_track,
+                &self.state.project_tracks.tracks,
+            );
             action
         }
     }
