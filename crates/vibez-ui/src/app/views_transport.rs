@@ -2,7 +2,7 @@
 //! Split from views_shell.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input,
+    button, canvas, center, column, container, horizontal_space, pick_list, row, text, text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -14,6 +14,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::AppState;
 use crate::theme as th;
+use crate::widgets::swing_fader::SwingFaderWidget;
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
@@ -146,44 +147,52 @@ impl App {
         let bpm_label = text("BPM").size(12).color(th::text_dim());
 
         let project_swing = self.state.perform.project_swing();
-        let swing_nudge = |label: &'static str, delta: f32| {
-            button(text(label).size(11).color(th::text_dim()))
-                .on_press(Message::Perform(PerformMsg::SetProjectSwing(
-                    project_swing.get() + delta,
-                )))
-                .width(Length::Fixed(20.0))
-                .height(Length::Fixed(22.0))
-                .padding(0)
-                .style(|_theme: &Theme, status| {
-                    let engaged =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    button::Style {
-                        background: Some(
-                            if engaged {
-                                th::bg_hover()
-                            } else {
-                                th::bg_surface()
-                            }
-                            .into(),
-                        ),
-                        text_color: if engaged {
-                            th::accent()
+        let swing_nudge = |icon: char, delta: f32| {
+            button(
+                center(icons::icon(icon).size(9).color(th::text_dim()))
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .on_press(Message::Perform(PerformMsg::SetProjectSwing(
+                project_swing.get() + delta,
+            )))
+            .width(Length::Fixed(22.0))
+            .height(Length::Fixed(22.0))
+            .padding(0)
+            .style(|_theme: &Theme, status| {
+                let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(
+                        if engaged {
+                            th::bg_hover()
                         } else {
-                            th::text_dim()
+                            th::bg_surface()
+                        }
+                        .into(),
+                    ),
+                    text_color: if engaged {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    },
+                    border: iced::Border {
+                        color: if engaged {
+                            th::accent_dim()
+                        } else {
+                            th::border()
                         },
-                        border: iced::Border {
-                            color: if engaged {
-                                th::accent_dim()
-                            } else {
-                                th::border()
-                            },
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                })
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
         };
+        let swing_fader: Element<'_, Message> =
+            canvas(SwingFaderWidget::project(project_swing.get()))
+                .width(Length::Fixed(108.0))
+                .height(Length::Fixed(22.0))
+                .into();
         let swing_control = container(
             row![
                 column![
@@ -193,8 +202,9 @@ impl App {
                         .color(th::text()),
                 ]
                 .spacing(1),
-                swing_nudge("−", -0.01),
-                swing_nudge("+", 0.01),
+                swing_fader,
+                swing_nudge(icons::MINUS, -0.01),
+                swing_nudge(icons::PLUS, 0.01),
             ]
             .spacing(4)
             .align_y(iced::Alignment::Center),
