@@ -122,11 +122,18 @@ impl BrowserState {
                 self.reset_results_window();
             }
             BrowserMsg::SelectLocalFolder(folder) => {
+                self.mode = SampleBrowserMode::Local;
                 self.select_local_folder(folder);
             }
             BrowserMsg::ToggleLocalFolder(folder) => {
-                if !self.expanded_local_folders.remove(&folder) {
-                    self.expanded_local_folders.insert(folder);
+                let should_expand = !self.expanded_local_folders.remove(&folder);
+                if should_expand {
+                    self.expanded_local_folders.insert(folder.clone());
+                }
+                self.mode = SampleBrowserMode::Local;
+                self.select_local_folder(Some(folder.clone()));
+                if !should_expand {
+                    self.expanded_local_folders.remove(&folder);
                 }
             }
             BrowserMsg::CycleSearchScope => {
