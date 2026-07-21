@@ -757,13 +757,14 @@ impl PerformState {
                         None
                     };
                 if let Some(note) = instrument_note {
-                    engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
-                        track_id: note.track_id,
-                        pitch: note.pitch,
-                        velocity: note.velocity,
-                    });
                     if note.repeating {
                         self.start_note_repeat(note, engine);
+                    } else {
+                        engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                            track_id: note.track_id,
+                            pitch: note.pitch,
+                            velocity: note.velocity,
+                        });
                     }
                 }
                 self.active_computer_keys

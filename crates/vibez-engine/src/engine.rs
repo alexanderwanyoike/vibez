@@ -83,6 +83,9 @@ pub struct AudioEngine {
     /// Continues Note Repeat timing while transport is stopped. While playing,
     /// this is kept aligned with the absolute transport position.
     performance_position: u64,
+    /// Vibez extends MPC Note Repeat to stopped transport. The first held pad
+    /// establishes this shared musical downbeat until the last repeat stops.
+    stopped_note_repeat_anchor: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -134,6 +137,7 @@ impl AudioEngine {
             arrangement_audio_length: None,
             project_swing: SwingAmount::default(),
             performance_position: 0,
+            stopped_note_repeat_anchor: None,
         };
 
         (engine, cmd_tx, event_rx)
@@ -384,6 +388,34 @@ impl AudioEngine {
         let project_swing = self.project_swing;
         for track in &mut self.tracks {
             track.reschedule_note_repeats(position, bpm, sample_rate, project_swing);
+        }
+    }
+
+    fn has_active_note_repeats(&self) -> bool {
+        self.tracks.iter().any(EngineTrack::has_active_note_repeats)
+    }
+
+    fn playing_note_repeat_anchor(&self) -> u64 {
+        self.active_section
+            .map(|section| {
+                self.performance_position
+                    .saturating_sub(section.position_samples)
+            })
+            .unwrap_or(0)
+    }
+
+    fn reanchor_note_repeats(&mut self, anchor_sample: u64, after_sample: u64) {
+        let bpm = self.transport.bpm();
+        let sample_rate = self.sample_rate;
+        let project_swing = self.project_swing;
+        for track in &mut self.tracks {
+            track.reanchor_note_repeats(
+                anchor_sample,
+                after_sample,
+                bpm,
+                sample_rate,
+                project_swing,
+            );
         }
     }
 

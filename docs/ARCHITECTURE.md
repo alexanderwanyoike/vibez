@@ -171,6 +171,12 @@ clock; `1/4`, `1/32`, and triplet rates remain exact. Existing clip notes keep
 their persisted absolute beat positions and never enter this transform. The
 engine retains Swing beside its generated-event scheduler so later Section
 Record quantization can share the contract without changing clip playback.
+While transport plays, the first repeated hit comes from the active musical
+grid and an Immediate Section transition establishes a new grid origin. Vibez
+deliberately extends MPC Note Repeat to stopped transport: the first pad sounds
+immediately as step zero, later pads share that anchor, and the anchor clears
+when the final repeated pad stops. Swing, tempo, rate, and Project Track offset
+changes reschedule future hits without changing the anchor.
 
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and

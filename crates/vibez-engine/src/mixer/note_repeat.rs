@@ -4,6 +4,10 @@ use super::*;
 use crate::note_repeat::{NoteRepeatClock, NoteRepeatStart};
 
 impl EngineTrack {
+    pub fn has_active_note_repeats(&self) -> bool {
+        self.note_repeats.is_active()
+    }
+
     pub fn effective_swing(&self, project_swing: SwingAmount) -> SwingAmount {
         project_swing.effective(self.swing_offset)
     }
@@ -41,6 +45,19 @@ impl EngineTrack {
         let swing = self.effective_swing(project_swing);
         self.note_repeats
             .reschedule(after_sample, bpm, sample_rate, swing);
+    }
+
+    pub fn reanchor_note_repeats(
+        &mut self,
+        anchor_sample: u64,
+        after_sample: u64,
+        bpm: f64,
+        sample_rate: u32,
+        project_swing: SwingAmount,
+    ) {
+        let swing = self.effective_swing(project_swing);
+        self.note_repeats
+            .reanchor(anchor_sample, after_sample, bpm, sample_rate, swing);
     }
 
     pub fn render_instrument_idle(

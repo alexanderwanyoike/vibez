@@ -42,6 +42,176 @@ fn repeat_timestamps(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<u64> {
     timestamps
 }
 
+fn repeat_events(events: &mut rtrb::Consumer<EngineEvent>) -> Vec<(u8, u64)> {
+    let mut repeated = Vec::new();
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::NoteRepeated {
+            pitch,
+            effective_at_samples,
+            ..
+        } = event
+        {
+            repeated.push((pitch, effective_at_samples));
+        }
+    }
+    repeated
+}
+
+fn stopped_repeat_engine_at(
+    position: usize,
+    swing: SwingAmount,
+) -> (
+    AudioEngine,
+    rtrb::Producer<EngineCommand>,
+    rtrb::Consumer<EngineEvent>,
+    TrackId,
+) {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    commands.push(EngineCommand::SetSampleRate(96)).unwrap();
+    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands
+        .push(EngineCommand::SetProjectSwing(swing))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackInstrument(
+            track_id,
+            InstrumentKind::SubtractiveSynth,
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    engine.process(&mut vec![0.0; position * 2], 2);
+    while events.pop().is_ok() {}
+    (engine, commands, events, track_id)
+}
+
+#[test]
+fn stopped_repeat_press_anchors_a_long_then_short_pair_mid_grid() {
+    // Start at an arbitrary point inside the old absolute Swing grid.
+    let (mut engine, mut commands, mut events, track_id) =
+        stopped_repeat_engine_at(29, SwingAmount::new(0.62));
+
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 60 * 2], 2);
+
+    // The press at 29 is step zero. At 62% the 48-tick pair is split at
+    // tick 30, so the audible gaps must be 30 then 18 ticks, never a flam
+    // or the reversed short-then-long phase of the old absolute clock.
+    assert_eq!(repeat_timestamps(&mut events), vec![29, 59, 77]);
+}
+
+#[test]
+fn stopped_repeat_pads_share_one_anchor_until_the_last_pad_stops() {
+    let (mut engine, mut commands, mut events, track_id) =
+        stopped_repeat_engine_at(29, SwingAmount::new(0.62));
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 10 * 2], 2);
+    assert_eq!(repeat_events(&mut events), vec![(42, 29)]);
+
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 1,
+            track_id,
+            pitch: 43,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 40 * 2], 2);
+    assert_eq!(
+        repeat_events(&mut events),
+        vec![(42, 59), (43, 59), (42, 77), (43, 77)]
+    );
+
+    commands
+        .push(EngineCommand::StopNoteRepeat { id: 0, track_id })
+        .unwrap();
+    commands
+        .push(EngineCommand::StopNoteRepeat { id: 1, track_id })
+        .unwrap();
+    engine.process(&mut [], 2);
+    engine.process(&mut vec![0.0; 7 * 2], 2);
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 2,
+            track_id,
+            pitch: 44,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 50 * 2], 2);
+    assert_eq!(
+        repeat_events(&mut events),
+        vec![(44, 86), (44, 116), (44, 134)]
+    );
+}
+
+#[test]
+fn playing_repeat_waits_for_the_existing_musical_grid() {
+    let (mut engine, mut commands, mut events, track_id) =
+        stopped_repeat_engine_at(0, SwingAmount::new(0.62));
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut vec![0.0; 29 * 2], 2);
+    while events.pop().is_ok() {}
+
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 60 * 2], 2);
+
+    assert_eq!(repeat_timestamps(&mut events), vec![30, 48, 78]);
+}
+
+#[test]
+fn swing_changes_preserve_the_stopped_press_anchor() {
+    let (mut engine, mut commands, mut events, track_id) =
+        stopped_repeat_engine_at(29, SwingAmount::new(0.62));
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 10 * 2], 2);
+    assert_eq!(repeat_timestamps(&mut events), vec![29]);
+
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.75)))
+        .unwrap();
+    engine.process(&mut vec![0.0; 40 * 2], 2);
+
+    assert_eq!(repeat_timestamps(&mut events), vec![65, 77]);
+}
+
 #[test]
 fn project_and_track_swing_shift_straight_repeat_timestamps() {
     let (mut engine, mut commands, mut events, track_id) = repeat_engine();

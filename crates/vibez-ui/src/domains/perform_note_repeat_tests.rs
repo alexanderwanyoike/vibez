@@ -64,14 +64,9 @@ fn momentary_repeat_starts_with_resolved_note_and_pad_release_stops_it() {
     assert!(matches!(
         engine.0.as_slice(),
         [
-            vibez_engine::commands::EngineCommand::ExternalNoteOn {
-                track_id,
-                pitch: 36,
-                velocity: 113,
-            },
             vibez_engine::commands::EngineCommand::StartNoteRepeat {
                 id: 12,
-                track_id: repeat_track,
+                track_id,
                 pitch: 36,
                 velocity: 113,
                 rate: NoteRepeatRate::Sixteenth,
@@ -90,7 +85,6 @@ fn momentary_repeat_starts_with_resolved_note_and_pad_release_stops_it() {
                 pitch: 36,
             },
         ] if *track_id == tracks[0].id
-            && *repeat_track == tracks[0].id
             && *update_track == tracks[0].id
             && *stop_track == tracks[0].id
             && *off_track == tracks[0].id
@@ -198,10 +192,7 @@ fn repeated_sixteen_level_velocity_uses_the_resolved_pad_velocity() {
 
     assert!(matches!(
         engine.0.as_slice(),
-        [
-            vibez_engine::commands::EngineCommand::ExternalNoteOn { velocity: 16, .. },
-            vibez_engine::commands::EngineCommand::StartNoteRepeat { velocity: 16, .. },
-        ]
+        [vibez_engine::commands::EngineCommand::StartNoteRepeat { velocity: 16, .. }]
     ));
 }
 

@@ -22,6 +22,8 @@ pub(crate) struct NoteRepeatStart {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct NoteRepeatClock {
     pub after_sample: u64,
+    pub anchor_sample: u64,
+    pub include_after_sample: bool,
     pub bpm: f64,
     pub sample_rate: u32,
     pub swing: SwingAmount,
@@ -33,6 +35,7 @@ struct NoteRepeatVoice {
     pitch: u8,
     velocity: u8,
     rate: NoteRepeatRate,
+    anchor_sample: u64,
     next_sample: u64,
 }
 
@@ -48,12 +51,15 @@ impl TrackNoteRepeats {
             pitch: start.pitch,
             velocity: start.velocity,
             rate: start.rate,
-            next_sample: next_repeat_sample(
+            anchor_sample: clock.anchor_sample,
+            next_sample: next_repeat_sample_from_anchor(
                 clock.after_sample,
+                clock.anchor_sample,
                 start.rate,
                 clock.bpm,
                 clock.sample_rate,
                 clock.swing,
+                clock.include_after_sample,
             ),
         };
         if let Some(existing) = self
@@ -77,6 +83,17 @@ impl TrackNoteRepeats {
         }
     }
 
+    pub const fn is_active(&self) -> bool {
+        let mut index = 0;
+        while index < self.voices.len() {
+            if self.voices[index].is_some() {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
     pub fn update_rate(
         &mut self,
         id: u8,
@@ -93,7 +110,15 @@ impl TrackNoteRepeats {
             .find(|voice| voice.id == id)
         {
             voice.rate = rate;
-            voice.next_sample = next_repeat_sample(after_sample, rate, bpm, sample_rate, swing);
+            voice.next_sample = next_repeat_sample_from_anchor(
+                after_sample,
+                voice.anchor_sample,
+                rate,
+                bpm,
+                sample_rate,
+                swing,
+                false,
+            );
         }
     }
 
@@ -105,8 +130,37 @@ impl TrackNoteRepeats {
         swing: SwingAmount,
     ) {
         for voice in self.voices.iter_mut().flatten() {
-            voice.next_sample =
-                next_repeat_sample(after_sample, voice.rate, bpm, sample_rate, swing);
+            voice.next_sample = next_repeat_sample_from_anchor(
+                after_sample,
+                voice.anchor_sample,
+                voice.rate,
+                bpm,
+                sample_rate,
+                swing,
+                false,
+            );
+        }
+    }
+
+    pub fn reanchor(
+        &mut self,
+        anchor_sample: u64,
+        after_sample: u64,
+        bpm: f64,
+        sample_rate: u32,
+        swing: SwingAmount,
+    ) {
+        for voice in self.voices.iter_mut().flatten() {
+            voice.anchor_sample = anchor_sample;
+            voice.next_sample = next_repeat_sample_from_anchor(
+                after_sample,
+                anchor_sample,
+                voice.rate,
+                bpm,
+                sample_rate,
+                swing,
+                true,
+            );
         }
     }
 
@@ -129,8 +183,15 @@ impl TrackNoteRepeats {
                 effective_at_samples: voice.next_sample,
             });
             count += 1;
-            voice.next_sample =
-                next_repeat_sample(voice.next_sample, voice.rate, bpm, sample_rate, swing);
+            voice.next_sample = next_repeat_sample_from_anchor(
+                voice.next_sample,
+                voice.anchor_sample,
+                voice.rate,
+                bpm,
+                sample_rate,
+                swing,
+                false,
+            );
         }
         (triggers, count)
     }
@@ -144,6 +205,18 @@ pub fn next_repeat_sample(
     bpm: f64,
     sample_rate: u32,
     swing: SwingAmount,
+) -> u64 {
+    next_repeat_sample_from_anchor(after_sample, 0, rate, bpm, sample_rate, swing, false)
+}
+
+fn next_repeat_sample_from_anchor(
+    after_sample: u64,
+    anchor_sample: u64,
+    rate: NoteRepeatRate,
+    bpm: f64,
+    sample_rate: u32,
+    swing: SwingAmount,
+    include_after_sample: bool,
 ) -> u64 {
     if !bpm.is_finite() || bpm <= 0.0 || sample_rate == 0 {
         return after_sample.saturating_add(1);
@@ -159,7 +232,8 @@ pub fn next_repeat_sample(
     {
         return after_sample.saturating_add(1);
     }
-    let approximate_step = (after_sample as f64 / samples_per_tick / ticks_per_step)
+    let relative_after = after_sample.saturating_sub(anchor_sample);
+    let approximate_step = (relative_after as f64 / samples_per_tick / ticks_per_step)
         .floor()
         .max(0.0) as u64;
     for step in approximate_step..approximate_step.saturating_add(4) {
@@ -169,8 +243,9 @@ pub fn next_repeat_sample(
         } else {
             step as f64 * ticks_per_step
         };
-        let sample = (position_ticks * samples_per_tick).round().max(0.0) as u64;
-        if sample > after_sample {
+        let sample = anchor_sample
+            .saturating_add((position_ticks * samples_per_tick).round().max(0.0) as u64);
+        if sample > after_sample || (include_after_sample && sample == after_sample) {
             return sample;
         }
     }

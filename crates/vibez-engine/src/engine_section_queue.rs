@@ -34,9 +34,10 @@ impl AudioEngine {
         if !self.transport.is_playing() {
             self.transport.play();
             self.performance_position = self.transport.position();
-            self.reschedule_note_repeats();
             let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
         }
+        self.stopped_note_repeat_anchor = None;
+        self.reanchor_note_repeats(effective_at_samples, effective_at_samples);
         let event = EngineEvent::SectionTransitioned {
             section_id,
             effective_at_samples,
