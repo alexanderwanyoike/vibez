@@ -27,6 +27,53 @@ fn apply_project_track_deletion_policy(message: Message, confirm: bool) -> Messa
     }
 }
 
+fn context_menu_message_keeps_open(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Tick
+            | Message::Transport(TransportMsg::EnginePosition(_))
+            | Message::EngineMetering { .. }
+            | Message::Transport(TransportMsg::EngineStopped)
+            | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
+            | Message::View(ViewMsg::ShowContextMenu { .. })
+            | Message::View(ViewMsg::DismissContextMenu)
+            | Message::Arrangement(ArrangementMsg::DeleteClipsInRegion { .. })
+            | Message::Arrangement(ArrangementMsg::SetSelectionAsLoop)
+            | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
+            | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
+            | Message::Arrangement(ArrangementMsg::SplitSelectedAtPlayhead)
+            | Message::Arrangement(ArrangementMsg::JoinSelectedClips)
+            | Message::Arrangement(ArrangementMsg::SplitAudioClip { .. })
+            | Message::Arrangement(ArrangementMsg::SplitNoteClip { .. })
+            | Message::Arrangement(ArrangementMsg::SplitClipsAtRegion { .. })
+            | Message::Arrangement(ArrangementMsg::CreateNoteClipFromSelection(_))
+            | Message::View(ViewMsg::EditNameText(_))
+            | Message::View(ViewMsg::CursorMoved(_, _))
+            | Message::View(ViewMsg::WindowResized(_, _))
+            | Message::View(ViewMsg::MouseReleased)
+            | Message::Browser(_)
+            | Message::RemoteCatalogPageFetched { .. }
+            | Message::RemoteCatalogSaved { .. }
+            | Message::NewProject
+            | Message::OpenProject
+            | Message::SaveProject
+            | Message::SaveProjectAs
+            | Message::Project(ProjectMsg::ToggleFileMenu)
+            | Message::Project(ProjectMsg::DismissFileMenu)
+            | Message::ProjectOpenPathSelected(_)
+            | Message::ProjectSavePathSelected(_)
+            | Message::ProjectLoaded(_)
+            | Message::ProjectSaved(_)
+            | Message::OpenSettings
+            | Message::CloseSettings
+            | Message::SelectSettingsTab(_)
+            | Message::SetBufferSize(_)
+            | Message::ScanPlugins
+            | Message::ScanPluginsComplete(_)
+            | Message::PluginLoadError(_)
+    )
+}
+
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let (message, undo_gesture) = match message {
@@ -53,51 +100,8 @@ impl App {
             }
         }
         // Auto-dismiss context menu on any action except tick/engine/menu events
-        if self.state.view.context_menu.is_some() {
-            let keep_menu = matches!(
-                message,
-                Message::Tick
-                    | Message::Transport(TransportMsg::EnginePosition(_))
-                    | Message::EngineMetering { .. }
-                    | Message::Transport(TransportMsg::EngineStopped)
-                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
-                    | Message::View(ViewMsg::ShowContextMenu { .. })
-                    | Message::View(ViewMsg::DismissContextMenu)
-                    | Message::Arrangement(ArrangementMsg::DeleteClipsInRegion { .. })
-                    | Message::Arrangement(ArrangementMsg::SetSelectionAsLoop)
-                    | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
-                    | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
-                    | Message::Arrangement(ArrangementMsg::SplitSelectedAtPlayhead)
-                    | Message::Arrangement(ArrangementMsg::JoinSelectedClips)
-                    | Message::Arrangement(ArrangementMsg::SplitAudioClip { .. })
-                    | Message::Arrangement(ArrangementMsg::SplitNoteClip { .. })
-                    | Message::Arrangement(ArrangementMsg::SplitClipsAtRegion { .. })
-                    | Message::Arrangement(ArrangementMsg::CreateNoteClipFromSelection(_))
-                    | Message::View(ViewMsg::EditNameText(_))
-                    | Message::View(ViewMsg::CursorMoved(_, _))
-                    | Message::View(ViewMsg::WindowResized(_, _))
-                    | Message::View(ViewMsg::MouseReleased)
-                    | Message::NewProject
-                    | Message::OpenProject
-                    | Message::SaveProject
-                    | Message::SaveProjectAs
-                    | Message::Project(ProjectMsg::ToggleFileMenu)
-                    | Message::Project(ProjectMsg::DismissFileMenu)
-                    | Message::ProjectOpenPathSelected(_)
-                    | Message::ProjectSavePathSelected(_)
-                    | Message::ProjectLoaded(_)
-                    | Message::ProjectSaved(_)
-                    | Message::OpenSettings
-                    | Message::CloseSettings
-                    | Message::SelectSettingsTab(_)
-                    | Message::SetBufferSize(_)
-                    | Message::ScanPlugins
-                    | Message::ScanPluginsComplete(_)
-                    | Message::PluginLoadError(_)
-            );
-            if !keep_menu {
-                self.state.view.context_menu = None;
-            }
+        if self.state.view.context_menu.is_some() && !context_menu_message_keeps_open(&message) {
+            self.state.view.context_menu = None;
         }
 
         let should_mark_dirty = matches!(
@@ -1068,6 +1072,28 @@ mod tests {
         assert!(matches!(
             confirmed,
             Message::Arrangement(ArrangementMsg::RequestRemoveTrack(id)) if id == track_id
+        ));
+    }
+
+    #[test]
+    fn arrangement_drag_hover_does_not_dismiss_an_open_context_menu() {
+        assert!(context_menu_message_keeps_open(&Message::Browser(
+            BrowserMsg::DragHoverTrack {
+                track_id: TrackId::new(),
+                beat: 4.0,
+                compatible: true,
+            },
+        )));
+    }
+
+    #[test]
+    fn remote_catalog_progress_does_not_dismiss_an_open_context_menu() {
+        assert!(context_menu_message_keeps_open(
+            &Message::RemoteCatalogSaved {
+                generation: 1,
+                next_checkpoint: None,
+                result: Ok(()),
+            },
         ));
     }
 }
