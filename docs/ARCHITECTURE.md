@@ -196,6 +196,14 @@ scheduler latches the effective result for each musical pair. Consequently a
 change cannot retime an in-flight pair, and both Note Repeat and opted-in clips
 adopt it at their next pair boundary.
 
+Track Swing is not owned by the Perform workspace. The Instrument rail edits
+the current Instrument Target, while the shared Arrange/Section Clip inspector
+edits the selected MIDI clip's parent Project Track through the same explicit
+Track identity. The inspector presents the relationship as one unit: Track
+Swing supplies the effective amount, and `OFF | 1/8 | 1/16` decides whether and
+on which grid that individual clip follows it. With no MIDI clip selected, the
+Track control remains available but clip application is withheld.
+
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project

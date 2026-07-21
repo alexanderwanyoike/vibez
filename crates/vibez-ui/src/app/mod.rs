@@ -155,6 +155,7 @@ mod views_browser_audition;
 mod views_browser_places;
 mod views_browser_remote;
 mod views_browser_style;
+mod views_clip_swing;
 mod views_detail;
 mod views_devices;
 mod views_mixer;

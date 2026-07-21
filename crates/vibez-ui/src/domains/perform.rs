@@ -229,7 +229,10 @@ pub enum PerformMsg {
     SetSixteenLevelsMaximum(i16),
     ChooseSixteenLevelsSource,
     SetProjectSwing(f32),
-    SetTrackSwingOffset(Option<f32>),
+    SetTrackSwingOffset {
+        track_id: TrackId,
+        value: Option<f32>,
+    },
     ProjectSwingInput(String),
     TargetSwingInput {
         track_id: TrackId,
@@ -266,7 +269,7 @@ impl PerformMsg {
                 | Self::ToggleSectionLoop(_)
                 | Self::RemoveTrackContent { .. }
                 | Self::SetProjectSwing(_)
-                | Self::SetTrackSwingOffset(_)
+                | Self::SetTrackSwingOffset { .. }
         )
     }
 }
@@ -697,8 +700,8 @@ impl PerformState {
             PerformMsg::SetProjectSwing(value) => {
                 self.update_project_swing(value, engine);
             }
-            PerformMsg::SetTrackSwingOffset(value) => {
-                return self.update_track_swing(value, engine, ctx);
+            PerformMsg::SetTrackSwingOffset { track_id, value } => {
+                return self.update_track_swing(track_id, value, engine, ctx);
             }
             PerformMsg::ProjectSwingInput(value) => {
                 self.project_swing_input = value;

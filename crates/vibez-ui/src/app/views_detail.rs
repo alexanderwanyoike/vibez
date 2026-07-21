@@ -118,6 +118,8 @@ impl App {
 
                     if has_note_clip {
                         self.view_piano_roll_panel(track_id, track_color)
+                    } else if is_midi {
+                        self.view_midi_track_clip_placeholder(track_id, track_color)
                     } else {
                         // Find a single selected audio clip on this track
                         let audio_sel = self
@@ -275,47 +277,8 @@ impl App {
                 .size(10)
                 .color(th::text_dim());
 
-            let groove_grid_control = GrooveGrid::ALL.into_iter().fold(
-                row![text("GROOVE GRID").size(8).color(th::text_dim())]
-                    .spacing(1)
-                    .align_y(iced::Alignment::Center),
-                |control, grid| {
-                    let selected = grid == groove_grid;
-                    control.push(
-                        button(text(grid.label()).size(9).color(if selected {
-                            th::accent()
-                        } else {
-                            th::text_dim()
-                        }))
-                        .on_press(Message::PianoRoll(PianoRollMsg::SetNoteClipGrooveGrid(
-                            tid, cid, grid,
-                        )))
-                        .padding([2, 5])
-                        .style(move |_theme: &Theme, _status| button::Style {
-                            background: Some(if selected {
-                                th::accent_dim().into()
-                            } else {
-                                th::bg_elevated().into()
-                            }),
-                            text_color: if selected {
-                                th::accent()
-                            } else {
-                                th::text_dim()
-                            },
-                            border: iced::Border {
-                                color: if selected {
-                                    th::accent_dim()
-                                } else {
-                                    th::border()
-                                },
-                                width: 1.0,
-                                radius: 2.0.into(),
-                            },
-                            ..Default::default()
-                        }),
-                    )
-                },
-            );
+            let swing_relationship =
+                self.view_clip_swing_relationship(tid, track_color, Some((cid, groove_grid)));
 
             // Loop toggle
             let loop_icon_color = if clip_loop {
@@ -395,7 +358,8 @@ impl App {
 
             let props_row = row![
                 clip_name,
-                groove_grid_control,
+                swing_relationship,
+                horizontal_space(),
                 pos_label,
                 dur_label,
                 loop_btn,

@@ -10,6 +10,7 @@ use crate::message::Message;
 use crate::state::UndoGestureId;
 use crate::theme;
 use crate::widgets::drag::ValueDrag;
+use vibez_core::id::TrackId;
 use vibez_core::perform::{SwingAmount, SwingOffset};
 
 const ARC_START: f32 = std::f32::consts::FRAC_PI_4 * 3.0;
@@ -40,7 +41,10 @@ pub(crate) fn offset_for_effective_percent(
 #[derive(Debug, Clone, Copy)]
 enum SwingTarget {
     Project,
-    Track { project: SwingAmount },
+    Track {
+        track_id: TrackId,
+        project: SwingAmount,
+    },
 }
 
 pub struct SwingKnobWidget {
@@ -58,9 +62,14 @@ impl SwingKnobWidget {
         }
     }
 
-    pub fn track(project: SwingAmount, effective: SwingAmount, automated: bool) -> Self {
+    pub fn track(
+        track_id: TrackId,
+        project: SwingAmount,
+        effective: SwingAmount,
+        automated: bool,
+    ) -> Self {
         Self {
-            target: SwingTarget::Track { project },
+            target: SwingTarget::Track { track_id, project },
             effective_value: effective.get(),
             automated,
         }
@@ -76,9 +85,10 @@ impl SwingKnobWidget {
             ((effective_value * 100.0).round() / 100.0).clamp(SwingAmount::MIN, SwingAmount::MAX);
         let edit = match self.target {
             SwingTarget::Project => PerformMsg::SetProjectSwing(effective_value),
-            SwingTarget::Track { project } => PerformMsg::SetTrackSwingOffset(Some(
-                SwingOffset::new(effective_value - project.get()).get(),
-            )),
+            SwingTarget::Track { track_id, project } => PerformMsg::SetTrackSwingOffset {
+                track_id,
+                value: Some(SwingOffset::new(effective_value - project.get()).get()),
+            },
         };
         let message = Message::Perform(edit);
         match gesture {
@@ -300,12 +310,18 @@ mod tests {
 
     #[test]
     fn target_knob_emits_a_project_relative_offset_from_its_effective_value() {
-        let widget = SwingKnobWidget::track(SwingAmount::new(0.56), SwingAmount::new(0.63), false);
+        let track_id = TrackId::new();
+        let widget = SwingKnobWidget::track(
+            track_id,
+            SwingAmount::new(0.56),
+            SwingAmount::new(0.63),
+            false,
+        );
         let message = widget.edit_message(0.63, None);
         assert!(matches!(
             perform_edit(Some(message)),
-            Some(PerformMsg::SetTrackSwingOffset(Some(value)))
-                if (value - 0.07).abs() < f32::EPSILON
+            Some(PerformMsg::SetTrackSwingOffset { track_id: actual, value: Some(value) })
+                if actual == track_id && (value - 0.07).abs() < f32::EPSILON
         ));
     }
 
@@ -358,7 +374,12 @@ mod tests {
 
     #[test]
     fn automated_target_knob_is_read_only() {
-        let widget = SwingKnobWidget::track(SwingAmount::new(0.56), SwingAmount::new(0.63), true);
+        let widget = SwingKnobWidget::track(
+            TrackId::new(),
+            SwingAmount::new(0.56),
+            SwingAmount::new(0.63),
+            true,
+        );
         let bounds = Rectangle::new(Point::ORIGIN, Size::new(40.0, 40.0));
         let mut state = SwingKnobState::default();
         let cursor = mouse::Cursor::Available(Point::new(20.0, 20.0));

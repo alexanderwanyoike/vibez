@@ -493,7 +493,8 @@ impl App {
             None => "FOLLOW PROJECT".to_string(),
         };
         let swing_knob: Element<'_, Message> = match selected_track {
-            Some(_) => canvas(SwingKnobWidget::track(
+            Some(track) => canvas(SwingKnobWidget::track(
+                track.id,
                 project_swing,
                 effective_swing,
                 automated,
@@ -513,12 +514,16 @@ impl App {
                 let input = self.state.perform.target_swing_input(track.id);
                 let submit = offset_for_effective_percent(input, project_swing)
                     .map(|offset| {
-                        Message::Perform(PerformMsg::SetTrackSwingOffset(Some(offset.get())))
+                        Message::Perform(PerformMsg::SetTrackSwingOffset {
+                            track_id: track.id,
+                            value: Some(offset.get()),
+                        })
                     })
                     .unwrap_or_else(|| {
-                        Message::Perform(PerformMsg::SetTrackSwingOffset(
-                            track_offset.map(SwingOffset::get),
-                        ))
+                        Message::Perform(PerformMsg::SetTrackSwingOffset {
+                            track_id: track.id,
+                            value: track_offset.map(SwingOffset::get),
+                        })
                     });
                 text_input(&format!("{:.0}%", effective_swing.get() * 100.0), input)
                     .on_input(move |value| {
@@ -565,8 +570,11 @@ impl App {
                     },
                     ..Default::default()
                 });
-            if selected_track.is_some() && !active {
-                button.on_press(Message::Perform(PerformMsg::SetTrackSwingOffset(None)))
+            if let Some(track) = selected_track.filter(|_| !active) {
+                button.on_press(Message::Perform(PerformMsg::SetTrackSwingOffset {
+                    track_id: track.id,
+                    value: None,
+                }))
             } else {
                 button
             }

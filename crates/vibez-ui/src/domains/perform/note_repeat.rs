@@ -15,16 +15,18 @@ impl PerformState {
 
     pub(super) fn update_track_swing(
         &mut self,
+        track_id: TrackId,
         value: Option<f32>,
         engine: &mut impl EngineHandle,
         ctx: PerformCtx<'_>,
     ) -> PerformAction {
-        let Some(track_id) = self
-            .instrument_target()
-            .filter(|track_id| ctx.project_tracks.iter().any(|track| track.id == *track_id))
-        else {
+        if !ctx
+            .project_tracks
+            .iter()
+            .any(|track| track.id == track_id && track.kind.is_midi())
+        {
             return PerformAction::default();
-        };
+        }
         let swing_offset = value.map(SwingOffset::new);
         let effective = self.project_swing.effective(swing_offset);
         self.target_swing_input = format!("{:.0}", effective.get() * 100.0);

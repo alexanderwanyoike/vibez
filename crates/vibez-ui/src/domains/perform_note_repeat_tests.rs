@@ -209,7 +209,10 @@ fn swing_edits_are_project_dirty_engine_commands_with_track_inheritance() {
 
     state.update(PerformMsg::SetProjectSwing(0.60), &mut engine, ctx);
     let action = state.update(
-        PerformMsg::SetTrackSwingOffset(Some(-0.04)),
+        PerformMsg::SetTrackSwingOffset {
+            track_id: tracks[0].id,
+            value: Some(-0.04),
+        },
         &mut engine,
         ctx,
     );
@@ -222,7 +225,11 @@ fn swing_edits_are_project_dirty_engine_commands_with_track_inheritance() {
         })
     );
     assert!(PerformMsg::SetProjectSwing(0.60).marks_dirty());
-    assert!(PerformMsg::SetTrackSwingOffset(None).marks_dirty());
+    assert!(PerformMsg::SetTrackSwingOffset {
+        track_id: tracks[0].id,
+        value: None,
+    }
+    .marks_dirty());
     assert!(matches!(
         engine.0.as_slice(),
         [
@@ -245,4 +252,40 @@ fn swing_numeric_input_buffers_are_not_project_edits() {
         value: "63".into(),
     }
     .marks_dirty());
+}
+
+#[test]
+fn track_swing_edit_targets_the_explicit_arrange_track() {
+    let tracks = vec![playable_track(), playable_track()];
+    let mut state = instrument_state();
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: false,
+        project_tracks: &tracks,
+        selected_project_track: Some(tracks[0].id),
+    };
+
+    let action = state.update(
+        PerformMsg::SetTrackSwingOffset {
+            track_id: tracks[1].id,
+            value: Some(0.05),
+        },
+        &mut engine,
+        ctx,
+    );
+
+    assert_eq!(
+        action.track_swing_request,
+        Some(TrackSwingRequest {
+            track_id: tracks[1].id,
+            swing_offset: Some(SwingOffset::new(0.05)),
+        })
+    );
+    assert!(matches!(
+        engine.0.as_slice(),
+        [vibez_engine::commands::EngineCommand::SetTrackSwingOffset(
+            track_id,
+            Some(offset),
+        )] if *track_id == tracks[1].id && *offset == SwingOffset::new(0.05)
+    ));
 }
