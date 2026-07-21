@@ -255,16 +255,8 @@ impl App {
 
         container(body)
             .padding([5, 7])
-            .style(move |_theme: &Theme| container::Style {
+            .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: Color {
-                        a: 0.72,
-                        ..track_color
-                    },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
                 ..Default::default()
             })
             .into()
