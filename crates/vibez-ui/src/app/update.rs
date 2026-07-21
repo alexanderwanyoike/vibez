@@ -51,6 +51,10 @@ fn context_menu_message_keeps_open(message: &Message) -> bool {
             | Message::View(ViewMsg::CursorMoved(_, _))
             | Message::View(ViewMsg::WindowResized(_, _))
             | Message::View(ViewMsg::MouseReleased)
+            | Message::KeyboardInput {
+                event: iced::keyboard::Event::ModifiersChanged(_),
+                ..
+            }
             | Message::Browser(_)
             | Message::RemoteCatalogPageFetched { .. }
             | Message::RemoteCatalogSaved { .. }
@@ -1095,5 +1099,13 @@ mod tests {
                 result: Ok(()),
             },
         ));
+    }
+
+    #[test]
+    fn modifier_state_sync_after_right_click_does_not_dismiss_context_menu() {
+        assert!(context_menu_message_keeps_open(&Message::KeyboardInput {
+            event: iced::keyboard::Event::ModifiersChanged(iced::keyboard::Modifiers::empty(),),
+            occurred_at: std::time::Instant::now(),
+        }));
     }
 }

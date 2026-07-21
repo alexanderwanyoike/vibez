@@ -58,8 +58,8 @@ impl App {
                     }),
             )
             .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-                x: 400.0,
-                y: 300.0,
+                x: self.state.view.cursor_x,
+                y: self.state.view.cursor_y,
                 target: ContextMenuTarget::ArrangementEmpty,
             }));
             if browser_drag_active {
@@ -501,9 +501,8 @@ impl App {
         ));
 
         // mouse_area only provides on_right_press (no cursor position),
-        // so the right-click context menu from the scrollable background
-        // opens at a default position. Track canvas right-clicks still
-        // use the precise cursor location.
+        // so use the globally tracked cursor for the scrollable background.
+        // Track canvas right-clicks still supply their precise event position.
         mouse_area(
             container(scrollable_content)
                 .width(Length::Fill)
@@ -514,8 +513,8 @@ impl App {
                 }),
         )
         .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-            x: 400.0,
-            y: 300.0,
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
             target: ContextMenuTarget::ArrangementEmpty,
         }))
         .into()

@@ -191,13 +191,6 @@ impl ViewState {
                 action.end_drag_resize = true;
             }
             ViewMsg::ShowContextMenu { x, y, target } => {
-                // For ArrangementEmpty from mouse_area (no cursor coords),
-                // use the globally tracked cursor position instead.
-                let (menu_x, menu_y) = if matches!(target, ContextMenuTarget::ArrangementEmpty) {
-                    (self.cursor_x, self.cursor_y)
-                } else {
-                    (x, y)
-                };
                 // Also select the clip if targeting one; the router
                 // applies this to the arrangement slice.
                 if let ContextMenuTarget::Clip {
@@ -208,11 +201,7 @@ impl ViewState {
                 {
                     action.select_clip = Some((*track_id, *clip_id, *is_note_clip));
                 }
-                self.context_menu = Some(crate::state::ContextMenu {
-                    x: menu_x,
-                    y: menu_y,
-                    target,
-                });
+                self.context_menu = Some(crate::state::ContextMenu { x, y, target });
             }
             ViewMsg::DismissContextMenu => {
                 self.context_menu = None;
@@ -357,6 +346,27 @@ mod tests {
         );
         assert!(v.context_menu.is_some());
         assert_eq!(action.select_clip, Some((tid, cid, false)));
+    }
+
+    #[test]
+    fn arrangement_empty_context_menu_uses_the_click_position() {
+        let mut view = ViewState {
+            cursor_x: 900.0,
+            cursor_y: 700.0,
+            ..ViewState::default()
+        };
+        view.update(
+            ViewMsg::ShowContextMenu {
+                x: 240.0,
+                y: 180.0,
+                target: ContextMenuTarget::ArrangementEmpty,
+            },
+            &TimelineEditorState::default(),
+            ViewCtx::default(),
+        );
+
+        let menu = view.context_menu.expect("context menu");
+        assert_eq!((menu.x, menu.y), (240.0, 180.0));
     }
 
     #[test]
