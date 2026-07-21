@@ -180,8 +180,9 @@ While transport plays, the first repeated hit comes from the active musical
 grid and an Immediate Section transition establishes a new grid origin. Vibez
 deliberately extends MPC Note Repeat to stopped transport: the first pad sounds
 immediately as step zero, later pads share that anchor, and the anchor clears
-when the final repeated pad stops. Swing, tempo, rate, and Project Track offset
-changes reschedule future hits without changing the anchor.
+when the final repeated pad stops. Tempo and rate changes reschedule future hits
+without changing the anchor. Swing and Project Track offset edits preserve the
+scheduled in-flight pair and become audible when the next pair begins.
 
 Swing UI uses two views of that same model rather than introducing a third
 value: Project Swing edits the native `50..75%` ratio, while contextual Target

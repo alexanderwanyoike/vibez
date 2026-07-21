@@ -193,7 +193,7 @@ fn playing_repeat_waits_for_the_existing_musical_grid() {
 }
 
 #[test]
-fn swing_changes_preserve_the_stopped_press_anchor() {
+fn project_swing_changes_wait_for_the_next_stopped_pair_and_preserve_the_anchor() {
     let (mut engine, mut commands, mut events, track_id) =
         stopped_repeat_engine_at(29, SwingAmount::new(0.62));
     commands
@@ -213,7 +213,38 @@ fn swing_changes_preserve_the_stopped_press_anchor() {
         .unwrap();
     engine.process(&mut vec![0.0; 40 * 2], 2);
 
-    assert_eq!(repeat_timestamps(&mut events), vec![65, 77]);
+    // The already scheduled 62% offbeat remains at anchor + tick 30. The pair
+    // boundary is fixed, and only the following pair adopts 75%.
+    assert_eq!(repeat_timestamps(&mut events), vec![59, 77]);
+}
+
+#[test]
+fn track_swing_changes_wait_for_the_next_stopped_pair() {
+    let (mut engine, mut commands, mut events, track_id) =
+        stopped_repeat_engine_at(29, SwingAmount::new(0.56));
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 10 * 2], 2);
+    assert_eq!(repeat_timestamps(&mut events), vec![29]);
+
+    commands
+        .push(EngineCommand::SetTrackSwingOffset(
+            track_id,
+            Some(SwingOffset::new(0.10)),
+        ))
+        .unwrap();
+    engine.process(&mut [0.0; 40 * 2], 2);
+
+    // The in-flight pair stays at Project 56% (tick 27); the effective 66%
+    // offset is picked up after the fixed pair boundary at sample 77.
+    assert_eq!(repeat_timestamps(&mut events), vec![56, 77]);
 }
 
 #[test]
