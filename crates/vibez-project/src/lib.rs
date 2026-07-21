@@ -542,6 +542,7 @@ mod tests {
                     loop_enabled: false,
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
+                    groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
                     notes: vec![
                         MidiNote {
                             pitch: 60,
@@ -570,6 +571,10 @@ mod tests {
         assert_eq!(loaded.arrange.note_clips[0].notes.len(), 2);
         assert_eq!(loaded.arrange.note_clips[0].notes[0].pitch, 60);
         assert_eq!(loaded.arrange.note_clips[0].notes[1].pitch, 64);
+        assert_eq!(
+            loaded.arrange.note_clips[0].groove_grid,
+            vibez_core::perform::GrooveGrid::Sixteenth
+        );
     }
 
     #[test]

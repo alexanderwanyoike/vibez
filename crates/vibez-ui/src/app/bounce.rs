@@ -109,6 +109,7 @@ impl App {
             range_samples,
             bpm,
             sample_rate,
+            swing: project.swing,
         };
 
         self.state.status_text = format!("Bouncing {clip_name}...");

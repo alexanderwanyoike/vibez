@@ -447,6 +447,23 @@ impl AudioEngine {
                     }
                     self.recalculate_audio_length();
                 }
+                EngineCommand::SetNoteClipGrooveGrid {
+                    track_id,
+                    clip_id,
+                    groove_grid,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|clip| clip.id == clip_id)
+                        {
+                            clip.groove_grid = groove_grid;
+                        }
+                        track.flush_notes();
+                    }
+                }
                 EngineCommand::AddNoteClip {
                     track_id,
                     clip_id,
@@ -455,17 +472,19 @@ impl AudioEngine {
                     loop_enabled,
                     loop_start_beats,
                     loop_end_beats,
+                    groove_grid,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                        track.playback_source.note_clips.push(EngineNoteClip {
-                            id: clip_id,
+                        track.playback_source.note_clips.push(EngineNoteClip::new(
+                            clip_id,
                             position_beats,
                             duration_beats,
-                            notes: Vec::new(),
+                            Vec::new(),
                             loop_enabled,
                             loop_start_beats,
                             loop_end_beats,
-                        });
+                            groove_grid,
+                        ));
                     }
                     self.recalculate_audio_length();
                 }

@@ -727,6 +727,7 @@ impl App {
                 loop_enabled: note_clip.loop_enabled,
                 loop_start_beats: note_clip.loop_start_beats,
                 loop_end_beats: note_clip.loop_end_beats,
+                groove_grid: note_clip.groove_grid,
             });
             for note in &note_clip.notes {
                 self.send_command(EngineCommand::AddNote {
@@ -749,6 +750,7 @@ impl App {
                         loop_enabled: note_clip.loop_enabled,
                         loop_start_beats: note_clip.loop_start_beats,
                         loop_end_beats: note_clip.loop_end_beats,
+                        groove_grid: note_clip.groove_grid,
                     });
             }
         }
@@ -888,6 +890,7 @@ impl App {
             range_samples: (0, total),
             bpm,
             sample_rate,
+            swing: project.swing,
         };
         self.state.status_text = format!("Exporting to {}...", path.display());
         Task::perform(export_async(request, path), Message::ExportComplete)

@@ -216,6 +216,7 @@ impl TimelineEditorState {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         engine.send(EngineCommand::AddNoteClip {
             track_id,
@@ -225,6 +226,7 @@ impl TimelineEditorState {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         self.selected_note_clip = Some((track_id, clip_id));
         self.selected_clips.clear();
@@ -499,6 +501,7 @@ impl TimelineEditorState {
                         loop_enabled: clip.loop_enabled,
                         loop_start_beats: clip.loop_start_beats,
                         loop_end_beats: clip.loop_end_beats,
+                        groove_grid: clip.groove_grid,
                     });
                     for note in &clip.notes {
                         engine.send(EngineCommand::AddNote {
@@ -695,6 +698,7 @@ impl TimelineEditorState {
                             loop_enabled: clip.loop_enabled,
                             loop_start_beats: clip.loop_start_beats,
                             loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
                         });
                         for note in clip.notes {
                             engine.send(EngineCommand::AddNote {

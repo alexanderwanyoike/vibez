@@ -813,6 +813,7 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         if let Some(t) = Arc::make_mut(&mut state.arrangement.timeline).get_mut(tid) {
             if let Some(c) = t.note_clips.iter_mut().find(|c| c.id == cid) {

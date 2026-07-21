@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::{ClipId, TrackId};
+use crate::perform::GrooveGrid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MidiNote {
@@ -34,6 +35,8 @@ pub struct NoteClipInfo {
     pub loop_start_beats: f64,
     #[serde(default)]
     pub loop_end_beats: f64,
+    #[serde(default)]
+    pub groove_grid: GrooveGrid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +82,7 @@ impl TrackKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::perform::GrooveGrid;
 
     #[test]
     fn midi_note_frequency() {
@@ -129,6 +133,7 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Sixteenth,
             notes: vec![
                 MidiNote {
                     pitch: 60,
@@ -149,6 +154,27 @@ mod tests {
         assert_eq!(loaded.name, "Pattern 1");
         assert_eq!(loaded.notes.len(), 2);
         assert_eq!(loaded.notes[0].pitch, 60);
+        assert_eq!(loaded.groove_grid, GrooveGrid::Sixteenth);
+    }
+
+    #[test]
+    fn legacy_note_clip_defaults_the_groove_grid_to_off() {
+        let clip = NoteClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "Legacy".into(),
+            position_beats: 0.0,
+            duration_beats: 4.0,
+            notes: Vec::new(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        let mut json = serde_json::to_value(clip).unwrap();
+        json.as_object_mut().unwrap().remove("groove_grid");
+        let loaded: NoteClipInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.groove_grid, GrooveGrid::Off);
     }
 
     #[test]

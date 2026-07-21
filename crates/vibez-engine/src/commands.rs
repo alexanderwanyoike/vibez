@@ -4,7 +4,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::SectionLaunchQuantization;
-use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
+use vibez_core::perform::{GrooveGrid, NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
@@ -34,8 +34,7 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
-    /// Set Project Swing for generated events. Existing clip playback is
-    /// deliberately unaffected.
+    /// Set Project Swing for generated events and opted-in MIDI clips.
     SetProjectSwing(SwingAmount),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
@@ -114,7 +113,7 @@ pub enum EngineCommand {
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
     /// Set the optional Project Track Swing adjustment used by generated
-    /// events on this channel.
+    /// events and opted-in MIDI clips on this channel.
     SetTrackSwingOffset(TrackId, Option<SwingOffset>),
 
     // -- Busses (return channels) --
@@ -175,6 +174,11 @@ pub enum EngineCommand {
         clip_id: ClipId,
         duration_beats: f64,
     },
+    SetNoteClipGrooveGrid {
+        track_id: TrackId,
+        clip_id: ClipId,
+        groove_grid: GrooveGrid,
+    },
     AddNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -183,6 +187,7 @@ pub enum EngineCommand {
         loop_enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
+        groove_grid: GrooveGrid,
     },
     RemoveNoteClip(TrackId, ClipId),
     /// Move a note clip to a new beat position on the timeline.

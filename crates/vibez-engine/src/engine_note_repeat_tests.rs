@@ -1,7 +1,10 @@
 use super::*;
-use vibez_core::id::{ClipId, TrackId};
+use crate::playback_source::{
+    EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
+};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
-use vibez_core::perform::{GrooveProfile, NoteRepeatRate, SwingAmount, SwingOffset};
+use vibez_core::perform::{GrooveGrid, GrooveProfile, NoteRepeatRate, SwingAmount, SwingOffset};
 
 fn repeat_engine() -> (
     AudioEngine,
@@ -321,8 +324,11 @@ fn stopping_repeat_prevents_every_future_generated_note() {
     assert!(repeat_timestamps(&mut events).is_empty());
 }
 
-fn render_clip_with_swing(swing: SwingAmount) -> Vec<f32> {
-    let (mut engine, mut commands, _events) = AudioEngine::new();
+fn clip_engine(
+    swing: SwingAmount,
+    groove_grid: GrooveGrid,
+) -> (AudioEngine, rtrb::Producer<EngineCommand>) {
+    let (engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
     commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
@@ -348,6 +354,7 @@ fn render_clip_with_swing(swing: SwingAmount) -> Vec<f32> {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid,
         })
         .unwrap();
     commands
@@ -357,10 +364,84 @@ fn render_clip_with_swing(swing: SwingAmount) -> Vec<f32> {
             note: MidiNote {
                 pitch: 60,
                 velocity: 100,
-                start_beat: 0.0,
-                duration_beats: 0.5,
+                start_beat: 0.25,
+                duration_beats: 0.25,
             },
         })
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    (engine, commands)
+}
+
+fn render_clip_with_swing(swing: SwingAmount, groove_grid: GrooveGrid) -> Vec<f32> {
+    let (mut engine, _commands) = clip_engine(swing, groove_grid);
+    let mut output = vec![0.0; 4_000 * 2];
+    engine.process(&mut output, 2);
+    output
+}
+
+#[test]
+fn swing_does_not_change_clip_playback_when_its_grid_is_off() {
+    assert_eq!(
+        render_clip_with_swing(SwingAmount::STRAIGHT, GrooveGrid::Off),
+        render_clip_with_swing(SwingAmount::new(0.75), GrooveGrid::Off)
+    );
+}
+
+#[test]
+fn swing_changes_opted_in_clip_playback_without_rewriting_notes() {
+    assert_ne!(
+        render_clip_with_swing(SwingAmount::STRAIGHT, GrooveGrid::Sixteenth),
+        render_clip_with_swing(SwingAmount::new(0.75), GrooveGrid::Sixteenth)
+    );
+}
+
+fn render_prepared_section_with_swing(swing: SwingAmount) -> Vec<f32> {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let prepared = PreparedSectionPlaybackSource::new(
+        SectionId::new(),
+        1.0,
+        false,
+        vec![(
+            track_id,
+            PreparedPlaybackSource::new(
+                Vec::new(),
+                vec![EngineNoteClip::new(
+                    ClipId::new(),
+                    0.0,
+                    1.0,
+                    vec![MidiNote {
+                        pitch: 60,
+                        velocity: 100,
+                        start_beat: 0.25,
+                        duration_beats: 0.25,
+                    }],
+                    false,
+                    0.0,
+                    0.0,
+                    GrooveGrid::Sixteenth,
+                )],
+                Vec::new(),
+            ),
+        )],
+    );
+    commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "Section clip".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackInstrument(
+            track_id,
+            InstrumentKind::SubtractiveSynth,
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetProjectSwing(swing))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(Box::new(prepared)))
         .unwrap();
     commands.push(EngineCommand::Play).unwrap();
     let mut output = vec![0.0; 4_000 * 2];
@@ -369,11 +450,27 @@ fn render_clip_with_swing(swing: SwingAmount) -> Vec<f32> {
 }
 
 #[test]
-fn swing_does_not_change_existing_clip_playback() {
-    assert_eq!(
-        render_clip_with_swing(SwingAmount::STRAIGHT),
-        render_clip_with_swing(SwingAmount::new(0.75))
+fn prepared_sections_apply_live_swing_at_render_read_time() {
+    assert_ne!(
+        render_prepared_section_with_swing(SwingAmount::STRAIGHT),
+        render_prepared_section_with_swing(SwingAmount::new(0.75))
     );
+}
+
+#[test]
+fn lowering_swing_mid_pair_does_not_move_an_unsounded_clip_note_into_the_past() {
+    let constant = render_clip_with_swing(SwingAmount::new(0.75), GrooveGrid::Sixteenth);
+    let (mut engine, mut commands) = clip_engine(SwingAmount::new(0.75), GrooveGrid::Sixteenth);
+    let mut before_change = vec![0.0; 1_200 * 2];
+    engine.process(&mut before_change, 2);
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::STRAIGHT))
+        .unwrap();
+    let mut after_change = vec![0.0; 2_800 * 2];
+    engine.process(&mut after_change, 2);
+    before_change.extend(after_change);
+
+    assert_eq!(before_change, constant);
 }
 
 #[test]

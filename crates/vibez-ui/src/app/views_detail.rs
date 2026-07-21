@@ -11,6 +11,7 @@ use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::perform::GrooveGrid;
 
 use crate::icons;
 use crate::message::Message;
@@ -207,7 +208,7 @@ impl App {
         let playhead_beats = self.state.position_beats();
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
-        let clip_data: Option<(String, f64, f64, bool, TrackId, ClipId)> =
+        let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> =
             if let Some((tid, cid)) = self.state.active_timeline_editor().selected_note_clip {
                 if tid == track_id {
                     self.state
@@ -219,6 +220,7 @@ impl App {
                                 c.position_beats,
                                 c.duration_beats,
                                 c.loop_enabled,
+                                c.groove_grid,
                                 tid,
                                 cid,
                             )
@@ -232,7 +234,7 @@ impl App {
 
         let piano_widget = if let Some(ref cd) = clip_data {
             if let Some(content) = self.state.active_timeline_content(track_id) {
-                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.5) {
+                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.6) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
                     PianoRollWidget::from_clip(
                         track_id,
@@ -262,7 +264,9 @@ impl App {
         // ── Clip properties bar (shown when a clip is selected) ──
         let mut content_col = column![].spacing(2).padding(4);
 
-        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, tid, cid)) = clip_data {
+        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, groove_grid, tid, cid)) =
+            clip_data
+        {
             let clip_name = text(clip_name_str.clone()).size(11).color(th::text());
             let pos_label = text(format!("Pos: {clip_pos:.1}"))
                 .size(10)
@@ -270,6 +274,48 @@ impl App {
             let dur_label = text(format!("Dur: {clip_dur:.1}"))
                 .size(10)
                 .color(th::text_dim());
+
+            let groove_grid_control = GrooveGrid::ALL.into_iter().fold(
+                row![text("GROOVE GRID").size(8).color(th::text_dim())]
+                    .spacing(1)
+                    .align_y(iced::Alignment::Center),
+                |control, grid| {
+                    let selected = grid == groove_grid;
+                    control.push(
+                        button(text(grid.label()).size(9).color(if selected {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        }))
+                        .on_press(Message::PianoRoll(PianoRollMsg::SetNoteClipGrooveGrid(
+                            tid, cid, grid,
+                        )))
+                        .padding([2, 5])
+                        .style(move |_theme: &Theme, _status| button::Style {
+                            background: Some(if selected {
+                                th::accent_dim().into()
+                            } else {
+                                th::bg_elevated().into()
+                            }),
+                            text_color: if selected {
+                                th::accent()
+                            } else {
+                                th::text_dim()
+                            },
+                            border: iced::Border {
+                                color: if selected {
+                                    th::accent_dim()
+                                } else {
+                                    th::border()
+                                },
+                                width: 1.0,
+                                radius: 2.0.into(),
+                            },
+                            ..Default::default()
+                        }),
+                    )
+                },
+            );
 
             // Loop toggle
             let loop_icon_color = if clip_loop {
@@ -348,7 +394,14 @@ impl App {
             .style(op_btn_style);
 
             let props_row = row![
-                clip_name, pos_label, dur_label, loop_btn, dup_btn, double_btn, halve_btn,
+                clip_name,
+                groove_grid_control,
+                pos_label,
+                dur_label,
+                loop_btn,
+                dup_btn,
+                double_btn,
+                halve_btn,
                 crop_btn,
             ]
             .spacing(6)

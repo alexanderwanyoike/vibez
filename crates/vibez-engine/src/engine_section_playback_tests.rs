@@ -379,20 +379,21 @@ fn switching_sections_releases_notes_from_the_previous_source() {
                     track_id,
                     PreparedPlaybackSource::new(
                         Vec::new(),
-                        vec![EngineNoteClip {
-                            id: ClipId::new(),
-                            position_beats: 0.0,
-                            duration_beats: 4.0,
-                            notes: vec![MidiNote {
+                        vec![EngineNoteClip::new(
+                            ClipId::new(),
+                            0.0,
+                            4.0,
+                            vec![MidiNote {
                                 pitch: 60,
                                 velocity: 100,
                                 start_beat: 0.0,
                                 duration_beats: 4.0,
                             }],
-                            loop_enabled: false,
-                            loop_start_beats: 0.0,
-                            loop_end_beats: 0.0,
-                        }],
+                            false,
+                            0.0,
+                            0.0,
+                            vibez_core::perform::GrooveGrid::Off,
+                        )],
                         Vec::new(),
                     ),
                 )],

@@ -4,12 +4,14 @@
 //! effects, sends, gain/pan, mute/solo, meters, and scratch buffers remain on
 //! [`EngineTrack`](crate::mixer::EngineTrack), the project-owned channel strip.
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::automation::AutomationLane;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
+use vibez_core::perform::GrooveGrid;
 
 /// A resident audio clip on a prepared timeline.
 pub struct EngineClip {
@@ -43,6 +45,59 @@ pub struct EngineNoteClip {
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
+    pub groove_grid: GrooveGrid,
+    groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
+}
+
+impl EngineNoteClip {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: ClipId,
+        position_beats: f64,
+        duration_beats: f64,
+        notes: Vec<MidiNote>,
+        loop_enabled: bool,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+        groove_grid: GrooveGrid,
+    ) -> Self {
+        Self {
+            id,
+            position_beats,
+            duration_beats,
+            notes,
+            loop_enabled,
+            loop_start_beats,
+            loop_end_beats,
+            groove_grid,
+            groove_latch: Cell::new(None),
+        }
+    }
+
+    pub fn reset_groove_latch(&self) {
+        self.groove_latch.set(None);
+    }
+
+    pub fn swing_for_pair(
+        &self,
+        local_beat: f64,
+        current: vibez_core::perform::SwingAmount,
+        force_new_pair: bool,
+    ) -> vibez_core::perform::SwingAmount {
+        let Some(pair_beats) = self.groove_grid.pair_beats() else {
+            return current;
+        };
+        let pair_index = (local_beat / pair_beats).floor() as i64;
+        if !force_new_pair {
+            if let Some((latched_pair, latched_swing)) = self.groove_latch.get() {
+                if latched_pair == pair_index {
+                    return latched_swing;
+                }
+            }
+        }
+        self.groove_latch.set(Some((pair_index, current)));
+        current
+    }
 }
 
 /// Map a raw timeline frame through the active Arrange loop.
@@ -310,15 +365,16 @@ mod tests {
         );
         let note_source = PreparedPlaybackSource::new(
             Vec::new(),
-            vec![EngineNoteClip {
-                id: ClipId::new(),
-                position_beats: 2.0,
-                duration_beats: 4.0,
-                notes: Vec::new(),
-                loop_enabled: false,
-                loop_start_beats: 0.0,
-                loop_end_beats: 0.0,
-            }],
+            vec![EngineNoteClip::new(
+                ClipId::new(),
+                2.0,
+                4.0,
+                Vec::new(),
+                false,
+                0.0,
+                0.0,
+                GrooveGrid::Off,
+            )],
             Vec::new(),
         );
         let sources = [audio_source, note_source];

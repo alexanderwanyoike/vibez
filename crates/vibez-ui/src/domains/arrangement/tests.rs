@@ -565,6 +565,7 @@ fn partial_time_selection_copies_audio_and_trimmed_midi() {
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     a.time_selection_active = true;
     a.selection_start_beats = 2.0;
@@ -683,6 +684,7 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
     });
     a.selected_clips.insert(ArrangementSelection::AudioClip {
         track_id: audio_tid,
@@ -773,6 +775,7 @@ fn midi_duplicate_keeps_the_source_clip_name_readable() {
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     a.selected_clips
         .insert(ArrangementSelection::NoteClip { track_id, clip_id });
@@ -842,6 +845,7 @@ fn split_looped_midi_materializes_both_looped_halves() {
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
     });
 
     a.update(
@@ -922,6 +926,7 @@ fn join_looped_midi_expands_repetitions_and_remains_looped() {
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
         });
         a.selected_clips
             .insert(ArrangementSelection::NoteClip { track_id, clip_id });

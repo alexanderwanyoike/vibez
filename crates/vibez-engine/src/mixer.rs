@@ -15,15 +15,14 @@ use vibez_instruments::Instrument;
 use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::{ArrangementPlaybackSource, PreparedPlaybackSource};
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
+mod groove;
 mod note_repeat;
+mod pan;
 mod render_context;
+use groove::{crossed_beat, mapped_note_end, mapped_note_start};
+pub use pan::{balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
-
-#[inline]
-fn crossed_beat(previous: f64, current: f64, event: f64) -> bool {
-    previous < event && event <= current
-}
 
 pub struct EffectSlot {
     pub id: EffectId,
@@ -159,6 +158,7 @@ impl EngineTrack {
     /// playhead moves discontinuously; the offs reach the instrument
     /// immediately (built-ins) or on its next render (plugins).
     pub fn flush_notes(&mut self) {
+        self.reset_groove_latches();
         if self.active_notes == 0 {
             return;
         }
@@ -359,26 +359,35 @@ impl EngineTrack {
                 let wrapped = looping
                     && was_in_clip
                     && prev_effective_local > effective_local + beat_step * 0.5;
+                let clip_swing =
+                    clip.swing_for_pair(effective_local, swing, wrapped || !was_in_clip);
 
                 if wrapped {
                     for note in &clip.notes {
                         self.timed_note_offs.push((frame as u32, note.pitch));
                     }
                     for note in &clip.notes {
-                        if note.start_beat >= clip.loop_start_beats
-                            && note.start_beat <= effective_local
+                        let mapped_start = mapped_note_start(clip, note, clip_swing);
+                        if mapped_start >= clip.loop_start_beats && mapped_start <= effective_local
                         {
                             self.timed_note_ons
                                 .push((frame as u32, note.pitch, note.velocity));
                         }
                     }
                 } else {
-                    for note in &clip.notes {
-                        if crossed_beat(prev_effective_local, effective_local, note.start_beat) {
+                    for (note_index, note) in clip.notes.iter().enumerate() {
+                        let mapped_start = mapped_note_start(clip, note, clip_swing);
+                        if mapped_start < clip.duration_beats
+                            && crossed_beat(prev_effective_local, effective_local, mapped_start)
+                        {
                             self.timed_note_ons
                                 .push((frame as u32, note.pitch, note.velocity));
                         }
-                        if crossed_beat(prev_effective_local, effective_local, note.end_beat()) {
+                        if crossed_beat(
+                            prev_effective_local,
+                            effective_local,
+                            mapped_note_end(clip, note_index, clip_swing),
+                        ) {
                             self.timed_note_offs.push((frame as u32, note.pitch));
                         }
                     }
@@ -509,24 +518,33 @@ impl EngineTrack {
                 let wrapped = looping
                     && was_in_clip
                     && prev_effective_local > effective_local + beat_step * 0.5;
+                let clip_swing =
+                    clip.swing_for_pair(effective_local, swing, wrapped || !was_in_clip);
 
                 if wrapped {
                     for note in &clip.notes {
                         note_offs.push(note.pitch);
                     }
                     for note in &clip.notes {
-                        if note.start_beat >= clip.loop_start_beats
-                            && note.start_beat <= effective_local
+                        let mapped_start = mapped_note_start(clip, note, clip_swing);
+                        if mapped_start >= clip.loop_start_beats && mapped_start <= effective_local
                         {
                             note_ons.push((note.pitch, note.velocity));
                         }
                     }
                 } else {
-                    for note in &clip.notes {
-                        if crossed_beat(prev_effective_local, effective_local, note.start_beat) {
+                    for (note_index, note) in clip.notes.iter().enumerate() {
+                        let mapped_start = mapped_note_start(clip, note, clip_swing);
+                        if mapped_start < clip.duration_beats
+                            && crossed_beat(prev_effective_local, effective_local, mapped_start)
+                        {
                             note_ons.push((note.pitch, note.velocity));
                         }
-                        if crossed_beat(prev_effective_local, effective_local, note.end_beat()) {
+                        if crossed_beat(
+                            prev_effective_local,
+                            effective_local,
+                            mapped_note_end(clip, note_index, clip_swing),
+                        ) {
                             note_offs.push(note.pitch);
                         }
                     }
@@ -561,25 +579,6 @@ impl EngineTrack {
 
         rendered
     }
-}
-
-/// Equal-power pan law.
-/// `pan` ranges from 0.0 (hard left) to 1.0 (hard right).
-/// Returns `(left_gain, right_gain)`.
-/// At center (0.5): both channels get ~0.707 (-3dB).
-pub fn equal_power_pan(pan: f32) -> (f32, f32) {
-    let pan = pan.clamp(0.0, 1.0);
-    let angle = pan * std::f32::consts::FRAC_PI_2;
-    (angle.cos(), angle.sin())
-}
-
-/// Stereo balance law for channels that carry already-panned
-/// material (buses): center passes both channels at unity, off-
-/// center attenuates the far side. Equal-power panning here would
-/// tax every centered return 3 dB.
-pub fn balance_pan(pan: f32) -> (f32, f32) {
-    let pan = pan.clamp(0.0, 1.0);
-    (((1.0 - pan) * 2.0).min(1.0), (pan * 2.0).min(1.0))
 }
 
 /// Returns `true` if any track in the slice has solo enabled.

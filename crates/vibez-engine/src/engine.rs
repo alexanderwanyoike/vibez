@@ -917,6 +917,10 @@ mod mute_event_tests;
 mod note_repeat_tests;
 
 #[cfg(test)]
+#[path = "engine_clip_groove_tests.rs"]
+mod clip_groove_tests;
+
+#[cfg(test)]
 #[path = "engine_section_playback_tests.rs"]
 mod section_playback_tests;
 
