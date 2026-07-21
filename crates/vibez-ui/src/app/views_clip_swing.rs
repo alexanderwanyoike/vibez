@@ -253,12 +253,6 @@ impl App {
             amount.into()
         };
 
-        container(body)
-            .padding([5, 7])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            })
-            .into()
+        container(body).padding([5, 7]).into()
     }
 }
