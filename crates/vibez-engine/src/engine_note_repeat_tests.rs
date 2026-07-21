@@ -2,6 +2,7 @@ use super::*;
 use crate::playback_source::{
     EngineNoteClip, PreparedPlaybackSource, PreparedSectionPlaybackSource,
 };
+use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::{GrooveGrid, GrooveProfile, NoteRepeatRate, SwingAmount, SwingOffset};
@@ -244,6 +245,71 @@ fn project_and_track_swing_shift_straight_repeat_timestamps() {
     // At 100 Hz and 60 BPM, MPC tick 63 lands at sample 66 and the next
     // 96-tick pair boundary lands at sample 100.
     assert_eq!(repeat_timestamps(&mut events), vec![66, 100]);
+}
+
+#[test]
+fn track_swing_automation_shapes_future_note_repeat_pairs() {
+    let (mut engine, mut commands, mut events, track_id) = repeat_engine();
+    while events.pop().is_ok() {}
+    let mut lane = AutomationLane::new(AutomationTarget::TrackSwingOffset);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: SwingOffset::new(0.10).normalized(),
+        curve: 0.0,
+    });
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.56)))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .unwrap();
+    engine.process(&mut [0.0; 2], 2);
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 91,
+            rate: NoteRepeatRate::Eighth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 120 * 2], 2);
+
+    assert_eq!(repeat_timestamps(&mut events), vec![66, 100]);
+}
+
+#[test]
+fn track_swing_automation_waits_for_the_next_note_repeat_pair() {
+    let (mut engine, mut commands, mut events, track_id) = repeat_engine();
+    while events.pop().is_ok() {}
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.56)))
+        .unwrap();
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 91,
+            rate: NoteRepeatRate::Eighth,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 80 * 2], 2);
+
+    let mut lane = AutomationLane::new(AutomationTarget::TrackSwingOffset);
+    lane.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: SwingOffset::new(0.10).normalized(),
+        curve: 0.0,
+    });
+    commands
+        .push(EngineCommand::SetAutomationLane { track_id, lane })
+        .unwrap();
+    engine.process(&mut [0.0; 140 * 2], 2);
+
+    // The in-flight pair keeps its 56% offbeat. At its boundary, the next
+    // pair latches the automated 66% result without an extra or skipped hit.
+    assert_eq!(repeat_timestamps(&mut events), vec![56, 100, 166, 200]);
 }
 
 #[test]

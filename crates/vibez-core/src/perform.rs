@@ -152,6 +152,14 @@ impl SwingOffset {
     pub const fn get(self) -> f32 {
         self.0
     }
+
+    pub fn from_normalized(value: f32) -> Self {
+        Self::new((value.clamp(0.0, 1.0) - 0.5) * (Self::MAX - Self::MIN))
+    }
+
+    pub fn normalized(self) -> f32 {
+        (self.0 - Self::MIN) / (Self::MAX - Self::MIN)
+    }
 }
 
 impl Default for SwingOffset {
@@ -312,6 +320,8 @@ mod groove_tests {
                 .get(),
             0.75
         );
+        assert!((SwingOffset::new(0.04).normalized() - 0.58).abs() < f32::EPSILON);
+        assert!((SwingOffset::from_normalized(0.58).get() - 0.04).abs() < f32::EPSILON);
     }
 }
 

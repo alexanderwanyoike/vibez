@@ -2,6 +2,7 @@
 
 use super::*;
 use std::sync::{Arc, Mutex};
+use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::{GrooveGrid, SwingAmount, SwingOffset};
@@ -64,10 +65,12 @@ impl vibez_instruments::Instrument for TimedSpy {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_events(
     grid: GrooveGrid,
     swing: SwingAmount,
     track_offset: Option<SwingOffset>,
+    automation_offset: Option<SwingOffset>,
     duration_beats: f64,
     looping: bool,
     loop_end_beats: f64,
@@ -97,6 +100,17 @@ fn render_events(
     if let Some(offset) = track_offset {
         commands
             .push(EngineCommand::SetTrackSwingOffset(track_id, Some(offset)))
+            .unwrap();
+    }
+    if let Some(offset) = automation_offset {
+        let mut lane = AutomationLane::new(AutomationTarget::TrackSwingOffset);
+        lane.insert_point(AutomationPoint {
+            beat: 0.0,
+            value: offset.normalized(),
+            curve: 0.0,
+        });
+        commands
+            .push(EngineCommand::SetAutomationLane { track_id, lane })
             .unwrap();
     }
     commands
@@ -154,6 +168,7 @@ fn opted_in_clip_midpoints_match_the_mpc_96_ppqn_ticks() {
                 grid,
                 SwingAmount::new(swing),
                 None,
+                None,
                 1.0,
                 false,
                 0.0,
@@ -173,6 +188,7 @@ fn looped_clip_reuses_its_local_grid_without_baking_absolute_positions() {
     let events = render_events(
         GrooveGrid::Sixteenth,
         SwingAmount::new(0.66),
+        None,
         None,
         1.0,
         true,
@@ -196,6 +212,7 @@ fn shortened_clip_drops_an_onset_mapped_past_its_boundary() {
         GrooveGrid::Sixteenth,
         SwingAmount::new(0.75),
         None,
+        None,
         0.3,
         false,
         0.0,
@@ -212,6 +229,7 @@ fn mapped_note_off_is_clamped_to_the_next_same_pitch_onset() {
     let events = render_events(
         GrooveGrid::Sixteenth,
         SwingAmount::new(0.66),
+        None,
         None,
         1.0,
         false,
@@ -244,6 +262,23 @@ fn project_track_offset_shapes_opted_in_clip_playback() {
     let events = render_events(
         GrooveGrid::Sixteenth,
         SwingAmount::new(0.56),
+        Some(SwingOffset::new(0.04)),
+        None,
+        1.0,
+        false,
+        0.0,
+        &[midpoint_note(0.25)],
+        96,
+    );
+    assert!(events.contains(&TimedEvent::On(29, 42)), "{events:?}");
+}
+
+#[test]
+fn track_swing_automation_shapes_opted_in_clip_playback() {
+    let events = render_events(
+        GrooveGrid::Sixteenth,
+        SwingAmount::new(0.56),
+        None,
         Some(SwingOffset::new(0.04)),
         1.0,
         false,

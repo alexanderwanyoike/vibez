@@ -42,6 +42,9 @@ pub fn shape(t: f32, curve: f32) -> f32 {
 pub enum AutomationTarget {
     TrackGain,
     TrackPan,
+    /// Project-relative Track Swing offset, normalized from -25..+25 points.
+    #[serde(rename = "track_swing_offset")]
+    TrackSwingOffset,
     EffectParam {
         effect_id: EffectId,
         param_index: usize,
@@ -125,6 +128,16 @@ impl AutomationLane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn track_swing_offset_has_a_stable_persisted_identity() {
+        let json = serde_json::to_string(&AutomationTarget::TrackSwingOffset).unwrap();
+        assert_eq!(json, "\"track_swing_offset\"");
+        assert_eq!(
+            serde_json::from_str::<AutomationTarget>(&json).unwrap(),
+            AutomationTarget::TrackSwingOffset
+        );
+    }
 
     fn lane(points: &[(f64, f32)]) -> AutomationLane {
         let mut l = AutomationLane::new(AutomationTarget::TrackGain);

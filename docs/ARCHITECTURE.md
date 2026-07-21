@@ -183,6 +183,18 @@ immediately as step zero, later pads share that anchor, and the anchor clears
 when the final repeated pad stops. Swing, tempo, rate, and Project Track offset
 changes reschedule future hits without changing the anchor.
 
+Swing UI uses two views of that same model rather than introducing a third
+value: Project Swing edits the native `50..75%` ratio, while contextual Target
+Swing shows the selected MIDI Project Track's effective ratio and its optional
+Project-relative offset. `FOLLOW` removes the manual offset. A persisted
+`track_swing_offset` automation lane stores that relative offset normalized
+from `-25..+25` percentage points; while a lane has a value it takes precedence
+over the manual offset and the Target control is read-only and marked `AUTO`.
+Automation is evaluated at the existing render-block boundary, then the Groove
+scheduler latches the effective result for each musical pair. Consequently a
+change cannot retime an in-flight pair, and both Note Repeat and opted-in clips
+adopt it at their next pair boundary.
+
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project

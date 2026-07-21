@@ -9,7 +9,7 @@ impl EngineTrack {
     }
 
     pub fn effective_swing(&self, project_swing: SwingAmount) -> SwingAmount {
-        project_swing.effective(self.swing_offset)
+        project_swing.effective(self.automation_swing_offset.or(self.swing_offset))
     }
 
     pub(crate) fn start_note_repeat(&mut self, start: NoteRepeatStart, mut clock: NoteRepeatClock) {

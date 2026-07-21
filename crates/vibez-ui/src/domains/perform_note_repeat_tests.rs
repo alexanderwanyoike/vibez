@@ -236,3 +236,13 @@ fn swing_edits_are_project_dirty_engine_commands_with_track_inheritance() {
             && *offset == SwingOffset::new(-0.04)
     ));
 }
+
+#[test]
+fn swing_numeric_input_buffers_are_not_project_edits() {
+    assert!(!PerformMsg::ProjectSwingInput("59".into()).marks_dirty());
+    assert!(!PerformMsg::TargetSwingInput {
+        track_id: TrackId::new(),
+        value: "63".into(),
+    }
+    .marks_dirty());
+}

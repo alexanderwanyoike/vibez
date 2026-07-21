@@ -5,13 +5,16 @@ use super::*;
 impl PerformState {
     pub(super) fn update_project_swing(&mut self, value: f32, engine: &mut impl EngineHandle) {
         self.project_swing = SwingAmount::new(value);
+        self.project_swing_input = format!("{:.0}", self.project_swing.get() * 100.0);
+        self.target_swing_input.clear();
+        self.target_swing_input_track = None;
         engine.send(vibez_engine::commands::EngineCommand::SetProjectSwing(
             self.project_swing,
         ));
     }
 
     pub(super) fn update_track_swing(
-        &self,
+        &mut self,
         value: Option<f32>,
         engine: &mut impl EngineHandle,
         ctx: PerformCtx<'_>,
@@ -23,6 +26,9 @@ impl PerformState {
             return PerformAction::default();
         };
         let swing_offset = value.map(SwingOffset::new);
+        let effective = self.project_swing.effective(swing_offset);
+        self.target_swing_input = format!("{:.0}", effective.get() * 100.0);
+        self.target_swing_input_track = Some(track_id);
         engine.send(vibez_engine::commands::EngineCommand::SetTrackSwingOffset(
             track_id,
             swing_offset,
@@ -106,6 +112,22 @@ impl PerformState {
         self.project_swing
     }
 
+    pub fn project_swing_input(&self) -> &str {
+        if self.project_swing_input.is_empty() {
+            "50"
+        } else {
+            &self.project_swing_input
+        }
+    }
+
+    pub fn target_swing_input(&self, track_id: TrackId) -> &str {
+        if self.target_swing_input_track == Some(track_id) {
+            &self.target_swing_input
+        } else {
+            ""
+        }
+    }
+
     pub const fn note_repeat_rate(&self) -> NoteRepeatRate {
         self.note_repeat_rate
     }
@@ -124,6 +146,9 @@ impl PerformState {
 
     pub fn set_project_swing(&mut self, swing: SwingAmount) {
         self.project_swing = swing;
+        self.project_swing_input = format!("{:.0}", swing.get() * 100.0);
+        self.target_swing_input.clear();
+        self.target_swing_input_track = None;
     }
 
     fn sync_note_repeat_activation(&mut self, was_active: bool, engine: &mut impl EngineHandle) {

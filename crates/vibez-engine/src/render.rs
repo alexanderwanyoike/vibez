@@ -292,6 +292,8 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 }
             }
 
+            let beat = pos as f64 / tempo.samples_per_beat();
+            let (auto_gain, auto_pan) = track.apply_automation(beat);
             let produced = if track.instrument.is_some() {
                 track.render_instrument(
                     InstrumentRenderContext {
@@ -315,8 +317,8 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             }
             track.process_effects(block, CHANNELS);
 
-            let (pan_l, pan_r) = equal_power_pan(track.pan);
-            let gain = track.gain;
+            let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
+            let gain = auto_gain.unwrap_or(track.gain);
             let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
             for frame in 0..block {
                 let idx = frame * CHANNELS;

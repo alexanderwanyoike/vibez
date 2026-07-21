@@ -313,6 +313,12 @@ impl App {
                 target: vibez_core::automation::AutomationTarget::TrackPan,
             },
         ];
+        if track.kind.is_midi() {
+            choices.push(LaneChoice {
+                label: "Track Swing".into(),
+                target: vibez_core::automation::AutomationTarget::TrackSwingOffset,
+            });
+        }
         if !track.plugin_instrument_descriptors.is_empty() {
             let name = track
                 .plugin_instrument_name
