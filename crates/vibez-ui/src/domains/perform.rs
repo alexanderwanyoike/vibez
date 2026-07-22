@@ -14,7 +14,10 @@ use vibez_project::SectionLaunchQuantization;
 use super::EngineHandle;
 use crate::state::ProjectTrack;
 
+mod instrument;
 mod sections;
+pub use instrument::SixteenLevelsParameter;
+use instrument::{ActiveInstrumentNote, InstrumentPerformanceState};
 pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
@@ -265,25 +268,6 @@ pub struct PadGesture {
     pub occurred_at: Instant,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ActiveInstrumentNote {
-    track_id: TrackId,
-    pitch: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ComputerKeyVelocity(u8);
-
-const INSTRUMENT_BASE_PITCH: u8 = 35;
-const MIN_INSTRUMENT_OCTAVE: i8 = -3;
-const MAX_INSTRUMENT_OCTAVE: i8 = 6;
-
-impl Default for ComputerKeyVelocity {
-    fn default() -> Self {
-        Self(100)
-    }
-}
-
 /// Which part of Perform owns keyboard/editor focus. This remains runtime UI
 /// state and is deliberately not persisted in the project document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -314,8 +298,9 @@ impl PerformBanks {
 }
 
 /// Perform state combines project-owned Sections with runtime interaction.
-/// Input mapping, mode, banks, Instrument octave, focus, and edit buffers remain
-/// global/runtime; only the Section store enters project persistence and undo.
+/// Input mapping, mode, banks, live Instrument controls, focus, and edit buffers
+/// remain global/runtime; only the Section store enters project persistence and
+/// undo.
 #[derive(Default)]
 pub struct PerformState {
     pub mode: PerformMode,
@@ -325,8 +310,7 @@ pub struct PerformState {
     pub input_mapping: PerformInputMapping,
     pub key_rebind_target: Option<PadPosition>,
     pub instrument_target_overlay: bool,
-    instrument_octave: i8,
-    computer_key_velocity: ComputerKeyVelocity,
+    instrument: InstrumentPerformanceState,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
     pub section_editor: SectionTimelineEditor,
@@ -375,6 +359,12 @@ pub enum PerformMsg {
     SetInstrumentTargetOverlay(bool),
     SelectInstrumentTarget(TrackId),
     SetFixedComputerVelocity(u8),
+    ToggleFullLevel,
+    ToggleSixteenLevels,
+    SelectSixteenLevelsParameter(SixteenLevelsParameter),
+    SetSixteenLevelsMinimum(i16),
+    SetSixteenLevelsMaximum(i16),
+    ChooseSixteenLevelsSource,
     ComputerKeyPressed {
         key: ComputerKey,
         key_id: String,
@@ -514,6 +504,7 @@ impl PerformState {
         ctx: PerformCtx<'_>,
     ) -> PerformAction {
         self.sync_track_mute_slots(ctx.project_tracks);
+        self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
@@ -703,10 +694,7 @@ impl PerformState {
                             if self.instrument_target_overlay {
                                 self.banks.instrument = self.banks.instrument.saturating_sub(1);
                             } else {
-                                self.instrument_octave = self
-                                    .instrument_octave
-                                    .saturating_sub(1)
-                                    .max(MIN_INSTRUMENT_OCTAVE);
+                                self.shift_instrument_octave(-1);
                             }
                         }
                     }
@@ -749,10 +737,7 @@ impl PerformState {
                                 self.banks.instrument =
                                     self.banks.instrument.saturating_add(1).min(last_bank as u8);
                             } else {
-                                self.instrument_octave = self
-                                    .instrument_octave
-                                    .saturating_add(1)
-                                    .min(MAX_INSTRUMENT_OCTAVE);
+                                self.shift_instrument_octave(1);
                             }
                         }
                     }
@@ -778,6 +763,9 @@ impl PerformState {
                         .iter()
                         .any(|track| track.id == track_id && track.is_playable_midi_target())
                 {
+                    if ctx.selected_project_track != Some(track_id) {
+                        self.sync_instrument_target(Some(track_id));
+                    }
                     return PerformAction {
                         select_project_track: Some(track_id),
                         ..PerformAction::default()
@@ -785,11 +773,41 @@ impl PerformState {
                 }
             }
             PerformMsg::SetFixedComputerVelocity(velocity) => {
-                self.computer_key_velocity = ComputerKeyVelocity(velocity.clamp(1, 127));
+                self.set_fixed_computer_velocity(velocity);
                 return PerformAction {
                     persist_settings: true,
                     ..PerformAction::default()
                 };
+            }
+            PerformMsg::ToggleFullLevel => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.toggle_full_level();
+                }
+            }
+            PerformMsg::ToggleSixteenLevels => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.toggle_sixteen_levels();
+                }
+            }
+            PerformMsg::SelectSixteenLevelsParameter(parameter) => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.select_sixteen_levels_parameter(parameter);
+                }
+            }
+            PerformMsg::SetSixteenLevelsMinimum(minimum) => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.set_sixteen_levels_minimum(minimum);
+                }
+            }
+            PerformMsg::SetSixteenLevelsMaximum(maximum) => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.set_sixteen_levels_maximum(maximum);
+                }
+            }
+            PerformMsg::ChooseSixteenLevelsSource => {
+                if ctx.workspace_visible && self.mode == PerformMode::Instrument {
+                    self.begin_choosing_sixteen_levels_source();
+                }
             }
             PerformMsg::ComputerKeyPressed {
                 key,
@@ -825,18 +843,20 @@ impl PerformState {
                             .map(|track| track.id)
                     })
                     .flatten();
+                if let Some(track_id) = selected_instrument_target {
+                    self.sync_instrument_target(Some(track_id));
+                }
                 let instrument_note = if self.mode == PerformMode::Instrument
                     && !self.instrument_target_overlay
                 {
-                    ctx.selected_project_track.and_then(|track_id| {
-                        ctx.project_tracks
-                            .iter()
-                            .find(|track| track.id == track_id && track.is_playable_midi_target())
-                            .map(|_| ActiveInstrumentNote {
-                                track_id,
-                                pitch: self.instrument_pitch(position),
+                    let velocity = self.fixed_computer_velocity();
+                    self.instrument_target()
+                        .filter(|track_id| {
+                            ctx.project_tracks.iter().any(|track| {
+                                track.id == *track_id && track.is_playable_midi_target()
                             })
-                    })
+                        })
+                        .map(|track_id| self.resolve_instrument_note(position, velocity, track_id))
                 } else {
                     None
                 };
@@ -844,7 +864,7 @@ impl PerformState {
                     engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
                         track_id: note.track_id,
                         pitch: note.pitch,
-                        velocity: self.computer_key_velocity.0,
+                        velocity: note.velocity,
                     });
                 }
                 self.active_computer_keys
@@ -924,23 +944,6 @@ impl PerformState {
         self.active_computer_keys
             .values()
             .any(|(pressed, _, _)| *pressed == position)
-    }
-
-    pub const fn fixed_computer_velocity(&self) -> u8 {
-        self.computer_key_velocity.0
-    }
-
-    pub const fn instrument_octave(&self) -> i8 {
-        self.instrument_octave
-    }
-
-    pub fn instrument_pitch(&self, position: PadPosition) -> u8 {
-        let base = i16::from(INSTRUMENT_BASE_PITCH + position.ordinal(PerformMode::Instrument));
-        (base + i16::from(self.instrument_octave) * 12).clamp(0, 127) as u8
-    }
-
-    pub fn set_fixed_computer_velocity(&mut self, velocity: u8) {
-        self.computer_key_velocity = ComputerKeyVelocity(velocity.clamp(1, 127));
     }
 
     fn select_section(&mut self, id: SectionId, selected_track: Option<TrackId>) {

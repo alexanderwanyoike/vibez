@@ -1,32 +1,19 @@
 //! Pad Surface rendering for the Perform workspace.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
-    tooltip,
+    button, center, column, container, horizontal_space, mouse_area, row, stack, text, tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
-use crate::domains::perform::{PadPosition, PerformEditorFocus, PerformMode, PerformMsg};
+use super::views_perform::{perform_pad_grid_height, perform_tool_button};
+use super::*;
+use crate::domains::perform::{
+    PadPosition, PerformEditorFocus, PerformMode, PerformMsg, SixteenLevelsParameter,
+};
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
-use vibez_core::id::TrackId;
-
-use super::views_perform::{perform_pad_grid_height, perform_tool_button};
-use super::*;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InstrumentTargetOption {
-    track_id: TrackId,
-    label: String,
-}
-
-impl std::fmt::Display for InstrumentTargetOption {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.label)
-    }
-}
 
 fn perform_bank_button(
     label: &'static str,
@@ -138,114 +125,16 @@ impl App {
             ),
         };
         let header: Element<'_, Message> = if mode == PerformMode::Instrument {
-            let targets: Vec<_> = self
-                .state
-                .project_tracks
-                .tracks
-                .iter()
-                .filter(|track| track.is_playable_midi_target())
-                .map(|track| InstrumentTargetOption {
-                    track_id: track.id,
-                    label: track.name.clone(),
-                })
-                .collect();
-            let selected = self.state.arrangement.selected_track.and_then(|selected| {
-                targets
-                    .iter()
-                    .find(|target| target.track_id == selected)
-                    .cloned()
-            });
-            let selector = pick_list(targets, selected, |target| {
-                Message::Perform(PerformMsg::SelectInstrumentTarget(target.track_id))
-            })
-            .placeholder("CHOOSE PLAYABLE MIDI TARGET")
-            .width(Length::Fill)
-            .padding([5, 8])
-            .text_size(10)
-            .style(|_theme: &Theme, status| {
-                let engaged = matches!(
-                    status,
-                    pick_list::Status::Hovered | pick_list::Status::Opened
-                );
-                pick_list::Style {
-                    text_color: th::text(),
-                    placeholder_color: th::text_dim(),
-                    handle_color: if engaged {
-                        th::accent()
-                    } else {
-                        th::text_dim()
-                    },
-                    background: th::perform_pad_lowlight().into(),
-                    border: iced::Border {
-                        color: if engaged {
-                            th::accent_dim()
-                        } else {
-                            th::border_light()
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                }
-            })
-            .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
-                background: th::bg_elevated().into(),
-                border: iced::Border {
-                    color: th::border_light(),
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                text_color: th::text(),
-                selected_text_color: th::accent(),
-                selected_background: th::bg_hover().into(),
-            });
-            let target_overlay = self.state.perform.instrument_target_overlay;
-            let range_or_bank = if target_overlay {
-                format!("TARGET BANK {bank}")
-            } else {
-                let low = crate::widgets::piano_roll::pitch_name(
-                    self.state.perform.instrument_pitch(PadPosition::ALL[12]),
-                );
-                let high = crate::widgets::piano_roll::pitch_name(
-                    self.state.perform.instrument_pitch(PadPosition::ALL[3]),
-                );
-                format!(
-                    "OCTAVE {:+} · {low}–{high}",
-                    self.state.perform.instrument_octave()
-                )
-            };
-            let previous_hint = if target_overlay {
-                "PREVIOUS TARGET BANK"
-            } else {
-                "OCTAVE DOWN  ["
-            };
-            let next_hint = if target_overlay {
-                "NEXT TARGET BANK"
-            } else {
-                "OCTAVE UP  ]"
-            };
-            let target_navigation = row![
-                text("INSTRUMENT TARGET")
-                    .font(PERFORM_LABEL)
-                    .size(8)
-                    .color(th::text_muted()),
+            row![
+                heading,
                 horizontal_space(),
-                text(range_or_bank)
-                    .font(PERFORM_TECH_STRONG)
-                    .size(8)
+                text("16 PAD INSTRUMENT · HOLD SHIFT FOR TARGETS")
+                    .font(PERFORM_TECH)
+                    .size(9)
                     .color(th::blend(th::text_dim(), th::text(), 0.24)),
-                perform_bank_button("‹", previous_hint, PerformMsg::PreviousBank),
-                perform_bank_button("›", next_hint, PerformMsg::NextBank),
             ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center);
-            let target_panel = column![target_navigation, selector]
-                .spacing(4)
-                .width(Length::Fill);
-
-            row![heading, target_panel]
-                .spacing(20)
-                .align_y(iced::Alignment::End)
-                .into()
+            .align_y(iced::Alignment::End)
+            .into()
         } else {
             let bank_navigation = row![
                 text(format!("BANK {bank}"))
@@ -289,7 +178,22 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fixed(pad_grid_height));
 
-        let surface = container(column![header, grid].spacing(12))
+        let content = if mode == PerformMode::Instrument {
+            let rail_width = (surface_width * 0.3).clamp(154.0, 176.0);
+            column![
+                header,
+                row![
+                    grid,
+                    self.view_instrument_control_rail(bank, pad_grid_height)
+                        .width(Length::Fixed(rail_width))
+                ]
+                .spacing(10)
+            ]
+            .spacing(12)
+        } else {
+            column![header, grid].spacing(12)
+        };
+        let surface = container(content)
             .width(Length::Fixed(surface_width))
             .height(Length::Fill)
             .padding(14)
@@ -352,7 +256,7 @@ impl App {
                     .track_for_instrument_target_pad(position, &self.state.project_tracks.tracks)
             })
             .flatten();
-        let selected_instrument = self.state.arrangement.selected_track.and_then(|track_id| {
+        let selected_instrument = self.state.perform.instrument_target().and_then(|track_id| {
             self.state
                 .project_tracks
                 .tracks
@@ -361,7 +265,7 @@ impl App {
         });
         let selected = selected
             || instrument_target
-                .is_some_and(|track| self.state.arrangement.selected_track == Some(track.id));
+                .is_some_and(|track| self.state.perform.instrument_target() == Some(track.id));
         let (title, detail, color, muted) = match mode {
             PerformMode::Sections => match section {
                 Some(section) => (
@@ -436,12 +340,25 @@ impl App {
                 }
             }
             PerformMode::Instrument => {
-                let pitch = self.state.perform.instrument_pitch(position);
+                let preview = self.state.perform.instrument_pad_preview(position);
+                let choosing_source = self.state.perform.choosing_sixteen_levels_source();
+                let levels_enabled = self.state.perform.sixteen_levels_enabled();
+                let parameter = self.state.perform.sixteen_levels_parameter();
+                let target = selected_instrument
+                    .map(|track| track.name.clone())
+                    .unwrap_or_else(|| "NO INSTRUMENT TARGET".to_string());
+                let detail = if choosing_source {
+                    format!("CHOOSE SOURCE · {target}")
+                } else if levels_enabled && parameter == SixteenLevelsParameter::Velocity {
+                    format!("VELOCITY {} · {target}", preview.velocity)
+                } else if levels_enabled {
+                    format!("PITCH LEVEL · {target}")
+                } else {
+                    target
+                };
                 (
-                    crate::widgets::piano_roll::pitch_name(pitch),
-                    selected_instrument
-                        .map(|track| track.name.clone())
-                        .unwrap_or_else(|| "NO INSTRUMENT TARGET".to_string()),
+                    crate::widgets::piano_roll::pitch_name(preview.pitch),
+                    detail,
                     selected_instrument
                         .map(|track| th::track_color(track.color_index))
                         .unwrap_or_else(|| th::track_color((ordinal - 1) as u8)),

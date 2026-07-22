@@ -160,6 +160,7 @@ mod views_devices;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_instrument;
 mod views_perform_pads;
 mod views_perform_playhead;
 mod views_perform_sections;
