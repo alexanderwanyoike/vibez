@@ -146,6 +146,7 @@ mod project_replay;
 mod project_sections;
 mod update;
 mod update_media;
+mod update_policy;
 mod update_remote;
 mod update_timeline;
 mod views_arrangement;

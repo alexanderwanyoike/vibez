@@ -156,8 +156,8 @@ impl App {
                 }),
         )
         .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-            x: 400.0,
-            y: 300.0,
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
             target: ContextMenuTarget::ArrangementEmpty,
         }))
         .into()

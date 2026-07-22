@@ -58,8 +58,8 @@ impl App {
                     }),
             )
             .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-                x: 400.0,
-                y: 300.0,
+                x: self.state.view.cursor_x,
+                y: self.state.view.cursor_y,
                 target: ContextMenuTarget::ArrangementEmpty,
             }));
             if browser_drag_active {
@@ -213,6 +213,7 @@ impl App {
         // Track rows: header widgets + clip canvas
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
+        let browser_drag_active = self.state.browser.drag_source.is_some();
 
         for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
@@ -275,7 +276,7 @@ impl App {
                 timeline.selection_start_beats,
                 timeline.selection_end_beats,
                 timeline.time_selection_track,
-                self.state.browser.drag_source.is_some(),
+                browser_drag_active,
                 browser_drag_duration,
                 browser_drag_detail.clone(),
             );
@@ -283,24 +284,27 @@ impl App {
             let compatible = !track.kind.is_midi();
             let grid = self.state.view.grid_config();
             let track_geometry = geometry;
-            let clip_canvas: Element<'_, Message> = mouse_area(
+            let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
                     .height(Length::Fixed(70.0)),
-            )
-            .on_move(move |point| {
-                let beat = grid.snap_beat(
-                    track_geometry.x_to_beat(point.x),
-                    track_geometry.pixels_per_beat(),
-                );
-                Message::Browser(BrowserMsg::DragHoverTrack {
-                    track_id,
-                    beat: beat.max(0.0),
-                    compatible,
-                })
-            })
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-            .into();
+            );
+            if browser_drag_active {
+                clip_canvas_area = clip_canvas_area
+                    .on_move(move |point| {
+                        let beat = grid.snap_beat(
+                            track_geometry.x_to_beat(point.x),
+                            track_geometry.pixels_per_beat(),
+                        );
+                        Message::Browser(BrowserMsg::DragHoverTrack {
+                            track_id,
+                            beat: beat.max(0.0),
+                            compatible,
+                        })
+                    })
+                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget));
+            }
+            let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
 
             let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
 
@@ -497,9 +501,8 @@ impl App {
         ));
 
         // mouse_area only provides on_right_press (no cursor position),
-        // so the right-click context menu from the scrollable background
-        // opens at a default position. Track canvas right-clicks still
-        // use the precise cursor location.
+        // so use the globally tracked cursor for the scrollable background.
+        // Track canvas right-clicks still supply their precise event position.
         mouse_area(
             container(scrollable_content)
                 .width(Length::Fill)
@@ -510,8 +513,8 @@ impl App {
                 }),
         )
         .on_right_press(Message::View(ViewMsg::ShowContextMenu {
-            x: 400.0,
-            y: 300.0,
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
             target: ContextMenuTarget::ArrangementEmpty,
         }))
         .into()
