@@ -54,8 +54,10 @@ impl App {
                 self.state.status_text = "Starting Capture into Arrange…".into();
             }
             CaptureAction::Stop => {
-                self.send_command(EngineCommand::StopPerformanceCapture);
-                self.state.status_text = "Stopping Capture…".into();
+                // Transport Stop publishes the Capture boundary first, then
+                // stops Section playback in the same audio callback.
+                self.send_command(capture_stop_command());
+                self.state.status_text = "Stopping Capture and Section playback…".into();
             }
         }
         Task::none()
@@ -106,6 +108,10 @@ impl App {
             self.state.project.dirty = dirty_before;
         }
     }
+}
+
+fn capture_stop_command() -> EngineCommand {
+    EngineCommand::Stop
 }
 
 fn capture_destination_from_playhead_is_empty(
@@ -192,6 +198,11 @@ mod tests {
     use std::collections::HashMap;
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::perform::GrooveGrid;
+
+    #[test]
+    fn capture_stop_uses_the_atomic_transport_stop_boundary() {
+        assert!(matches!(capture_stop_command(), EngineCommand::Stop));
+    }
 
     fn snapshot(state: &AppState) -> ProjectSnapshot {
         ProjectSnapshot {

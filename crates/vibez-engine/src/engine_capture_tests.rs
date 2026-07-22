@@ -75,3 +75,40 @@ fn capture_stop_reports_callback_boundary_without_ui_tick_timing() {
     });
     assert_eq!(stopped, Some(7));
 }
+
+#[test]
+fn transport_stop_ends_capture_and_section_playback_at_one_boundary() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(empty_section(
+            section_id, track_id,
+        )))
+        .unwrap();
+    commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
+    engine.process(&mut [0.0; 7], 1);
+    while events.pop().is_ok() {}
+
+    commands.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 3], 1);
+
+    let terminal: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples,
+            } => Some(("capture", effective_at_samples)),
+            EngineEvent::PlaybackStopped => Some(("playback", 7)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(terminal, [("capture", 7), ("playback", 7)]);
+    assert!(!engine.transport().is_playing());
+    assert!(engine.active_section.is_none());
+}

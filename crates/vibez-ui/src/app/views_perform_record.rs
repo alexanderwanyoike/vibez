@@ -240,14 +240,13 @@ fn record_button_content(active: bool) -> Element<'static, Message> {
 
 fn capture_button_content(active: bool) -> Element<'static, Message> {
     let color = if active { th::bg_dark() } else { th::accent() };
+    let capture_icon: Element<'static, Message> = if active {
+        icons::icon(icons::STOP).size(11).color(color).into()
+    } else {
+        capture_to_arrange_icon()
+    };
     row![
-        icons::icon(if active {
-            icons::STOP
-        } else {
-            icons::LAYOUT_LIST
-        })
-        .size(11)
-        .color(color),
+        capture_icon,
         text(if active {
             "STOP CAPTURE"
         } else {
@@ -259,6 +258,36 @@ fn capture_button_content(active: bool) -> Element<'static, Message> {
         shortcut_keycap("F5", color, active),
     ]
     .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// Purpose-built Capture mark: a record source feeding linear timeline lanes.
+/// It deliberately shares no glyph with the Arrange workspace or timeline
+/// expansion controls.
+fn capture_to_arrange_icon() -> Element<'static, Message> {
+    let lane = || {
+        container(horizontal_space())
+            .width(Length::Fixed(8.0))
+            .height(Length::Fixed(1.0))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::accent().into()),
+                ..Default::default()
+            })
+    };
+    let lanes = iced::widget::column![lane(), lane(), lane()]
+        .spacing(2)
+        .align_x(iced::Alignment::Start);
+
+    row![
+        icons::icon(icons::CIRCLE_DOT).size(10).color(th::danger()),
+        text("›")
+            .font(PERFORM_TECH_STRONG)
+            .size(10)
+            .color(th::accent()),
+        lanes,
+    ]
+    .spacing(2)
     .align_y(iced::Alignment::Center)
     .into()
 }
