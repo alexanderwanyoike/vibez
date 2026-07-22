@@ -403,7 +403,7 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
-            PerformMsg::SectionRecord(msg) => return self.update_section_record(msg, ctx),
+            PerformMsg::SectionRecord(msg) => return self.update_section_record(msg),
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
                     self.mode = mode;

@@ -20,6 +20,27 @@ const RECORD_CLIP_EIGHTH: &str = "Section Record · 1/8 Groove";
 const RECORD_CLIP_SIXTEENTH: &str = "Section Record · 1/16 Groove";
 
 impl App {
+    pub(super) fn route_perform_message(
+        &mut self,
+        msg: crate::domains::perform::PerformMsg,
+    ) -> Task<Message> {
+        self.state.perform.section_record.sync_clock(
+            self.state.transport.playing,
+            self.state.transport.bpm,
+            self.state.transport.sample_rate,
+        );
+        let ctx = crate::domains::perform::PerformCtx {
+            workspace_visible: self.state.view.workspace == crate::state::Workspace::Perform,
+            project_tracks: &self.state.project_tracks.tracks,
+            selected_project_track: self.state.arrangement.selected_track,
+        };
+        let action = {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            self.state.perform.update(msg, &mut engine, ctx)
+        };
+        self.apply_perform_action(action)
+    }
+
     pub(super) fn apply_section_record_action(
         &mut self,
         action: SectionRecordAction,

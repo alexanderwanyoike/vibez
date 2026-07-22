@@ -1,7 +1,9 @@
 use vibez_core::id::{SectionId, TrackId};
-use vibez_core::perform::{GrooveGrid, NoteRepeatRate, SwingAmount};
+use vibez_core::perform::{GrooveGrid, NoteRepeatRate};
+#[cfg(test)]
+use vibez_core::perform::SwingAmount;
 
-use super::{PerformAction, PerformCtx, PerformState};
+use super::{PerformAction, PerformState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SectionRecordCountIn {
@@ -205,7 +207,6 @@ struct RecordingSession {
     track_id: TrackId,
     bpm: f64,
     sample_rate: u32,
-    swing: SwingAmount,
     length_beats: f64,
     length_samples: u64,
     mode: SectionRecordMode,
@@ -271,7 +272,6 @@ impl SectionRecordState {
         section_id: SectionId,
         track_id: TrackId,
         from_stopped: bool,
-        swing: SwingAmount,
         length_beats: f64,
     ) -> Option<SectionRecordStartRequest> {
         let bpm = self.bpm;
@@ -284,7 +284,6 @@ impl SectionRecordState {
             track_id,
             bpm,
             sample_rate,
-            swing,
             length_beats,
             length_samples: (length_beats * f64::from(sample_rate) * 60.0 / bpm)
                 .round()
@@ -517,11 +516,7 @@ impl SectionRecordState {
 }
 
 impl PerformState {
-    pub(super) fn update_section_record(
-        &mut self,
-        msg: SectionRecordMsg,
-        ctx: PerformCtx<'_>,
-    ) -> PerformAction {
+    pub(super) fn update_section_record(&mut self, msg: SectionRecordMsg) -> PerformAction {
         match msg {
             SectionRecordMsg::SetCountIn(value) if !self.section_record.is_active() => {
                 self.section_record.count_in = value;
@@ -565,17 +560,10 @@ impl PerformState {
                 let Some(section) = self.sections.by_id(section_id) else {
                     return PerformAction::default();
                 };
-                let swing = self.project_swing.effective(
-                    ctx.project_tracks
-                        .iter()
-                        .find(|track| track.id == track_id)
-                        .and_then(|track| track.swing_offset),
-                );
                 if let Some(request) = self.section_record.request_start(
                     section_id,
                     track_id,
                     !self.section_record.transport_playing,
-                    swing,
                     section.length_beats,
                 ) {
                     return PerformAction {
@@ -596,12 +584,7 @@ fn push_free_note(session: &mut RecordingSession, note: OpenNote, off_sample: u6
         session.bpm,
         session.sample_rate,
     );
-    let start_beat = quantize_start(
-        raw_start,
-        session.quantization,
-        session.swing,
-        session.length_beats,
-    );
+    let start_beat = quantize_start(raw_start, session.quantization, session.length_beats);
     let duration_beats = samples_to_beats(
         off_sample.saturating_sub(note.effective_at_samples),
         session.bpm,
@@ -613,7 +596,7 @@ fn push_free_note(session: &mut RecordingSession, note: OpenNote, off_sample: u6
         velocity: note.velocity,
         start_beat,
         duration_beats,
-        groove_grid: GrooveGrid::Off,
+        groove_grid: session.quantization.groove_grid(),
     });
 }
 
@@ -621,20 +604,12 @@ fn samples_to_beats(samples: u64, bpm: f64, sample_rate: u32) -> f64 {
     samples as f64 * bpm / (f64::from(sample_rate) * 60.0)
 }
 
-fn quantize_start(
-    beat: f64,
-    quantization: SectionRecordQuantization,
-    swing: SwingAmount,
-    length_beats: f64,
-) -> f64 {
+fn quantize_start(beat: f64, quantization: SectionRecordQuantization, length_beats: f64) -> f64 {
     let Some(step) = quantization.interval_beats() else {
         return beat.rem_euclid(length_beats);
     };
     let canonical = (beat / step).round() * step;
-    quantization
-        .groove_grid()
-        .map_beat(canonical, swing)
-        .rem_euclid(length_beats)
+    canonical.rem_euclid(length_beats)
 }
 
 #[cfg(test)]
@@ -654,7 +629,7 @@ mod tests {
         let track_id = TrackId::new();
         state.sync_clock(false, 60.0, 96);
         state
-            .request_start(section_id, track_id, false, SwingAmount::new(0.75), 4.0)
+            .request_start(section_id, track_id, false, 4.0)
             .unwrap();
         state.start(section_id, track_id, 1_000, 0);
         state
@@ -678,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn free_note_quantization_moves_only_the_start() {
+    fn free_note_quantization_keeps_canonical_start_and_live_groove_grid() {
         let mut state = session(
             SectionRecordMode::Overdub,
             SectionRecordQuantization::Sixteenth,
@@ -697,9 +672,15 @@ mod tests {
             (1_072, Some(72)),
         );
         let completed = state.finish(section, track, 1_080, 80, true).unwrap();
-        assert_eq!(completed.notes[0].start_beat, 0.375);
+        assert_eq!(completed.notes[0].start_beat, 0.25);
         assert_eq!(completed.notes[0].duration_beats, 0.5);
-        assert_eq!(completed.notes[0].groove_grid, GrooveGrid::Off);
+        assert_eq!(completed.notes[0].groove_grid, GrooveGrid::Sixteenth);
+        assert_eq!(
+            completed.notes[0]
+                .groove_grid
+                .map_beat(completed.notes[0].start_beat, SwingAmount::new(0.75)),
+            0.375
+        );
     }
 
     #[test]
@@ -742,14 +723,13 @@ mod tests {
 
     #[test]
     fn every_input_grid_snaps_while_triplets_remain_exact() {
-        let swing = SwingAmount::new(0.75);
         let cases = [
             (SectionRecordQuantization::Off, 0.48, 0.48),
             (SectionRecordQuantization::Quarter, 0.48, 0.0),
             (SectionRecordQuantization::QuarterTriplet, 0.7, 2.0 / 3.0),
-            (SectionRecordQuantization::Eighth, 0.48, 0.75),
+            (SectionRecordQuantization::Eighth, 0.48, 0.5),
             (SectionRecordQuantization::EighthTriplet, 0.31, 1.0 / 3.0),
-            (SectionRecordQuantization::Sixteenth, 0.24, 0.375),
+            (SectionRecordQuantization::Sixteenth, 0.24, 0.25),
             (SectionRecordQuantization::SixteenthTriplet, 0.18, 1.0 / 6.0),
             (SectionRecordQuantization::ThirtySecond, 0.12, 0.125),
             (
@@ -759,7 +739,7 @@ mod tests {
             ),
         ];
         for (grid, input, expected) in cases {
-            let actual = quantize_start(input, grid, swing, 4.0);
+            let actual = quantize_start(input, grid, 4.0);
             assert!((actual - expected).abs() < 1e-9, "{grid:?}: {actual}");
         }
     }
