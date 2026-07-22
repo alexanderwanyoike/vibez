@@ -55,6 +55,13 @@ impl AudioEngine {
         prepared: Box<PreparedSectionPlaybackSource>,
         quantization: SectionLaunchQuantization,
     ) {
+        if self.pending_section_record.is_some() || self.active_section_record.is_some() {
+            let event = EngineEvent::SectionQueueCancelled { retired: prepared };
+            if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                std::mem::forget(event);
+            }
+            return;
+        }
         let now = self.transport.position();
         if quantization == SectionLaunchQuantization::Immediate
             || self.active_section.is_none()
@@ -163,7 +170,7 @@ impl AudioEngine {
         self.render_section_frames(output, frames, channels, section, block_start);
     }
 
-    fn render_section_frames(
+    pub(super) fn render_section_frames(
         &mut self,
         output: &mut [f32],
         frames: usize,
@@ -213,7 +220,7 @@ impl AudioEngine {
         }
     }
 
-    fn section_length_samples(&self, length_beats: f64) -> u64 {
+    pub(super) fn section_length_samples(&self, length_beats: f64) -> u64 {
         if self.transport.bpm() > 0.0 {
             (length_beats * self.sample_rate as f64 * 60.0 / self.transport.bpm())
                 .round()

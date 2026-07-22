@@ -94,6 +94,12 @@ impl App {
         action: crate::domains::perform::PerformAction,
     ) -> Task<Message> {
         let mut tasks = Vec::new();
+        if let Some(status) = action.section_record_status {
+            self.state.status_text = status.into();
+        }
+        if let Some(record_action) = action.section_record {
+            tasks.push(self.apply_section_record_action(record_action));
+        }
         if action.persist_settings {
             self.persist_ui_settings();
             self.state.status_text = "Perform settings saved".into();
@@ -588,6 +594,7 @@ impl App {
     }
 
     pub(super) fn poll_engine_events(&mut self) {
+        let mut completed_section_recordings = Vec::new();
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
                 match event {
@@ -662,9 +669,92 @@ impl App {
                             track.mute = muted;
                         }
                     }
-                    EngineEvent::NoteRepeated { .. } => {
-                        // Engine-owned timing evidence is consumed by later
-                        // Section Record/Capture cards, not mirrored as UI state.
+                    EngineEvent::NoteRepeated {
+                        track_id,
+                        pitch,
+                        velocity,
+                        rate,
+                        effective_at_samples,
+                        section_id,
+                        canonical_section_position_samples,
+                        ..
+                    } => {
+                        self.state.perform.section_record.repeated_note(
+                            section_id,
+                            track_id,
+                            pitch,
+                            velocity,
+                            rate,
+                            effective_at_samples,
+                            canonical_section_position_samples,
+                        );
+                    }
+                    EngineEvent::InstrumentNoteInput {
+                        track_id,
+                        pitch,
+                        velocity,
+                        on,
+                        effective_at_samples,
+                        section_id,
+                        section_position_samples,
+                    } => {
+                        self.state.perform.section_record.input_note(
+                            crate::domains::perform::section_record::SectionRecordInput {
+                                section_id,
+                                track_id,
+                                pitch,
+                                velocity,
+                                on,
+                                effective_at_samples,
+                                section_position_samples,
+                            },
+                        );
+                    }
+                    EngineEvent::SectionRecordArmed {
+                        section_id,
+                        track_id,
+                        effective_at_samples,
+                        ..
+                    } => {
+                        self.state.perform.section_record.arm(
+                            section_id,
+                            track_id,
+                            effective_at_samples,
+                        );
+                        self.state.status_text =
+                            format!("Section Record pending at sample {effective_at_samples}");
+                    }
+                    EngineEvent::SectionRecordStarted {
+                        section_id,
+                        track_id,
+                        effective_at_samples,
+                        section_position_samples,
+                    } => {
+                        self.state.perform.section_record.start(
+                            section_id,
+                            track_id,
+                            effective_at_samples,
+                            section_position_samples,
+                        );
+                        self.state.status_text = "Section Record running".into();
+                    }
+                    EngineEvent::SectionRecordStopped {
+                        section_id,
+                        track_id,
+                        effective_at_samples,
+                        section_position_samples,
+                        started,
+                        retired,
+                    } => {
+                        let completed = self.state.perform.section_record.finish(
+                            section_id,
+                            track_id,
+                            effective_at_samples,
+                            section_position_samples,
+                            started,
+                        );
+                        drop(retired);
+                        completed_section_recordings.push(completed);
                     }
                     EngineEvent::SectionTransitioned {
                         section_id,
@@ -701,6 +791,10 @@ impl App {
                         if self.state.perform.playing_section == Some(section_id) {
                             self.state.perform.section_playhead_samples = position_samples;
                         }
+                        self.state
+                            .perform
+                            .section_record
+                            .observe_playhead(section_id, position_samples);
                     }
                     EngineEvent::SectionSourceRefreshed {
                         section_id: _,
@@ -709,6 +803,9 @@ impl App {
                     } => drop(retired),
                 }
             }
+        }
+        for completed in completed_section_recordings {
+            self.finish_section_record_session(completed);
         }
     }
 

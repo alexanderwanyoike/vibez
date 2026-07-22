@@ -159,8 +159,23 @@ UI clock. Holding `N` or a future mapped control, or enabling the on-screen
 latch, starts fixed-capacity repeat voices in the audio engine after the source
 note has sounded. The engine schedules straight and triplet subdivisions on its
 sample clock, accepts rate changes without an immediate retrigger, and emits
-`NoteRepeated` events with authoritative sample timestamps. Pad release owns the
-matching stop and note-off even when the latch remains enabled.
+`NoteRepeated` events with both the audible sample timestamp and its canonical
+straight-clock timestamp. Pad release owns the matching stop and note-off even
+when the latch remains enabled.
+
+Section Record keeps its destination fixed when it is armed: the engine-owned
+playing Section and the then-current Instrument Target. From stopped transport,
+the router prepares the selected Section off the audio thread and transfers the
+resident owner with an Off/one-bar/two-bar count-in. During playback the engine
+arms at the next local Section bar without restarting it. `SectionRecordArmed`,
+`SectionRecordStarted`, monitored note, repeated-note, and stop events all carry
+engine sample timestamps; the 60 fps UI tick never supplies recorded timing.
+The UI collects one runtime session, applies Overdub or the first crossed
+Replace span on stop, and writes full-Section MIDI clips grouped by Groove Grid.
+Free notes bake their selected input quantization while preserving performed
+duration and keep Groove Grid Off. `1/8` and `1/16` Note Repeat stores the
+canonical straight position with its matching Groove Grid, so playback applies
+live Swing once and later Swing edits remain effective.
 
 The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
 Project Swing, and optional Project Track Swing offsets as canonical project
@@ -275,9 +290,11 @@ transaction retains those same `Arc`-shared canonical stores, edits continue
 through their existing domain boundaries, and commit adds the pre-edit state as
 exactly one undo step. Abandon returns that state for rollback without changing
 history. Transactions do not nest: a multi-store operation encountered inside
-an existing recording transaction participates in the outer transaction. The
-first consumer is Project Track deletion, which removes the shared identity
-from Project Tracks, Arrange, and every Section before committing one step.
+an existing recording transaction participates in the outer transaction.
+Project Track deletion removes the shared identity from Project Tracks,
+Arrange, and every Section before committing one step. Section Record is the
+long-lived consumer: it opens before residency/arming and commits the complete
+Overdub or Replace session on the engine-confirmed stop as one undo step.
 Editor selections, meters, decoded/runtime caches, and live plugin pointers are
 outside the transaction snapshot and are neither cloned nor restored.
 
@@ -332,6 +349,18 @@ from local sample zero. Empty sources still run the shared device chain,
 allowing existing effect tails to decay naturally. Live Project Track mutes
 remain channel state across transitions, and the engine plus Transport domain
 hold one Project BPM until Perform playback stops.
+
+`EngineCommand::ArmSectionRecord` adds a separate engine-clock state machine.
+An already-playing Section computes the next bar from its local playhead. A
+stopped-start count-in advances on an unbounded clock and, if its boundary falls
+inside a callback, renders the prefix before activating the resident Section at
+local sample zero for the suffix. Recording does not route notes through a
+second renderer: monitored input stays on the existing instrument path while
+`InstrumentNoteInput` and enriched `NoteRepeated` events report the exact
+effective/local positions. `StopSectionRecord` returns a cancelled resident
+owner to the UI or closes the active session without allocating or dropping it
+in the callback. Section launches and BPM changes are held while this fixed
+recording target is armed.
 
 ```mermaid
 flowchart LR
