@@ -43,6 +43,11 @@ pub struct ProjectAction {
 impl ProjectState {
     pub fn update(&mut self, msg: ProjectMsg, ctx: ProjectCtx) -> ProjectAction {
         let mut action = ProjectAction::default();
+        if self.history.transaction_active() && matches!(&msg, ProjectMsg::Undo | ProjectMsg::Redo)
+        {
+            action.status = Some("Finish the current project transaction first".to_string());
+            return action;
+        }
         match msg {
             ProjectMsg::ToggleFileMenu => {
                 self.file_menu_open = !self.file_menu_open;
@@ -138,7 +143,6 @@ pub fn collect_plugin_reload_requests(
 mod tests {
     use super::*;
     use crate::state::{ArrangementTimeline, ProjectTrack, ProjectTracksState, UiEffect};
-    use std::collections::HashSet;
     use vibez_core::effect::EffectType;
 
     fn plugin_device(name: &str) -> PluginDeviceInfo {
@@ -177,15 +181,10 @@ mod tests {
             arrange_timeline: std::sync::Arc::new(ArrangementTimeline::default()),
             sections: std::sync::Arc::new(crate::domains::perform::SectionStore::default()),
             bpm: 120.0,
-            bpm_text: "120".to_string(),
             project_swing: vibez_core::perform::SwingAmount::default(),
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
-            selected_track: None,
-            selected_clips: HashSet::new(),
-            selected_note_clip: None,
-            selected_section: None,
         }
     }
 
@@ -247,6 +246,23 @@ mod tests {
         assert!(action.apply_snapshot.is_none());
         assert_eq!(action.status.as_deref(), Some("Nothing to undo"));
         assert_eq!(p.history.redo.len(), 0);
+    }
+
+    #[test]
+    fn undo_waits_for_an_open_project_transaction() {
+        let mut p = ProjectState::default();
+        assert!(p
+            .history
+            .begin_transaction(snapshot_with(Vec::new()), false));
+
+        let action = p.update(ProjectMsg::Undo, ctx());
+
+        assert!(action.apply_snapshot.is_none());
+        assert_eq!(
+            action.status.as_deref(),
+            Some("Finish the current project transaction first")
+        );
+        assert!(p.history.transaction_active());
     }
 
     #[test]

@@ -18,21 +18,78 @@ impl App {
             arrange_timeline: Arc::clone(&self.state.arrangement.timeline),
             sections: Arc::clone(&self.state.perform.sections),
             bpm: self.state.transport.bpm,
-            bpm_text: self.state.transport.bpm_text.clone(),
             project_swing: self.state.perform.project_swing(),
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
-            selected_track: self.state.arrangement.selected_track,
-            selected_clips: self.state.arrangement.selected_clips.clone(),
-            selected_note_clip: self.state.arrangement.selected_note_clip,
-            selected_section: self.state.perform.selected_section,
         }
     }
 
     pub(super) fn push_undo_snapshot(&mut self, gesture: Option<crate::state::UndoGestureId>) {
         let snapshot = self.take_snapshot();
         self.state.project.history.push_edit(snapshot, gesture);
+    }
+
+    /// Open one project transaction at the current canonical editable state.
+    /// Returns false when a wider transaction is already active.
+    pub(super) fn begin_project_transaction(&mut self) -> bool {
+        let snapshot = self.take_snapshot();
+        self.state
+            .project
+            .history
+            .begin_transaction(snapshot, self.state.project.dirty)
+    }
+
+    pub(super) fn commit_project_transaction(&mut self) -> bool {
+        self.state.project.history.commit_transaction()
+    }
+
+    /// Project Track deletion is the first multi-store consumer of project
+    /// transactions: Arrange removes the channel and local content, then the
+    /// application action removes that identity from every Section.
+    pub(super) fn begin_project_track_deletion_transaction(
+        &mut self,
+        message: &crate::message::Message,
+    ) -> bool {
+        matches!(
+            message,
+            crate::message::Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::ConfirmRemoveTrack(_)
+                    | crate::domains::arrangement::ArrangementMsg::RemoveTrack(_)
+            )
+        ) && self.begin_project_transaction()
+    }
+
+    pub(super) fn apply_arrangement_action_in_transaction(
+        &mut self,
+        action: crate::domains::arrangement::ArrangementAction,
+        owns_transaction: bool,
+    ) -> iced::Task<crate::message::Message> {
+        let removed_project_track = action.remove_track_from_sections.is_some();
+        let task = self.apply_arrangement_action(action);
+        if owns_transaction {
+            if removed_project_track {
+                self.commit_project_transaction();
+            } else {
+                // A stale confirmation or missing id is a no-op, so it must
+                // not create an empty transaction in history.
+                if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
+                    self.state.project.dirty = dirty_before;
+                }
+            }
+        }
+        task
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn abandon_project_transaction(&mut self) -> bool {
+        let Some((snapshot, dirty_before)) = self.state.project.history.abandon_transaction()
+        else {
+            return false;
+        };
+        self.apply_snapshot(snapshot);
+        self.state.project.dirty = dirty_before;
+        true
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
@@ -100,15 +157,11 @@ impl App {
         self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.perform.sections = snapshot.sections;
         self.state.transport.bpm = snapshot.bpm;
-        self.state.transport.bpm_text = snapshot.bpm_text;
+        self.state.transport.bpm_text = format!("{:.0}", snapshot.bpm);
         self.state.perform.set_project_swing(snapshot.project_swing);
         self.state.transport.loop_enabled = snapshot.loop_enabled;
         self.state.transport.loop_start_beats = snapshot.loop_start_beats;
         self.state.transport.loop_end_beats = snapshot.loop_end_beats;
-        self.state.arrangement.selected_track = snapshot.selected_track;
-        self.state.arrangement.selected_clips = snapshot.selected_clips;
-        self.state.arrangement.selected_note_clip = snapshot.selected_note_clip;
-        self.state.perform.selected_section = snapshot.selected_section;
         self.state
             .perform
             .sync_selected_section_editor(self.state.arrangement.selected_track);

@@ -270,6 +270,17 @@ being edited. Meters, decoded device media, waveform/runtime caches, and UI
 selection are UI runtime state; they are not fields of persisted timeline
 content.
 
+`UndoHistory` also owns the single open `ProjectTransaction`. Beginning a
+transaction retains those same `Arc`-shared canonical stores, edits continue
+through their existing domain boundaries, and commit adds the pre-edit state as
+exactly one undo step. Abandon returns that state for rollback without changing
+history. Transactions do not nest: a multi-store operation encountered inside
+an existing recording transaction participates in the outer transaction. The
+first consumer is Project Track deletion, which removes the shared identity
+from Project Tracks, Arrange, and every Section before committing one step.
+Editor selections, meters, decoded/runtime caches, and live plugin pointers are
+outside the transaction snapshot and are neither cloned nor restored.
+
 ## The audio engine
 
 The engine lives on the cpal audio callback. Its rules:
@@ -376,6 +387,10 @@ are handled in three stages:
   Arrange store.
   Live plugin state is captured before teardown so undo does not reset
   plugin parameters.
+- Long-lived recording edits use one explicit Project Transaction from start
+  through stop. Commit creates one undo step regardless of the number of
+  canonical stores edited; abandonment rolls every canonical edit back and
+  creates no history entry.
 - Warping detects a clip's BPM, then time-stretches it to the project tempo
   with Signalsmith Stretch (near-unity ratios use a resampler instead).
   Changing the project tempo re-warps every warped clip so the arrangement

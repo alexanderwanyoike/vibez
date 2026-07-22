@@ -1,13 +1,11 @@
 //! Project snapshots and bounded undo/redo history.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use vibez_core::id::{ClipId, TrackId};
-
-use super::{ArrangementSelection, ArrangementTimeline, ProjectTracksState};
+use super::{ArrangementTimeline, ProjectTracksState};
 
 /// A point-in-time snapshot of the editable project state, used to implement
 /// undo / redo. Project Tracks, Arrange, and the Section store are independently
@@ -18,15 +16,20 @@ pub struct ProjectSnapshot {
     pub arrange_timeline: Arc<ArrangementTimeline>,
     pub sections: Arc<crate::domains::perform::SectionStore>,
     pub bpm: f64,
-    pub bpm_text: String,
     pub project_swing: vibez_core::perform::SwingAmount,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
-    pub selected_track: Option<TrackId>,
-    pub selected_clips: HashSet<ArrangementSelection>,
-    pub selected_note_clip: Option<(TrackId, ClipId)>,
-    pub selected_section: Option<vibez_core::id::SectionId>,
+}
+
+/// One open project edit that will either become one undo step or be rolled
+/// back. The pre-edit snapshot is independently `Arc`-shared, so opening a
+/// recording-length transaction does not clone project media or device state.
+#[derive(Debug)]
+struct ProjectTransaction {
+    before: ProjectSnapshot,
+    dirty_before: bool,
+    changed: bool,
 }
 
 /// Runtime identity for one continuous pointer gesture. Every incremental
@@ -61,6 +64,7 @@ pub struct UndoHistory {
     pub undo: VecDeque<ProjectSnapshot>,
     pub redo: VecDeque<ProjectSnapshot>,
     last_gesture: Option<UndoGestureId>,
+    transaction: Option<ProjectTransaction>,
 }
 
 impl UndoHistory {
@@ -80,6 +84,11 @@ impl UndoHistory {
     }
 
     pub fn push_edit(&mut self, snapshot: ProjectSnapshot, gesture: Option<UndoGestureId>) {
+        if let Some(transaction) = &mut self.transaction {
+            transaction.changed = true;
+            self.last_gesture = None;
+            return;
+        }
         if gesture.is_some() && self.last_gesture == gesture {
             return;
         }
@@ -114,9 +123,52 @@ impl UndoHistory {
         !self.redo.is_empty()
     }
 
+    /// Open a transaction at the supplied pre-edit project state. Nested
+    /// transactions are deliberately rejected: an inner multi-edit operation
+    /// simply participates in the already-open recording transaction.
+    pub fn begin_transaction(&mut self, before: ProjectSnapshot, dirty_before: bool) -> bool {
+        if self.transaction.is_some() {
+            return false;
+        }
+        self.last_gesture = None;
+        self.transaction = Some(ProjectTransaction {
+            before,
+            dirty_before,
+            changed: false,
+        });
+        true
+    }
+
+    /// Commit every edit since `begin_transaction` as exactly one undo step.
+    /// Returns whether the transaction contained an effective project edit.
+    pub fn commit_transaction(&mut self) -> bool {
+        let Some(transaction) = self.transaction.take() else {
+            return false;
+        };
+        if !transaction.changed {
+            return false;
+        }
+        self.push_snapshot(transaction.before);
+        true
+    }
+
+    /// Abandon the open transaction and return its pre-edit state for the
+    /// application boundary to restore. History itself is left unchanged.
+    pub fn abandon_transaction(&mut self) -> Option<(ProjectSnapshot, bool)> {
+        self.last_gesture = None;
+        self.transaction
+            .take()
+            .map(|transaction| (transaction.before, transaction.dirty_before))
+    }
+
+    pub fn transaction_active(&self) -> bool {
+        self.transaction.is_some()
+    }
+
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
         self.last_gesture = None;
+        self.transaction = None;
     }
 }

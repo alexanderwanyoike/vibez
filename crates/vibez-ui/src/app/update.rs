@@ -27,6 +27,7 @@ impl App {
         };
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
+        let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         if self.state.view.edit_menu_open {
             let keep_menu = matches!(
                 &message,
@@ -155,7 +156,8 @@ impl App {
                 self.state
                     .perform
                     .sync_project_tracks(&self.state.project_tracks.tracks);
-                return self.apply_arrangement_action(action);
+                return self
+                    .apply_arrangement_action_in_transaction(action, owns_project_transaction);
             }
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
