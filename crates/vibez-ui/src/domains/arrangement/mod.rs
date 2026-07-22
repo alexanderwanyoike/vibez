@@ -493,6 +493,7 @@ impl TimelineEditorState {
                             loop_enabled: clip.loop_enabled,
                             loop_start_beats: clip.loop_start_beats,
                             loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
                         });
                         for note in &clip.notes {
                             engine.send(EngineCommand::AddNote {
@@ -654,6 +655,7 @@ impl TimelineEditorState {
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start_beats: duplicate.loop_start_beats,
                                         loop_end_beats: duplicate.loop_end_beats,
+                                        groove_grid: duplicate.groove_grid,
                                     });
                                     for note in &duplicate.notes {
                                         engine.send(EngineCommand::AddNote {
@@ -773,6 +775,7 @@ impl TimelineEditorState {
                                 loop_enabled: clip.loop_enabled,
                                 loop_start_beats: clip.loop_start_beats,
                                 loop_end_beats: clip.loop_end_beats,
+                                groove_grid: clip.groove_grid,
                             },
                             new_pos,
                             clip.duration_beats,
@@ -780,12 +783,21 @@ impl TimelineEditorState {
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
+                            clip.groove_grid,
                         ));
                     }
                 }
 
-                if let Some((new_clip, pos, dur, notes, loop_enabled, loop_start, loop_end)) =
-                    new_clip_data
+                if let Some((
+                    new_clip,
+                    pos,
+                    dur,
+                    notes,
+                    loop_enabled,
+                    loop_start,
+                    loop_end,
+                    groove_grid,
+                )) = new_clip_data
                 {
                     if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
@@ -798,6 +810,7 @@ impl TimelineEditorState {
                         loop_enabled,
                         loop_start_beats: loop_start,
                         loop_end_beats: loop_end,
+                        groove_grid,
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {

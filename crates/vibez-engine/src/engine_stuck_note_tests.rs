@@ -74,6 +74,7 @@ fn engine_with_held_note() -> (
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         })
         .unwrap();
     cmd_tx
@@ -147,6 +148,7 @@ fn run_scenario(
             loop_enabled: clip_loop.0,
             loop_start_beats: clip_loop.1,
             loop_end_beats: clip_loop.2,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         })
         .unwrap();
     cmd_tx
@@ -218,6 +220,7 @@ fn looped_note_ons_per_bar(batch_render: bool) -> Vec<usize> {
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         })
         .unwrap();
     for step in 0..8 {

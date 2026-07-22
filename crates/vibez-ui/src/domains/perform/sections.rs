@@ -152,14 +152,17 @@ impl Section {
                 let note_clips = content
                     .into_iter()
                     .flat_map(|content| content.note_clips.iter())
-                    .map(|clip| EngineNoteClip {
-                        id: clip.id,
-                        position_beats: clip.position_beats,
-                        duration_beats: clip.duration_beats,
-                        notes: clip.notes.clone(),
-                        loop_enabled: clip.loop_enabled,
-                        loop_start_beats: clip.loop_start_beats,
-                        loop_end_beats: clip.loop_end_beats,
+                    .map(|clip| {
+                        EngineNoteClip::new(
+                            clip.id,
+                            clip.position_beats,
+                            clip.duration_beats,
+                            clip.notes.clone(),
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
+                            clip.groove_grid,
+                        )
                     })
                     .collect();
                 let automation = content
@@ -273,6 +276,7 @@ mod tests {
                     loop_enabled: false,
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
+                    groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
                 }],
                 automation: vec![lane],
                 ..TrackTimelineContent::default()
@@ -320,6 +324,7 @@ mod tests {
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
+                groove_grid: vibez_core::perform::GrooveGrid::Off,
             });
 
         assert!(arrange.editor.timeline.get(track_id).is_none());
@@ -347,6 +352,7 @@ mod tests {
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
+                groove_grid: vibez_core::perform::GrooveGrid::Off,
             });
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
@@ -367,6 +373,7 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         };
         Arc::make_mut(&mut section.timeline)
             .ensure(track_id)
@@ -406,6 +413,7 @@ mod tests {
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
+                groove_grid: vibez_core::perform::GrooveGrid::Off,
             });
         let tracks = [
             crate::state::ProjectTrack::new(populated_id, "Drums".into(), 0),

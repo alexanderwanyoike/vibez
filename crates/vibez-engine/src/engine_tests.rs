@@ -64,6 +64,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         })
         .unwrap();
     let mut output = [0.0; 2];
@@ -1205,6 +1206,7 @@ fn note_clip_loop_renders() {
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 2.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         })
         .unwrap();
     // Add a note at beat 0, 1 beat long

@@ -1,5 +1,71 @@
 use serde::{Deserialize, Serialize};
 
+/// Opt-in playback grid for non-destructive MIDI clip Swing.
+///
+/// `Off` deliberately remains the default: Vibez never guesses the rhythmic
+/// intent of freely recorded notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrooveGrid {
+    #[default]
+    Off,
+    Eighth,
+    Sixteenth,
+}
+
+impl GrooveGrid {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Eighth, Self::Sixteenth];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Eighth => "1/8",
+            Self::Sixteenth => "1/16",
+        }
+    }
+
+    /// Map one clip-local beat through the MPC2000XL pair shape.
+    ///
+    /// Pair endpoints stay fixed and the straight midpoint moves to the
+    /// nearest 96 PPQN Swing tick. Interpolating either side maps human timing
+    /// without a tolerance window and cannot reorder events.
+    pub fn map_beat(self, beat: f64, swing: SwingAmount) -> f64 {
+        let pair_ticks = match self {
+            Self::Off => return beat,
+            Self::Eighth => GrooveProfile::MPC2000XL_PPQN,
+            Self::Sixteenth => GrooveProfile::MPC2000XL_PPQN / 2,
+        };
+        let pair_beats = pair_ticks as f64 / GrooveProfile::MPC2000XL_PPQN as f64;
+        let pair_start = (beat / pair_beats).floor() * pair_beats;
+        let phase = beat - pair_start;
+        let midpoint = pair_beats / 2.0;
+        let swung_ticks = (pair_ticks as f64 * swing.get() as f64).round();
+        let swung_midpoint = swung_ticks / GrooveProfile::MPC2000XL_PPQN as f64;
+
+        if phase <= midpoint {
+            pair_start + phase / midpoint * swung_midpoint
+        } else {
+            pair_start
+                + swung_midpoint
+                + (phase - midpoint) / midpoint * (pair_beats - swung_midpoint)
+        }
+    }
+
+    pub const fn pair_beats(self) -> Option<f64> {
+        match self {
+            Self::Off => None,
+            Self::Eighth => Some(1.0),
+            Self::Sixteenth => Some(0.5),
+        }
+    }
+}
+
+impl std::fmt::Display for GrooveGrid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 /// Immutable timing-model identity used to interpret Project Swing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GrooveProfile {
@@ -187,6 +253,38 @@ impl std::fmt::Display for NoteRepeatRate {
 #[cfg(test)]
 mod groove_tests {
     use super::*;
+
+    #[test]
+    fn groove_grid_maps_the_midpoint_to_the_96_ppqn_swing_tick() {
+        assert!(
+            (GrooveGrid::Sixteenth.map_beat(0.25, SwingAmount::new(0.66)) - 32.0 / 96.0).abs()
+                < 1e-9
+        );
+        assert!(
+            (GrooveGrid::Eighth.map_beat(0.5, SwingAmount::new(0.56)) - 54.0 / 96.0).abs() < 1e-9
+        );
+    }
+
+    #[test]
+    fn groove_grid_maps_human_timing_monotonically_without_a_tolerance() {
+        let swing = SwingAmount::new(0.66);
+        let mapped =
+            [0.0, 0.125, 0.25, 0.375, 0.5].map(|beat| GrooveGrid::Sixteenth.map_beat(beat, swing));
+        assert_eq!(mapped[0], 0.0);
+        assert!((mapped[1] - 16.0 / 96.0).abs() < 1e-9);
+        assert!((mapped[2] - 32.0 / 96.0).abs() < 1e-9);
+        assert!((mapped[3] - 40.0 / 96.0).abs() < 1e-9);
+        assert_eq!(mapped[4], 0.5);
+        assert!(mapped.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn groove_grid_off_is_an_identity_map() {
+        assert_eq!(
+            GrooveGrid::Off.map_beat(0.371, SwingAmount::new(0.75)),
+            0.371
+        );
+    }
 
     #[test]
     fn mpc2000xl_profile_has_a_stable_persisted_identity() {

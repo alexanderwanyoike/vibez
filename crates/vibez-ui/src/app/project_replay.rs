@@ -269,6 +269,7 @@ impl App {
                 loop_enabled: clip.loop_enabled,
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
+                groove_grid: clip.groove_grid,
             });
             for note in &clip.notes {
                 self.send_command(EngineCommand::AddNote {

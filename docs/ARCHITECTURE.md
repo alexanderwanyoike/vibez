@@ -167,10 +167,15 @@ Project Swing, and optional Project Track Swing offsets as canonical project
 data and undo state. Swing uses the profile's native `50..75%` long/short pair
 ratio and the Project Track offset adds percentage points before clamping to
 that range. Generated `1/8` and `1/16` events resolve on the profile's 96 PPQN
-clock; `1/4`, `1/32`, and triplet rates remain exact. Existing clip notes keep
-their persisted absolute beat positions and never enter this transform. The
-engine retains Swing beside its generated-event scheduler so later Section
-Record quantization can share the contract without changing clip playback.
+clock; `1/4`, `1/32`, and triplet rates remain exact. MIDI clips opt into the
+same live transform with a persisted `Off | 1/8 | 1/16` Groove Grid; `Off` is
+the legacy and new-clip default. The render scheduler maps both endpoints
+through a monotonic pair shape whose midpoint is the same 96 PPQN Swing tick,
+so stored beat positions remain canonical and free human timing needs no
+tolerance heuristic. Swing is latched at each clip-local pair boundary, applied
+at the shared Arrange/Section event read, and never baked into prepared Section
+content. Shortened sources drop mapped onsets beyond their boundary, and mapped
+note-offs are clamped to the next same-pitch onset.
 While transport plays, the first repeated hit comes from the active musical
 grid and an Immediate Section transition establishes a new grid origin. Vibez
 deliberately extends MPC Note Repeat to stopped transport: the first pad sounds
@@ -335,7 +340,8 @@ are handled in three stages:
   flattened into the existing `clips`/`note_clips` keys for compatibility;
   legacy track automation is migrated into Arrange Timeline Content on load.
   Project Groove data persists as the versioned `groove_profile`, native
-  `swing` ratio, and optional Project Track `swing_offset` fields.
+  `swing` ratio, optional Project Track `swing_offset` fields, and each MIDI
+  clip's opt-in `groove_grid`.
   Existing project bytes therefore load with an empty Section store and no
   format migration.
 - Save, load, media collection and hydration, unresolved-media preservation,

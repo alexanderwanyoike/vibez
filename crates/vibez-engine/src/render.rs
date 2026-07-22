@@ -65,6 +65,7 @@ pub struct BounceRequest {
     pub range_samples: (u64, u64),
     pub bpm: f64,
     pub sample_rate: u32,
+    pub swing: vibez_core::perform::SwingAmount,
 }
 
 pub struct BounceResult {
@@ -92,6 +93,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         let mut engine = EngineTrack::new(track_info.id);
         engine.gain = track_info.gain;
         engine.pan = track_info.pan;
+        engine.swing_offset = track_info.swing_offset;
         engine.sends = track_info.sends.clone();
         match req.mode {
             BounceMode::Master => {
@@ -187,15 +189,16 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             if !clip_included_for_mode(nc.id, req.mode, true) {
                 continue;
             }
-            engine.playback_source.note_clips.push(EngineNoteClip {
-                id: nc.id,
-                position_beats: nc.position_beats,
-                duration_beats: nc.duration_beats,
-                notes: nc.notes.clone(),
-                loop_enabled: nc.loop_enabled,
-                loop_start_beats: nc.loop_start_beats,
-                loop_end_beats: nc.loop_end_beats,
-            });
+            engine.playback_source.note_clips.push(EngineNoteClip::new(
+                nc.id,
+                nc.position_beats,
+                nc.duration_beats,
+                nc.notes.clone(),
+                nc.loop_enabled,
+                nc.loop_start_beats,
+                nc.loop_end_beats,
+                nc.groove_grid,
+            ));
         }
 
         tracks.push(engine);
@@ -297,7 +300,7 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                         frames: block,
                         channels: CHANNELS,
                         tempo_map: &tempo,
-                        project_swing: vibez_core::perform::SwingAmount::default(),
+                        project_swing: req.swing,
                     },
                     &mut |_| {},
                 )
@@ -452,6 +455,7 @@ mod tests {
             range_samples: (0, 512),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
 
         let result = render_offline(&request);
@@ -506,6 +510,7 @@ mod tests {
             range_samples: (0, 200),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let result = render_offline(&req);
         // Dry + unity send through a flat centered bus doubles the
@@ -568,6 +573,7 @@ mod tests {
             range_samples: (0, 200),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
 
         let result = render_offline(&req);
@@ -618,6 +624,7 @@ mod tests {
             range_samples: (0, 100),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let out = render_offline(&req);
         assert!(out.audio.channels[0].iter().all(|&s| s.abs() < 1e-6));
@@ -661,6 +668,7 @@ mod tests {
             range_samples: (0, 100),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let out = render_offline(&req);
         assert!(out.audio.channels[0].iter().any(|&s| s.abs() > 1e-4));
@@ -728,6 +736,7 @@ mod tests {
             range_samples: (0, 100),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let out = render_offline(&req);
         let expected = 0.3 * std::f32::consts::FRAC_1_SQRT_2;
@@ -764,14 +773,15 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
             notes: vec![MidiNote {
                 pitch: 60,
                 velocity: 100,
-                start_beat: 0.0,
+                start_beat: 0.25,
                 duration_beats: 0.5,
             }],
         };
-        let req = BounceRequest {
+        let mut req = BounceRequest {
             master: None,
             buses: Vec::new(),
             tracks: vec![track],
@@ -784,9 +794,13 @@ mod tests {
             range_samples: (0, 22_050),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
-        let out = render_offline(&req);
-        assert!(out.audio.channels[0].iter().any(|&s| s.abs() > 1e-3));
+        let straight = render_offline(&req);
+        assert!(straight.audio.channels[0].iter().any(|&s| s.abs() > 1e-3));
+        req.swing = vibez_core::perform::SwingAmount::new(0.75);
+        let swung = render_offline(&req);
+        assert_ne!(straight.audio.channels, swung.audio.channels);
     }
 
     #[test]
@@ -822,6 +836,7 @@ mod tests {
             range_samples: (0, 4_410),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let out = render_offline(&req);
         assert!(!out.warnings.is_empty());
@@ -874,6 +889,7 @@ mod tests {
             range_samples: (0, 100),
             bpm: 120.0,
             sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
         };
         let out = render_offline(&req);
         let peak = out.audio.channels[0]

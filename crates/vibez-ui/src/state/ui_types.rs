@@ -168,6 +168,7 @@ pub struct UiNoteClip {
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
+    pub groove_grid: vibez_core::perform::GrooveGrid,
 }
 
 #[derive(Debug, Clone)]
