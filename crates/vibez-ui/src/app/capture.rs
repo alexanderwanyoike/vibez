@@ -16,6 +16,29 @@ impl App {
     pub(super) fn apply_capture_action(&mut self, action: CaptureAction) -> Task<Message> {
         match action {
             CaptureAction::Start => {
+                let perform_track_ids: Vec<_> = self
+                    .state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id)
+                    .collect();
+                let samples_per_beat = if self.state.transport.bpm > 0.0 {
+                    60.0 * f64::from(self.state.transport.sample_rate) / self.state.transport.bpm
+                } else {
+                    0.0
+                };
+                if !capture_destination_from_playhead_is_empty(
+                    &self.state.arrangement.timeline,
+                    &perform_track_ids,
+                    self.state.transport.position_samples,
+                    samples_per_beat,
+                ) {
+                    self.state.perform.capture.cancel();
+                    self.state.status_text =
+                        "Capture needs empty Arrange content from the playhead".into();
+                    return Task::none();
+                }
                 if !self.begin_project_transaction() {
                     self.state.perform.capture.cancel();
                     self.state.status_text =
@@ -83,6 +106,29 @@ impl App {
             self.state.project.dirty = dirty_before;
         }
     }
+}
+
+fn capture_destination_from_playhead_is_empty(
+    arrange: &crate::state::ArrangementTimeline,
+    perform_track_ids: &[vibez_core::id::TrackId],
+    arrange_start_samples: u64,
+    samples_per_beat: f64,
+) -> bool {
+    perform_track_ids.iter().all(|track_id| {
+        arrange.get(*track_id).is_none_or(|existing| {
+            let audio_clear = existing
+                .clips
+                .iter()
+                .all(|clip| clip.position.saturating_add(clip.duration) <= arrange_start_samples);
+            let note_clear = existing.note_clips.iter().all(|clip| {
+                let end = ((clip.position_beats + clip.duration_beats) * samples_per_beat)
+                    .round()
+                    .max(0.0) as u64;
+                end <= arrange_start_samples
+            });
+            audio_clear && note_clear && existing.automation.is_empty()
+        })
+    })
 }
 
 fn apply_capture_to_arrangement(
@@ -190,6 +236,31 @@ mod tests {
             untouched_before
         );
         assert!(arrange.get(captured_track).is_some());
+    }
+
+    #[test]
+    fn capture_preflight_rejects_future_content_before_the_take_starts() {
+        let track_id = TrackId::new();
+        let mut arrange = ArrangementTimeline::default();
+        arrange.ensure(track_id).note_clips.push(UiNoteClip {
+            id: ClipId::new(),
+            name: "Future clip".into(),
+            position_beats: 8.0,
+            duration_beats: 1.0,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        });
+
+        assert!(!capture_destination_from_playhead_is_empty(
+            &arrange,
+            &[track_id],
+            16,
+            4.0,
+        ));
     }
 
     #[test]
