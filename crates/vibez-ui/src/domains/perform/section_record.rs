@@ -1,4 +1,4 @@
-use vibez_core::id::{SectionId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 #[cfg(test)]
 use vibez_core::perform::SwingAmount;
 use vibez_core::perform::{GrooveGrid, NoteRepeatRate};
@@ -194,6 +194,17 @@ pub struct CompletedSectionRecording {
     pub replace_ranges: Vec<(f64, f64)>,
 }
 
+/// Paint-only snapshot of an active take for the Section Construction lane.
+/// It never enters project state or history; Stop remains the mutation boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionRecordPreview {
+    pub clip_id: ClipId,
+    pub section_id: SectionId,
+    pub track_id: TrackId,
+    pub length_beats: f64,
+    pub notes: Vec<RecordedSectionNote>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct OpenNote {
     pitch: u8,
@@ -204,6 +215,7 @@ struct OpenNote {
 
 #[derive(Debug)]
 struct RecordingSession {
+    preview_clip_id: ClipId,
     section_id: SectionId,
     track_id: TrackId,
     bpm: f64,
@@ -268,6 +280,35 @@ impl SectionRecordState {
             .map(|session| (session.section_id, session.track_id))
     }
 
+    pub fn live_preview(&self) -> Option<SectionRecordPreview> {
+        let session = self.session.as_ref().filter(|session| {
+            session.started_at_samples.is_some()
+                && matches!(
+                    self.phase,
+                    SectionRecordPhase::Recording | SectionRecordPhase::Stopping
+                )
+        })?;
+        let mut notes = session.notes.clone();
+        notes.extend(
+            session
+                .open_notes
+                .iter()
+                .map(|note| preview_open_note(session, *note)),
+        );
+        notes.sort_by(|left, right| {
+            left.start_beat
+                .total_cmp(&right.start_beat)
+                .then(left.pitch.cmp(&right.pitch))
+        });
+        Some(SectionRecordPreview {
+            clip_id: session.preview_clip_id,
+            section_id: session.section_id,
+            track_id: session.track_id,
+            length_beats: session.length_beats,
+            notes,
+        })
+    }
+
     pub fn request_start(
         &mut self,
         section_id: SectionId,
@@ -281,6 +322,7 @@ impl SectionRecordState {
             return None;
         }
         self.session = Some(RecordingSession {
+            preview_clip_id: ClipId::new(),
             section_id,
             track_id,
             bpm,
@@ -391,6 +433,7 @@ impl SectionRecordState {
             return;
         };
         if on {
+            session.last_section_samples = section_position_samples;
             session.open_notes.push(OpenNote {
                 pitch,
                 velocity,
@@ -432,6 +475,7 @@ impl SectionRecordState {
         let Some(position) = canonical_section_position_samples else {
             return;
         };
+        session.last_section_samples = position;
         session.notes.push(RecordedSectionNote {
             pitch,
             velocity,
@@ -602,6 +646,30 @@ fn push_free_note(session: &mut RecordingSession, note: OpenNote, off_sample: u6
     });
 }
 
+fn preview_open_note(session: &RecordingSession, note: OpenNote) -> RecordedSectionNote {
+    let raw_start = samples_to_beats(
+        note.section_position_samples,
+        session.bpm,
+        session.sample_rate,
+    );
+    let elapsed_samples = if session.last_section_samples >= note.section_position_samples {
+        session.last_section_samples - note.section_position_samples
+    } else {
+        session
+            .length_samples
+            .saturating_sub(note.section_position_samples)
+            .saturating_add(session.last_section_samples)
+    };
+    RecordedSectionNote {
+        pitch: note.pitch,
+        velocity: note.velocity,
+        start_beat: quantize_start(raw_start, session.quantization, session.length_beats),
+        duration_beats: samples_to_beats(elapsed_samples, session.bpm, session.sample_rate)
+            .max(1.0 / 960.0),
+        groove_grid: session.quantization.groove_grid(),
+    }
+}
+
 fn samples_to_beats(samples: u64, bpm: f64, sample_rate: u32) -> f64 {
     samples as f64 * bpm / (f64::from(sample_rate) * 60.0)
 }
@@ -683,6 +751,44 @@ mod tests {
                 .map_beat(completed.notes[0].start_beat, SwingAmount::new(0.75)),
             0.375
         );
+    }
+
+    #[test]
+    fn live_preview_shows_a_note_while_held_and_after_release() {
+        let mut state = session(
+            SectionRecordMode::Overdub,
+            SectionRecordQuantization::Sixteenth,
+        );
+        let (section, track) = state.target().unwrap();
+        input(
+            &mut state,
+            (Some(section), track),
+            (42, 100, true),
+            (1_024, Some(24)),
+        );
+
+        let pressed = state.live_preview().expect("active recording preview");
+        assert_eq!((pressed.section_id, pressed.track_id), (section, track));
+        assert_eq!(pressed.notes.len(), 1);
+        assert_eq!(pressed.notes[0].pitch, 42);
+        assert_eq!(pressed.notes[0].start_beat, 0.25);
+        assert_eq!(pressed.notes[0].duration_beats, 1.0 / 960.0);
+
+        state.observe_playhead(section, 72);
+        let held = state.live_preview().expect("held-note preview");
+        assert_eq!(held.notes[0].duration_beats, 0.5);
+
+        input(
+            &mut state,
+            (Some(section), track),
+            (42, 0, false),
+            (1_072, Some(72)),
+        );
+        let released = state.live_preview().expect("released-note preview");
+        assert_eq!(released.notes[0].duration_beats, 0.5);
+
+        state.finish(section, track, 1_080, 80, true).unwrap();
+        assert!(state.live_preview().is_none());
     }
 
     #[test]

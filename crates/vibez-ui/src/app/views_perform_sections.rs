@@ -16,7 +16,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
-use crate::widgets::timeline::TrackClipCanvas;
+use crate::widgets::timeline::{TimelineNoteClip, TrackClipCanvas};
 
 use super::views_automation::AutomationLaneLayout;
 use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
@@ -31,6 +31,7 @@ impl App {
             .and_then(|id| self.state.perform.sections.by_id(id));
         let toolbar = self.view_section_toolbar(selected, section_width);
         let editor = self.state.perform.section_editor.editor();
+        let recording_preview = self.state.perform.section_record.live_preview();
         let bar_count = selected
             .map(|section| (section.length_beats / 4.0).round() as usize)
             .unwrap_or(4)
@@ -376,7 +377,7 @@ impl App {
                         _ => None,
                     })
                     .collect();
-                let clip_canvas = TrackClipCanvas::from_track(
+                let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
                     -1.0,
@@ -405,6 +406,24 @@ impl App {
                     browser_drag_duration,
                     browser_drag_detail.clone(),
                 );
+                if let Some(preview) = recording_preview.as_ref().filter(|preview| {
+                    preview.section_id == section_id && preview.track_id == track.id
+                }) {
+                    clip_canvas = clip_canvas.with_recording_preview(TimelineNoteClip {
+                        clip_id: preview.clip_id,
+                        position_beats: 0.0,
+                        duration_beats: preview.length_beats,
+                        name: "● RECORDING LIVE".into(),
+                        notes: preview
+                            .notes
+                            .iter()
+                            .map(|note| (note.pitch, note.start_beat, note.duration_beats))
+                            .collect(),
+                        loop_enabled: false,
+                        loop_start_beats: 0.0,
+                        loop_end_beats: 0.0,
+                    });
+                }
                 let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(2.0, 0.0);
                 let grid = self.state.view.grid_config();
                 let compatible = !track.kind.is_midi();
