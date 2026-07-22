@@ -137,7 +137,7 @@ fn record_button_content(active: bool) -> Element<'static, Message> {
     let shortcut = container(text("F4").font(PERFORM_TECH_STRONG).size(8).color(color))
         .padding([1, 4])
         .style(move |_theme: &Theme| container::Style {
-            background: Some(th::blend(th::bg_dark(), color, 0.08).into()),
+            background: (!active).then(|| th::blend(th::bg_dark(), color, 0.08).into()),
             border: iced::Border {
                 color: th::blend(th::border_light(), color, 0.3),
                 width: 1.0,
