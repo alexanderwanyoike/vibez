@@ -4,7 +4,7 @@
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
-use crate::domains::perform::{PerformMode, PerformMsg};
+use crate::domains::perform::{PerformMode, PerformMsg, SectionRecordMsg};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
@@ -250,12 +250,34 @@ impl super::App {
 
         fallback
             .and_then(|(key, modifiers, key_id)| {
-                let message = global_key_handler(key, modifiers)?;
+                let message = if self.state.view.workspace == crate::state::Workspace::Perform {
+                    perform_workspace_key_handler(&key, modifiers)
+                } else {
+                    None
+                }
+                .or_else(|| global_key_handler(key, modifiers))?;
                 self.edge_shortcuts
                     .should_dispatch(&key_id, &message, occurred_at)
                     .then_some(message)
             })
             .map_or_else(iced::Task::none, iced::Task::done)
+    }
+}
+
+fn perform_workspace_key_handler(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<Message> {
+    use iced::keyboard::key::Named;
+
+    if !modifiers.is_empty() {
+        return None;
+    }
+    match key {
+        iced::keyboard::Key::Named(Named::F4) => Some(Message::Perform(PerformMsg::SectionRecord(
+            SectionRecordMsg::Toggle,
+        ))),
+        _ => None,
     }
 }
 
@@ -593,6 +615,20 @@ mod tests {
         }
 
         assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn f4_toggles_section_record_only_without_modifiers_in_perform() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::SectionRecord(
+                SectionRecordMsg::Toggle
+            )))
+        ));
+        assert!(perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::SHIFT).is_none());
+        assert!(global_key_handler(Key::Named(Named::F4), Modifiers::empty()).is_none());
     }
 
     #[test]

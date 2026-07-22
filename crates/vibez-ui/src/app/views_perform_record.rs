@@ -7,6 +7,7 @@ use crate::domains::perform::{
     PerformMsg, SectionRecordCountIn, SectionRecordMode, SectionRecordMsg, SectionRecordPhase,
     SectionRecordQuantization,
 };
+use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
@@ -23,9 +24,9 @@ impl App {
             .and_then(|(section_id, track_id)| {
                 let section = self.state.perform.sections.by_id(section_id)?;
                 let track = self.state.find_track(track_id)?;
-                Some(format!("{} · {}", section.name, track.name))
+                Some(format!("REC TARGET · {} · {}", section.name, track.name))
             })
-            .unwrap_or_else(|| "Playing Section · Instrument Target".into());
+            .unwrap_or_else(|| "PLAYING SECTION · INSTRUMENT TARGET".into());
         let phase = match record.phase {
             SectionRecordPhase::Idle => "READY".into(),
             SectionRecordPhase::Preparing => "PREPARING".into(),
@@ -37,42 +38,37 @@ impl App {
             SectionRecordPhase::Stopping => "STOPPING".into(),
         };
 
-        let record_button = button(
-            text(if active { "■ STOP" } else { "● REC" })
-                .font(PERFORM_TECH_STRONG)
-                .size(10)
-                .color(if active { th::bg_dark() } else { th::danger() }),
-        )
-        .on_press(Message::Perform(PerformMsg::SectionRecord(
-            SectionRecordMsg::Toggle,
-        )))
-        .padding([7, 12])
-        .style(move |_theme: &Theme, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: Some(
-                    if recording {
-                        th::danger()
-                    } else if active || hovered {
-                        th::accent()
-                    } else {
-                        th::perform_inset()
-                    }
-                    .into(),
-                ),
-                text_color: if active { th::bg_dark() } else { th::danger() },
-                border: iced::Border {
-                    color: if active {
-                        th::danger()
-                    } else {
-                        th::border_light()
+        let record_button = button(record_button_content(active))
+            .on_press(Message::Perform(PerformMsg::SectionRecord(
+                SectionRecordMsg::Toggle,
+            )))
+            .padding([7, 12])
+            .style(move |_theme: &Theme, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(
+                        if recording {
+                            th::danger()
+                        } else if active || hovered {
+                            th::accent()
+                        } else {
+                            th::perform_inset()
+                        }
+                        .into(),
+                    ),
+                    text_color: if active { th::bg_dark() } else { th::danger() },
+                    border: iced::Border {
+                        color: if active {
+                            th::danger()
+                        } else {
+                            th::border_light()
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
                     },
-                    width: 1.0,
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+                    ..Default::default()
+                }
+            });
 
         let count_in = record_pick_list(
             &SectionRecordCountIn::ALL,
@@ -134,6 +130,42 @@ impl App {
         })
         .into()
     }
+}
+
+fn record_button_content(active: bool) -> Element<'static, Message> {
+    let color = if active { th::bg_dark() } else { th::danger() };
+    let shortcut = container(text("F4").font(PERFORM_TECH_STRONG).size(8).color(color))
+        .padding([1, 4])
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(th::blend(th::bg_dark(), color, 0.08).into()),
+            border: iced::Border {
+                color: th::blend(th::border_light(), color, 0.3),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        });
+    row![
+        icons::icon(if active {
+            icons::STOP
+        } else {
+            icons::CIRCLE_DOT
+        })
+        .size(11)
+        .color(color),
+        text(if active {
+            "STOP SECTION"
+        } else {
+            "SECTION REC"
+        })
+        .font(PERFORM_TECH_STRONG)
+        .size(9)
+        .color(color),
+        shortcut,
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(

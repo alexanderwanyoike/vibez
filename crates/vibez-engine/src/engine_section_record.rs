@@ -108,7 +108,7 @@ impl AudioEngine {
             effective_at_samples,
             section_position_samples,
         });
-        self.start_section_record_if_due(now);
+        self.start_section_record_if_due(self.performance_position);
     }
 
     pub(super) fn stop_section_record(&mut self) {

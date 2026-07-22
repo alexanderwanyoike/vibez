@@ -237,6 +237,13 @@ impl App {
             section.is_some_and(|section| self.state.perform.playing_section == Some(section.id));
         let queued =
             section.is_some_and(|section| self.state.perform.queued_section == Some(section.id));
+        let record_target = section.is_some_and(|section| {
+            self.state
+                .perform
+                .section_record
+                .target()
+                .is_some_and(|(section_id, _)| section_id == section.id)
+        });
         let playhead_fraction = section.filter(|_| playing).map(|section| {
             super::views_perform_playhead::section_playhead_fraction(
                 self.state.perform.section_playhead_samples,
@@ -277,7 +284,9 @@ impl App {
                     section.name.clone(),
                     format!(
                         "{} · {:.0} BARS",
-                        if playing {
+                        if record_target {
+                            "REC TARGET"
+                        } else if playing {
                             "PLAYING"
                         } else if queued {
                             "QUEUED"
@@ -412,7 +421,9 @@ impl App {
                 iced::gradient::Linear::new(2.35)
                     .add_stop(
                         0.0,
-                        if pressed || playing {
+                        if record_target {
+                            th::blend(th::danger(), color, 0.2)
+                        } else if pressed || playing {
                             th::blend(th::accent_dim(), color, 0.35)
                         } else if queued {
                             th::blend(th::accent_dim(), th::bg_hover(), 0.42)
@@ -428,7 +439,9 @@ impl App {
                     .into(),
             ),
             border: iced::Border {
-                color: if pressed || playing {
+                color: if record_target {
+                    th::danger()
+                } else if pressed || playing {
                     th::accent()
                 } else if queued || selected {
                     th::accent_dim()

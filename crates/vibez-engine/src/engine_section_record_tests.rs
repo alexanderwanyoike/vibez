@@ -133,6 +133,40 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
 }
 
 #[test]
+fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+
+    engine.process(&mut [0.0; 40], 1);
+    commands
+        .push(EngineCommand::ArmSectionRecord {
+            section_id,
+            track_id,
+            prepared: Some(source(section_id, track_id, 0.75)),
+            count_in_bars: 1,
+            replace_existing: false,
+        })
+        .unwrap();
+
+    let mut count_in_prefix = [0.0; 4];
+    engine.process(&mut count_in_prefix, 1);
+    assert_eq!(record_events(&mut events), vec![(false, 16, 0)]);
+    assert!(count_in_prefix.iter().all(|sample| *sample == 0.0));
+
+    let mut boundary_block = [0.0; 13];
+    engine.process(&mut boundary_block, 1);
+    assert!(boundary_block[..12].iter().all(|sample| *sample == 0.0));
+    assert!((boundary_block[12] - 0.75).abs() < f32::EPSILON);
+    assert_eq!(record_events(&mut events), vec![(true, 16, 0)]);
+}
+
+#[test]
 fn playing_arm_uses_next_section_bar_without_restart() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
