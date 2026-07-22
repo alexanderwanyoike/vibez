@@ -167,6 +167,12 @@ impl AudioEngine {
     /// 4. Otherwise: falls back to legacy single-audio path.
     /// 5. Sends metering and position events to the UI thread.
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
+        // A musical boundary due at this block start owns the same timestamp
+        // as commands drained below. Publish the recording start first so a
+        // first pad strike at the boundary cannot reach consumers while the
+        // take still appears armed.
+        self.start_section_record_if_due(self.performance_position);
+
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
 

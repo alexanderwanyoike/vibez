@@ -201,6 +201,7 @@ pub struct SectionRecordPreview {
     pub clip_id: ClipId,
     pub section_id: SectionId,
     pub track_id: TrackId,
+    pub position_beats: f64,
     pub length_beats: f64,
     pub notes: Vec<RecordedSectionNote>,
 }
@@ -227,6 +228,7 @@ struct RecordingSession {
     started_at_samples: Option<u64>,
     started_at_section_samples: u64,
     last_section_samples: u64,
+    preview_wrapped: bool,
     replace_wrapped: bool,
     open_notes: Vec<OpenNote>,
     notes: Vec<RecordedSectionNote>,
@@ -300,11 +302,27 @@ impl SectionRecordState {
                 .total_cmp(&right.start_beat)
                 .then(left.pitch.cmp(&right.pitch))
         });
+        let (position_beats, length_beats) = if session.preview_wrapped {
+            (0.0, session.length_beats)
+        } else {
+            let elapsed = session
+                .last_section_samples
+                .saturating_sub(session.started_at_section_samples);
+            (
+                samples_to_beats(
+                    session.started_at_section_samples,
+                    session.bpm,
+                    session.sample_rate,
+                ),
+                samples_to_beats(elapsed, session.bpm, session.sample_rate),
+            )
+        };
         Some(SectionRecordPreview {
             clip_id: session.preview_clip_id,
             section_id: session.section_id,
             track_id: session.track_id,
-            length_beats: session.length_beats,
+            position_beats,
+            length_beats: length_beats.min(session.length_beats),
             notes,
         })
     }
@@ -336,6 +354,7 @@ impl SectionRecordState {
             started_at_samples: None,
             started_at_section_samples: 0,
             last_section_samples: 0,
+            preview_wrapped: false,
             replace_wrapped: false,
             open_notes: Vec::new(),
             notes: Vec::new(),
@@ -397,12 +416,12 @@ impl SectionRecordState {
         }) else {
             return;
         };
-        if session.mode == SectionRecordMode::Replace
-            && !session.replace_wrapped
-            && position_samples < session.last_section_samples
-        {
-            session.replace_wrapped = true;
-            self.mode = SectionRecordMode::Overdub;
+        if position_samples < session.last_section_samples {
+            session.preview_wrapped = true;
+            if session.mode == SectionRecordMode::Replace && !session.replace_wrapped {
+                session.replace_wrapped = true;
+                self.mode = SectionRecordMode::Overdub;
+            }
         }
         session.last_section_samples = position_samples;
     }
@@ -773,10 +792,13 @@ mod tests {
         assert_eq!(pressed.notes[0].pitch, 42);
         assert_eq!(pressed.notes[0].start_beat, 0.25);
         assert_eq!(pressed.notes[0].duration_beats, 1.0 / 960.0);
+        assert_eq!(pressed.position_beats, 0.0);
+        assert_eq!(pressed.length_beats, 0.25);
 
         state.observe_playhead(section, 72);
         let held = state.live_preview().expect("held-note preview");
         assert_eq!(held.notes[0].duration_beats, 0.5);
+        assert_eq!(held.length_beats, 0.75);
 
         input(
             &mut state,
@@ -789,6 +811,26 @@ mod tests {
 
         state.finish(section, track, 1_080, 80, true).unwrap();
         assert!(state.live_preview().is_none());
+    }
+
+    #[test]
+    fn live_preview_grows_from_the_record_boundary_then_fills_after_wrap() {
+        let mut state = SectionRecordState::default();
+        let section = SectionId::new();
+        let track = TrackId::new();
+        state.sync_clock(true, 60.0, 96);
+        state.request_start(section, track, false, 4.0).unwrap();
+        state.start(section, track, 1_000, 96);
+
+        state.observe_playhead(section, 144);
+        let growing = state.live_preview().expect("first-pass preview");
+        assert_eq!(growing.position_beats, 1.0);
+        assert_eq!(growing.length_beats, 0.5);
+
+        state.observe_playhead(section, 8);
+        let wrapped = state.live_preview().expect("wrapped preview");
+        assert_eq!(wrapped.position_beats, 0.0);
+        assert_eq!(wrapped.length_beats, 4.0);
     }
 
     #[test]

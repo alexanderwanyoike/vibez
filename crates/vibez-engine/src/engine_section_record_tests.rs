@@ -245,6 +245,67 @@ fn playing_arm_uses_next_section_bar_without_restart() {
 }
 
 #[test]
+fn note_at_block_start_boundary_is_reported_after_recording_starts() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(source(
+            section_id, track_id, 0.0,
+        )))
+        .unwrap();
+    engine.process(&mut [0.0], 1);
+    while events.pop().is_ok() {}
+
+    commands
+        .push(EngineCommand::ArmSectionRecord {
+            section_id,
+            track_id,
+            prepared: None,
+            count_in_bars: 0,
+            replace_existing: false,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 15], 1);
+    while events.pop().is_ok() {}
+
+    commands
+        .push(EngineCommand::ExternalNoteOn {
+            track_id,
+            pitch: 42,
+            velocity: 100,
+        })
+        .unwrap();
+    engine.process(&mut [0.0], 1);
+
+    let boundary_events: Vec<_> = std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::SectionRecordStarted {
+                effective_at_samples,
+                ..
+            } => Some(("record-started", effective_at_samples)),
+            EngineEvent::InstrumentNoteInput {
+                pitch,
+                on: true,
+                effective_at_samples,
+                ..
+            } if pitch == 42 => Some(("note-on", effective_at_samples)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        boundary_events,
+        vec![("record-started", 16), ("note-on", 16)]
+    );
+}
+
+#[test]
 fn stop_reports_the_engine_timestamp_and_local_playhead() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();

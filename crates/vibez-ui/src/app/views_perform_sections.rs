@@ -411,13 +411,19 @@ impl App {
                 }) {
                     clip_canvas = clip_canvas.with_recording_preview(TimelineNoteClip {
                         clip_id: preview.clip_id,
-                        position_beats: 0.0,
+                        position_beats: preview.position_beats,
                         duration_beats: preview.length_beats,
                         name: "● RECORDING LIVE".into(),
                         notes: preview
                             .notes
                             .iter()
-                            .map(|note| (note.pitch, note.start_beat, note.duration_beats))
+                            .map(|note| {
+                                (
+                                    note.pitch,
+                                    (note.start_beat - preview.position_beats).max(0.0),
+                                    note.duration_beats,
+                                )
+                            })
                             .collect(),
                         loop_enabled: false,
                         loop_start_beats: 0.0,
