@@ -548,7 +548,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            clip.notes.push(note);
+                            clip.push_note(note);
                         }
                     }
                 }
@@ -564,9 +564,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            if note_index < clip.notes.len() {
-                                clip.notes.remove(note_index);
-                            }
+                            clip.remove_note(note_index);
                         }
                         track.flush_notes();
                     }
@@ -584,9 +582,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            if note_index < clip.notes.len() {
-                                clip.notes[note_index] = note;
-                            }
+                            clip.edit_note(note_index, note);
                         }
                         track.flush_notes();
                     }
