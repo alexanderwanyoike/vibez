@@ -139,6 +139,7 @@ impl App {
             track_id: request.track_id,
             prepared,
             count_in_bars: request.count_in_bars,
+            replace_existing: request.replace_existing,
         });
         self.state.status_text = "Section Record armed".into();
     }

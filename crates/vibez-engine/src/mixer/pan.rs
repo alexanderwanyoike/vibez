@@ -1,3 +1,5 @@
+use super::EngineTrack;
+
 /// Equal-power pan law.
 /// `pan` ranges from 0.0 (hard left) to 1.0 (hard right).
 /// Returns `(left_gain, right_gain)`.
@@ -15,4 +17,9 @@ pub fn equal_power_pan(pan: f32) -> (f32, f32) {
 pub fn balance_pan(pan: f32) -> (f32, f32) {
     let pan = pan.clamp(0.0, 1.0);
     (((1.0 - pan) * 2.0).min(1.0), (pan * 2.0).min(1.0))
+}
+
+/// Returns `true` if any track in the slice has solo enabled.
+pub fn any_solo(tracks: &[EngineTrack]) -> bool {
+    tracks.iter().any(|track| track.solo)
 }

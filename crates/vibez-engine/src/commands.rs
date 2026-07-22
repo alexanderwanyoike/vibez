@@ -55,6 +55,7 @@ pub enum EngineCommand {
         track_id: TrackId,
         prepared: Option<Box<PreparedSectionPlaybackSource>>,
         count_in_bars: u8,
+        replace_existing: bool,
     },
     /// Stop the current armed or active Section recording session.
     StopSectionRecord,

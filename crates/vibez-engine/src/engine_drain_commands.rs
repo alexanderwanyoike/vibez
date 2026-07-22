@@ -128,7 +128,14 @@ impl AudioEngine {
                     track_id,
                     prepared,
                     count_in_bars,
-                } => self.arm_section_record(section_id, track_id, prepared, count_in_bars),
+                    replace_existing,
+                } => self.arm_section_record(
+                    section_id,
+                    track_id,
+                    prepared,
+                    count_in_bars,
+                    replace_existing,
+                ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;

@@ -6,29 +6,24 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
 #[cfg(test)]
 use vibez_core::id::ClipId;
-use vibez_core::id::{EffectId, TrackId};
+use vibez_core::id::TrackId;
 use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::time::TempoMap;
-use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
 use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::{ArrangementPlaybackSource, PreparedPlaybackSource};
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
+mod effect_slot;
 mod groove;
 mod note_repeat;
 mod pan;
 mod render_context;
+pub use effect_slot::EffectSlot;
 use groove::{crossed_beat, mapped_note_end, mapped_note_start};
-pub use pan::{balance_pan, equal_power_pan};
+pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
-
-pub struct EffectSlot {
-    pub id: EffectId,
-    pub effect: Box<dyn AudioEffect>,
-    pub bypass: bool,
-}
 
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
@@ -66,6 +61,7 @@ pub struct EngineTrack {
     /// adjacent sample positions, so a jump would otherwise strand
     /// every sounding note in the "held down" state forever.
     active_notes: u128,
+    pub(crate) suppress_source_notes: bool,
 }
 
 impl EngineTrack {
@@ -93,6 +89,7 @@ impl EngineTrack {
             timed_note_offs: Vec::new(),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
+            suppress_source_notes: false,
         }
     }
 
@@ -321,7 +318,12 @@ impl EngineTrack {
                 -1.0
             };
 
-            for clip in &self.playback_source.note_clips {
+            let note_clips = if self.suppress_source_notes {
+                &[][..]
+            } else {
+                &self.playback_source.note_clips
+            };
+            for clip in note_clips {
                 let clip_start_beat = clip.position_beats;
                 let clip_end_beat = clip.position_beats + clip.duration_beats;
 
@@ -480,7 +482,12 @@ impl EngineTrack {
             note_ons.clear();
             note_offs.clear();
 
-            for clip in &self.playback_source.note_clips {
+            let note_clips = if self.suppress_source_notes {
+                &[][..]
+            } else {
+                &self.playback_source.note_clips
+            };
+            for clip in note_clips {
                 let clip_start_beat = clip.position_beats;
                 let clip_end_beat = clip.position_beats + clip.duration_beats;
 
@@ -587,11 +594,6 @@ impl EngineTrack {
 
         rendered
     }
-}
-
-/// Returns `true` if any track in the slice has solo enabled.
-pub fn any_solo(tracks: &[EngineTrack]) -> bool {
-    tracks.iter().any(|t| t.solo)
 }
 
 #[cfg(test)]

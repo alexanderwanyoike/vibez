@@ -8,12 +8,16 @@ pub(super) struct PendingSectionRecord {
     pub(super) prepared: Option<Box<PreparedSectionPlaybackSource>>,
     pub(super) effective_at_samples: u64,
     pub(super) section_position_samples: u64,
+    pub(super) replace_existing: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ActiveSectionRecord {
     pub(super) section_id: SectionId,
     pub(super) track_id: TrackId,
+    pub(super) effective_at_samples: u64,
+    pub(super) replace_first_pass: bool,
+    pub(super) replace_source_flushed: bool,
 }
 
 pub(super) fn section_sample_for_performance(
@@ -37,6 +41,7 @@ impl AudioEngine {
         track_id: TrackId,
         prepared: Option<Box<PreparedSectionPlaybackSource>>,
         count_in_bars: u8,
+        replace_existing: bool,
     ) {
         if self.pending_section_record.is_some() || self.active_section_record.is_some() {
             return;
@@ -95,6 +100,7 @@ impl AudioEngine {
             prepared,
             effective_at_samples,
             section_position_samples,
+            replace_existing,
         });
         let _ = self.event_tx.push(EngineEvent::SectionRecordArmed {
             section_id,
@@ -152,6 +158,9 @@ impl AudioEngine {
         self.active_section_record = Some(ActiveSectionRecord {
             section_id: pending.section_id,
             track_id: pending.track_id,
+            effective_at_samples: pending.effective_at_samples,
+            replace_first_pass: pending.replace_existing,
+            replace_source_flushed: false,
         });
         let _ = self.event_tx.push(EngineEvent::SectionRecordStarted {
             section_id: pending.section_id,

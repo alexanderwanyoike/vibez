@@ -163,6 +163,7 @@ pub struct SectionRecordStartRequest {
     pub track_id: TrackId,
     pub from_stopped: bool,
     pub count_in_bars: u8,
+    pub replace_existing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -308,6 +309,7 @@ impl SectionRecordState {
             } else {
                 0
             },
+            replace_existing: self.mode == SectionRecordMode::Replace,
         })
     }
 
@@ -693,6 +695,20 @@ mod tests {
         state.observe_playhead(section, 120);
         let completed = state.finish(section, track, 1_500, 120, true).unwrap();
         assert_eq!(completed.replace_ranges, vec![(0.0, 4.0)]);
+    }
+
+    #[test]
+    fn replace_start_request_carries_the_live_suppression_policy() {
+        let mut state = SectionRecordState {
+            mode: SectionRecordMode::Replace,
+            ..SectionRecordState::default()
+        };
+        state.sync_clock(true, 120.0, 48_000);
+        let request = state
+            .request_start(SectionId::new(), TrackId::new(), false, 4.0)
+            .unwrap();
+
+        assert!(request.replace_existing);
     }
 
     #[test]
