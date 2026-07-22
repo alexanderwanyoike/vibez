@@ -119,9 +119,12 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
         let mut output = vec![0.0; frames];
         engine.process(&mut output, 1);
 
-        assert!(output[..boundary as usize]
-            .iter()
-            .all(|sample| *sample == 0.0));
+        if boundary > 0 {
+            assert!((output[0] - 0.32).abs() < f32::EPSILON);
+            assert!(output[..boundary as usize]
+                .iter()
+                .all(|sample| sample.abs() <= 0.32));
+        }
         assert!(output[boundary as usize..]
             .iter()
             .all(|sample| (*sample - 0.75).abs() < f32::EPSILON));
@@ -157,13 +160,49 @@ fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() 
     let mut count_in_prefix = [0.0; 4];
     engine.process(&mut count_in_prefix, 1);
     assert_eq!(record_events(&mut events), vec![(false, 16, 0)]);
-    assert!(count_in_prefix.iter().all(|sample| *sample == 0.0));
+    assert!((count_in_prefix[0] - 0.32).abs() < f32::EPSILON);
+    assert!(count_in_prefix.iter().all(|sample| sample.abs() <= 0.32));
 
     let mut boundary_block = [0.0; 13];
     engine.process(&mut boundary_block, 1);
-    assert!(boundary_block[..12].iter().all(|sample| *sample == 0.0));
+    assert!(boundary_block[..12]
+        .iter()
+        .all(|sample| sample.abs() <= 0.32));
     assert!((boundary_block[12] - 0.75).abs() < f32::EPSILON);
     assert_eq!(record_events(&mut events), vec![(true, 16, 0)]);
+}
+
+#[test]
+fn stopped_count_in_click_accents_each_bar_and_clicks_each_beat() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::ArmSectionRecord {
+            section_id,
+            track_id,
+            prepared: Some(source(section_id, track_id, 0.75)),
+            count_in_bars: 2,
+            replace_existing: false,
+        })
+        .unwrap();
+
+    let mut output = vec![0.0; 32_001];
+    engine.process(&mut output, 1);
+
+    assert!((output[0] - 0.32).abs() < f32::EPSILON);
+    assert!((output[4_000] - 0.22).abs() < f32::EPSILON);
+    assert!((output[8_000] - 0.22).abs() < f32::EPSILON);
+    assert!((output[12_000] - 0.22).abs() < f32::EPSILON);
+    assert!((output[16_000] - 0.32).abs() < f32::EPSILON);
+    assert!((output[20_000] - 0.22).abs() < f32::EPSILON);
+    assert!(output[1_000].abs() < f32::EPSILON);
+    assert!((output[32_000] - 0.75).abs() < f32::EPSILON);
 }
 
 #[test]

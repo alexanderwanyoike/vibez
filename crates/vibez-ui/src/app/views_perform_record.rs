@@ -32,8 +32,20 @@ impl App {
             SectionRecordPhase::Preparing => "PREPARING".into(),
             SectionRecordPhase::Armed => record
                 .pending_boundary_samples
-                .map(|sample| format!("PENDING · {sample} smp"))
-                .unwrap_or_else(|| "ARMED".into()),
+                .and_then(|boundary| {
+                    (self.state.perform.playing_section.is_none())
+                        .then(|| {
+                            count_in_beats_remaining(
+                                boundary,
+                                self.state.transport.position_samples,
+                                self.state.transport.bpm,
+                                self.state.transport.sample_rate,
+                            )
+                        })
+                        .flatten()
+                })
+                .map(|beats| format!("COUNT-IN · {beats}"))
+                .unwrap_or_else(|| "ARMED · NEXT BAR".into()),
             SectionRecordPhase::Recording => "RECORDING".into(),
             SectionRecordPhase::Stopping => "STOPPING".into(),
         };
@@ -132,6 +144,20 @@ impl App {
     }
 }
 
+fn count_in_beats_remaining(
+    boundary: u64,
+    position: u64,
+    bpm: f64,
+    sample_rate: u32,
+) -> Option<u64> {
+    if boundary <= position || !bpm.is_finite() || bpm <= 0.0 || sample_rate == 0 {
+        return None;
+    }
+    let beat_samples = (f64::from(sample_rate) * 60.0 / bpm).round().max(1.0) as u64;
+    let remaining = boundary - position;
+    Some(remaining.saturating_add(beat_samples - 1) / beat_samples)
+}
+
 fn record_button_content(active: bool) -> Element<'static, Message> {
     let color = if active { th::bg_dark() } else { th::danger() };
     let shortcut = container(text("F4").font(PERFORM_TECH_STRONG).size(8).color(color))
@@ -181,4 +207,30 @@ fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(
     .padding([5, 7])
     .text_size(9)
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_in_beats_remaining;
+
+    #[test]
+    fn count_in_label_counts_whole_beats_down_to_one() {
+        assert_eq!(count_in_beats_remaining(88_200, 0, 120.0, 44_100), Some(4));
+        assert_eq!(
+            count_in_beats_remaining(88_200, 22_049, 120.0, 44_100),
+            Some(4)
+        );
+        assert_eq!(
+            count_in_beats_remaining(88_200, 22_050, 120.0, 44_100),
+            Some(3)
+        );
+        assert_eq!(
+            count_in_beats_remaining(88_200, 88_199, 120.0, 44_100),
+            Some(1)
+        );
+        assert_eq!(
+            count_in_beats_remaining(88_200, 88_200, 120.0, 44_100),
+            None
+        );
+    }
 }

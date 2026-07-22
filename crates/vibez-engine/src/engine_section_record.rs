@@ -8,7 +8,16 @@ pub(super) struct PendingSectionRecord {
     pub(super) prepared: Option<Box<PreparedSectionPlaybackSource>>,
     pub(super) effective_at_samples: u64,
     pub(super) section_position_samples: u64,
+    pub(super) count_in_start_samples: u64,
+    pub(super) count_in_beat_samples: u64,
     pub(super) replace_existing: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CountInClickTiming {
+    start: u64,
+    beat_samples: u64,
+    boundary: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,50 +58,54 @@ impl AudioEngine {
         self.cancel_section_queue();
 
         let now = self.performance_position;
-        let (effective_at_samples, section_position_samples, prepared) = if let Some(active) = self
-            .active_section
-            .filter(|active| active.section_id == section_id && self.transport.is_playing())
-        {
-            let bar_samples = self.section_length_samples(4.0);
-            let next_local = active
-                .position_samples
-                .checked_div(bar_samples)
-                .unwrap_or(0)
-                .saturating_add(1)
-                .saturating_mul(bar_samples);
-            let (delta, local) = if next_local >= active.length_samples {
-                (
-                    active
-                        .length_samples
-                        .saturating_sub(active.position_samples),
-                    0,
-                )
+        let count_in_beat_samples = self.section_length_samples(1.0);
+        let (effective_at_samples, section_position_samples, count_in_start_samples, prepared) =
+            if let Some(active) = self
+                .active_section
+                .filter(|active| active.section_id == section_id && self.transport.is_playing())
+            {
+                let bar_samples = self.section_length_samples(4.0);
+                let next_local = active
+                    .position_samples
+                    .checked_div(bar_samples)
+                    .unwrap_or(0)
+                    .saturating_add(1)
+                    .saturating_mul(bar_samples);
+                let (delta, local) = if next_local >= active.length_samples {
+                    (
+                        active
+                            .length_samples
+                            .saturating_sub(active.position_samples),
+                        0,
+                    )
+                } else {
+                    (
+                        next_local.saturating_sub(active.position_samples),
+                        next_local,
+                    )
+                };
+                (now.saturating_add(delta), local, now, None)
             } else {
+                let Some(prepared) = prepared else {
+                    return;
+                };
+                let count_in_samples = self
+                    .section_length_samples(4.0)
+                    .saturating_mul(u64::from(count_in_bars));
+                if !self.transport.is_playing() {
+                    self.transport.play();
+                    self.performance_position = self.transport.position();
+                    self.stopped_note_repeat_anchor = None;
+                    let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+                }
+                let count_in_start_samples = self.performance_position;
                 (
-                    next_local.saturating_sub(active.position_samples),
-                    next_local,
+                    count_in_start_samples.saturating_add(count_in_samples),
+                    0,
+                    count_in_start_samples,
+                    Some(prepared),
                 )
             };
-            (now.saturating_add(delta), local, None)
-        } else {
-            let Some(prepared) = prepared else {
-                return;
-            };
-            let count_in_samples = self
-                .section_length_samples(4.0)
-                .saturating_mul(u64::from(count_in_bars));
-            if !self.transport.is_playing() {
-                self.transport.play();
-                self.performance_position = self.transport.position();
-                self.stopped_note_repeat_anchor = None;
-                let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
-            }
-            (
-                self.performance_position.saturating_add(count_in_samples),
-                0,
-                Some(prepared),
-            )
-        };
 
         self.pending_section_record = Some(PendingSectionRecord {
             section_id,
@@ -100,6 +113,8 @@ impl AudioEngine {
             prepared,
             effective_at_samples,
             section_position_samples,
+            count_in_start_samples,
+            count_in_beat_samples,
             replace_existing,
         });
         let _ = self.event_tx.push(EngineEvent::SectionRecordArmed {
@@ -179,25 +194,36 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
     ) -> bool {
-        let Some(boundary) = self.pending_section_record.as_ref().and_then(|pending| {
-            pending
-                .prepared
-                .as_ref()
-                .map(|_| pending.effective_at_samples)
+        let Some(timing) = self.pending_section_record.as_ref().and_then(|pending| {
+            pending.prepared.as_ref().map(|_| CountInClickTiming {
+                start: pending.count_in_start_samples,
+                beat_samples: pending.count_in_beat_samples,
+                boundary: pending.effective_at_samples,
+            })
         }) else {
             return false;
         };
         let block_start = self.performance_position;
         let block_end = block_start.saturating_add(frames as u64);
-        if boundary <= block_start {
+        if timing.boundary <= block_start {
             self.start_section_record_if_due(block_start);
             return false;
         }
-        if boundary >= block_end {
-            return false;
+        if timing.boundary >= block_end {
+            let arrangement_position = self.transport.position();
+            self.render_multitrack_segment(
+                output,
+                arrangement_position,
+                block_start,
+                frames,
+                channels,
+                self.transport.active_loop_region(),
+            );
+            self.mix_section_record_count_in_click(output, frames, channels, block_start, timing);
+            return true;
         }
 
-        let frames_before = (boundary - block_start) as usize;
+        let frames_before = (timing.boundary - block_start) as usize;
         if frames_before > 0 {
             let arrangement_position = self.transport.position();
             self.render_multitrack_segment(
@@ -208,8 +234,15 @@ impl AudioEngine {
                 channels,
                 self.transport.active_loop_region(),
             );
+            self.mix_section_record_count_in_click(
+                &mut output[..frames_before * channels],
+                frames_before,
+                channels,
+                block_start,
+                timing,
+            );
         }
-        self.start_section_record_if_due(boundary);
+        self.start_section_record_if_due(timing.boundary);
         let frames_after = frames - frames_before;
         let section = self.active_section.expect("recording activated Section");
         self.render_section_frames(
@@ -217,9 +250,47 @@ impl AudioEngine {
             frames_after,
             channels,
             section,
-            boundary,
+            timing.boundary,
         );
         self.section_advance_override = Some(frames_after as u64);
         true
+    }
+
+    fn mix_section_record_count_in_click(
+        &self,
+        output: &mut [f32],
+        frames: usize,
+        channels: usize,
+        block_start: u64,
+        timing: CountInClickTiming,
+    ) {
+        if channels == 0 || timing.beat_samples == 0 || self.sample_rate == 0 {
+            return;
+        }
+        let click_samples = ((self.sample_rate as f32 * 0.03).round() as u64)
+            .max(1)
+            .min(timing.beat_samples);
+        for frame in 0..frames {
+            let sample_position = block_start.saturating_add(frame as u64);
+            if sample_position < timing.start || sample_position >= timing.boundary {
+                continue;
+            }
+            let elapsed = sample_position - timing.start;
+            let click_position = elapsed % timing.beat_samples;
+            if click_position >= click_samples {
+                continue;
+            }
+            let beat = elapsed / timing.beat_samples;
+            let accent = beat.is_multiple_of(4);
+            let frequency = if accent { 1_760.0 } else { 1_320.0 };
+            let amplitude = if accent { 0.32 } else { 0.22 };
+            let time = click_position as f32 / self.sample_rate as f32;
+            let envelope = 1.0 - click_position as f32 / click_samples as f32;
+            let click =
+                (std::f32::consts::TAU * frequency * time).cos() * envelope.powi(4) * amplitude;
+            for channel in 0..channels {
+                output[frame * channels + channel] += click;
+            }
+        }
     }
 }
