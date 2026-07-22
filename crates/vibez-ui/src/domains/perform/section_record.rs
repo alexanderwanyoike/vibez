@@ -1,7 +1,7 @@
 use vibez_core::id::{SectionId, TrackId};
-use vibez_core::perform::{GrooveGrid, NoteRepeatRate};
 #[cfg(test)]
 use vibez_core::perform::SwingAmount;
+use vibez_core::perform::{GrooveGrid, NoteRepeatRate};
 
 use super::{PerformAction, PerformState};
 
