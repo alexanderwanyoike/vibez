@@ -13,7 +13,7 @@ pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
 pub mod piano_roll;
-pub mod swing_fader;
+pub mod swing_knob;
 pub mod timeline;
 pub mod track_header;
 pub mod vu_meter;

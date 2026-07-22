@@ -123,6 +123,13 @@ pub fn normalized_target_value(target: &AutomationTarget, track: &ProjectTrack) 
     match target {
         AutomationTarget::TrackGain => Some((track.gain / 2.0).clamp(0.0, 1.0)),
         AutomationTarget::TrackPan => Some(track.pan.clamp(0.0, 1.0)),
+        AutomationTarget::TrackSwingOffset => Some(
+            track
+                .swing_offset
+                .unwrap_or_default()
+                .normalized()
+                .clamp(0.0, 1.0),
+        ),
         AutomationTarget::EffectParam {
             effect_id,
             param_index,
@@ -175,6 +182,15 @@ pub static SEND_DESCRIPTOR: vibez_core::effect::ParamDescriptor =
         unit: "",
     };
 
+pub static TRACK_SWING_OFFSET_DESCRIPTOR: vibez_core::effect::ParamDescriptor =
+    vibez_core::effect::ParamDescriptor {
+        name: "Track Swing",
+        min: -25.0,
+        max: 25.0,
+        default: 0.0,
+        unit: "%",
+    };
+
 /// The static descriptor behind a target, when one exists (effect
 /// and instrument params). Gain/pan have implicit ranges.
 pub fn target_descriptor(
@@ -199,6 +215,7 @@ pub fn target_descriptor(
             }
         }
         AutomationTarget::Send { .. } => Some(&SEND_DESCRIPTOR),
+        AutomationTarget::TrackSwingOffset => Some(&TRACK_SWING_OFFSET_DESCRIPTOR),
         _ => None,
     }
 }
@@ -209,6 +226,7 @@ pub fn target_label(target: &AutomationTarget, track: &ProjectTrack) -> String {
     match target {
         AutomationTarget::TrackGain => "Volume".to_string(),
         AutomationTarget::TrackPan => "Pan".to_string(),
+        AutomationTarget::TrackSwingOffset => "Track Swing".to_string(),
         AutomationTarget::EffectParam {
             effect_id,
             param_index,

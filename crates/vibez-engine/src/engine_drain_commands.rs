@@ -53,7 +53,6 @@ impl AudioEngine {
                 }
                 EngineCommand::SetProjectSwing(swing) => {
                     self.project_swing = swing;
-                    self.reschedule_note_repeats();
                 }
                 EngineCommand::LaunchSection(prepared) => {
                     self.cancel_section_queue();
@@ -309,13 +308,8 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackSwingOffset(id, offset) => {
-                    let position = self.performance_position;
-                    let bpm = self.transport.bpm();
-                    let sample_rate = self.sample_rate;
-                    let project_swing = self.project_swing;
                     if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
                         track.swing_offset = offset;
-                        track.reschedule_note_repeats(position, bpm, sample_rate, project_swing);
                     }
                 }
 

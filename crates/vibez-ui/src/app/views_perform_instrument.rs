@@ -3,20 +3,20 @@
 use std::borrow::Borrow;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, pick_list, row, slider, text,
+    button, canvas, column, container, horizontal_space, pick_list, row, slider, text, text_input,
     vertical_space,
 };
 use iced::{Element, Length, Theme};
 
+use vibez_core::automation::AutomationTarget;
 use vibez_core::id::TrackId;
-use vibez_core::perform::NoteRepeatRate;
+use vibez_core::perform::{NoteRepeatRate, SwingOffset};
 
 use crate::domains::perform::{PerformMsg, SixteenLevelsParameter};
-use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
-use crate::widgets::swing_fader::SwingFaderWidget;
+use crate::widgets::swing_knob::{offset_for_effective_percent, SwingKnobWidget};
 
 use super::*;
 
@@ -210,47 +210,6 @@ where
             selected_background: th::bg_hover().into(),
         })
         .into()
-}
-
-fn rail_nudge_button(icon: char, message: PerformMsg) -> Element<'static, Message> {
-    button(
-        center(icons::icon(icon).size(9).color(th::text_dim()))
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .on_press(Message::Perform(message))
-    .width(Length::Fixed(24.0))
-    .height(Length::Fixed(22.0))
-    .padding(0)
-    .style(|_theme: &Theme, status| {
-        let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: Some(
-                if engaged {
-                    th::bg_hover()
-                } else {
-                    th::bg_surface()
-                }
-                .into(),
-            ),
-            text_color: if engaged {
-                th::accent()
-            } else {
-                th::text_dim()
-            },
-            border: iced::Border {
-                color: if engaged {
-                    th::accent_dim()
-                } else {
-                    th::border()
-                },
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        }
-    })
-    .into()
 }
 
 impl App {
@@ -513,89 +472,137 @@ impl App {
         });
         let project_swing = self.state.perform.project_swing();
         let track_offset = selected_track.and_then(|track| track.swing_offset);
-        let effective_swing = project_swing.effective(track_offset);
-        let offset = track_offset.unwrap_or_default().get();
-        let swing_state = match track_offset {
-            Some(_) => format!(
-                "{:+.0}→{:.0}%",
-                offset * 100.0,
-                effective_swing.get() * 100.0
-            ),
-            None => format!("PROJECT · {:.0}%", effective_swing.get() * 100.0),
+        let automation_offset = selected_track.and_then(|track| {
+            self.state
+                .active_timeline_content(track.id)
+                .and_then(|content| {
+                    content
+                        .automation
+                        .iter()
+                        .find(|lane| lane.target == AutomationTarget::TrackSwingOffset)
+                })
+                .and_then(|lane| lane.value_at(self.state.position_beats()))
+                .map(SwingOffset::from_normalized)
+        });
+        let automated = automation_offset.is_some();
+        let controlling_offset = automation_offset.or(track_offset);
+        let effective_swing = project_swing.effective(controlling_offset);
+        let composition = match controlling_offset {
+            Some(offset) if automated => format!("AUTO · PROJECT {:+.0}", offset.get() * 100.0),
+            Some(offset) => format!("PROJECT {:+.0}", offset.get() * 100.0),
+            None => "FOLLOW PROJECT".to_string(),
         };
-        let swing_readout: Element<'_, Message> = if track_offset.is_some() {
-            row![
-                text(swing_state)
-                    .font(PERFORM_TECH_STRONG)
-                    .size(7)
-                    .color(th::text_dim()),
-                button(
-                    center(icons::icon(icons::X).size(7).color(th::text_muted()))
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                )
-                .on_press(Message::Perform(PerformMsg::SetTrackSwingOffset(None)))
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .padding(0)
-                .style(|_theme: &Theme, status| {
-                    let engaged =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    button::Style {
-                        background: None,
-                        text_color: if engaged {
-                            th::accent()
-                        } else {
-                            th::text_muted()
-                        },
-                        ..Default::default()
-                    }
-                }),
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center)
-            .into()
-        } else {
-            text(swing_state)
+        let swing_knob: Element<'_, Message> = match selected_track {
+            Some(track) => canvas(SwingKnobWidget::track(
+                track.id,
+                project_swing,
+                effective_swing,
+                automated,
+            ))
+            .width(Length::Fixed(38.0))
+            .height(Length::Fixed(38.0))
+            .into(),
+            None => horizontal_space().width(Length::Fixed(38.0)).into(),
+        };
+        let swing_value: Element<'_, Message> = match selected_track {
+            Some(_) if automated => text(format!("{:.0}%  AUTO", effective_swing.get() * 100.0))
                 .font(PERFORM_TECH_STRONG)
-                .size(7)
-                .color(th::text_dim())
-                .into()
+                .size(10)
+                .color(th::success())
+                .into(),
+            Some(track) => {
+                let input = self.state.perform.target_swing_input(track.id);
+                let submit = offset_for_effective_percent(input, project_swing)
+                    .map(|offset| {
+                        Message::Perform(PerformMsg::SetTrackSwingOffset {
+                            track_id: track.id,
+                            value: Some(offset.get()),
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        Message::Perform(PerformMsg::SetTrackSwingOffset {
+                            track_id: track.id,
+                            value: track_offset.map(SwingOffset::get),
+                        })
+                    });
+                text_input(&format!("{:.0}%", effective_swing.get() * 100.0), input)
+                    .on_input(move |value| {
+                        Message::Perform(PerformMsg::TargetSwingInput {
+                            track_id: track.id,
+                            value,
+                        })
+                    })
+                    .on_submit(submit)
+                    .width(Length::Fixed(40.0))
+                    .padding([2, 4])
+                    .size(10)
+                    .into()
+            }
+            None => text("NO TARGET")
+                .font(PERFORM_TECH_STRONG)
+                .size(8)
+                .color(th::text_muted())
+                .into(),
         };
-        let swing_fader: Element<'_, Message> = if selected_track.is_some() {
-            canvas(SwingFaderWidget::track(offset))
-                .width(Length::Fill)
-                .height(Length::Fixed(22.0))
-                .into()
-        } else {
-            horizontal_space().into()
+        let follow_button = {
+            let active = track_offset.is_none();
+            let button = button(text("FOLLOW").font(PERFORM_TECH_STRONG).size(7))
+                .width(Length::Fixed(39.0))
+                .padding([2, 3])
+                .style(move |_theme: &Theme, _status| button::Style {
+                    background: Some(
+                        if active {
+                            th::accent_dim()
+                        } else {
+                            th::bg_elevated()
+                        }
+                        .into(),
+                    ),
+                    text_color: if active { th::accent() } else { th::text_dim() },
+                    border: iced::Border {
+                        color: if active {
+                            th::accent_dim()
+                        } else {
+                            th::border()
+                        },
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                });
+            if let Some(track) = selected_track.filter(|_| !active) {
+                button.on_press(Message::Perform(PerformMsg::SetTrackSwingOffset {
+                    track_id: track.id,
+                    value: None,
+                }))
+            } else {
+                button
+            }
         };
         let track_swing = container(
-            column![
-                row![
-                    text("TRACK SWING")
+            row![
+                swing_knob,
+                column![
+                    text("TARGET SWING")
                         .font(PERFORM_LABEL)
                         .size(8)
                         .color(th::text_muted()),
-                    horizontal_space(),
-                    swing_readout,
+                    row![swing_value, follow_button]
+                        .spacing(3)
+                        .align_y(iced::Alignment::Center),
+                    text(composition)
+                        .font(PERFORM_TECH)
+                        .size(7)
+                        .color(if automated {
+                            th::success()
+                        } else {
+                            th::text_dim()
+                        }),
                 ]
-                .align_y(iced::Alignment::Center),
-                row![
-                    rail_nudge_button(
-                        icons::MINUS,
-                        PerformMsg::SetTrackSwingOffset(Some(offset - 0.01)),
-                    ),
-                    swing_fader,
-                    rail_nudge_button(
-                        icons::PLUS,
-                        PerformMsg::SetTrackSwingOffset(Some(offset + 0.01)),
-                    ),
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
+                .spacing(2),
             ]
-            .spacing(5),
+            .spacing(7)
+            .align_y(iced::Alignment::Center),
         )
         .padding(7)
         .style(|_theme: &Theme| container::Style {

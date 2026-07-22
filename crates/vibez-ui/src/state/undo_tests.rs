@@ -250,7 +250,10 @@ fn project_and_track_swing_edits_restore_through_undo() {
     let action = perform_edit(
         &mut state,
         &mut engine,
-        PerformMsg::SetTrackSwingOffset(Some(0.08)),
+        PerformMsg::SetTrackSwingOffset {
+            track_id,
+            value: Some(0.08),
+        },
     );
     let request = action.track_swing_request.expect("track Swing edit");
     Arc::make_mut(&mut state.project_tracks)

@@ -733,6 +733,13 @@ impl AudioEngine {
             // and reverb tails ring out and queued plugin parameter
             // changes (knob edits, automation) actually reach the
             // plugin instead of waiting for play.
+            let beat = if self.transport.bpm() > 0.0 {
+                self.transport.position() as f64 * self.transport.bpm()
+                    / (self.sample_rate as f64 * 60.0)
+            } else {
+                0.0
+            };
+            track.apply_automation(beat);
             let has_signal = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;

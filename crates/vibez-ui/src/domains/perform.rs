@@ -167,6 +167,9 @@ pub struct PerformState {
     pub instrument_target_overlay: bool,
     instrument: InstrumentPerformanceState,
     project_swing: SwingAmount,
+    project_swing_input: String,
+    target_swing_input: String,
+    target_swing_input_track: Option<TrackId>,
     note_repeat_rate: NoteRepeatRate,
     note_repeat_momentary: bool,
     note_repeat_momentary_key_id: Option<String>,
@@ -226,7 +229,15 @@ pub enum PerformMsg {
     SetSixteenLevelsMaximum(i16),
     ChooseSixteenLevelsSource,
     SetProjectSwing(f32),
-    SetTrackSwingOffset(Option<f32>),
+    SetTrackSwingOffset {
+        track_id: TrackId,
+        value: Option<f32>,
+    },
+    ProjectSwingInput(String),
+    TargetSwingInput {
+        track_id: TrackId,
+        value: String,
+    },
     SetNoteRepeatRate(NoteRepeatRate),
     SetNoteRepeatMomentary {
         active: bool,
@@ -258,7 +269,7 @@ impl PerformMsg {
                 | Self::ToggleSectionLoop(_)
                 | Self::RemoveTrackContent { .. }
                 | Self::SetProjectSwing(_)
-                | Self::SetTrackSwingOffset(_)
+                | Self::SetTrackSwingOffset { .. }
         )
     }
 }
@@ -689,8 +700,15 @@ impl PerformState {
             PerformMsg::SetProjectSwing(value) => {
                 self.update_project_swing(value, engine);
             }
-            PerformMsg::SetTrackSwingOffset(value) => {
-                return self.update_track_swing(value, engine, ctx);
+            PerformMsg::SetTrackSwingOffset { track_id, value } => {
+                return self.update_track_swing(track_id, value, engine, ctx);
+            }
+            PerformMsg::ProjectSwingInput(value) => {
+                self.project_swing_input = value;
+            }
+            PerformMsg::TargetSwingInput { track_id, value } => {
+                self.target_swing_input_track = Some(track_id);
+                self.target_swing_input = value;
             }
             PerformMsg::SetNoteRepeatRate(rate) => {
                 self.update_note_repeat_rate(rate, engine);

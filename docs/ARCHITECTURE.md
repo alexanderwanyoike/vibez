@@ -180,8 +180,29 @@ While transport plays, the first repeated hit comes from the active musical
 grid and an Immediate Section transition establishes a new grid origin. Vibez
 deliberately extends MPC Note Repeat to stopped transport: the first pad sounds
 immediately as step zero, later pads share that anchor, and the anchor clears
-when the final repeated pad stops. Swing, tempo, rate, and Project Track offset
-changes reschedule future hits without changing the anchor.
+when the final repeated pad stops. Tempo and rate changes reschedule future hits
+without changing the anchor. Swing and Project Track offset edits preserve the
+scheduled in-flight pair and become audible when the next pair begins.
+
+Swing UI uses two views of that same model rather than introducing a third
+value: Project Swing edits the native `50..75%` ratio, while contextual Target
+Swing shows the selected MIDI Project Track's effective ratio and its optional
+Project-relative offset. `FOLLOW` removes the manual offset. A persisted
+`track_swing_offset` automation lane stores that relative offset normalized
+from `-25..+25` percentage points; while a lane has a value it takes precedence
+over the manual offset and the Target control is read-only and marked `AUTO`.
+Automation is evaluated at the existing render-block boundary, then the Groove
+scheduler latches the effective result for each musical pair. Consequently a
+change cannot retime an in-flight pair, and both Note Repeat and opted-in clips
+adopt it at their next pair boundary.
+
+Track Swing is not owned by the Perform workspace. The Instrument rail edits
+the current Instrument Target, while the shared Arrange/Section Clip inspector
+edits the selected MIDI clip's parent Project Track through the same explicit
+Track identity. The inspector presents the relationship as one unit: Track
+Swing supplies the effective amount, and `OFF | 1/8 | 1/16` decides whether and
+on which grid that individual clip follows it. With no MIDI clip selected, the
+Track control remains available but clip application is withheld.
 
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and

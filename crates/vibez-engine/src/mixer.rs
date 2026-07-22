@@ -45,6 +45,8 @@ pub struct EngineTrack {
     pub mute: bool,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
+    /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
+    automation_swing_offset: Option<SwingOffset>,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
@@ -82,6 +84,7 @@ impl EngineTrack {
             mute: false,
             solo: false,
             swing_offset: None,
+            automation_swing_offset: None,
             mix_buffer: Vec::new(),
             effects: Vec::new(),
             sends: Vec::new(),
@@ -98,6 +101,7 @@ impl EngineTrack {
         use vibez_core::automation::AutomationTarget;
         let mut gain = None;
         let mut pan = None;
+        let mut swing_offset = None;
         for lane_idx in 0..self.playback_source.automation.len() {
             let lane = &self.playback_source.automation[lane_idx];
             let Some(value) = lane.value_at(beat) else {
@@ -107,6 +111,9 @@ impl EngineTrack {
                 // Gain's native range is 0..2; pan is already 0..1.
                 AutomationTarget::TrackGain => gain = Some(value * 2.0),
                 AutomationTarget::TrackPan => pan = Some(value),
+                AutomationTarget::TrackSwingOffset => {
+                    swing_offset = Some(SwingOffset::from_normalized(value));
+                }
                 AutomationTarget::EffectParam {
                     effect_id,
                     param_index,
@@ -140,6 +147,7 @@ impl EngineTrack {
                 }
             }
         }
+        self.automation_swing_offset = swing_offset;
         (gain, pan)
     }
 

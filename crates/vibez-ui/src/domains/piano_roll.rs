@@ -242,7 +242,10 @@ impl PianoRollState {
                     clip_id,
                     groove_grid,
                 });
-                action.status = Some(format!("Groove Grid: {}", groove_grid.label()));
+                action.status = Some(match groove_grid {
+                    GrooveGrid::Off => "Clip Swing disabled".to_string(),
+                    _ => format!("Clip Swing follows Track on {}", groove_grid.label()),
+                });
             }
             PianoRollMsg::SetNoteClipLoopRegion {
                 track_id,
@@ -912,7 +915,10 @@ mod tests {
                 groove_grid: GrooveGrid::Sixteenth,
             } if track_id == tid && clip_id == cid
         ));
-        assert_eq!(action.status.as_deref(), Some("Groove Grid: 1/16"));
+        assert_eq!(
+            action.status.as_deref(),
+            Some("Clip Swing follows Track on 1/16")
+        );
     }
 
     #[test]

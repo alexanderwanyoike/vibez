@@ -37,6 +37,7 @@ struct NoteRepeatVoice {
     rate: NoteRepeatRate,
     anchor_sample: u64,
     next_sample: u64,
+    next_step: u64,
 }
 
 #[derive(Debug, Default)]
@@ -46,21 +47,23 @@ pub struct TrackNoteRepeats {
 
 impl TrackNoteRepeats {
     pub(crate) fn start(&mut self, start: NoteRepeatStart, clock: NoteRepeatClock) {
+        let (next_sample, next_step) = next_repeat_from_anchor(
+            clock.after_sample,
+            clock.anchor_sample,
+            start.rate,
+            clock.bpm,
+            clock.sample_rate,
+            clock.swing,
+            clock.include_after_sample,
+        );
         let voice = NoteRepeatVoice {
             id: start.id,
             pitch: start.pitch,
             velocity: start.velocity,
             rate: start.rate,
             anchor_sample: clock.anchor_sample,
-            next_sample: next_repeat_sample_from_anchor(
-                clock.after_sample,
-                clock.anchor_sample,
-                start.rate,
-                clock.bpm,
-                clock.sample_rate,
-                clock.swing,
-                clock.include_after_sample,
-            ),
+            next_sample,
+            next_step,
         };
         if let Some(existing) = self
             .voices
@@ -110,7 +113,7 @@ impl TrackNoteRepeats {
             .find(|voice| voice.id == id)
         {
             voice.rate = rate;
-            voice.next_sample = next_repeat_sample_from_anchor(
+            (voice.next_sample, voice.next_step) = next_repeat_from_anchor(
                 after_sample,
                 voice.anchor_sample,
                 rate,
@@ -130,7 +133,7 @@ impl TrackNoteRepeats {
         swing: SwingAmount,
     ) {
         for voice in self.voices.iter_mut().flatten() {
-            voice.next_sample = next_repeat_sample_from_anchor(
+            (voice.next_sample, voice.next_step) = next_repeat_from_anchor(
                 after_sample,
                 voice.anchor_sample,
                 voice.rate,
@@ -152,7 +155,7 @@ impl TrackNoteRepeats {
     ) {
         for voice in self.voices.iter_mut().flatten() {
             voice.anchor_sample = anchor_sample;
-            voice.next_sample = next_repeat_sample_from_anchor(
+            (voice.next_sample, voice.next_step) = next_repeat_from_anchor(
                 after_sample,
                 anchor_sample,
                 voice.rate,
@@ -183,15 +186,18 @@ impl TrackNoteRepeats {
                 effective_at_samples: voice.next_sample,
             });
             count += 1;
-            voice.next_sample = next_repeat_sample_from_anchor(
-                voice.next_sample,
+            let previous_sample = voice.next_sample;
+            voice.next_step = voice.next_step.saturating_add(1);
+            voice.next_sample = repeat_sample_for_step(
                 voice.anchor_sample,
                 voice.rate,
                 bpm,
                 sample_rate,
                 swing,
-                false,
-            );
+                voice.next_step,
+            )
+            .unwrap_or_else(|| previous_sample.saturating_add(1))
+            .max(previous_sample.saturating_add(1));
         }
         (triggers, count)
     }
@@ -206,10 +212,10 @@ pub fn next_repeat_sample(
     sample_rate: u32,
     swing: SwingAmount,
 ) -> u64 {
-    next_repeat_sample_from_anchor(after_sample, 0, rate, bpm, sample_rate, swing, false)
+    next_repeat_from_anchor(after_sample, 0, rate, bpm, sample_rate, swing, false).0
 }
 
-fn next_repeat_sample_from_anchor(
+fn next_repeat_from_anchor(
     after_sample: u64,
     anchor_sample: u64,
     rate: NoteRepeatRate,
@@ -217,11 +223,10 @@ fn next_repeat_sample_from_anchor(
     sample_rate: u32,
     swing: SwingAmount,
     include_after_sample: bool,
-) -> u64 {
+) -> (u64, u64) {
     if !bpm.is_finite() || bpm <= 0.0 || sample_rate == 0 {
-        return after_sample.saturating_add(1);
+        return (after_sample.saturating_add(1), 0);
     }
-    let profile = GrooveProfile::Mpc2000XlV1;
     let samples_per_tick =
         f64::from(sample_rate) * 60.0 / (bpm * f64::from(GrooveProfile::MPC2000XL_PPQN));
     let ticks_per_step = rate.interval_beats() * f64::from(GrooveProfile::MPC2000XL_PPQN);
@@ -230,26 +235,53 @@ fn next_repeat_sample_from_anchor(
         || !ticks_per_step.is_finite()
         || ticks_per_step <= 0.0
     {
-        return after_sample.saturating_add(1);
+        return (after_sample.saturating_add(1), 0);
     }
     let relative_after = after_sample.saturating_sub(anchor_sample);
     let approximate_step = (relative_after as f64 / samples_per_tick / ticks_per_step)
         .floor()
         .max(0.0) as u64;
     for step in approximate_step..approximate_step.saturating_add(4) {
-        let position_ticks = if profile.swings(rate) && step % 2 == 1 {
-            let pair_start = step.saturating_sub(1) as f64 * ticks_per_step;
-            pair_start + (2.0 * ticks_per_step * f64::from(swing.get())).round()
-        } else {
-            step as f64 * ticks_per_step
-        };
-        let sample = anchor_sample
-            .saturating_add((position_ticks * samples_per_tick).round().max(0.0) as u64);
+        let sample = repeat_sample_for_step(anchor_sample, rate, bpm, sample_rate, swing, step)
+            .expect("validated repeat clock");
         if sample > after_sample || (include_after_sample && sample == after_sample) {
-            return sample;
+            return (sample, step);
         }
     }
-    after_sample.saturating_add((ticks_per_step * samples_per_tick).round().max(1.0) as u64)
+    (
+        after_sample.saturating_add((ticks_per_step * samples_per_tick).round().max(1.0) as u64),
+        approximate_step.saturating_add(4),
+    )
+}
+
+fn repeat_sample_for_step(
+    anchor_sample: u64,
+    rate: NoteRepeatRate,
+    bpm: f64,
+    sample_rate: u32,
+    swing: SwingAmount,
+    step: u64,
+) -> Option<u64> {
+    if !bpm.is_finite() || bpm <= 0.0 || sample_rate == 0 {
+        return None;
+    }
+    let samples_per_tick =
+        f64::from(sample_rate) * 60.0 / (bpm * f64::from(GrooveProfile::MPC2000XL_PPQN));
+    let ticks_per_step = rate.interval_beats() * f64::from(GrooveProfile::MPC2000XL_PPQN);
+    if !samples_per_tick.is_finite()
+        || samples_per_tick <= 0.0
+        || !ticks_per_step.is_finite()
+        || ticks_per_step <= 0.0
+    {
+        return None;
+    }
+    let position_ticks = if GrooveProfile::Mpc2000XlV1.swings(rate) && step % 2 == 1 {
+        let pair_start = step.saturating_sub(1) as f64 * ticks_per_step;
+        pair_start + (2.0 * ticks_per_step * f64::from(swing.get())).round()
+    } else {
+        step as f64 * ticks_per_step
+    };
+    Some(anchor_sample.saturating_add((position_ticks * samples_per_tick).round().max(0.0) as u64))
 }
 
 #[cfg(test)]
