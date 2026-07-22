@@ -4,7 +4,7 @@
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
-use crate::domains::perform::{PerformMode, PerformMsg, SectionRecordMsg};
+use crate::domains::perform::{CaptureMsg, PerformMode, PerformMsg, SectionRecordMsg};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
@@ -277,6 +277,9 @@ fn perform_workspace_key_handler(
         iced::keyboard::Key::Named(Named::F4) => Some(Message::Perform(PerformMsg::SectionRecord(
             SectionRecordMsg::Toggle,
         ))),
+        iced::keyboard::Key::Named(Named::F5) => {
+            Some(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+        }
         _ => None,
     }
 }
@@ -618,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn f4_toggles_section_record_only_without_modifiers_in_perform() {
+    fn f4_and_f5_toggle_recording_controls_only_without_modifiers_in_perform() {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
         assert!(matches!(
@@ -629,6 +632,12 @@ mod tests {
         ));
         assert!(perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::SHIFT).is_none());
         assert!(global_key_handler(Key::Named(Named::F4), Modifiers::empty()).is_none());
+        assert!(matches!(
+            perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+        ));
+        assert!(perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::ALT).is_none());
+        assert!(global_key_handler(Key::Named(Named::F5), Modifiers::empty()).is_none());
     }
 
     #[test]
