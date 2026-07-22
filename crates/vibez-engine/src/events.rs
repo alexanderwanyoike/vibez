@@ -135,6 +135,17 @@ pub enum EngineEvent {
         retired: Option<Box<PreparedSectionPlaybackSource>>,
     },
 
+    /// Capture into Arrange began on this exact engine boundary. An already
+    /// active Section includes its exact local playhead for a mid-loop start.
+    PerformanceCaptureStarted {
+        effective_at_samples: u64,
+        section_id: Option<SectionId>,
+        section_position_samples: Option<u64>,
+    },
+
+    /// Capture into Arrange stopped on this exact engine boundary.
+    PerformanceCaptureStopped { effective_at_samples: u64 },
+
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.
     SectionQueued {
@@ -353,6 +364,26 @@ impl PartialEq for EngineEvent {
                         _ => false,
                     }
             }
+            (
+                Self::PerformanceCaptureStarted {
+                    effective_at_samples: le,
+                    section_id: ls,
+                    section_position_samples: lp,
+                },
+                Self::PerformanceCaptureStarted {
+                    effective_at_samples: re,
+                    section_id: rs,
+                    section_position_samples: rp,
+                },
+            ) => le == re && ls == rs && lp == rp,
+            (
+                Self::PerformanceCaptureStopped {
+                    effective_at_samples: left,
+                },
+                Self::PerformanceCaptureStopped {
+                    effective_at_samples: right,
+                },
+            ) => left == right,
             (
                 Self::SectionQueued {
                     section_id: left_section,

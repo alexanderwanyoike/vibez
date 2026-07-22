@@ -341,6 +341,9 @@ impl AudioEngine {
         }
         if section_ended {
             self.stop_section_record();
+            let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples: new_pos,
+            });
             self.transport.stop();
             let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
             self.active_section = None;
@@ -994,3 +997,7 @@ mod section_queue_tests;
 #[cfg(test)]
 #[path = "engine_section_record_tests.rs"]
 mod section_record_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_tests.rs"]
+mod capture_tests;

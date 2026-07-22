@@ -59,6 +59,10 @@ pub enum EngineCommand {
     },
     /// Stop the current armed or active Section recording session.
     StopSectionRecord,
+    /// Mark the exact engine boundary where Capture into Arrange begins.
+    StartPerformanceCapture,
+    /// Mark the exact engine boundary where Capture into Arrange stops.
+    StopPerformanceCapture,
     /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
     /// Remove any loaded audio from the engine (legacy single-file).

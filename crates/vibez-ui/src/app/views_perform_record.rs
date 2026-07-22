@@ -1,11 +1,11 @@
-//! Compact Section Record strip shared by every Perform mode.
+//! Compact Section Record and Capture strip shared by every Perform mode.
 
 use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{
-    PerformMsg, SectionRecordCountIn, SectionRecordMode, SectionRecordMsg, SectionRecordPhase,
-    SectionRecordQuantization,
+    CaptureMsg, CapturePhase, PerformMsg, SectionRecordCountIn, SectionRecordMode,
+    SectionRecordMsg, SectionRecordPhase, SectionRecordQuantization,
 };
 use crate::icons;
 use crate::message::Message;
@@ -17,8 +17,11 @@ use super::*;
 impl App {
     pub(super) fn view_section_record_bar(&self) -> Element<'_, Message> {
         let record = &self.state.perform.section_record;
+        let capture = &self.state.perform.capture;
         let active = record.is_active();
         let recording = record.phase == SectionRecordPhase::Recording;
+        let capture_active = capture.is_active();
+        let capturing = capture.phase == CapturePhase::Recording;
         let target = record
             .target()
             .and_then(|(section_id, track_id)| {
@@ -48,6 +51,12 @@ impl App {
                 .unwrap_or_else(|| "ARMED · NEXT BAR".into()),
             SectionRecordPhase::Recording => "RECORDING".into(),
             SectionRecordPhase::Stopping => "STOPPING".into(),
+        };
+        let capture_phase = match capture.phase {
+            CapturePhase::Idle => "ARRANGE · READY",
+            CapturePhase::Starting => "ARRANGE · STARTING",
+            CapturePhase::Recording => "ARRANGE · CAPTURING",
+            CapturePhase::Stopping => "ARRANGE · STOPPING",
         };
 
         let record_button = button(record_button_content(active))
@@ -82,6 +91,49 @@ impl App {
                 }
             });
 
+        let capture_button = button(
+            text(if capture_active {
+                "■ STOP CAPTURE"
+            } else {
+                "● CAPTURE"
+            })
+            .font(PERFORM_TECH_STRONG)
+            .size(10),
+        )
+        .on_press(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+        .padding([7, 12])
+        .style(move |_theme: &Theme, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            let emphasized = capture_active || hovered;
+            button::Style {
+                background: Some(
+                    if capturing {
+                        th::danger()
+                    } else if emphasized {
+                        th::accent()
+                    } else {
+                        th::perform_inset()
+                    }
+                    .into(),
+                ),
+                text_color: if emphasized {
+                    th::bg_dark()
+                } else {
+                    th::accent()
+                },
+                border: iced::Border {
+                    color: if capturing {
+                        th::danger()
+                    } else {
+                        th::accent_dim()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
         let count_in = record_pick_list(
             &SectionRecordCountIn::ALL,
             record.count_in,
@@ -114,6 +166,7 @@ impl App {
                 count_in,
                 mode,
                 quantization,
+                capture_button,
                 container(horizontal_space()).width(Length::Fill),
                 row![
                     text(target)
@@ -121,6 +174,14 @@ impl App {
                         .size(9)
                         .color(th::text_dim()),
                     text(phase).font(PERFORM_LABEL).size(9).color(state_color),
+                    text(capture_phase)
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(if capturing {
+                            th::danger()
+                        } else {
+                            th::accent()
+                        }),
                 ]
                 .spacing(12)
                 .align_y(iced::Alignment::Center),
