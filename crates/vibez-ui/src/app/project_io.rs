@@ -209,7 +209,13 @@ impl App {
         self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
+        self.state
+            .perform
+            .set_project_swing(vibez_core::perform::SwingAmount::default());
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
+        self.send_command(EngineCommand::SetProjectSwing(
+            vibez_core::perform::SwingAmount::default(),
+        ));
         self.state.project.current_path = None;
         self.state.project.dirty = false;
         self.state.project.history.clear();
@@ -296,6 +302,7 @@ impl App {
             pan: track.pan,
             mute: track.mute,
             solo: track.solo,
+            swing_offset: track.swing_offset,
             effects,
             kind: track.kind,
             color_index: track.color_index,
@@ -335,6 +342,8 @@ impl App {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Untitled".to_string()),
             bpm: self.state.transport.bpm,
+            groove_profile: vibez_core::perform::GrooveProfile::default(),
+            swing: self.state.perform.project_swing(),
             sample_rate: self.state.transport.sample_rate,
             tracks,
             arrange: super::project_sections::timeline_info_from_ui(
@@ -427,7 +436,9 @@ impl App {
         self.state.project.history.clear();
         self.state.transport.bpm = loaded.project.bpm;
         self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
+        self.state.perform.set_project_swing(loaded.project.swing);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
+        self.send_command(EngineCommand::SetProjectSwing(loaded.project.swing));
 
         for track_info in &loaded.project.tracks {
             let mut track = ProjectTrack::new_instrument(
@@ -440,6 +451,7 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
+            track.swing_offset = track_info.swing_offset;
             let automation = super::project_sections::legacy_automation_for_track(
                 &loaded.project,
                 track_info.id,
@@ -470,6 +482,10 @@ impl App {
             self.send_command(EngineCommand::SetTrackPan(track_info.id, track_info.pan));
             self.send_command(EngineCommand::SetTrackMute(track_info.id, track_info.mute));
             self.send_command(EngineCommand::SetTrackSolo(track_info.id, track_info.solo));
+            self.send_command(EngineCommand::SetTrackSwingOffset(
+                track_info.id,
+                track_info.swing_offset,
+            ));
 
             if let Some(kind) = track_info.instrument {
                 self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));

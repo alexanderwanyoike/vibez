@@ -10,10 +10,15 @@ impl AudioEngine {
             match cmd {
                 EngineCommand::Play => {
                     self.transport.play();
+                    self.performance_position = self.transport.position();
+                    self.stopped_note_repeat_anchor = None;
+                    let anchor = self.playing_note_repeat_anchor();
+                    self.reanchor_note_repeats(anchor, self.performance_position);
                     let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
                 }
                 EngineCommand::Stop => {
                     self.transport.stop();
+                    self.performance_position = self.transport.position();
                     self.cancel_section_queue();
                     self.active_section = None;
                     self.transport
@@ -21,13 +26,21 @@ impl AudioEngine {
                     for track in &mut self.tracks {
                         track.flush_notes();
                     }
+                    self.stopped_note_repeat_anchor = self
+                        .has_active_note_repeats()
+                        .then_some(self.performance_position);
+                    if let Some(anchor) = self.stopped_note_repeat_anchor {
+                        self.reanchor_note_repeats(anchor, self.performance_position);
+                    }
                     let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
                 }
                 EngineCommand::Seek(pos) => {
                     self.transport.seek(pos);
+                    self.performance_position = pos;
                     for track in &mut self.tracks {
                         track.flush_notes();
                     }
+                    self.reschedule_note_repeats();
                 }
                 EngineCommand::SetBpm(bpm) => {
                     // V1 Perform holds one project tempo from the first
@@ -35,7 +48,12 @@ impl AudioEngine {
                     if self.active_section.is_none() {
                         self.transport.set_bpm(bpm);
                         self.recalculate_audio_length();
+                        self.reschedule_note_repeats();
                     }
+                }
+                EngineCommand::SetProjectSwing(swing) => {
+                    self.project_swing = swing;
+                    self.reschedule_note_repeats();
                 }
                 EngineCommand::LaunchSection(prepared) => {
                     self.cancel_section_queue();
@@ -290,11 +308,22 @@ impl AudioEngine {
                         channel.solo = solo;
                     }
                 }
+                EngineCommand::SetTrackSwingOffset(id, offset) => {
+                    let position = self.performance_position;
+                    let bpm = self.transport.bpm();
+                    let sample_rate = self.sample_rate;
+                    let project_swing = self.project_swing;
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
+                        track.swing_offset = offset;
+                        track.reschedule_note_repeats(position, bpm, sample_rate, project_swing);
+                    }
+                }
 
                 // -- Infrastructure --
                 EngineCommand::SetSampleRate(sr) => {
                     self.sample_rate = sr;
                     self.recalculate_audio_length();
+                    self.reschedule_note_repeats();
                 }
                 EngineCommand::SetSpectrumTap(target) => {
                     self.spectrum_track = target;
@@ -686,6 +715,82 @@ impl AudioEngine {
                         if let Some(instrument) = track.instrument.as_mut() {
                             instrument.note_off(pitch);
                         }
+                    }
+                }
+                EngineCommand::StartNoteRepeat {
+                    id,
+                    track_id,
+                    pitch,
+                    velocity,
+                    rate,
+                } => {
+                    let position = self.performance_position;
+                    let bpm = self.transport.bpm();
+                    let sample_rate = self.sample_rate;
+                    let project_swing = self.project_swing;
+                    let Some(track_index) =
+                        self.tracks.iter().position(|track| track.id == track_id)
+                    else {
+                        continue;
+                    };
+                    let playing = self.transport.is_playing();
+                    let had_active_repeats = self.has_active_note_repeats();
+                    let anchor_sample = if playing {
+                        self.playing_note_repeat_anchor()
+                    } else {
+                        *self.stopped_note_repeat_anchor.get_or_insert(position)
+                    };
+                    let sound_immediately = !playing && !had_active_repeats;
+                    if sound_immediately {
+                        if let Some(instrument) = self.tracks[track_index].instrument.as_mut() {
+                            instrument.note_on(pitch, velocity);
+                        }
+                        let _ = self.event_tx.push(EngineEvent::NoteRepeated {
+                            track_id,
+                            pitch,
+                            velocity,
+                            effective_at_samples: position,
+                        });
+                    }
+                    self.tracks[track_index].start_note_repeat(
+                        NoteRepeatStart {
+                            id,
+                            pitch,
+                            velocity,
+                            rate,
+                        },
+                        NoteRepeatClock {
+                            after_sample: position,
+                            anchor_sample,
+                            include_after_sample: !sound_immediately,
+                            bpm,
+                            sample_rate,
+                            swing: project_swing,
+                        },
+                    );
+                }
+                EngineCommand::UpdateNoteRepeatRate { id, track_id, rate } => {
+                    let position = self.performance_position;
+                    let bpm = self.transport.bpm();
+                    let sample_rate = self.sample_rate;
+                    let project_swing = self.project_swing;
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                        track.update_note_repeat_rate(
+                            id,
+                            rate,
+                            position,
+                            bpm,
+                            sample_rate,
+                            project_swing,
+                        );
+                    }
+                }
+                EngineCommand::StopNoteRepeat { id, track_id } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                        track.stop_note_repeat(id);
+                    }
+                    if !self.transport.is_playing() && !self.has_active_note_repeats() {
+                        self.stopped_note_repeat_anchor = None;
                     }
                 }
 

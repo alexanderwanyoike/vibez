@@ -23,6 +23,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         pan: 0.5,
         mute: false,
         solo: false,
+        swing_offset: None,
         effects: Vec::new(),
         kind: TrackKind::Midi,
         color_index,
@@ -156,6 +157,8 @@ fn main() {
         buses: Vec::new(),
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
+        groove_profile: vibez_core::perform::GrooveProfile::default(),
+        swing: vibez_core::perform::SwingAmount::default(),
         sample_rate: 48_000,
         tracks: vec![drums, bass, chords, lead],
         arrange: TimelineInfo {

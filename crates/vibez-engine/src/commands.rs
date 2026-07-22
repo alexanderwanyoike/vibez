@@ -4,6 +4,7 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::SectionLaunchQuantization;
+use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
@@ -33,6 +34,9 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
+    /// Set Project Swing for generated events. Existing clip playback is
+    /// deliberately unaffected.
+    SetProjectSwing(SwingAmount),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
     /// Queue a complete resident Section for an engine-owned musical boundary.
@@ -109,6 +113,9 @@ pub enum EngineCommand {
     SetTrackMute(TrackId, bool),
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
+    /// Set the optional Project Track Swing adjustment used by generated
+    /// events on this channel.
+    SetTrackSwingOffset(TrackId, Option<SwingOffset>),
 
     // -- Busses (return channels) --
     /// Add a bus: a mixer-only channel fed by per-track sends.
@@ -278,6 +285,26 @@ pub enum EngineCommand {
     ExternalNoteOff {
         track_id: TrackId,
         pitch: u8,
+    },
+    /// Begin engine-scheduled repeats after the already-played source note.
+    StartNoteRepeat {
+        id: u8,
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        rate: NoteRepeatRate,
+    },
+    /// Retime future repeats without firing a new source note.
+    UpdateNoteRepeatRate {
+        id: u8,
+        track_id: TrackId,
+        rate: NoteRepeatRate,
+    },
+    /// Stop scheduling one held pad. Its paired note-off remains a separate
+    /// live-input command so release ownership stays explicit.
+    StopNoteRepeat {
+        id: u8,
+        track_id: TrackId,
     },
 
     // -- External plugins --

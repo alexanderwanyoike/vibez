@@ -154,6 +154,30 @@ resolved Track and pitch, so changing a range, assignment, or Instrument Target
 cannot redirect its eventual note-off. These controls and their source memory
 are runtime performance state rather than project content.
 
+Instrument Note Repeat crosses the same input boundary without introducing a
+UI clock. Holding `N` or a future mapped control, or enabling the on-screen
+latch, starts fixed-capacity repeat voices in the audio engine after the source
+note has sounded. The engine schedules straight and triplet subdivisions on its
+sample clock, accepts rate changes without an immediate retrigger, and emits
+`NoteRepeated` events with authoritative sample timestamps. Pad release owns the
+matching stop and note-off even when the latch remains enabled.
+
+The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
+Project Swing, and optional Project Track Swing offsets as canonical project
+data and undo state. Swing uses the profile's native `50..75%` long/short pair
+ratio and the Project Track offset adds percentage points before clamping to
+that range. Generated `1/8` and `1/16` events resolve on the profile's 96 PPQN
+clock; `1/4`, `1/32`, and triplet rates remain exact. Existing clip notes keep
+their persisted absolute beat positions and never enter this transform. The
+engine retains Swing beside its generated-event scheduler so later Section
+Record quantization can share the contract without changing clip playback.
+While transport plays, the first repeated hit comes from the active musical
+grid and an Immediate Section transition establishes a new grid origin. Vibez
+deliberately extends MPC Note Repeat to stopped transport: the first pad sounds
+immediately as step zero, later pads share that anchor, and the anchor clears
+when the final repeated pad stops. Swing, tempo, rate, and Project Track offset
+changes reschedule future hits without changing the anchor.
+
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project
@@ -310,6 +334,8 @@ are handled in three stages:
   its properties and Timeline Content. Arrange audio and note clips stay
   flattened into the existing `clips`/`note_clips` keys for compatibility;
   legacy track automation is migrated into Arrange Timeline Content on load.
+  Project Groove data persists as the versioned `groove_profile`, native
+  `swing` ratio, and optional Project Track `swing_offset` fields.
   Existing project bytes therefore load with an empty Section store and no
   format migration.
 - Save, load, media collection and hydration, unresolved-media preservation,

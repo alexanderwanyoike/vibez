@@ -7,15 +7,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
 use vibez_core::id::{SectionId, TrackId};
+use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_project::SectionLaunchQuantization;
 
 use super::EngineHandle;
 use crate::state::ProjectTrack;
 
+mod input_mapping;
 mod instrument;
+mod note_repeat;
 mod sections;
+pub use input_mapping::{ComputerKey, PerformInputMapping};
 pub use instrument::SixteenLevelsParameter;
 use instrument::{ActiveInstrumentNote, InstrumentPerformanceState};
 pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
@@ -99,154 +102,6 @@ impl PadPosition {
     }
 }
 
-/// A portable physical computer-key position supported by Perform rebinding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ComputerKey {
-    Digit0,
-    Digit1,
-    Digit2,
-    Digit3,
-    Digit4,
-    Digit5,
-    Digit6,
-    Digit7,
-    Digit8,
-    Digit9,
-    A,
-    B,
-    C,
-    D,
-    E,
-    F,
-    G,
-    H,
-    I,
-    J,
-    K,
-    L,
-    M,
-    N,
-    O,
-    P,
-    Q,
-    R,
-    S,
-    T,
-    U,
-    V,
-    W,
-    X,
-    Y,
-    Z,
-}
-
-impl ComputerKey {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Digit0 => "0",
-            Self::Digit1 => "1",
-            Self::Digit2 => "2",
-            Self::Digit3 => "3",
-            Self::Digit4 => "4",
-            Self::Digit5 => "5",
-            Self::Digit6 => "6",
-            Self::Digit7 => "7",
-            Self::Digit8 => "8",
-            Self::Digit9 => "9",
-            Self::A => "A",
-            Self::B => "B",
-            Self::C => "C",
-            Self::D => "D",
-            Self::E => "E",
-            Self::F => "F",
-            Self::G => "G",
-            Self::H => "H",
-            Self::I => "I",
-            Self::J => "J",
-            Self::K => "K",
-            Self::L => "L",
-            Self::M => "M",
-            Self::N => "N",
-            Self::O => "O",
-            Self::P => "P",
-            Self::Q => "Q",
-            Self::R => "R",
-            Self::S => "S",
-            Self::T => "T",
-            Self::U => "U",
-            Self::V => "V",
-            Self::W => "W",
-            Self::X => "X",
-            Self::Y => "Y",
-            Self::Z => "Z",
-        }
-    }
-}
-
-const DEFAULT_COMPUTER_KEYS: [ComputerKey; 16] = [
-    ComputerKey::Digit1,
-    ComputerKey::Digit2,
-    ComputerKey::Digit3,
-    ComputerKey::Digit4,
-    ComputerKey::Q,
-    ComputerKey::W,
-    ComputerKey::E,
-    ComputerKey::R,
-    ComputerKey::A,
-    ComputerKey::S,
-    ComputerKey::D,
-    ComputerKey::F,
-    ComputerKey::Z,
-    ComputerKey::X,
-    ComputerKey::C,
-    ComputerKey::V,
-];
-
-/// Global producer preference assigning physical computer keys to Pad Positions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PerformInputMapping {
-    #[serde(default = "default_computer_keys")]
-    computer_keys: [ComputerKey; 16],
-}
-
-const fn default_computer_keys() -> [ComputerKey; 16] {
-    DEFAULT_COMPUTER_KEYS
-}
-
-impl Default for PerformInputMapping {
-    fn default() -> Self {
-        Self {
-            computer_keys: DEFAULT_COMPUTER_KEYS,
-        }
-    }
-}
-
-impl PerformInputMapping {
-    pub fn key_for(&self, position: PadPosition) -> ComputerKey {
-        self.computer_keys[position.index()]
-    }
-
-    pub fn position_for(&self, key: ComputerKey) -> Option<PadPosition> {
-        self.computer_keys
-            .iter()
-            .position(|candidate| *candidate == key)
-            .map(|index| PadPosition::ALL[index])
-    }
-
-    pub fn rebind(&mut self, position: PadPosition, key: ComputerKey) {
-        let target = position.index();
-        if let Some(existing) = self
-            .computer_keys
-            .iter()
-            .position(|candidate| *candidate == key)
-        {
-            self.computer_keys.swap(target, existing);
-        } else {
-            self.computer_keys[target] = key;
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PadGestureKind {
     Press,
@@ -311,6 +166,11 @@ pub struct PerformState {
     pub key_rebind_target: Option<PadPosition>,
     pub instrument_target_overlay: bool,
     instrument: InstrumentPerformanceState,
+    project_swing: SwingAmount,
+    note_repeat_rate: NoteRepeatRate,
+    note_repeat_momentary: bool,
+    note_repeat_momentary_key_id: Option<String>,
+    note_repeat_latched: bool,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
     pub section_editor: SectionTimelineEditor,
@@ -365,6 +225,14 @@ pub enum PerformMsg {
     SetSixteenLevelsMinimum(i16),
     SetSixteenLevelsMaximum(i16),
     ChooseSixteenLevelsSource,
+    SetProjectSwing(f32),
+    SetTrackSwingOffset(Option<f32>),
+    SetNoteRepeatRate(NoteRepeatRate),
+    SetNoteRepeatMomentary {
+        active: bool,
+        key_id: Option<String>,
+    },
+    ToggleNoteRepeatLatch,
     ComputerKeyPressed {
         key: ComputerKey,
         key_id: String,
@@ -389,6 +257,8 @@ impl PerformMsg {
                 | Self::SetSectionLaunchQuantization(..)
                 | Self::ToggleSectionLoop(_)
                 | Self::RemoveTrackContent { .. }
+                | Self::SetProjectSwing(_)
+                | Self::SetTrackSwingOffset(_)
         )
     }
 }
@@ -409,14 +279,21 @@ pub struct TrackMuteRequest {
     pub muted: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrackSwingRequest {
+    pub track_id: TrackId,
+    pub swing_offset: Option<SwingOffset>,
+}
+
 /// Cross-domain effects requested by Perform. Pad Gestures leave the adapter
 /// through this boundary so later musical consumers do not observe UI state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PerformAction {
     pub keyboard_consumed: bool,
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
+    pub track_swing_request: Option<TrackSwingRequest>,
     pub select_project_track: Option<TrackId>,
     pub section_launch: Option<SectionId>,
     pub section_content_changed: Option<SectionId>,
@@ -809,6 +686,21 @@ impl PerformState {
                     self.begin_choosing_sixteen_levels_source();
                 }
             }
+            PerformMsg::SetProjectSwing(value) => {
+                self.update_project_swing(value, engine);
+            }
+            PerformMsg::SetTrackSwingOffset(value) => {
+                return self.update_track_swing(value, engine, ctx);
+            }
+            PerformMsg::SetNoteRepeatRate(rate) => {
+                self.update_note_repeat_rate(rate, engine);
+            }
+            PerformMsg::SetNoteRepeatMomentary { active, key_id } => {
+                return self.update_note_repeat_momentary(active, key_id, engine);
+            }
+            PerformMsg::ToggleNoteRepeatLatch => {
+                self.toggle_note_repeat_latch(engine);
+            }
             PerformMsg::ComputerKeyPressed {
                 key,
                 key_id,
@@ -846,26 +738,34 @@ impl PerformState {
                 if let Some(track_id) = selected_instrument_target {
                     self.sync_instrument_target(Some(track_id));
                 }
-                let instrument_note = if self.mode == PerformMode::Instrument
-                    && !self.instrument_target_overlay
-                {
-                    let velocity = self.fixed_computer_velocity();
-                    self.instrument_target()
-                        .filter(|track_id| {
-                            ctx.project_tracks.iter().any(|track| {
-                                track.id == *track_id && track.is_playable_midi_target()
+                let instrument_note =
+                    if self.mode == PerformMode::Instrument && !self.instrument_target_overlay {
+                        let velocity = self.fixed_computer_velocity();
+                        self.instrument_target()
+                            .filter(|track_id| {
+                                ctx.project_tracks.iter().any(|track| {
+                                    track.id == *track_id && track.is_playable_midi_target()
+                                })
                             })
-                        })
-                        .map(|track_id| self.resolve_instrument_note(position, velocity, track_id))
-                } else {
-                    None
-                };
+                            .map(|track_id| {
+                                let mut note =
+                                    self.resolve_instrument_note(position, velocity, track_id);
+                                note.repeating = self.note_repeat_active();
+                                note
+                            })
+                    } else {
+                        None
+                    };
                 if let Some(note) = instrument_note {
-                    engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
-                        track_id: note.track_id,
-                        pitch: note.pitch,
-                        velocity: note.velocity,
-                    });
+                    if note.repeating {
+                        self.start_note_repeat(note, engine);
+                    } else {
+                        engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOn {
+                            track_id: note.track_id,
+                            pitch: note.pitch,
+                            velocity: note.velocity,
+                        });
+                    }
                 }
                 self.active_computer_keys
                     .insert(key_id, (position, source, instrument_note));
@@ -892,6 +792,7 @@ impl PerformState {
                         occurred_at,
                     }),
                     track_mute_request,
+                    track_swing_request: None,
                     select_project_track: selected_instrument_target,
                     section_launch,
                     section_content_changed: None,
@@ -907,6 +808,9 @@ impl PerformState {
                     return PerformAction::default();
                 };
                 if let Some(note) = instrument_note {
+                    if note.repeating {
+                        Self::stop_note_repeat(note, engine);
+                    }
                     engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOff {
                         track_id: note.track_id,
                         pitch: note.pitch,
@@ -927,8 +831,13 @@ impl PerformState {
             }
             PerformMsg::WindowUnfocused => {
                 self.instrument_target_overlay = false;
+                self.note_repeat_momentary = false;
+                self.note_repeat_momentary_key_id = None;
                 for (_, (_, _, instrument_note)) in self.active_computer_keys.drain() {
                     if let Some(note) = instrument_note {
+                        if note.repeating {
+                            Self::stop_note_repeat(note, engine);
+                        }
                         engine.send(vibez_engine::commands::EngineCommand::ExternalNoteOff {
                             track_id: note.track_id,
                             pitch: note.pitch,
@@ -989,3 +898,7 @@ mod tests;
 #[cfg(test)]
 #[path = "perform_focus_tests.rs"]
 mod focus_tests;
+
+#[cfg(test)]
+#[path = "perform_note_repeat_tests.rs"]
+mod note_repeat_tests;

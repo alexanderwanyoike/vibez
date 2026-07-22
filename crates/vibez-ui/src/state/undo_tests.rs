@@ -20,6 +20,7 @@ fn snapshot(state: &AppState) -> ProjectSnapshot {
         sections: Arc::clone(&state.perform.sections),
         bpm: state.transport.bpm,
         bpm_text: state.transport.bpm_text.clone(),
+        project_swing: state.perform.project_swing(),
         loop_enabled: state.transport.loop_enabled,
         loop_start_beats: state.transport.loop_start_beats,
         loop_end_beats: state.transport.loop_end_beats,
@@ -34,10 +35,15 @@ fn apply_snapshot(state: &mut AppState, snapshot: ProjectSnapshot) {
     state.project_tracks = snapshot.project_tracks;
     state.arrangement.timeline = snapshot.arrange_timeline;
     state.perform.sections = snapshot.sections;
+    state.perform.set_project_swing(snapshot.project_swing);
     state.perform.selected_section = snapshot.selected_section;
 }
 
-fn perform_edit(state: &mut AppState, engine: &mut RecordingEngine, message: PerformMsg) {
+fn perform_edit(
+    state: &mut AppState,
+    engine: &mut RecordingEngine,
+    message: PerformMsg,
+) -> crate::domains::perform::PerformAction {
     state.project.history.push_edit(snapshot(state), None);
     state.perform.update(
         message,
@@ -47,7 +53,7 @@ fn perform_edit(state: &mut AppState, engine: &mut RecordingEngine, message: Per
             project_tracks: &state.project_tracks.tracks,
             selected_project_track: state.arrangement.selected_track,
         },
-    );
+    )
 }
 
 fn undo_once(state: &mut AppState) {
@@ -226,6 +232,50 @@ fn section_crud_operations_are_individual_undo_steps() {
     undo_once(&mut state);
     assert!(state.perform.sections.sections.is_empty());
     assert!(engine.0.is_empty());
+}
+
+#[test]
+fn project_and_track_swing_edits_restore_through_undo() {
+    let mut state = AppState::default();
+    let mut engine = RecordingEngine::default();
+    let mut track = ProjectTrack::new(TrackId::new(), "Hats".into(), 0);
+    track.kind = vibez_core::midi::TrackKind::Midi;
+    track.has_instrument = true;
+    let track_id = track.id;
+    Arc::make_mut(&mut state.project_tracks).tracks.push(track);
+    state.arrangement.selected_track = Some(track_id);
+
+    perform_edit(&mut state, &mut engine, PerformMsg::SetProjectSwing(0.63));
+    let action = perform_edit(
+        &mut state,
+        &mut engine,
+        PerformMsg::SetTrackSwingOffset(Some(0.08)),
+    );
+    let request = action.track_swing_request.expect("track Swing edit");
+    Arc::make_mut(&mut state.project_tracks)
+        .find_mut(request.track_id)
+        .unwrap()
+        .swing_offset = request.swing_offset;
+
+    assert_eq!(state.project.history.undo.len(), 2);
+    assert_eq!(state.perform.project_swing().get(), 0.63);
+    assert_eq!(
+        state.project_tracks.find(track_id).unwrap().swing_offset,
+        Some(vibez_core::perform::SwingOffset::new(0.08))
+    );
+
+    undo_once(&mut state);
+    assert_eq!(
+        state.project_tracks.find(track_id).unwrap().swing_offset,
+        None
+    );
+    assert_eq!(state.perform.project_swing().get(), 0.63);
+
+    undo_once(&mut state);
+    assert_eq!(
+        state.perform.project_swing(),
+        vibez_core::perform::SwingAmount::default()
+    );
 }
 
 #[test]

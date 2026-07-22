@@ -952,6 +952,8 @@ pub fn representative_document() -> ProjectDocumentV1 {
     let project = Project {
         name: "Project Format V1 proof".into(),
         bpm: 126.0,
+        groove_profile: vibez_core::perform::GrooveProfile::default(),
+        swing: vibez_core::perform::SwingAmount::default(),
         sample_rate: 48_000,
         tracks: vec![track],
         arrange: crate::TimelineInfo {

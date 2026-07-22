@@ -155,7 +155,12 @@ impl App {
                 .into()
         };
 
-        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height);
+        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
+            - if mode == PerformMode::Instrument {
+                82.0
+            } else {
+                0.0
+            };
         let mut grid = column![]
             .width(Length::Fill)
             .height(Length::Fixed(pad_grid_height))

@@ -81,6 +81,15 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
 
+    /// A generated Note Repeat retrigger became effective at this exact
+    /// engine sample. Later recording cards consume the same audible truth.
+    NoteRepeated {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        effective_at_samples: u64,
+    },
+
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.
     SectionQueued {
@@ -186,6 +195,25 @@ impl PartialEq for EngineEvent {
             ) => {
                 left_track == right_track
                     && left_muted == right_muted
+                    && left_effective == right_effective
+            }
+            (
+                Self::NoteRepeated {
+                    track_id: left_track,
+                    pitch: left_pitch,
+                    velocity: left_velocity,
+                    effective_at_samples: left_effective,
+                },
+                Self::NoteRepeated {
+                    track_id: right_track,
+                    pitch: right_pitch,
+                    velocity: right_velocity,
+                    effective_at_samples: right_effective,
+                },
+            ) => {
+                left_track == right_track
+                    && left_pitch == right_pitch
+                    && left_velocity == right_velocity
                     && left_effective == right_effective
             }
             (

@@ -178,6 +178,7 @@ mod tests {
             sections: std::sync::Arc::new(crate::domains::perform::SectionStore::default()),
             bpm: 120.0,
             bpm_text: "120".to_string(),
+            project_swing: vibez_core::perform::SwingAmount::default(),
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,

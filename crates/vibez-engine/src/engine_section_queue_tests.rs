@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, SectionId, TrackId};
-use vibez_core::perform::SectionLaunchQuantization;
+use vibez_core::midi::InstrumentKind;
+use vibez_core::perform::{NoteRepeatRate, SectionLaunchQuantization, SwingAmount};
 
 use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
 
@@ -86,6 +87,58 @@ fn transition_event(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(Section
         } => Some((section_id, effective_at_samples)),
         _ => None,
     })
+}
+
+#[test]
+fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    commands.push(EngineCommand::SetSampleRate(96)).unwrap();
+    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.62)))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "Hats".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackInstrument(
+            track_id,
+            InstrumentKind::SubtractiveSynth,
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut vec![0.0; 35 * 2], 2);
+    commands
+        .push(EngineCommand::StartNoteRepeat {
+            id: 0,
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Sixteenth,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 2], 2);
+    while events.pop().is_ok() {}
+
+    commands
+        .push(EngineCommand::QueueSection {
+            prepared: source(SectionId::new(), track_id, 8.0, 0.0),
+            quantization: SectionLaunchQuantization::Immediate,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0; 60 * 2], 2);
+
+    let repeated: Vec<u64> = std::iter::from_fn(|| events.pop().ok())
+        .filter_map(|event| match event {
+            EngineEvent::NoteRepeated {
+                effective_at_samples,
+                ..
+            } => Some(effective_at_samples),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(repeated, vec![36, 66, 84]);
 }
 
 #[test]

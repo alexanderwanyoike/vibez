@@ -19,6 +19,7 @@ impl App {
             sections: Arc::clone(&self.state.perform.sections),
             bpm: self.state.transport.bpm,
             bpm_text: self.state.transport.bpm_text.clone(),
+            project_swing: self.state.perform.project_swing(),
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
@@ -100,6 +101,7 @@ impl App {
         self.state.perform.sections = snapshot.sections;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = snapshot.bpm_text;
+        self.state.perform.set_project_swing(snapshot.project_swing);
         self.state.transport.loop_enabled = snapshot.loop_enabled;
         self.state.transport.loop_start_beats = snapshot.loop_start_beats;
         self.state.transport.loop_end_beats = snapshot.loop_end_beats;
@@ -121,6 +123,7 @@ impl App {
         self.state.perform.duplicate_source = None;
 
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
+        self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
         self.send_command(EngineCommand::SetArrangementLoop(
             self.state.transport.loop_enabled,
         ));
@@ -181,6 +184,10 @@ impl App {
         self.send_command(EngineCommand::SetTrackPan(track.id, track.pan));
         self.send_command(EngineCommand::SetTrackMute(track.id, track.mute));
         self.send_command(EngineCommand::SetTrackSolo(track.id, track.solo));
+        self.send_command(EngineCommand::SetTrackSwingOffset(
+            track.id,
+            track.swing_offset,
+        ));
 
         if let Some(kind) = track.instrument_kind {
             self.send_command(EngineCommand::SetTrackInstrument(track.id, kind));

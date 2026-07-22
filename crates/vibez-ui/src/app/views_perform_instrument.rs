@@ -1,16 +1,22 @@
 //! Instrument-mode controls for the Perform pad surface.
 
+use std::borrow::Borrow;
+
 use iced::widget::{
-    button, column, container, horizontal_space, pick_list, row, slider, text, vertical_space,
+    button, canvas, center, column, container, horizontal_space, pick_list, row, slider, text,
+    vertical_space,
 };
 use iced::{Element, Length, Theme};
 
 use vibez_core::id::TrackId;
+use vibez_core::perform::NoteRepeatRate;
 
 use crate::domains::perform::{PerformMsg, SixteenLevelsParameter};
+use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::widgets::swing_fader::SwingFaderWidget;
 
 use super::*;
 
@@ -155,6 +161,98 @@ fn navigation_button(label: &'static str, message: PerformMsg) -> Element<'stati
     .into()
 }
 
+fn compact_pick_list<'a, T>(
+    options: impl Borrow<[T]> + 'a,
+    selected: Option<T>,
+    on_selected: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+{
+    pick_list(options, selected, on_selected)
+        .width(Length::Fill)
+        .padding([4, 7])
+        .text_size(9)
+        .style(|_theme: &Theme, status| {
+            let engaged = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: th::text(),
+                placeholder_color: th::text_dim(),
+                handle_color: if engaged {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::perform_pad_lowlight().into(),
+                border: iced::Border {
+                    color: if engaged {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into()
+}
+
+fn rail_nudge_button(icon: char, message: PerformMsg) -> Element<'static, Message> {
+    button(
+        center(icons::icon(icon).size(9).color(th::text_dim()))
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_press(Message::Perform(message))
+    .width(Length::Fixed(24.0))
+    .height(Length::Fixed(22.0))
+    .padding(0)
+    .style(|_theme: &Theme, status| {
+        let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(
+                if engaged {
+                    th::bg_hover()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: if engaged {
+                th::accent()
+            } else {
+                th::text_dim()
+            },
+            border: iced::Border {
+                color: if engaged {
+                    th::accent_dim()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        }
+    })
+    .into()
+}
+
 impl App {
     pub(super) fn view_instrument_control_rail(
         &self,
@@ -228,16 +326,6 @@ impl App {
         } else {
             format!("OCTAVE {:+}", self.state.perform.instrument_octave())
         };
-        let previous_hint = if target_overlay {
-            "TARGET ‹"
-        } else {
-            "OCTAVE ‹"
-        };
-        let next_hint = if target_overlay {
-            "TARGET ›"
-        } else {
-            "OCTAVE ›"
-        };
         let navigation = row![
             text(range_or_bank)
                 .font(PERFORM_TECH_STRONG)
@@ -293,49 +381,77 @@ impl App {
         ]
         .spacing(5);
 
-        let assignment = pick_list(
-            SixteenLevelsParameter::ALL.to_vec(),
-            Some(parameter),
-            |parameter| Message::Perform(PerformMsg::SelectSixteenLevelsParameter(parameter)),
-        )
-        .width(Length::Fill)
-        .padding([4, 7])
-        .text_size(9)
-        .style(|_theme: &Theme, status| {
-            let engaged = matches!(
-                status,
-                pick_list::Status::Hovered | pick_list::Status::Opened
-            );
-            pick_list::Style {
-                text_color: th::text(),
-                placeholder_color: th::text_dim(),
-                handle_color: if engaged {
-                    th::accent()
+        let repeat_active = self.state.perform.note_repeat_active();
+        let repeat_latched = self.state.perform.note_repeat_latched();
+        let repeat_rate = self.state.perform.note_repeat_rate();
+        let repeat_controls = row![
+            rail_button(
+                "NOTE REPEAT",
+                if repeat_latched {
+                    "LATCHED"
+                } else if repeat_active {
+                    "HELD"
                 } else {
-                    th::text_dim()
-                },
-                background: th::perform_pad_lowlight().into(),
+                    "OFF · N"
+                }
+                .into(),
+                repeat_active,
+                true,
+                PerformMsg::ToggleNoteRepeatLatch,
+            ),
+            container(
+                column![
+                    text("REPEAT RATE")
+                        .font(PERFORM_LABEL)
+                        .size(8)
+                        .color(th::text_dim()),
+                    compact_pick_list(NoteRepeatRate::ALL, Some(repeat_rate), |rate| {
+                        Message::Perform(PerformMsg::SetNoteRepeatRate(rate))
+                    }),
+                ]
+                .spacing(4),
+            )
+            .width(Length::FillPortion(1))
+            .height(Length::Fixed(50.0))
+            .padding([5, 7])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
                 border: iced::Border {
-                    color: if engaged {
-                        th::accent_dim()
-                    } else {
-                        th::border()
-                    },
+                    color: th::border(),
                     width: 1.0,
                     radius: 2.0.into(),
                 },
-            }
-        })
-        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
-            background: th::bg_elevated().into(),
+                ..Default::default()
+            }),
+        ]
+        .spacing(5);
+
+        let assignment = compact_pick_list(
+            SixteenLevelsParameter::ALL.to_vec(),
+            Some(parameter),
+            |parameter| Message::Perform(PerformMsg::SelectSixteenLevelsParameter(parameter)),
+        );
+        let assignment_control = container(
+            column![
+                text("ASSIGNMENT")
+                    .font(PERFORM_LABEL)
+                    .size(8)
+                    .color(th::text_dim()),
+                assignment,
+            ]
+            .spacing(4),
+        )
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(50.0))
+        .padding([5, 7])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
             border: iced::Border {
-                color: th::border_light(),
+                color: th::border(),
                 width: 1.0,
                 radius: 2.0.into(),
             },
-            text_color: th::text(),
-            selected_text_color: th::accent(),
-            selected_background: th::bg_hover().into(),
+            ..Default::default()
         });
         let source_state = if choosing_source {
             "PRESS A PAD".to_string()
@@ -356,6 +472,142 @@ impl App {
             SixteenLevelsParameter::Velocity => "VEL",
         };
 
+        let levels_detail: Element<'_, Message> = if levels_enabled {
+            column![
+                row![assignment_control, source_control].spacing(5),
+                row![
+                    range_control(
+                        format!("MIN {} {range_units}", range.minimum),
+                        bounds.minimum..=range.maximum,
+                        range.minimum,
+                        |value| Message::Perform(PerformMsg::SetSixteenLevelsMinimum(value)),
+                    ),
+                    range_control(
+                        format!("MAX {} {range_units}", range.maximum),
+                        range.minimum..=bounds.maximum,
+                        range.maximum,
+                        |value| Message::Perform(PerformMsg::SetSixteenLevelsMaximum(value)),
+                    ),
+                ]
+                .spacing(7),
+            ]
+            .spacing(5)
+            .into()
+        } else {
+            container(
+                text("16 LEVEL DETAILS APPEAR WHEN ENGAGED")
+                    .font(PERFORM_TECH)
+                    .size(7)
+                    .color(th::text_muted()),
+            )
+            .padding([6, 0])
+            .into()
+        };
+
+        let selected_track = self.state.perform.instrument_target().and_then(|track_id| {
+            self.state
+                .project_tracks
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id)
+        });
+        let project_swing = self.state.perform.project_swing();
+        let track_offset = selected_track.and_then(|track| track.swing_offset);
+        let effective_swing = project_swing.effective(track_offset);
+        let offset = track_offset.unwrap_or_default().get();
+        let swing_state = match track_offset {
+            Some(_) => format!(
+                "{:+.0}→{:.0}%",
+                offset * 100.0,
+                effective_swing.get() * 100.0
+            ),
+            None => format!("PROJECT · {:.0}%", effective_swing.get() * 100.0),
+        };
+        let swing_readout: Element<'_, Message> = if track_offset.is_some() {
+            row![
+                text(swing_state)
+                    .font(PERFORM_TECH_STRONG)
+                    .size(7)
+                    .color(th::text_dim()),
+                button(
+                    center(icons::icon(icons::X).size(7).color(th::text_muted()))
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                )
+                .on_press(Message::Perform(PerformMsg::SetTrackSwingOffset(None)))
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
+                .padding(0)
+                .style(|_theme: &Theme, status| {
+                    let engaged =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: None,
+                        text_color: if engaged {
+                            th::accent()
+                        } else {
+                            th::text_muted()
+                        },
+                        ..Default::default()
+                    }
+                }),
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            text(swing_state)
+                .font(PERFORM_TECH_STRONG)
+                .size(7)
+                .color(th::text_dim())
+                .into()
+        };
+        let swing_fader: Element<'_, Message> = if selected_track.is_some() {
+            canvas(SwingFaderWidget::track(offset))
+                .width(Length::Fill)
+                .height(Length::Fixed(22.0))
+                .into()
+        } else {
+            horizontal_space().into()
+        };
+        let track_swing = container(
+            column![
+                row![
+                    text("TRACK SWING")
+                        .font(PERFORM_LABEL)
+                        .size(8)
+                        .color(th::text_muted()),
+                    horizontal_space(),
+                    swing_readout,
+                ]
+                .align_y(iced::Alignment::Center),
+                row![
+                    rail_nudge_button(
+                        icons::MINUS,
+                        PerformMsg::SetTrackSwingOffset(Some(offset - 0.01)),
+                    ),
+                    swing_fader,
+                    rail_nudge_button(
+                        icons::PLUS,
+                        PerformMsg::SetTrackSwingOffset(Some(offset + 0.01)),
+                    ),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
+            ]
+            .spacing(5),
+        )
+        .padding(7)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        });
+
         container(
             column![
                 text("INSTRUMENT TARGET")
@@ -365,37 +617,15 @@ impl App {
                 selector,
                 navigation,
                 toggles,
-                column![
-                    text("16 LEVEL ASSIGNMENT")
-                        .font(PERFORM_LABEL)
-                        .size(8)
-                        .color(th::text_muted()),
-                    assignment,
-                ]
-                .spacing(3),
-                source_control,
-                range_control(
-                    format!("MIN {} {range_units}", range.minimum),
-                    bounds.minimum..=range.maximum,
-                    range.minimum,
-                    |value| Message::Perform(PerformMsg::SetSixteenLevelsMinimum(value)),
-                ),
-                range_control(
-                    format!("MAX {} {range_units}", range.maximum),
-                    range.minimum..=bounds.maximum,
-                    range.maximum,
-                    |value| Message::Perform(PerformMsg::SetSixteenLevelsMaximum(value)),
-                ),
+                repeat_controls,
+                levels_detail,
                 vertical_space().height(Length::Fill),
-                text(format!("{previous_hint}  ·  {next_hint}"))
-                    .font(PERFORM_TECH)
-                    .size(7)
-                    .color(th::text_muted()),
+                track_swing,
             ]
-            .spacing(7),
+            .spacing(5),
         )
         .height(Length::Fixed(height))
-        .padding(8)
+        .padding(7)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_dark().into()),
             border: iced::Border {

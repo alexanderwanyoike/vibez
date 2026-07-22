@@ -33,8 +33,11 @@ impl AudioEngine {
         self.transport.set_audio_length(None);
         if !self.transport.is_playing() {
             self.transport.play();
+            self.performance_position = self.transport.position();
             let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
         }
+        self.stopped_note_repeat_anchor = None;
+        self.reanchor_note_repeats(effective_at_samples, effective_at_samples);
         let event = EngineEvent::SectionTransitioned {
             section_id,
             effective_at_samples,
@@ -139,6 +142,7 @@ impl AudioEngine {
                 frames_before,
                 channels,
                 old_section,
+                block_start,
             );
             let queued = self.queued_section.take().expect("queued Section");
             self.activate_section(queued.prepared, boundary);
@@ -149,13 +153,14 @@ impl AudioEngine {
                 frames_after,
                 channels,
                 new_section,
+                boundary,
             );
             self.section_advance_override = Some(frames_after as u64);
             return;
         }
 
         let section = self.active_section.expect("active Section");
-        self.render_section_frames(output, frames, channels, section);
+        self.render_section_frames(output, frames, channels, section, block_start);
     }
 
     fn render_section_frames(
@@ -164,6 +169,7 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
         section: ActiveSectionPlayback,
+        performance_position: u64,
     ) {
         for track in &mut self.tracks {
             std::mem::swap(
@@ -182,6 +188,7 @@ impl AudioEngine {
             self.render_multitrack_segment(
                 &mut output[start..end],
                 local_position,
+                performance_position + rendered_frames as u64,
                 segment_frames,
                 channels,
                 None,
