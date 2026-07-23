@@ -19,15 +19,10 @@ fn snapshot(state: &AppState) -> ProjectSnapshot {
         arrange_timeline: Arc::clone(&state.arrangement.timeline),
         sections: Arc::clone(&state.perform.sections),
         bpm: state.transport.bpm,
-        bpm_text: state.transport.bpm_text.clone(),
         project_swing: state.perform.project_swing(),
         loop_enabled: state.transport.loop_enabled,
         loop_start_beats: state.transport.loop_start_beats,
         loop_end_beats: state.transport.loop_end_beats,
-        selected_track: state.arrangement.selected_track,
-        selected_clips: state.arrangement.selected_clips.clone(),
-        selected_note_clip: state.arrangement.selected_note_clip,
-        selected_section: state.perform.selected_section,
     }
 }
 
@@ -35,8 +30,12 @@ fn apply_snapshot(state: &mut AppState, snapshot: ProjectSnapshot) {
     state.project_tracks = snapshot.project_tracks;
     state.arrangement.timeline = snapshot.arrange_timeline;
     state.perform.sections = snapshot.sections;
+    state.transport.bpm = snapshot.bpm;
+    state.transport.bpm_text = format!("{:.0}", snapshot.bpm);
     state.perform.set_project_swing(snapshot.project_swing);
-    state.perform.selected_section = snapshot.selected_section;
+    state.transport.loop_enabled = snapshot.loop_enabled;
+    state.transport.loop_start_beats = snapshot.loop_start_beats;
+    state.transport.loop_end_beats = snapshot.loop_end_beats;
 }
 
 fn perform_edit(
@@ -308,6 +307,10 @@ fn project_track_deletion_across_timelines_is_one_undo_step() {
         &mut engine,
         ArrangementCtx::default(),
     );
+    assert!(state
+        .project
+        .history
+        .begin_transaction(snapshot(&state), state.project.dirty));
     state.project.history.push_edit(snapshot(&state), None);
     let action = state.arrangement.update(
         Arc::make_mut(&mut state.project_tracks),
@@ -320,6 +323,7 @@ fn project_track_deletion_across_timelines_is_one_undo_step() {
             .remove_track_from_sections
             .expect("confirmed deletion spans Sections"),
     );
+    assert!(state.project.history.commit_transaction());
 
     assert_eq!(state.project.history.undo.len(), 1);
     assert!(state.project_tracks.find(track_id).is_none());
@@ -331,7 +335,10 @@ fn project_track_deletion_across_timelines_is_one_undo_step() {
         .iter()
         .all(|section| section.timeline.get(track_id).is_none()));
 
-    undo_once(&mut state);
+    let deleted = snapshot(&state);
+    let before_deletion = state.project.history.pop_undo().unwrap();
+    state.project.history.push_redo(deleted);
+    apply_snapshot(&mut state, before_deletion);
     assert!(state.project_tracks.find(track_id).is_some());
     assert!(state.arrangement.timeline.get(track_id).is_some());
     assert!(state
@@ -340,4 +347,120 @@ fn project_track_deletion_across_timelines_is_one_undo_step() {
         .sections
         .iter()
         .all(|section| section.timeline.get(track_id).is_some()));
+
+    let restored = snapshot(&state);
+    let after_deletion = state.project.history.pop_redo().unwrap();
+    state.project.history.push_undo(restored);
+    apply_snapshot(&mut state, after_deletion);
+    assert!(state.project_tracks.find(track_id).is_none());
+    assert!(state.arrangement.timeline.get(track_id).is_none());
+    assert!(state
+        .perform
+        .sections
+        .sections
+        .iter()
+        .all(|section| section.timeline.get(track_id).is_none()));
+}
+
+#[test]
+fn transaction_snapshot_capture_shares_project_storage() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Shared".into(), 0));
+    Arc::make_mut(&mut state.arrangement.timeline).ensure(track_id);
+    Arc::make_mut(&mut state.perform.sections).insert(crate::domains::perform::Section::new(0));
+
+    let captured = snapshot(&state);
+
+    assert!(Arc::ptr_eq(&captured.project_tracks, &state.project_tracks));
+    assert!(Arc::ptr_eq(
+        &captured.arrange_timeline,
+        &state.arrangement.timeline
+    ));
+    assert!(Arc::ptr_eq(&captured.sections, &state.perform.sections));
+}
+
+#[test]
+fn abandoning_a_transaction_rolls_back_all_canonical_edits_without_history() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Shared".into(), 0));
+    Arc::make_mut(&mut state.arrangement.timeline).ensure(track_id);
+    let mut section = crate::domains::perform::Section::new(0);
+    Arc::make_mut(&mut section.timeline).ensure(track_id);
+    let section_id = section.id;
+    Arc::make_mut(&mut state.perform.sections).insert(section);
+
+    assert!(state
+        .project
+        .history
+        .begin_transaction(snapshot(&state), state.project.dirty));
+    state.project.history.push_edit(snapshot(&state), None);
+    Arc::make_mut(&mut state.arrangement.timeline).remove(track_id);
+    Arc::make_mut(&mut state.perform.sections)
+        .by_id_mut(section_id)
+        .unwrap()
+        .timeline = Arc::new(ArrangementTimeline::default());
+
+    state.project.dirty = true;
+    let (before, dirty_before) = state
+        .project
+        .history
+        .abandon_transaction()
+        .expect("open transaction");
+    apply_snapshot(&mut state, before);
+    state.project.dirty = dirty_before;
+
+    assert!(state.arrangement.timeline.get(track_id).is_some());
+    assert!(state
+        .perform
+        .sections
+        .by_id(section_id)
+        .unwrap()
+        .timeline
+        .get(track_id)
+        .is_some());
+    assert!(state.project.history.undo.is_empty());
+    assert!(state.project.history.redo.is_empty());
+    assert!(!state.project.history.transaction_active());
+    assert!(!state.project.dirty);
+}
+
+#[test]
+fn undo_restores_canonical_state_without_restoring_selection() {
+    let mut state = AppState::default();
+    let first = TrackId::new();
+    let second = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks).tracks.extend([
+        ProjectTrack::new(first, "First".into(), 0),
+        ProjectTrack::new(second, "Second".into(), 1),
+    ]);
+    state.arrangement.selected_track = Some(first);
+
+    state.project.history.push_edit(snapshot(&state), None);
+    Arc::make_mut(&mut state.project_tracks)
+        .find_mut(first)
+        .unwrap()
+        .gain = 0.25;
+    state.arrangement.selected_track = Some(second);
+
+    undo_once(&mut state);
+
+    assert_eq!(state.project_tracks.find(first).unwrap().gain, 1.0);
+    assert_eq!(state.arrangement.selected_track, Some(second));
+}
+
+#[test]
+fn empty_transaction_does_not_create_an_undo_step() {
+    let mut state = AppState::default();
+    assert!(state
+        .project
+        .history
+        .begin_transaction(snapshot(&state), state.project.dirty));
+    assert!(!state.project.history.commit_transaction());
+    assert!(state.project.history.undo.is_empty());
 }

@@ -807,15 +807,10 @@ mod perform_action_tests {
             arrange_timeline: Arc::clone(&state.arrangement.timeline),
             sections: Arc::clone(&state.perform.sections),
             bpm: state.transport.bpm,
-            bpm_text: state.transport.bpm_text.clone(),
             project_swing: state.perform.project_swing(),
             loop_enabled: state.transport.loop_enabled,
             loop_start_beats: state.transport.loop_start_beats,
             loop_end_beats: state.transport.loop_end_beats,
-            selected_track: state.arrangement.selected_track,
-            selected_clips: state.arrangement.selected_clips.clone(),
-            selected_note_clip: state.arrangement.selected_note_clip,
-            selected_section: state.perform.selected_section,
         }
     }
 
