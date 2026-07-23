@@ -210,29 +210,18 @@ impl AudioEngine {
             return false;
         }
         if timing.boundary >= block_end {
-            let arrangement_position = self.transport.position();
-            self.render_multitrack_segment(
-                output,
-                arrangement_position,
-                block_start,
-                frames,
-                channels,
-                self.transport.active_loop_region(),
-            );
+            self.render_idle_instruments(output, frames, channels, block_start);
             self.mix_section_record_count_in_click(output, frames, channels, block_start, timing);
             return true;
         }
 
         let frames_before = (timing.boundary - block_start) as usize;
         if frames_before > 0 {
-            let arrangement_position = self.transport.position();
-            self.render_multitrack_segment(
+            self.render_idle_instruments(
                 &mut output[..frames_before * channels],
-                arrangement_position,
-                block_start,
                 frames_before,
                 channels,
-                self.transport.active_loop_region(),
+                block_start,
             );
             self.mix_section_record_count_in_click(
                 &mut output[..frames_before * channels],
