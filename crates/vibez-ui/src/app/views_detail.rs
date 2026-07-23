@@ -10,7 +10,7 @@ use iced::{Color, Element, Length, Theme};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::GrooveGrid;
 
 use crate::icons;
@@ -25,6 +25,21 @@ use super::*;
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
 const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
+
+fn resolved_detail_playhead_samples(
+    editing_perform: bool,
+    selected_section: Option<SectionId>,
+    playing_section: Option<SectionId>,
+    arrange_samples: u64,
+    section_samples: u64,
+) -> Option<u64> {
+    if !editing_perform {
+        return Some(arrange_samples);
+    }
+    selected_section
+        .filter(|selected| Some(*selected) == playing_section)
+        .map(|_| section_samples)
+}
 
 fn effective_detail_panel_height(preferred_height: f32, window_height: f32) -> f32 {
     let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
@@ -207,7 +222,18 @@ impl App {
     ) -> Element<'_, Message> {
         use crate::state::PianoRollEditMode;
 
-        let playhead_beats = self.state.position_beats();
+        let playhead_beats = resolved_detail_playhead_samples(
+            self.state.view.workspace == crate::state::Workspace::Perform,
+            self.state.perform.selected_section,
+            self.state.perform.playing_section,
+            self.state.transport.position_samples,
+            self.state.perform.section_playhead_samples,
+        )
+        .map(|samples| {
+            samples as f64 * self.state.transport.bpm
+                / (f64::from(self.state.transport.sample_rate.max(1)) * 60.0)
+        })
+        .unwrap_or(-1.0);
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
         let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> =
@@ -473,15 +499,21 @@ impl App {
         clip: &UiClip,
         track_color: Color,
     ) -> Element<'_, Message> {
-        let playhead_samples = self.state.transport.position_samples;
-        let playhead_normalized = if clip.duration > 0
-            && playhead_samples >= clip.position
-            && playhead_samples < clip.position + clip.duration
-        {
-            (playhead_samples - clip.position) as f64 / clip.duration as f64
-        } else {
-            -1.0
-        };
+        let playhead_samples = resolved_detail_playhead_samples(
+            self.state.view.workspace == crate::state::Workspace::Perform,
+            self.state.perform.selected_section,
+            self.state.perform.playing_section,
+            self.state.transport.position_samples,
+            self.state.perform.section_playhead_samples,
+        );
+        let playhead_normalized = playhead_samples
+            .filter(|playhead| {
+                clip.duration > 0
+                    && *playhead >= clip.position
+                    && *playhead < clip.position + clip.duration
+            })
+            .map(|playhead| (playhead - clip.position) as f64 / clip.duration as f64)
+            .unwrap_or(-1.0);
 
         let waveform_widget = AudioClipDetailWidget {
             audio: Arc::clone(&clip.audio),
@@ -695,7 +727,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::effective_detail_panel_height;
+    use super::{effective_detail_panel_height, resolved_detail_playhead_samples};
+    use vibez_core::id::SectionId;
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
@@ -703,5 +736,24 @@ mod tests {
         assert_eq!(effective_detail_panel_height(360.0, 900.0), 360.0);
         assert_eq!(effective_detail_panel_height(800.0, 900.0), 540.0);
         assert_eq!(effective_detail_panel_height(320.0, 520.0), 180.0);
+    }
+
+    #[test]
+    fn detail_playhead_resolves_arrange_and_section_clocks_without_crossing_targets() {
+        let playing = SectionId::new();
+        let other = SectionId::new();
+
+        assert_eq!(
+            resolved_detail_playhead_samples(false, None, None, 96_000, 12_000),
+            Some(96_000)
+        );
+        assert_eq!(
+            resolved_detail_playhead_samples(true, Some(playing), Some(playing), 96_000, 12_000,),
+            Some(12_000)
+        );
+        assert_eq!(
+            resolved_detail_playhead_samples(true, Some(other), Some(playing), 96_000, 12_000,),
+            None
+        );
     }
 }
