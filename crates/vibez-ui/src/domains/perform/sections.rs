@@ -17,9 +17,10 @@ pub const MAX_SECTION_LENGTH_BEATS: f64 = 1024.0;
 
 /// Runtime-only editor adapter for the selected Section.
 ///
-/// Persisted Section content remains in [`Section::timeline`]. Selection,
-/// clipboard, and pointer interaction state stay outside the canonical Section
-/// store and are reset when a different Section is selected.
+/// Persisted Section content remains in [`Section::timeline`]. Selection and
+/// pointer interaction state stay outside the canonical Section store and are
+/// reset when a different Section is selected. The application owns the one
+/// clipboard shared with Arrange.
 #[derive(Debug, Default)]
 pub struct SectionTimelineEditor {
     editor: TimelineEditorState,

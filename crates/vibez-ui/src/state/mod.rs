@@ -331,7 +331,6 @@ pub struct TimelineEditorState {
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
-    pub clipboard: ClipClipboard,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -353,7 +352,6 @@ impl Default for TimelineEditorState {
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
-            clipboard: ClipClipboard::default(),
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
@@ -454,6 +452,9 @@ pub struct AppState {
     // Arrange-owned timeline content and editor state.
     pub arrangement: ArrangementState,
 
+    // One runtime clipboard shared by Arrange and every Section editor.
+    pub clip_clipboard: ClipClipboard,
+
     /// In-progress manual BPM input text keyed by clip id. Only
     /// populated while the user is actively editing the field in the
     // Device context menu
@@ -508,6 +509,7 @@ impl Default for AppState {
                 ..ProjectTracksState::default()
             }),
             arrangement: ArrangementState::default(),
+            clip_clipboard: ClipClipboard::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
