@@ -104,6 +104,9 @@ impl App {
                 if stops_perform {
                     self.section_residency_request.cancel();
                 }
+                let perform_playback_active = self.state.perform.playing_section.is_some()
+                    || self.state.perform.queued_section.is_some()
+                    || self.state.perform.section_record.is_active();
                 let ctx = crate::domains::transport::TransportCtx {
                     total_duration_samples: self.state.total_duration_samples(),
                     time_selection: if self.state.arrangement.time_selection_active {
@@ -114,9 +117,8 @@ impl App {
                     } else {
                         None
                     },
-                    perform_tempo_locked: self.state.perform.playing_section.is_some()
-                        || self.state.perform.queued_section.is_some()
-                        || self.state.perform.section_record.is_active(),
+                    perform_tempo_locked: perform_playback_active,
+                    perform_playback_active,
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);

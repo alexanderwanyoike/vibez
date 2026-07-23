@@ -24,6 +24,9 @@ impl App {
                     EngineEvent::PlaybackPosition(pos) => {
                         self.state.transport.position_samples = pos;
                     }
+                    EngineEvent::PerformancePosition(pos) => {
+                        self.state.perform.performance_position_samples = pos;
+                    }
                     EngineEvent::Metering { peak_l, peak_r, .. } => {
                         self.state.peak_l = peak_l.max(self.state.peak_l * 0.85);
                         self.state.peak_r = peak_r.max(self.state.peak_r * 0.85);

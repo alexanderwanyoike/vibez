@@ -9,6 +9,7 @@ impl AudioEngine {
         while let Ok(cmd) = self.cmd_rx.pop() {
             match cmd {
                 EngineCommand::Play => {
+                    self.clock_domain = ClockDomain::Arrange;
                     self.transport.play();
                     self.performance_position = self.transport.position();
                     self.stopped_note_repeat_anchor = None;
@@ -19,9 +20,10 @@ impl AudioEngine {
                 EngineCommand::Stop => {
                     self.stop_section_record();
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.transport.position(),
+                        effective_at_samples: self.effective_position(),
                     });
                     self.transport.stop();
+                    self.clock_domain = ClockDomain::Arrange;
                     self.performance_position = self.transport.position();
                     self.cancel_section_queue();
                     self.active_section = None;
@@ -40,11 +42,13 @@ impl AudioEngine {
                 }
                 EngineCommand::Seek(pos) => {
                     self.transport.seek(pos);
-                    self.performance_position = pos;
                     for track in &mut self.tracks {
                         track.flush_notes();
                     }
-                    self.reschedule_note_repeats();
+                    if self.clock_domain == ClockDomain::Arrange {
+                        self.performance_position = pos;
+                        self.reschedule_note_repeats();
+                    }
                 }
                 EngineCommand::SetBpm(bpm) => {
                     // V1 Perform holds one project tempo from the first
@@ -71,7 +75,8 @@ impl AudioEngine {
                         continue;
                     }
                     self.cancel_section_queue();
-                    self.activate_section(prepared, self.transport.position());
+                    self.begin_performance_clock();
+                    self.activate_section(prepared, self.performance_position);
                 }
                 EngineCommand::QueueSection {
                     prepared,
@@ -145,14 +150,14 @@ impl AudioEngine {
                     let section_position_samples =
                         self.active_section.map(|section| section.position_samples);
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
-                        effective_at_samples: self.transport.position(),
+                        effective_at_samples: self.effective_position(),
                         section_id,
                         section_position_samples,
                     });
                 }
                 EngineCommand::StopPerformanceCapture => {
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.transport.position(),
+                        effective_at_samples: self.effective_position(),
                     });
                 }
                 EngineCommand::LoadAudio(audio) => {
@@ -166,11 +171,12 @@ impl AudioEngine {
                 EngineCommand::UnloadAudio => {
                     self.stop_section_record();
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                        effective_at_samples: self.transport.position(),
+                        effective_at_samples: self.effective_position(),
                     });
                     self.audio = None;
                     self.arrangement_audio_length = None;
                     self.active_section = None;
+                    self.clock_domain = ClockDomain::Arrange;
                     self.transport.set_audio_length(None);
                     self.transport.stop();
                     let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
@@ -302,7 +308,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
-                    let effective_at_samples = self.transport.position();
+                    let effective_at_samples = self.effective_position();
                     let changed = if let Some(track) = self.channel_mut(id) {
                         track.mute = mute;
                         true

@@ -9,6 +9,7 @@ impl AudioEngine {
         mut prepared: Box<PreparedSectionPlaybackSource>,
         effective_at_samples: u64,
     ) {
+        self.begin_performance_clock();
         let section_id = prepared.section_id;
         let length_samples = self.section_length_samples(prepared.length_beats);
         let looping = prepared.looping;
@@ -33,7 +34,6 @@ impl AudioEngine {
         self.transport.set_audio_length(None);
         if !self.transport.is_playing() {
             self.transport.play();
-            self.performance_position = self.transport.position();
             let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
         }
         self.stopped_note_repeat_anchor = None;
@@ -62,7 +62,8 @@ impl AudioEngine {
             }
             return;
         }
-        let now = self.transport.position();
+        self.begin_performance_clock();
+        let now = self.performance_position;
         if quantization == SectionLaunchQuantization::Immediate
             || self.active_section.is_none()
             || !self.transport.is_playing()
@@ -127,7 +128,7 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
     ) {
-        let block_start = self.transport.position();
+        let block_start = self.performance_position;
         let block_end = block_start.saturating_add(frames as u64);
         let boundary = self
             .queued_section

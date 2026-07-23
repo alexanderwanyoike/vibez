@@ -102,6 +102,7 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
         let section_id = SectionId::new();
         commands.push(EngineCommand::SetSampleRate(8)).unwrap();
         commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+        commands.push(EngineCommand::Seek(40)).unwrap();
         commands
             .push(EngineCommand::AddTrack(track_id, "Audio".into()))
             .unwrap();
@@ -131,6 +132,11 @@ fn stopped_count_in_variants_activate_section_at_exact_boundary() {
         assert_eq!(
             record_events(&mut events),
             vec![(false, boundary, 0), (true, boundary, 0)]
+        );
+        assert_eq!(
+            engine.transport().position(),
+            40,
+            "count-in and Section Record must not move the Arrange cursor"
         );
     }
 }

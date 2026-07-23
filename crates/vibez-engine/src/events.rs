@@ -55,8 +55,12 @@ pub enum EngineEvent {
     /// See [`EngineEvent::DisposeEffect`].
     DisposeInstrument(DisposalCell<dyn vibez_instruments::Instrument>),
 
-    /// The current playback position expressed as an absolute sample offset.
+    /// The canonical Arrange cursor expressed as an absolute sample offset.
+    /// Perform playback deliberately leaves this value unchanged.
     PlaybackPosition(u64),
+
+    /// Monotonic, zero-based time for the current Perform session.
+    PerformancePosition(u64),
 
     /// Peak and RMS meter readings for the most recent audio buffer.
     Metering {
@@ -202,6 +206,7 @@ impl PartialEq for EngineEvent {
             (Self::DisposeEffect(left), Self::DisposeEffect(right)) => left == right,
             (Self::DisposeInstrument(left), Self::DisposeInstrument(right)) => left == right,
             (Self::PlaybackPosition(left), Self::PlaybackPosition(right)) => left == right,
+            (Self::PerformancePosition(left), Self::PerformancePosition(right)) => left == right,
             (
                 Self::Metering {
                     peak_l: left_peak_l,
@@ -471,6 +476,7 @@ mod tests {
     #[test]
     fn event_variants_are_constructible() {
         let _pos = EngineEvent::PlaybackPosition(44_100);
+        let _performance_pos = EngineEvent::PerformancePosition(22_050);
         let _meter = EngineEvent::Metering {
             peak_l: 0.8,
             peak_r: 0.75,
@@ -501,6 +507,9 @@ mod tests {
         producer.push(EngineEvent::PlaybackStarted).unwrap();
         producer.push(EngineEvent::PlaybackPosition(512)).unwrap();
         producer
+            .push(EngineEvent::PerformancePosition(256))
+            .unwrap();
+        producer
             .push(EngineEvent::Metering {
                 peak_l: 0.9,
                 peak_r: 0.85,
@@ -517,6 +526,10 @@ mod tests {
         assert!(matches!(
             consumer.pop().unwrap(),
             EngineEvent::PlaybackPosition(512)
+        ));
+        assert!(matches!(
+            consumer.pop().unwrap(),
+            EngineEvent::PerformancePosition(256)
         ));
 
         match consumer.pop().unwrap() {

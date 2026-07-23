@@ -12,7 +12,7 @@ use crate::domains::view::ViewMsg;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::AppState;
+use crate::state::{AppState, Workspace};
 use crate::theme as th;
 use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
 use crate::widgets::vu_meter::VuMeterWidget;
@@ -101,13 +101,9 @@ impl App {
         let transport_buttons = row![skip_back_btn, play_pause_btn, loop_btn].spacing(4);
 
         // Time display
-        let time_text = text(format!(
-            "{} / {}",
-            AppState::format_time(self.state.position_seconds()),
-            AppState::format_time(self.state.duration_seconds()),
-        ))
-        .size(14)
-        .color(th::text());
+        let time_text = text(transport_time_label(&self.state))
+            .size(14)
+            .color(th::text());
 
         // BPM
         let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
@@ -327,5 +323,49 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+}
+
+fn transport_time_label(state: &AppState) -> String {
+    if state.view.workspace == Workspace::Perform {
+        let seconds = if state.transport.sample_rate == 0 {
+            0.0
+        } else {
+            state.perform.performance_position_samples as f64
+                / f64::from(state.transport.sample_rate)
+        };
+        format!("PERFORMANCE TIME · {}", AppState::format_time(seconds))
+    } else {
+        format!(
+            "{} / {}",
+            AppState::format_time(state.position_seconds()),
+            AppState::format_time(state.duration_seconds()),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transport_time_label;
+    use crate::state::{AppState, Workspace};
+
+    #[test]
+    fn perform_labels_its_independent_zero_based_clock() {
+        let mut state = AppState::default();
+        state.view.workspace = Workspace::Perform;
+        state.transport.sample_rate = 48_000;
+        state.transport.position_samples = 480_000;
+        state.perform.performance_position_samples = 72_000;
+
+        assert_eq!(transport_time_label(&state), "PERFORMANCE TIME · 00:01.50");
+    }
+
+    #[test]
+    fn arrange_keeps_the_canonical_cursor_and_duration_readout() {
+        let mut state = AppState::default();
+        state.transport.sample_rate = 48_000;
+        state.transport.position_samples = 72_000;
+
+        assert_eq!(transport_time_label(&state), "00:01.50 / 00:00.00");
     }
 }

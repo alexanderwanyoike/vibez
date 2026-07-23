@@ -30,12 +30,13 @@ fn capture_started(events: &mut rtrb::Consumer<EngineEvent>) -> Option<(u64, Sec
 }
 
 #[test]
-fn capture_start_reports_exact_transport_and_active_section_position() {
+fn section_rehearsal_advances_capture_time_without_moving_arrange_cursor() {
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
     commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands.push(EngineCommand::Seek(40)).unwrap();
     commands
         .push(EngineCommand::AddTrack(track_id, "Audio".into()))
         .unwrap();
@@ -45,6 +46,11 @@ fn capture_start_reports_exact_transport_and_active_section_position() {
         )))
         .unwrap();
     engine.process(&mut [0.0; 3], 1);
+    assert_eq!(
+        engine.transport().position(),
+        40,
+        "Perform must not advance the canonical Arrange cursor"
+    );
     while events.pop().is_ok() {}
 
     commands
@@ -53,6 +59,7 @@ fn capture_start_reports_exact_transport_and_active_section_position() {
     engine.process(&mut [0.0; 5], 1);
 
     assert_eq!(capture_started(&mut events), Some((3, section_id, 3)));
+    assert_eq!(engine.transport().position(), 40);
 }
 
 #[test]
@@ -111,4 +118,55 @@ fn transport_stop_ends_capture_and_section_playback_at_one_boundary() {
     assert_eq!(terminal, [("capture", 7), ("playback", 7)]);
     assert!(!engine.transport().is_playing());
     assert!(engine.active_section.is_none());
+}
+
+#[test]
+fn stopping_perform_returns_to_the_exact_arrange_cursor_without_repair() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::Seek(40)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(empty_section(
+            section_id, track_id,
+        )))
+        .unwrap();
+    engine.process(&mut [0.0; 7], 1);
+    commands.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 3], 1);
+
+    assert_eq!(engine.transport().position(), 40);
+    assert!(!engine.transport().is_playing());
+}
+
+#[test]
+fn moving_the_arrange_cursor_during_perform_does_not_retime_performance_events() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(empty_section(
+            section_id, track_id,
+        )))
+        .unwrap();
+    engine.process(&mut [0.0; 3], 1);
+    commands.push(EngineCommand::Seek(40)).unwrap();
+    engine.process(&mut [0.0; 2], 1);
+    while events.pop().is_ok() {}
+
+    commands
+        .push(EngineCommand::StartPerformanceCapture)
+        .unwrap();
+    engine.process(&mut [0.0], 1);
+
+    assert_eq!(engine.transport().position(), 40);
+    assert_eq!(capture_started(&mut events), Some((5, section_id, 5)));
 }
