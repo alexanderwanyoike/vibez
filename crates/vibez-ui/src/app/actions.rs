@@ -632,9 +632,22 @@ impl App {
             .analyse(self.state.transport.sample_rate as f32);
     }
 
+    pub(super) fn poll_audio_stream_events(&mut self) {
+        let mut events = Vec::new();
+        if let Some(stream) = self._stream.as_ref() {
+            while let Some(event) = stream.try_next_event() {
+                events.push(event);
+            }
+        }
+        for event in events {
+            self.state.apply_audio_stream_event(event);
+        }
+    }
+
     /// One frame of the 60fps subscription: drain engine events and
     /// pump every background service.
     pub(super) fn handle_tick(&mut self) -> Task<Message> {
+        self.poll_audio_stream_events();
         self.poll_engine_events();
         self.poll_spectrum();
         self.poll_plugin_loads();
