@@ -47,6 +47,18 @@ pub enum EngineCommand {
     /// The engine preserves its local playhead and returns ownership of the
     /// displaced source through `SectionSourceRefreshed`.
     RefreshSection(Box<PreparedSectionPlaybackSource>),
+    /// Arm recording into a fixed Section/Project Track target. A prepared
+    /// source is supplied only when recording starts from stopped transport;
+    /// an already-playing Section remains resident and is never restarted.
+    ArmSectionRecord {
+        section_id: vibez_core::id::SectionId,
+        track_id: TrackId,
+        prepared: Option<Box<PreparedSectionPlaybackSource>>,
+        count_in_bars: u8,
+        replace_existing: bool,
+    },
+    /// Stop the current armed or active Section recording session.
+    StopSectionRecord,
     /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
     /// Remove any loaded audio from the engine (legacy single-file).

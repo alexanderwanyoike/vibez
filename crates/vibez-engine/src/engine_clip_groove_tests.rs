@@ -150,6 +150,60 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 }
 
 #[test]
+fn dense_recorded_groove_uses_one_cached_note_end_lookup_per_note_and_frame() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    commands.push(EngineCommand::SetSampleRate(44_100)).unwrap();
+    commands.push(EngineCommand::SetBpm(128.0)).unwrap();
+    commands
+        .push(EngineCommand::SetProjectSwing(SwingAmount::new(0.59)))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddInstrumentTrack(
+            track_id,
+            "Recorded groove".into(),
+            InstrumentKind::SubtractiveSynth,
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddNoteClip {
+            track_id,
+            clip_id,
+            position_beats: 0.0,
+            duration_beats: 8.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Sixteenth,
+        })
+        .unwrap();
+    for index in 0..29 {
+        commands
+            .push(EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                note: MidiNote {
+                    pitch: 48 + (index % 8) as u8,
+                    velocity: 100,
+                    start_beat: index as f64 * 0.25,
+                    duration_beats: 0.2,
+                },
+            })
+            .unwrap();
+    }
+    commands.push(EngineCommand::Play).unwrap();
+
+    crate::playback_source::reset_audio_thread_note_end_lookups();
+    engine.process(&mut vec![0.0; 236 * 2], 2);
+
+    assert_eq!(
+        crate::playback_source::audio_thread_note_end_lookups(),
+        236 * 29
+    );
+}
+
+#[test]
 fn opted_in_clip_midpoints_match_the_mpc_96_ppqn_ticks() {
     for (grid, midpoint, fixtures) in [
         (

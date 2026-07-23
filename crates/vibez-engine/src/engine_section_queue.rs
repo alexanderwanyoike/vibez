@@ -55,6 +55,13 @@ impl AudioEngine {
         prepared: Box<PreparedSectionPlaybackSource>,
         quantization: SectionLaunchQuantization,
     ) {
+        if self.pending_section_record.is_some() || self.active_section_record.is_some() {
+            let event = EngineEvent::SectionQueueCancelled { retired: prepared };
+            if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                std::mem::forget(event);
+            }
+            return;
+        }
         let now = self.transport.position();
         if quantization == SectionLaunchQuantization::Immediate
             || self.active_section.is_none()
@@ -163,7 +170,7 @@ impl AudioEngine {
         self.render_section_frames(output, frames, channels, section, block_start);
     }
 
-    fn render_section_frames(
+    pub(super) fn render_section_frames(
         &mut self,
         output: &mut [f32],
         frames: usize,
@@ -182,20 +189,65 @@ impl AudioEngine {
         let mut local_position = section.position_samples.min(section.length_samples);
         while rendered_frames < frames && local_position < section.length_samples {
             let available = (section.length_samples - local_position) as usize;
-            let segment_frames = available.min(frames - rendered_frames);
+            let mut segment_frames = available.min(frames - rendered_frames);
+            let segment_performance_position = performance_position + rendered_frames as u64;
+            if let Some(record) = self.active_section_record.filter(|record| {
+                record.replace_first_pass
+                    && segment_performance_position < record.effective_at_samples
+            }) {
+                let until_replace = record
+                    .effective_at_samples
+                    .saturating_sub(segment_performance_position)
+                    as usize;
+                segment_frames = segment_frames.min(until_replace);
+            }
+            let replace_track = self
+                .active_section_record
+                .filter(|record| {
+                    record.replace_first_pass
+                        && segment_performance_position >= record.effective_at_samples
+                })
+                .map(|record| record.track_id);
+            if let Some(track_id) = replace_track {
+                let needs_flush = self
+                    .active_section_record
+                    .is_some_and(|record| !record.replace_source_flushed);
+                if needs_flush {
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                        track.flush_notes();
+                    }
+                    if let Some(record) = self.active_section_record.as_mut() {
+                        record.replace_source_flushed = true;
+                    }
+                }
+            }
+            for track in &mut self.tracks {
+                track.suppress_source_notes = Some(track.id) == replace_track;
+            }
             let start = rendered_frames * channels;
             let end = (rendered_frames + segment_frames) * channels;
             self.render_multitrack_segment(
                 &mut output[start..end],
                 local_position,
-                performance_position + rendered_frames as u64,
+                segment_performance_position,
                 segment_frames,
                 channels,
                 None,
             );
+            for track in &mut self.tracks {
+                track.suppress_source_notes = false;
+            }
             rendered_frames += segment_frames;
             local_position += segment_frames as u64;
-            if rendered_frames < frames && section.looping {
+            if local_position >= section.length_samples && replace_track.is_some() {
+                if let Some(record) = self.active_section_record.as_mut() {
+                    record.replace_first_pass = false;
+                }
+            }
+            if rendered_frames < frames
+                && local_position >= section.length_samples
+                && section.looping
+            {
                 for track in &mut self.tracks {
                     track.flush_notes();
                 }
@@ -213,7 +265,7 @@ impl AudioEngine {
         }
     }
 
-    fn section_length_samples(&self, length_beats: f64) -> u64 {
+    pub(super) fn section_length_samples(&self, length_beats: f64) -> u64 {
         if self.transport.bpm() > 0.0 {
             (length_beats * self.sample_rate as f64 * 60.0 / self.transport.bpm())
                 .round()

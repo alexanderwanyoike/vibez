@@ -134,19 +134,21 @@ impl App {
         .height(Length::Fill)
         .spacing(0);
 
-        container(column![mode_selector, workspace].height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::FillPortion(5))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(
+            column![mode_selector, self.view_section_record_bar(), workspace].height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::FillPortion(5))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_dark().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 
     pub(super) fn perform_workspace_width(&self) -> f32 {

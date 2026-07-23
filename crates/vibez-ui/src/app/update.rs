@@ -115,7 +115,8 @@ impl App {
                         None
                     },
                     perform_tempo_locked: self.state.perform.playing_section.is_some()
-                        || self.state.perform.queued_section.is_some(),
+                        || self.state.perform.queued_section.is_some()
+                        || self.state.perform.section_record.is_active(),
                 };
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -181,17 +182,7 @@ impl App {
                 }
             }
             Message::Perform(msg) => {
-                let ctx = crate::domains::perform::PerformCtx {
-                    workspace_visible: self.state.view.workspace
-                        == crate::state::Workspace::Perform,
-                    project_tracks: &self.state.project_tracks.tracks,
-                    selected_project_track: self.state.arrangement.selected_track,
-                };
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    self.state.perform.update(msg, &mut engine, ctx)
-                };
-                return self.apply_perform_action(action);
+                return self.route_perform_message(msg);
             }
             Message::SectionResidencyReady {
                 request_id,
@@ -210,6 +201,13 @@ impl App {
                             format!("Section ready · {}", quantization.label());
                     }
                 }
+            }
+            Message::SectionRecordResidencyReady {
+                request_id,
+                request,
+                resident,
+            } => {
+                self.finish_section_record_residency(request_id, request, resident);
             }
             Message::View(msg) => {
                 if matches!(&msg, ViewMsg::ToggleEditMenu) {

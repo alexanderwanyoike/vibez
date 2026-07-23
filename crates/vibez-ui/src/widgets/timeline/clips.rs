@@ -66,6 +66,9 @@ pub struct TrackClipCanvas {
     pub selected_clips: HashSet<ClipId>,
     pub clips: Vec<TimelineClip>,
     pub note_clips: Vec<TimelineNoteClip>,
+    /// Transient Section Record visualization. It is deliberately excluded
+    /// from hit testing and edit messages.
+    pub recording_preview: Option<TimelineNoteClip>,
     pub playhead_beats: f64,
     pub zoom_level: f32,
     pub grid: GridConfig,
@@ -174,6 +177,7 @@ impl TrackClipCanvas {
             selected_clips,
             clips,
             note_clips,
+            recording_preview: None,
             playhead_beats,
             zoom_level,
             grid,
@@ -196,6 +200,11 @@ impl TrackClipCanvas {
             sample_drop_detail,
             track_name: track.name.clone(),
         }
+    }
+
+    pub fn with_recording_preview(mut self, preview: TimelineNoteClip) -> Self {
+        self.recording_preview = Some(preview);
+        self
     }
 
     pub(super) fn geometry(&self) -> TimelineGeometry {
@@ -843,6 +852,27 @@ mod tests {
             assert_eq!(status, canvas::event::Status::Ignored);
             assert!(message.is_none());
         }
+    }
+
+    #[test]
+    fn recording_preview_is_visible_but_not_hit_testable() {
+        let preview_id = ClipId::new();
+        let canvas = empty_track_canvas().with_recording_preview(TimelineNoteClip {
+            clip_id: preview_id,
+            position_beats: 0.0,
+            duration_beats: 4.0,
+            name: "● RECORDING LIVE".into(),
+            notes: vec![(60, 0.0, 0.5)],
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+        });
+
+        assert_eq!(
+            canvas.recording_preview.as_ref().unwrap().clip_id,
+            preview_id
+        );
+        assert!(canvas.hit_test(10.0).is_none());
     }
 }
 

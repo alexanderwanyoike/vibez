@@ -320,10 +320,22 @@ impl TrackClipCanvas {
 
         // Draw note clips (for instrument tracks)
         if self.is_instrument && self.bpm > 0.0 {
-            let note_clip_color = theme::with_alpha(self.track_color, 0.4);
-            let note_block_color = theme::with_alpha(self.track_color, 0.8);
-
-            for note_clip in &self.note_clips {
+            for (note_clip, is_recording_preview) in self
+                .note_clips
+                .iter()
+                .map(|clip| (clip, false))
+                .chain(self.recording_preview.iter().map(|clip| (clip, true)))
+            {
+                let note_clip_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.32)
+                } else {
+                    theme::with_alpha(self.track_color, 0.4)
+                };
+                let note_block_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.88)
+                } else {
+                    theme::with_alpha(self.track_color, 0.8)
+                };
                 let clip_x = self.beat_to_x(note_clip.position_beats);
                 let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 
@@ -436,8 +448,11 @@ impl TrackClipCanvas {
                 }
 
                 // Selection highlight
-                let is_selected = self.selected_clips.contains(&note_clip.clip_id);
-                let border_color = if is_selected {
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
+                let border_color = if is_recording_preview {
+                    theme::danger()
+                } else if is_selected {
                     theme::accent()
                 } else {
                     theme::darken(self.track_color, 0.7)

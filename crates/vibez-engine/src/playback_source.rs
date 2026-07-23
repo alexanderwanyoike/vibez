@@ -13,6 +13,21 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
 
+#[cfg(test)]
+thread_local! {
+    static AUDIO_THREAD_NOTE_END_LOOKUPS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_audio_thread_note_end_lookups() {
+    AUDIO_THREAD_NOTE_END_LOOKUPS.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn audio_thread_note_end_lookups() -> usize {
+    AUDIO_THREAD_NOTE_END_LOOKUPS.get()
+}
+
 /// A resident audio clip on a prepared timeline.
 pub struct EngineClip {
     pub id: ClipId,
@@ -46,6 +61,7 @@ pub struct EngineNoteClip {
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub groove_grid: GrooveGrid,
+    next_same_pitch_start_beats: Vec<Option<f64>>,
     groove_latch: Cell<Option<(i64, vibez_core::perform::SwingAmount)>>,
 }
 
@@ -61,6 +77,7 @@ impl EngineNoteClip {
         loop_end_beats: f64,
         groove_grid: GrooveGrid,
     ) -> Self {
+        let next_same_pitch_start_beats = build_next_same_pitch_start_beats(&notes);
         Self {
             id,
             position_beats,
@@ -70,8 +87,62 @@ impl EngineNoteClip {
             loop_start_beats,
             loop_end_beats,
             groove_grid,
+            next_same_pitch_start_beats,
             groove_latch: Cell::new(None),
         }
+    }
+
+    #[inline]
+    pub(crate) fn next_same_pitch_start_beat(&self, note_index: usize) -> Option<f64> {
+        #[cfg(test)]
+        AUDIO_THREAD_NOTE_END_LOOKUPS.set(AUDIO_THREAD_NOTE_END_LOOKUPS.get() + 1);
+        self.next_same_pitch_start_beats
+            .get(note_index)
+            .copied()
+            .flatten()
+    }
+
+    pub(crate) fn push_note(&mut self, note: MidiNote) {
+        let next_same_pitch_start = self
+            .notes
+            .iter()
+            .filter(|existing| {
+                existing.pitch == note.pitch && existing.start_beat > note.start_beat
+            })
+            .map(|existing| existing.start_beat)
+            .min_by(f64::total_cmp);
+        for (index, existing) in self.notes.iter().enumerate() {
+            if existing.pitch == note.pitch && existing.start_beat < note.start_beat {
+                let cached_next = &mut self.next_same_pitch_start_beats[index];
+                if cached_next.is_none_or(|start| note.start_beat < start) {
+                    *cached_next = Some(note.start_beat);
+                }
+            }
+        }
+        self.notes.push(note);
+        self.next_same_pitch_start_beats.push(next_same_pitch_start);
+    }
+
+    pub(crate) fn remove_note(&mut self, note_index: usize) -> bool {
+        if note_index >= self.notes.len() {
+            return false;
+        }
+        self.notes.remove(note_index);
+        self.rebuild_note_end_clamps();
+        true
+    }
+
+    pub(crate) fn edit_note(&mut self, note_index: usize, note: MidiNote) -> bool {
+        let Some(existing) = self.notes.get_mut(note_index) else {
+            return false;
+        };
+        *existing = note;
+        self.rebuild_note_end_clamps();
+        true
+    }
+
+    fn rebuild_note_end_clamps(&mut self) {
+        self.next_same_pitch_start_beats = build_next_same_pitch_start_beats(&self.notes);
     }
 
     pub fn reset_groove_latch(&self) {
@@ -98,6 +169,37 @@ impl EngineNoteClip {
         self.groove_latch.set(Some((pair_index, current)));
         current
     }
+}
+
+/// Precompute note-off clamps away from the realtime render loop. Notes retain
+/// their caller-visible order; only the temporary index list is sorted.
+fn build_next_same_pitch_start_beats(notes: &[MidiNote]) -> Vec<Option<f64>> {
+    let mut by_descending_start: Vec<_> = (0..notes.len()).collect();
+    by_descending_start
+        .sort_by(|left, right| notes[*right].start_beat.total_cmp(&notes[*left].start_beat));
+    let mut result = vec![None; notes.len()];
+    let mut next_by_pitch = [None; 256];
+    let mut group_start = 0;
+    while group_start < by_descending_start.len() {
+        let start_beat = notes[by_descending_start[group_start]].start_beat;
+        let mut group_end = group_start + 1;
+        while group_end < by_descending_start.len()
+            && notes[by_descending_start[group_end]]
+                .start_beat
+                .total_cmp(&start_beat)
+                .is_eq()
+        {
+            group_end += 1;
+        }
+        for &index in &by_descending_start[group_start..group_end] {
+            result[index] = next_by_pitch[notes[index].pitch as usize];
+        }
+        for &index in &by_descending_start[group_start..group_end] {
+            next_by_pitch[notes[index].pitch as usize] = Some(start_beat);
+        }
+        group_start = group_end;
+    }
+    result
 }
 
 /// Map a raw timeline frame through the active Arrange loop.
@@ -305,6 +407,50 @@ mod tests {
 
     use super::*;
     use crate::mixer::EngineTrack;
+
+    fn note(pitch: u8, start_beat: f64) -> MidiNote {
+        MidiNote {
+            pitch,
+            velocity: 100,
+            start_beat,
+            duration_beats: 0.5,
+        }
+    }
+
+    #[test]
+    fn note_end_clamps_are_precomputed_without_reordering_notes() {
+        let original = vec![
+            note(42, 1.0),
+            note(42, 0.5),
+            note(43, 0.75),
+            note(42, 1.5),
+            note(42, 1.0),
+        ];
+        let mut clip = EngineNoteClip::new(
+            ClipId::new(),
+            0.0,
+            4.0,
+            original.clone(),
+            false,
+            0.0,
+            0.0,
+            GrooveGrid::Sixteenth,
+        );
+
+        assert_eq!(clip.notes, original);
+        assert_eq!(clip.next_same_pitch_start_beat(0), Some(1.5));
+        assert_eq!(clip.next_same_pitch_start_beat(1), Some(1.0));
+        assert_eq!(clip.next_same_pitch_start_beat(2), None);
+        assert_eq!(clip.next_same_pitch_start_beat(3), None);
+        assert_eq!(clip.next_same_pitch_start_beat(4), Some(1.5));
+
+        clip.push_note(note(42, 1.25));
+        assert_eq!(clip.next_same_pitch_start_beat(0), Some(1.25));
+        assert!(clip.edit_note(5, note(43, 1.25)));
+        assert_eq!(clip.next_same_pitch_start_beat(0), Some(1.5));
+        assert!(clip.remove_note(3));
+        assert_eq!(clip.next_same_pitch_start_beat(0), None);
+    }
 
     #[test]
     fn arrangement_adapter_prepares_an_empty_resident_source() {

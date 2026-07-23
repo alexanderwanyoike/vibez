@@ -17,10 +17,15 @@ use crate::state::ProjectTrack;
 mod input_mapping;
 mod instrument;
 mod note_repeat;
+pub(crate) mod section_record;
 mod sections;
 pub use input_mapping::{ComputerKey, PerformInputMapping};
 pub use instrument::SixteenLevelsParameter;
 use instrument::{ActiveInstrumentNote, InstrumentPerformanceState};
+pub use section_record::{
+    CompletedSectionRecording, SectionRecordAction, SectionRecordCountIn, SectionRecordMode,
+    SectionRecordMsg, SectionRecordPhase, SectionRecordQuantization, SectionRecordStartRequest,
+};
 pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
@@ -174,6 +179,7 @@ pub struct PerformState {
     note_repeat_momentary: bool,
     note_repeat_momentary_key_id: Option<String>,
     note_repeat_latched: bool,
+    pub section_record: section_record::SectionRecordState,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
     pub section_editor: SectionTimelineEditor,
@@ -193,6 +199,7 @@ pub struct PerformState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PerformMsg {
+    SectionRecord(SectionRecordMsg),
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
     BeginKeyRebind(PadPosition),
@@ -308,6 +315,8 @@ pub struct PerformAction {
     pub select_project_track: Option<TrackId>,
     pub section_launch: Option<SectionId>,
     pub section_content_changed: Option<SectionId>,
+    pub section_record: Option<SectionRecordAction>,
+    pub section_record_status: Option<&'static str>,
 }
 
 impl PerformState {
@@ -394,6 +403,7 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
+            PerformMsg::SectionRecord(msg) => return self.update_section_record(msg),
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
                     self.mode = mode;
@@ -418,6 +428,7 @@ impl PerformState {
             PerformMsg::LaunchSection(id) => {
                 if ctx.workspace_visible
                     && self.mode == PerformMode::Sections
+                    && !self.section_record.is_active()
                     && self.sections.by_id(id).is_some()
                 {
                     self.select_section(id, ctx.selected_project_track);
@@ -790,12 +801,13 @@ impl PerformState {
                 let track_mute_request = (self.mode == PerformMode::TrackMutes)
                     .then(|| self.track_mute_request(position, ctx.project_tracks))
                     .flatten();
-                let section_launch = if self.mode == PerformMode::Sections {
-                    let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
-                    self.sections.at_slot(slot).map(|section| section.id)
-                } else {
-                    None
-                };
+                let section_launch =
+                    if self.mode == PerformMode::Sections && !self.section_record.is_active() {
+                        let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
+                        self.sections.at_slot(slot).map(|section| section.id)
+                    } else {
+                        None
+                    };
                 if let Some(section_id) = section_launch {
                     self.select_section(section_id, ctx.selected_project_track);
                 }
@@ -814,6 +826,8 @@ impl PerformState {
                     select_project_track: selected_instrument_target,
                     section_launch,
                     section_content_changed: None,
+                    section_record: None,
+                    section_record_status: None,
                 };
             }
             PerformMsg::ComputerKeyReleased {

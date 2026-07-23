@@ -8,7 +8,11 @@ pub const MAX_NOTE_REPEATS: usize = 16;
 pub struct NoteRepeatTrigger {
     pub pitch: u8,
     pub velocity: u8,
+    pub rate: NoteRepeatRate,
     pub effective_at_samples: u64,
+    /// The same repeat step on a straight clock. Recording stores this value
+    /// with a Groove Grid so playback applies Swing exactly once.
+    pub canonical_at_samples: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -183,7 +187,17 @@ impl TrackNoteRepeats {
             triggers[count] = Some(NoteRepeatTrigger {
                 pitch: voice.pitch,
                 velocity: voice.velocity,
+                rate: voice.rate,
                 effective_at_samples: voice.next_sample,
+                canonical_at_samples: repeat_sample_for_step(
+                    voice.anchor_sample,
+                    voice.rate,
+                    bpm,
+                    sample_rate,
+                    SwingAmount::STRAIGHT,
+                    voice.next_step,
+                )
+                .unwrap_or(voice.next_sample),
             });
             count += 1;
             let previous_sample = voice.next_sample;

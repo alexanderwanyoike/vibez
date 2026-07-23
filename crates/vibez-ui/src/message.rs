@@ -277,6 +277,11 @@ pub enum Message {
         quantization: vibez_core::perform::SectionLaunchQuantization,
         resident: ResidentSection,
     },
+    SectionRecordResidencyReady {
+        request_id: u64,
+        request: crate::domains::perform::SectionRecordStartRequest,
+        resident: ResidentSection,
+    },
     KeyboardInput {
         event: iced::keyboard::Event,
         occurred_at: std::time::Instant,

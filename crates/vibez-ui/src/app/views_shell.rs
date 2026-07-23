@@ -287,7 +287,7 @@ impl App {
             })
         };
 
-        let tabs = row![arrange_tab, perform_tab, mix_tab].spacing(4);
+        let tabs = row![perform_tab, arrange_tab, mix_tab].spacing(4);
 
         let file_btn = button(text("File").size(13).color(th::text_dim()))
             .on_press(Message::Project(ProjectMsg::ToggleFileMenu))

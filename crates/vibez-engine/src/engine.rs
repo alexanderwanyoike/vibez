@@ -73,6 +73,8 @@ pub struct AudioEngine {
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
     queued_section: Option<QueuedSectionPlayback>,
+    pending_section_record: Option<section_record::PendingSectionRecord>,
+    active_section_record: Option<section_record::ActiveSectionRecord>,
     /// When a transition lands partway through the current callback, only
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
@@ -133,6 +135,8 @@ impl AudioEngine {
             split_wrap_handled: false,
             active_section: None,
             queued_section: None,
+            pending_section_record: None,
+            active_section_record: None,
             section_advance_override: None,
             arrangement_audio_length: None,
             project_swing: SwingAmount::default(),
@@ -163,6 +167,12 @@ impl AudioEngine {
     /// 4. Otherwise: falls back to legacy single-audio path.
     /// 5. Sends metering and position events to the UI thread.
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
+        // A musical boundary due at this block start owns the same timestamp
+        // as commands drained below. Publish the recording start first so a
+        // first pad strike at the boundary cannot reach consumers while the
+        // take still appears armed.
+        self.start_section_record_if_due(self.performance_position);
+
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
 
@@ -292,7 +302,11 @@ impl AudioEngine {
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
         let pos_before = self.transport.position();
-        let new_pos = if self.active_section.is_some() {
+        let section_count_in = self
+            .pending_section_record
+            .as_ref()
+            .is_some_and(|pending| pending.prepared.is_some());
+        let new_pos = if self.active_section.is_some() || section_count_in {
             self.transport.advance_unbounded(frames as u64)
         } else {
             self.transport.advance(frames as u64)
@@ -316,8 +330,6 @@ impl AudioEngine {
                 } else {
                     section.position_samples = advanced.min(section.length_samples);
                     if advanced >= section.length_samples {
-                        self.transport.stop();
-                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
                         section_ended = true;
                     }
                 }
@@ -328,6 +340,9 @@ impl AudioEngine {
             }
         }
         if section_ended {
+            self.stop_section_record();
+            self.transport.stop();
+            let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
             self.active_section = None;
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
@@ -453,7 +468,18 @@ impl AudioEngine {
             return;
         }
 
+        if self.process_section_record_count_in(output, frames, channels) {
+            return;
+        }
+
         if self.active_section.is_some() {
+            if frames > 0 {
+                self.start_section_record_if_due(
+                    self.performance_position
+                        .saturating_add(frames as u64)
+                        .saturating_sub(1),
+                );
+            }
             self.process_section_multitrack(output, frames, channels);
             return;
         }
@@ -555,12 +581,34 @@ impl AudioEngine {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
+                let section = self.active_section;
                 let mut on_repeat = |trigger: crate::note_repeat::NoteRepeatTrigger| {
+                    let section_position = section.map(|active| {
+                        section_record::section_sample_for_performance(
+                            pos,
+                            repeat_pos,
+                            trigger.effective_at_samples,
+                            active.length_samples,
+                        )
+                    });
+                    let canonical_section_position = section.map(|active| {
+                        section_record::section_sample_for_performance(
+                            pos,
+                            repeat_pos,
+                            trigger.canonical_at_samples,
+                            active.length_samples,
+                        )
+                    });
                     let _ = event_tx.push(EngineEvent::NoteRepeated {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
+                        rate: trigger.rate,
                         effective_at_samples: trigger.effective_at_samples,
+                        canonical_at_samples: trigger.canonical_at_samples,
+                        section_id: section.map(|active| active.section_id),
+                        section_position_samples: section_position,
+                        canonical_section_position_samples: canonical_section_position,
                     });
                 };
                 track.render_instrument(
@@ -749,7 +797,12 @@ impl AudioEngine {
                         track_id,
                         pitch: trigger.pitch,
                         velocity: trigger.velocity,
+                        rate: trigger.rate,
                         effective_at_samples: trigger.effective_at_samples,
+                        canonical_at_samples: trigger.canonical_at_samples,
+                        section_id: None,
+                        section_position_samples: None,
+                        canonical_section_position_samples: None,
                     });
                 };
                 track.render_instrument_idle(
@@ -907,6 +960,9 @@ mod drain_commands;
 #[path = "engine_section_queue.rs"]
 mod section_queue;
 
+#[path = "engine_section_record.rs"]
+mod section_record;
+
 #[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
@@ -934,3 +990,7 @@ mod section_playback_tests;
 #[cfg(test)]
 #[path = "engine_section_queue_tests.rs"]
 mod section_queue_tests;
+
+#[cfg(test)]
+#[path = "engine_section_record_tests.rs"]
+mod section_record_tests;

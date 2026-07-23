@@ -17,6 +17,7 @@ impl AudioEngine {
                     let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
                 }
                 EngineCommand::Stop => {
+                    self.stop_section_record();
                     self.transport.stop();
                     self.performance_position = self.transport.position();
                     self.cancel_section_queue();
@@ -45,7 +46,10 @@ impl AudioEngine {
                 EngineCommand::SetBpm(bpm) => {
                     // V1 Perform holds one project tempo from the first
                     // Section transition until transport stop.
-                    if self.active_section.is_none() {
+                    if self.active_section.is_none()
+                        && self.pending_section_record.is_none()
+                        && self.active_section_record.is_none()
+                    {
                         self.transport.set_bpm(bpm);
                         self.recalculate_audio_length();
                         self.reschedule_note_repeats();
@@ -55,6 +59,14 @@ impl AudioEngine {
                     self.project_swing = swing;
                 }
                 EngineCommand::LaunchSection(prepared) => {
+                    if self.pending_section_record.is_some() || self.active_section_record.is_some()
+                    {
+                        let event = EngineEvent::SectionQueueCancelled { retired: prepared };
+                        if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+                            std::mem::forget(event);
+                        }
+                        continue;
+                    }
                     self.cancel_section_queue();
                     self.activate_section(prepared, self.transport.position());
                 }
@@ -111,6 +123,20 @@ impl AudioEngine {
                         std::mem::forget(event);
                     }
                 }
+                EngineCommand::ArmSectionRecord {
+                    section_id,
+                    track_id,
+                    prepared,
+                    count_in_bars,
+                    replace_existing,
+                } => self.arm_section_record(
+                    section_id,
+                    track_id,
+                    prepared,
+                    count_in_bars,
+                    replace_existing,
+                ),
+                EngineCommand::StopSectionRecord => self.stop_section_record(),
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
@@ -120,6 +146,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::UnloadAudio => {
+                    self.stop_section_record();
                     self.audio = None;
                     self.arrangement_audio_length = None;
                     self.active_section = None;
@@ -521,7 +548,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            clip.notes.push(note);
+                            clip.push_note(note);
                         }
                     }
                 }
@@ -537,9 +564,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            if note_index < clip.notes.len() {
-                                clip.notes.remove(note_index);
-                            }
+                            clip.remove_note(note_index);
                         }
                         track.flush_notes();
                     }
@@ -557,9 +582,7 @@ impl AudioEngine {
                             .iter_mut()
                             .find(|c| c.id == clip_id)
                         {
-                            if note_index < clip.notes.len() {
-                                clip.notes[note_index] = note;
-                            }
+                            clip.edit_note(note_index, note);
                         }
                         track.flush_notes();
                     }
@@ -722,6 +745,16 @@ impl AudioEngine {
                             instrument.note_on(pitch, velocity);
                         }
                     }
+                    let section = self.active_section;
+                    let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
+                        track_id,
+                        pitch,
+                        velocity,
+                        on: true,
+                        effective_at_samples: self.performance_position,
+                        section_id: section.map(|active| active.section_id),
+                        section_position_samples: section.map(|active| active.position_samples),
+                    });
                 }
                 EngineCommand::ExternalNoteOff { track_id, pitch } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
@@ -729,6 +762,16 @@ impl AudioEngine {
                             instrument.note_off(pitch);
                         }
                     }
+                    let section = self.active_section;
+                    let _ = self.event_tx.push(EngineEvent::InstrumentNoteInput {
+                        track_id,
+                        pitch,
+                        velocity: 0,
+                        on: false,
+                        effective_at_samples: self.performance_position,
+                        section_id: section.map(|active| active.section_id),
+                        section_position_samples: section.map(|active| active.position_samples),
+                    });
                 }
                 EngineCommand::StartNoteRepeat {
                     id,
@@ -762,7 +805,16 @@ impl AudioEngine {
                             track_id,
                             pitch,
                             velocity,
+                            rate,
                             effective_at_samples: position,
+                            canonical_at_samples: position,
+                            section_id: self.active_section.map(|active| active.section_id),
+                            section_position_samples: self
+                                .active_section
+                                .map(|active| active.position_samples),
+                            canonical_section_position_samples: self
+                                .active_section
+                                .map(|active| active.position_samples),
                         });
                     }
                     self.tracks[track_index].start_note_repeat(

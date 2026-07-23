@@ -21,11 +21,8 @@ pub(super) fn mapped_note_end(clip: &EngineNoteClip, note_index: usize, swing: S
         return mapped_end;
     }
     let next_same_pitch = clip
-        .notes
-        .iter()
-        .filter(|candidate| candidate.pitch == note.pitch && candidate.start_beat > note.start_beat)
-        .map(|candidate| mapped_note_start(clip, candidate, swing))
-        .min_by(f64::total_cmp);
+        .next_same_pitch_start_beat(note_index)
+        .map(|start_beat| clip.groove_grid.map_beat(start_beat, swing));
     next_same_pitch.map_or(mapped_end, |next_start| mapped_end.min(next_start))
 }
 

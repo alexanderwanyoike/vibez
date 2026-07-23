@@ -1,4 +1,5 @@
 use vibez_core::id::{SectionId, TrackId};
+use vibez_core::perform::NoteRepeatRate;
 
 use crate::playback_source::PreparedSectionPlaybackSource;
 
@@ -87,7 +88,51 @@ pub enum EngineEvent {
         track_id: TrackId,
         pitch: u8,
         velocity: u8,
+        rate: NoteRepeatRate,
         effective_at_samples: u64,
+        canonical_at_samples: u64,
+        section_id: Option<SectionId>,
+        section_position_samples: Option<u64>,
+        canonical_section_position_samples: Option<u64>,
+    },
+
+    /// A monitored input note became effective on the engine clock. Section
+    /// Record consumes these events; monitoring itself remains immediate.
+    InstrumentNoteInput {
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        on: bool,
+        effective_at_samples: u64,
+        section_id: Option<SectionId>,
+        section_position_samples: Option<u64>,
+    },
+
+    /// Section Record is waiting for an engine-owned musical boundary.
+    SectionRecordArmed {
+        section_id: SectionId,
+        track_id: TrackId,
+        effective_at_samples: u64,
+        section_position_samples: u64,
+    },
+
+    /// Section Record crossed its boundary and now accepts timestamped input.
+    SectionRecordStarted {
+        section_id: SectionId,
+        track_id: TrackId,
+        effective_at_samples: u64,
+        section_position_samples: u64,
+    },
+
+    /// Section Record stopped. A cancelled count-in returns its resident owner
+    /// so it is dropped on the UI thread, never in the audio callback.
+    SectionRecordStopped {
+        section_id: SectionId,
+        track_id: TrackId,
+        effective_at_samples: u64,
+        section_position_samples: u64,
+        started: bool,
+        retired: Option<Box<PreparedSectionPlaybackSource>>,
     },
 
     /// A resident Section is queued for this exact transport sample.
@@ -202,19 +247,111 @@ impl PartialEq for EngineEvent {
                     track_id: left_track,
                     pitch: left_pitch,
                     velocity: left_velocity,
+                    rate: left_rate,
                     effective_at_samples: left_effective,
+                    canonical_at_samples: left_canonical,
+                    section_id: left_section,
+                    section_position_samples: left_position,
+                    canonical_section_position_samples: left_canonical_position,
                 },
                 Self::NoteRepeated {
                     track_id: right_track,
                     pitch: right_pitch,
                     velocity: right_velocity,
+                    rate: right_rate,
                     effective_at_samples: right_effective,
+                    canonical_at_samples: right_canonical,
+                    section_id: right_section,
+                    section_position_samples: right_position,
+                    canonical_section_position_samples: right_canonical_position,
                 },
             ) => {
                 left_track == right_track
                     && left_pitch == right_pitch
                     && left_velocity == right_velocity
+                    && left_rate == right_rate
                     && left_effective == right_effective
+                    && left_canonical == right_canonical
+                    && left_section == right_section
+                    && left_position == right_position
+                    && left_canonical_position == right_canonical_position
+            }
+            (
+                Self::InstrumentNoteInput {
+                    track_id: lt,
+                    pitch: lp,
+                    velocity: lv,
+                    on: lo,
+                    effective_at_samples: le,
+                    section_id: ls,
+                    section_position_samples: lsp,
+                },
+                Self::InstrumentNoteInput {
+                    track_id: rt,
+                    pitch: rp,
+                    velocity: rv,
+                    on: ro,
+                    effective_at_samples: re,
+                    section_id: rs,
+                    section_position_samples: rsp,
+                },
+            ) => lt == rt && lp == rp && lv == rv && lo == ro && le == re && ls == rs && lsp == rsp,
+            (
+                Self::SectionRecordArmed {
+                    section_id: ls,
+                    track_id: lt,
+                    effective_at_samples: le,
+                    section_position_samples: lp,
+                },
+                Self::SectionRecordArmed {
+                    section_id: rs,
+                    track_id: rt,
+                    effective_at_samples: re,
+                    section_position_samples: rp,
+                },
+            )
+            | (
+                Self::SectionRecordStarted {
+                    section_id: ls,
+                    track_id: lt,
+                    effective_at_samples: le,
+                    section_position_samples: lp,
+                },
+                Self::SectionRecordStarted {
+                    section_id: rs,
+                    track_id: rt,
+                    effective_at_samples: re,
+                    section_position_samples: rp,
+                },
+            ) => ls == rs && lt == rt && le == re && lp == rp,
+            (
+                Self::SectionRecordStopped {
+                    section_id: ls,
+                    track_id: lt,
+                    effective_at_samples: le,
+                    section_position_samples: lp,
+                    started: lstarted,
+                    retired: lr,
+                },
+                Self::SectionRecordStopped {
+                    section_id: rs,
+                    track_id: rt,
+                    effective_at_samples: re,
+                    section_position_samples: rp,
+                    started: rstarted,
+                    retired: rr,
+                },
+            ) => {
+                ls == rs
+                    && lt == rt
+                    && le == re
+                    && lp == rp
+                    && lstarted == rstarted
+                    && match (lr, rr) {
+                        (Some(left), Some(right)) => std::ptr::eq(left.as_ref(), right.as_ref()),
+                        (None, None) => true,
+                        _ => false,
+                    }
             }
             (
                 Self::SectionQueued {
