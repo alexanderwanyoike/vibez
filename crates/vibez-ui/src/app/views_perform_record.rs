@@ -1,11 +1,11 @@
-//! Compact Section Record strip shared by every Perform mode.
+//! Compact Section Record and Capture strip shared by every Perform mode.
 
 use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{
-    PerformMsg, SectionRecordCountIn, SectionRecordMode, SectionRecordMsg, SectionRecordPhase,
-    SectionRecordQuantization,
+    CaptureMsg, CapturePhase, PerformMsg, SectionRecordCountIn, SectionRecordMode,
+    SectionRecordMsg, SectionRecordPhase, SectionRecordQuantization,
 };
 use crate::icons;
 use crate::message::Message;
@@ -17,8 +17,11 @@ use super::*;
 impl App {
     pub(super) fn view_section_record_bar(&self) -> Element<'_, Message> {
         let record = &self.state.perform.section_record;
+        let capture = &self.state.perform.capture;
         let active = record.is_active();
         let recording = record.phase == SectionRecordPhase::Recording;
+        let capture_active = capture.is_active();
+        let capturing = capture.phase == CapturePhase::Recording;
         let target = record
             .target()
             .and_then(|(section_id, track_id)| {
@@ -49,6 +52,12 @@ impl App {
             SectionRecordPhase::Recording => "RECORDING".into(),
             SectionRecordPhase::Stopping => "STOPPING".into(),
         };
+        let capture_phase = match capture.phase {
+            CapturePhase::Idle => "ARRANGE · READY",
+            CapturePhase::Starting => "ARRANGE · STARTING",
+            CapturePhase::Recording => "ARRANGE · CAPTURING",
+            CapturePhase::Stopping => "ARRANGE · STOPPING",
+        };
 
         let record_button = button(record_button_content(active))
             .on_press(Message::Perform(PerformMsg::SectionRecord(
@@ -74,6 +83,43 @@ impl App {
                             th::danger()
                         } else {
                             th::border_light()
+                        },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+
+        let capture_button = button(capture_button_content(capture_active))
+            .on_press(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+            .padding([7, 12])
+            .style(move |_theme: &Theme, status| {
+                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let emphasized = capture_active || hovered;
+                button::Style {
+                    background: Some(
+                        if capturing {
+                            th::danger()
+                        } else if capture_active {
+                            th::accent()
+                        } else if hovered {
+                            th::blend(th::perform_inset(), th::accent(), 0.14)
+                        } else {
+                            th::perform_inset()
+                        }
+                        .into(),
+                    ),
+                    text_color: if emphasized {
+                        th::bg_dark()
+                    } else {
+                        th::accent()
+                    },
+                    border: iced::Border {
+                        color: if capturing {
+                            th::danger()
+                        } else {
+                            th::accent_dim()
                         },
                         width: 1.0,
                         radius: 3.0.into(),
@@ -114,6 +160,7 @@ impl App {
                 count_in,
                 mode,
                 quantization,
+                capture_button,
                 container(horizontal_space()).width(Length::Fill),
                 row![
                     text(target)
@@ -121,6 +168,14 @@ impl App {
                         .size(9)
                         .color(th::text_dim()),
                     text(phase).font(PERFORM_LABEL).size(9).color(state_color),
+                    text(capture_phase)
+                        .font(PERFORM_LABEL)
+                        .size(9)
+                        .color(if capturing {
+                            th::danger()
+                        } else {
+                            th::accent()
+                        }),
                 ]
                 .spacing(12)
                 .align_y(iced::Alignment::Center),
@@ -160,17 +215,6 @@ fn count_in_beats_remaining(
 
 fn record_button_content(active: bool) -> Element<'static, Message> {
     let color = if active { th::bg_dark() } else { th::danger() };
-    let shortcut = container(text("F4").font(PERFORM_TECH_STRONG).size(8).color(color))
-        .padding([1, 4])
-        .style(move |_theme: &Theme| container::Style {
-            background: (!active).then(|| th::blend(th::bg_dark(), color, 0.08).into()),
-            border: iced::Border {
-                color: th::blend(th::border_light(), color, 0.3),
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        });
     row![
         icons::icon(if active {
             icons::STOP
@@ -187,11 +231,84 @@ fn record_button_content(active: bool) -> Element<'static, Message> {
         .font(PERFORM_TECH_STRONG)
         .size(9)
         .color(color),
-        shortcut,
+        shortcut_keycap("F4", color, active),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+fn capture_button_content(active: bool) -> Element<'static, Message> {
+    let color = if active { th::bg_dark() } else { th::accent() };
+    let capture_icon: Element<'static, Message> = if active {
+        icons::icon(icons::STOP).size(11).color(color).into()
+    } else {
+        capture_to_arrange_icon()
+    };
+    row![
+        capture_icon,
+        text(if active {
+            "STOP CAPTURE"
+        } else {
+            "CAPTURE → ARRANGE"
+        })
+        .font(PERFORM_TECH_STRONG)
+        .size(9)
+        .color(color),
+        shortcut_keycap("F5", color, active),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// Purpose-built Capture mark: a record source feeding linear timeline lanes.
+/// It deliberately shares no glyph with the Arrange workspace or timeline
+/// expansion controls.
+fn capture_to_arrange_icon() -> Element<'static, Message> {
+    let lane = || {
+        container(horizontal_space())
+            .width(Length::Fixed(8.0))
+            .height(Length::Fixed(1.0))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::accent().into()),
+                ..Default::default()
+            })
+    };
+    let lanes = iced::widget::column![lane(), lane(), lane()]
+        .spacing(2)
+        .align_x(iced::Alignment::Start);
+
+    row![
+        icons::icon(icons::CIRCLE_DOT).size(10).color(th::danger()),
+        text("›")
+            .font(PERFORM_TECH_STRONG)
+            .size(10)
+            .color(th::accent()),
+        lanes,
+    ]
+    .spacing(2)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+fn shortcut_keycap(
+    label: &'static str,
+    color: iced::Color,
+    active: bool,
+) -> Element<'static, Message> {
+    container(text(label).font(PERFORM_TECH_STRONG).size(8).color(color))
+        .padding([1, 4])
+        .style(move |_theme: &Theme| container::Style {
+            background: (!active).then(|| th::blend(th::bg_dark(), color, 0.08).into()),
+            border: iced::Border {
+                color: th::blend(th::border_light(), color, 0.3),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
 fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(

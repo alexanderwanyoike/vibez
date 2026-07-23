@@ -18,6 +18,9 @@ impl AudioEngine {
                 }
                 EngineCommand::Stop => {
                     self.stop_section_record();
+                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                        effective_at_samples: self.transport.position(),
+                    });
                     self.transport.stop();
                     self.performance_position = self.transport.position();
                     self.cancel_section_queue();
@@ -137,6 +140,21 @@ impl AudioEngine {
                     replace_existing,
                 ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
+                EngineCommand::StartPerformanceCapture => {
+                    let section_id = self.active_section.map(|section| section.section_id);
+                    let section_position_samples =
+                        self.active_section.map(|section| section.position_samples);
+                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStarted {
+                        effective_at_samples: self.transport.position(),
+                        section_id,
+                        section_position_samples,
+                    });
+                }
+                EngineCommand::StopPerformanceCapture => {
+                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                        effective_at_samples: self.transport.position(),
+                    });
+                }
                 EngineCommand::LoadAudio(audio) => {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
@@ -147,6 +165,9 @@ impl AudioEngine {
                 }
                 EngineCommand::UnloadAudio => {
                     self.stop_section_record();
+                    let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                        effective_at_samples: self.transport.position(),
+                    });
                     self.audio = None;
                     self.arrangement_audio_length = None;
                     self.active_section = None;
@@ -907,6 +928,29 @@ impl AudioEngine {
                     }
                 }
             }
+        }
+    }
+
+    fn recalculate_audio_length(&mut self) {
+        let samples_per_beat = if self.transport.bpm() > 0.0 {
+            self.sample_rate as f64 * 60.0 / self.transport.bpm()
+        } else {
+            0.0
+        };
+        let total = calculate_total_length(
+            self.tracks
+                .iter()
+                .map(|track| track.playback_source.as_ref()),
+            samples_per_beat,
+        );
+        self.arrangement_audio_length = if total > 0 {
+            Some(total)
+        } else {
+            self.audio.as_ref().map(|audio| audio.num_frames() as u64)
+        };
+        if self.active_section.is_none() {
+            self.transport
+                .set_audio_length(self.arrangement_audio_length);
         }
     }
 }

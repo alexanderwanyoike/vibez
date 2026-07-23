@@ -14,11 +14,16 @@ use vibez_project::SectionLaunchQuantization;
 use super::EngineHandle;
 use crate::state::ProjectTrack;
 
+pub(crate) mod capture;
 mod input_mapping;
 mod instrument;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
+pub use capture::{
+    CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedSectionSource,
+    MaterializedCapture,
+};
 pub use input_mapping::{ComputerKey, PerformInputMapping};
 pub use instrument::SixteenLevelsParameter;
 use instrument::{ActiveInstrumentNote, InstrumentPerformanceState};
@@ -179,6 +184,7 @@ pub struct PerformState {
     note_repeat_momentary: bool,
     note_repeat_momentary_key_id: Option<String>,
     note_repeat_latched: bool,
+    pub capture: CaptureState,
     pub section_record: section_record::SectionRecordState,
     pub sections: Arc<SectionStore>,
     pub selected_section: Option<SectionId>,
@@ -199,6 +205,7 @@ pub struct PerformState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PerformMsg {
+    Capture(CaptureMsg),
     SectionRecord(SectionRecordMsg),
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
@@ -315,6 +322,7 @@ pub struct PerformAction {
     pub select_project_track: Option<TrackId>,
     pub section_launch: Option<SectionId>,
     pub section_content_changed: Option<SectionId>,
+    pub capture: Option<CaptureAction>,
     pub section_record: Option<SectionRecordAction>,
     pub section_record_status: Option<&'static str>,
 }
@@ -403,6 +411,7 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
+            PerformMsg::Capture(msg) => return self.capture.update(msg),
             PerformMsg::SectionRecord(msg) => return self.update_section_record(msg),
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
@@ -826,6 +835,7 @@ impl PerformState {
                     select_project_track: selected_instrument_target,
                     section_launch,
                     section_content_changed: None,
+                    capture: None,
                     section_record: None,
                     section_record_status: None,
                 };

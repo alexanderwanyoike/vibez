@@ -177,6 +177,23 @@ duration and keep Groove Grid Off. `1/8` and `1/16` Note Repeat stores the
 canonical straight position with its matching Groove Grid, so playback applies
 live Swing once and later Swing edits remain effective.
 
+Capture into Arrange is a separate runtime log over the same engine clock.
+`PerformanceCaptureStarted`, `SectionTransitioned`, and
+`PerformanceCaptureStopped` report exact effective samples, including a
+transition that splits an audio callback and a Capture begun partway through an
+already-playing Section. The UI snapshots each canonical Section timeline at
+the boundary where it becomes audible. On stop, it flattens those snapshots
+across Section loop passes into newly identified Arrange audio and MIDI clips,
+offset from the Arrange playhead captured at session start. The copied clips
+share only immutable decoded audio; they retain no Section identity or mutable
+reference, so later Section edits and launches cannot rewrite Arrange.
+
+Card 17 applies that materialization only when the destination interval is
+empty on every affected Project Track. Any overlap aborts the still-open
+project transaction without changing Arrange; interval replacement belongs to
+Card 18. Track Mutes, live notes, and effective automation are likewise later
+Capture log consumers rather than implicit work in this first slice.
+
 The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
 Project Swing, and optional Project Track Swing offsets as canonical project
 data and undo state. Swing uses the profile's native `50..75%` long/short pair
@@ -297,6 +314,11 @@ long-lived consumer: it opens before residency/arming and commits the complete
 Overdub or Replace session on the engine-confirmed stop as one undo step.
 Editor selections, meters, decoded/runtime caches, and live plugin pointers are
 outside the transaction snapshot and are neither cloned nor restored.
+Capture opens the same transaction before requesting its engine start boundary,
+then marks one edit and commits only after the engine-confirmed stop has
+materialized independent Arrange content. Empty or overlapping sessions abandon
+the transaction, while undo/redo replays the complete captured Arrangement as
+one project step.
 
 ## The audio engine
 

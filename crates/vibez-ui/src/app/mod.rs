@@ -130,6 +130,8 @@ mod actions;
 mod async_helpers;
 mod audio_tasks;
 mod bounce;
+mod capture;
+mod engine_events;
 mod keyboard;
 mod local_watcher;
 mod tracked_request;

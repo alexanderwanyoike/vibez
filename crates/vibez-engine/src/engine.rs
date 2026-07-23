@@ -341,6 +341,9 @@ impl AudioEngine {
         }
         if section_ended {
             self.stop_section_record();
+            let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
+                effective_at_samples: new_pos,
+            });
             self.transport.stop();
             let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
             self.active_section = None;
@@ -913,29 +916,6 @@ impl AudioEngine {
             std::mem::forget(item);
         }
     }
-
-    fn recalculate_audio_length(&mut self) {
-        let samples_per_beat = if self.transport.bpm() > 0.0 {
-            self.sample_rate as f64 * 60.0 / self.transport.bpm()
-        } else {
-            0.0
-        };
-        let total = calculate_total_length(
-            self.tracks
-                .iter()
-                .map(|track| track.playback_source.as_ref()),
-            samples_per_beat,
-        );
-        self.arrangement_audio_length = if total > 0 {
-            Some(total)
-        } else {
-            self.audio.as_ref().map(|audio| audio.num_frames() as u64)
-        };
-        if self.active_section.is_none() {
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
-        }
-    }
 }
 
 /// Stream a block to the UI spectrum analyser as mono samples.
@@ -994,3 +974,7 @@ mod section_queue_tests;
 #[cfg(test)]
 #[path = "engine_section_record_tests.rs"]
 mod section_record_tests;
+
+#[cfg(test)]
+#[path = "engine_capture_tests.rs"]
+mod capture_tests;
