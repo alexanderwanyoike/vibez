@@ -126,6 +126,12 @@ pub enum EngineCommand {
     SetTrackPan(TrackId, f32),
     /// Set the mute state for a track.
     SetTrackMute(TrackId, bool),
+    /// Enable or clear a manual override for one automated parameter.
+    SetAutomationOverride {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+        overridden: bool,
+    },
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
     /// Set the optional Project Track Swing adjustment used by generated

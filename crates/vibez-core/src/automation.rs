@@ -1,10 +1,9 @@
 //! Automation lanes: parameter values drawn over time.
 //!
 //! A lane targets one parameter and holds points sorted by beat.
-//! Evaluation is linear interpolation between points, holding the
-//! first value before the first point and the last value after the
-//! last point. Block-rate evaluation (once per render segment) is
-//! the v1 contract; no sample-accurate ramps yet.
+//! Continuous lanes interpolate between points and hold their edge
+//! values. Stepped lanes hold the preceding point and impose no
+//! value before their first point.
 
 use serde::{Deserialize, Serialize};
 
@@ -38,10 +37,14 @@ pub fn shape(t: f32, curve: f32) -> f32 {
 }
 
 /// What a lane drives.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AutomationTarget {
     TrackGain,
     TrackPan,
+    /// Channel mute. Values below 0.5 are unmuted; values at or above
+    /// 0.5 are muted. Unlike continuous targets this lane is stepped.
+    #[serde(rename = "track_mute")]
+    TrackMute,
     /// Project-relative Track Swing offset, normalized from -25..+25 points.
     #[serde(rename = "track_swing_offset")]
     TrackSwingOffset,
@@ -88,6 +91,9 @@ impl AutomationLane {
         if points.is_empty() {
             return None;
         }
+        if self.target.is_stepped() && beat < points[0].beat {
+            return None;
+        }
         if beat <= points[0].beat {
             return Some(points[0].value);
         }
@@ -99,6 +105,9 @@ impl AutomationLane {
         let idx = points.partition_point(|p| p.beat <= beat);
         let a = points[idx - 1];
         let b = points[idx];
+        if self.target.is_stepped() {
+            return Some(a.value);
+        }
         let span = b.beat - a.beat;
         if span <= f64::EPSILON {
             return Some(b.value);
@@ -125,6 +134,14 @@ impl AutomationLane {
     }
 }
 
+impl AutomationTarget {
+    /// Whether points describe instantaneous state changes rather than
+    /// interpolated segments.
+    pub const fn is_stepped(self) -> bool {
+        matches!(self, Self::TrackMute)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +153,16 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<AutomationTarget>(&json).unwrap(),
             AutomationTarget::TrackSwingOffset
+        );
+    }
+
+    #[test]
+    fn track_mute_has_a_stable_persisted_identity() {
+        let json = serde_json::to_string(&AutomationTarget::TrackMute).unwrap();
+        assert_eq!(json, "\"track_mute\"");
+        assert_eq!(
+            serde_json::from_str::<AutomationTarget>(&json).unwrap(),
+            AutomationTarget::TrackMute
         );
     }
 
@@ -168,6 +195,26 @@ mod tests {
         let l = lane(&[(0.0, 0.0), (8.0, 1.0)]);
         assert_eq!(l.value_at(4.0), Some(0.5));
         assert_eq!(l.value_at(2.0), Some(0.25));
+    }
+
+    #[test]
+    fn stepped_lane_imposes_nothing_before_first_point_and_holds_steps() {
+        let mut l = AutomationLane::new(AutomationTarget::TrackMute);
+        l.insert_point(AutomationPoint {
+            beat: 4.0,
+            value: 1.0,
+            curve: 0.75,
+        });
+        l.insert_point(AutomationPoint {
+            beat: 8.0,
+            value: 0.0,
+            curve: -0.75,
+        });
+
+        assert_eq!(l.value_at(3.999), None);
+        assert_eq!(l.value_at(4.0), Some(1.0));
+        assert_eq!(l.value_at(7.999), Some(1.0));
+        assert_eq!(l.value_at(8.0), Some(0.0));
     }
 
     #[test]
