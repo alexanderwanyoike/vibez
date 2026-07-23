@@ -93,19 +93,15 @@ impl AudioEngine {
     ) {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
+        let bpm = self.transport.bpm();
+        let samples_per_beat = if bpm > 0.0 {
+            self.sample_rate as f64 * 60.0 / bpm
+        } else {
+            0.0
+        };
 
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
-
-            // Skip muted tracks always
-            if track.mute {
-                let _ = self.event_tx.push(EngineEvent::TrackMeter {
-                    track_id: track.id,
-                    peak_l: 0.0,
-                    peak_r: 0.0,
-                });
-                continue;
-            }
 
             // A soloed return still needs every source to render its
             // sends. Without a return solo, preserve normal track
@@ -124,7 +120,6 @@ impl AudioEngine {
             // place; gain/pan come back as overrides for the sum
             // stage below.
             let beat = {
-                let bpm = self.transport.bpm();
                 if bpm > 0.0 {
                     pos as f64 * bpm / (self.sample_rate as f64 * 60.0)
                 } else {
@@ -185,6 +180,7 @@ impl AudioEngine {
             // Always run the shared device chain. A silent new Section stops
             // source material while already-produced effect tails continue.
             track.process_effects(frames, channels);
+            track.apply_mute_envelope(pos, frames, channels, samples_per_beat);
             let rendered = rendered
                 || track.mix_buffer[..frames * channels]
                     .iter()
@@ -329,7 +325,7 @@ impl AudioEngine {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         for track in &mut self.tracks {
-            if track.mute || (has_track_solo && !track.solo && !has_bus_solo) {
+            if has_track_solo && !track.solo && !has_bus_solo {
                 continue;
             }
             // Instruments render so auditioned notes sound; every
@@ -344,6 +340,9 @@ impl AudioEngine {
                 0.0
             };
             track.apply_automation(beat);
+            if track.effective_muted() {
+                continue;
+            }
             let has_signal = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;

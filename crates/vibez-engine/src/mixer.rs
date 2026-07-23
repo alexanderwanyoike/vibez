@@ -18,6 +18,74 @@ pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
 
+const MUTE_RAMP_FRAMES: u32 = 64;
+
+#[derive(Debug, Clone, Copy)]
+struct MuteRamp {
+    gain: f32,
+    target: f32,
+    remaining: u32,
+}
+
+impl Default for MuteRamp {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            target: 1.0,
+            remaining: 0,
+        }
+    }
+}
+
+impl MuteRamp {
+    fn set_muted(&mut self, muted: bool, immediate: bool) {
+        let target = if muted { 0.0 } else { 1.0 };
+        if immediate {
+            self.gain = target;
+            self.target = target;
+            self.remaining = 0;
+        } else if self.target != target {
+            self.target = target;
+            self.remaining = MUTE_RAMP_FRAMES;
+        }
+    }
+
+    fn next_gain(&mut self) -> f32 {
+        if self.remaining == 0 {
+            return self.gain;
+        }
+        self.gain += (self.target - self.gain) / self.remaining as f32;
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            self.gain = self.target;
+        }
+        self.gain
+    }
+}
+
+/// Runtime manual-overrides for automated parameters. Mute is the first
+/// consumer; later parameters extend this value without changing ownership.
+#[derive(Debug, Default)]
+struct AutomationOverrides {
+    track_mute: bool,
+}
+
+impl AutomationOverrides {
+    fn contains(&self, target: vibez_core::automation::AutomationTarget) -> bool {
+        matches!(target, vibez_core::automation::AutomationTarget::TrackMute) && self.track_mute
+    }
+
+    fn set(&mut self, target: vibez_core::automation::AutomationTarget, overridden: bool) -> bool {
+        let slot = match target {
+            vibez_core::automation::AutomationTarget::TrackMute => &mut self.track_mute,
+            _ => return false,
+        };
+        let changed = *slot != overridden;
+        *slot = overridden;
+        changed
+    }
+}
+
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
     pub id: TrackId,
@@ -31,6 +99,9 @@ pub struct EngineTrack {
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
+    automation_mute: Option<bool>,
+    automation_overrides: AutomationOverrides,
+    mute_ramp: MuteRamp,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.

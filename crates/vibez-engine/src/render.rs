@@ -97,11 +97,11 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         engine.sends = track_info.sends.clone();
         match req.mode {
             BounceMode::Master => {
-                engine.mute = track_info.mute;
+                engine.set_manual_mute(track_info.mute, true);
                 engine.solo = track_info.solo;
             }
             _ => {
-                engine.mute = false;
+                engine.set_manual_mute(false, true);
                 engine.solo = false;
             }
         }
@@ -283,13 +283,12 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         }
 
         for track in tracks.iter_mut() {
-            if matches!(req.mode, BounceMode::Master) {
-                if track.mute {
-                    continue;
-                }
-                if has_track_solo && !track.solo && !has_bus_solo {
-                    continue;
-                }
+            if matches!(req.mode, BounceMode::Master)
+                && has_track_solo
+                && !track.solo
+                && !has_bus_solo
+            {
+                continue;
             }
 
             let beat = pos as f64 / tempo.samples_per_beat();
@@ -316,6 +315,9 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 continue;
             }
             track.process_effects(block, CHANNELS);
+            if matches!(req.mode, BounceMode::Master) {
+                track.apply_mute_envelope(pos, block, CHANNELS, tempo.samples_per_beat());
+            }
 
             let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let gain = auto_gain.unwrap_or(track.gain);

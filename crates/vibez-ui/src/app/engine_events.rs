@@ -80,11 +80,25 @@ impl App {
                     EngineEvent::TrackMuteChanged {
                         track_id,
                         muted,
-                        effective_at_samples: _,
+                        effective_at_samples,
                     } => {
+                        self.state.perform.capture.track_mute_changed(
+                            track_id,
+                            muted,
+                            effective_at_samples,
+                        );
                         if let Some(track) = self.state.find_track_mut(track_id) {
                             track.mute = muted;
                         }
+                    }
+                    EngineEvent::AutomationOverrideChanged {
+                        track_id,
+                        target,
+                        overridden,
+                    } => {
+                        self.state
+                            .automation_ui
+                            .set_override(track_id, target, overridden);
                     }
                     EngineEvent::NoteRepeated {
                         track_id,
