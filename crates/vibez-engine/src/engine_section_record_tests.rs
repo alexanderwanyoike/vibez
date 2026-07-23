@@ -173,6 +173,105 @@ fn stopped_count_in_ignores_the_idle_performance_clock_before_transport_reset() 
 }
 
 #[test]
+fn stopped_count_in_does_not_play_arrangement_content() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    let arrangement_audio = Arc::new(DecodedAudio {
+        channels: vec![vec![0.5; 128]],
+        sample_rate: 8,
+    });
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddClip {
+            track_id,
+            clip_id: ClipId::new(),
+            audio: arrangement_audio,
+            position: 0,
+            source_offset: 0,
+            duration: 128,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::ArmSectionRecord {
+            section_id,
+            track_id,
+            prepared: Some(source(section_id, track_id, 0.75)),
+            count_in_bars: 1,
+            replace_existing: false,
+        })
+        .unwrap();
+
+    let mut output = [0.0; 17];
+    engine.process(&mut output, 1);
+
+    assert!(
+        (output[0] - 0.32).abs() < f32::EPSILON,
+        "count-in downbeat must contain only the click, got {}",
+        output[0]
+    );
+    assert!(output[1..4]
+        .iter()
+        .all(|sample| sample.abs() < f32::EPSILON));
+    assert!((output[4] - 0.22).abs() < f32::EPSILON);
+    assert!((output[8] - 0.22).abs() < f32::EPSILON);
+    assert!((output[12] - 0.22).abs() < f32::EPSILON);
+    for sample in [5, 6, 7, 9, 10, 11, 13, 14, 15] {
+        assert!(output[sample].abs() < f32::EPSILON);
+    }
+    assert!((output[16] - 0.75).abs() < f32::EPSILON);
+}
+
+#[test]
+fn stopped_count_in_keeps_live_instrument_monitoring() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let section_id = SectionId::new();
+    commands.push(EngineCommand::SetSampleRate(8_000)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "MIDI".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackInstrument(
+            track_id,
+            InstrumentKind::SubtractiveSynth,
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::ArmSectionRecord {
+            section_id,
+            track_id,
+            prepared: Some(source(section_id, track_id, 0.0)),
+            count_in_bars: 1,
+            replace_existing: false,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::ExternalNoteOn {
+            track_id,
+            pitch: 60,
+            velocity: 100,
+        })
+        .unwrap();
+
+    let mut output = vec![0.0; 2_000];
+    engine.process(&mut output, 2);
+
+    assert!(
+        output[600..].iter().any(|sample| sample.abs() > 0.001),
+        "live instrument input must remain audible between count-in clicks"
+    );
+}
+
+#[test]
 fn stopped_count_in_click_accents_each_bar_and_clicks_each_beat() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
