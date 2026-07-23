@@ -825,6 +825,61 @@ mod tests {
         )
     }
 
+    fn right_click(
+        canvas: &TrackClipCanvas,
+        position: Point,
+    ) -> (canvas::event::Status, Option<Message>) {
+        <TrackClipCanvas as canvas::Program<Message>>::update(
+            canvas,
+            &mut ClipInteractionState::default(),
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Right,
+            )),
+            Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+            mouse::Cursor::Available(position),
+        )
+    }
+
+    #[test]
+    fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
+        let mut canvas = empty_track_canvas();
+        let (status, message) = right_click(&canvas, Point::new(300.0, 20.0));
+        assert_eq!(status, canvas::event::Status::Captured);
+        assert!(matches!(
+            message,
+            Some(Message::View(ViewMsg::ShowContextMenu {
+                target: ContextMenuTarget::ArrangementEmpty,
+                ..
+            }))
+        ));
+
+        let clip_id = ClipId::new();
+        canvas.clips.push(TimelineClip {
+            clip_id,
+            position: 0,
+            duration: 44_100,
+            name: "Clip".into(),
+            peaks: Arc::new(Vec::new()),
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            warp_stale: false,
+        });
+        let (status, message) = right_click(&canvas, Point::new(10.0, 10.0));
+        assert_eq!(status, canvas::event::Status::Captured);
+        assert!(matches!(
+            message,
+            Some(Message::View(ViewMsg::ShowContextMenu {
+                target: ContextMenuTarget::Clip {
+                    clip_id: id,
+                    is_note_clip: false,
+                    ..
+                },
+                ..
+            })) if id == clip_id
+        ));
+    }
+
     #[test]
     fn per_track_canvas_ignores_global_track_creation_shortcuts() {
         let canvas = empty_track_canvas();
