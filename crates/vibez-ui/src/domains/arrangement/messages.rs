@@ -210,8 +210,6 @@ pub struct ArrangementAction {
     pub loop_from_selection: Option<(f64, f64)>,
     /// A drag moved a clip near the view edge; auto-scroll to it.
     pub scroll_to_beat: Option<f64>,
-    /// Dismiss the arrangement context menu.
-    pub close_context_menu: bool,
     /// The project content changed outside the undo-snapshot path.
     pub mark_dirty: bool,
 }

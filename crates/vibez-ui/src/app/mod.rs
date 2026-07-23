@@ -134,6 +134,7 @@ mod capture;
 mod engine_events;
 mod keyboard;
 mod local_watcher;
+mod menu_lifecycle;
 mod tracked_request;
 
 use async_helpers::*;

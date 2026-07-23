@@ -6,7 +6,6 @@ use iced::Task;
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::transport::TransportMsg;
-use crate::domains::view::ViewMsg;
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
@@ -14,7 +13,7 @@ use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrume
 
 use crate::message::Message;
 
-use super::update_policy::{apply_project_track_deletion_policy, context_menu_message_keeps_open};
+use super::update_policy::apply_project_track_deletion_policy;
 use super::*;
 
 impl App {
@@ -26,28 +25,6 @@ impl App {
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
-        if self.state.view.edit_menu_open {
-            let keep_menu = matches!(
-                &message,
-                Message::Tick
-                    | Message::Transport(TransportMsg::EnginePosition(_))
-                    | Message::EngineMetering { .. }
-                    | Message::Transport(TransportMsg::EngineStopped)
-                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
-                    | Message::View(ViewMsg::ToggleEditMenu)
-                    | Message::View(ViewMsg::CursorMoved(_, _))
-                    | Message::View(ViewMsg::WindowResized(_, _))
-                    | Message::View(ViewMsg::MouseReleased)
-            );
-            if !keep_menu {
-                self.state.view.edit_menu_open = false;
-            }
-        }
-        // Auto-dismiss context menu on any action except tick/engine/menu events
-        if self.state.view.context_menu.is_some() && !context_menu_message_keeps_open(&message) {
-            self.state.view.context_menu = None;
-        }
-
         let should_mark_dirty = matches!(
             &message,
             Message::Transport(TransportMsg::BpmSubmit)
@@ -83,6 +60,14 @@ impl App {
         }
 
         match message {
+            Message::MenuItemSelected(overlay, action) => {
+                let task = self.update(*action);
+                menu_lifecycle::dismiss(&mut self.state, overlay);
+                return task;
+            }
+            Message::DismissMenu(overlay) => {
+                menu_lifecycle::dismiss(&mut self.state, overlay);
+            }
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
@@ -251,7 +236,6 @@ impl App {
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;
-                self.state.project.file_menu_open = false;
             }
             Message::CloseSettings => {
                 self.state.settings_open = false;
@@ -411,7 +395,6 @@ impl App {
 
             // -- Bounce / resample --
             Message::BounceSelectionToAudio => {
-                self.state.view.context_menu = None;
                 if !self.state.arrangement.time_selection_active
                     || self.state.arrangement.selection_end_beats
                         <= self.state.arrangement.selection_start_beats
@@ -452,7 +435,6 @@ impl App {
 
             // -- Quantize --
             Message::QuantizeAudioClip { track_id, clip_id } => {
-                self.state.view.context_menu = None;
                 let grid = self
                     .state
                     .view
@@ -536,7 +518,6 @@ impl App {
 
             // -- Export --
             Message::ExportProject => {
-                self.state.project.file_menu_open = false;
                 let default_name = self
                     .state
                     .project

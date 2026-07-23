@@ -173,9 +173,6 @@ impl App {
         &mut self,
         action: crate::domains::arrangement::ArrangementAction,
     ) -> Task<Message> {
-        if action.close_context_menu {
-            self.state.view.context_menu = None;
-        }
         if action.focus_clip_tab {
             self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
@@ -183,7 +180,6 @@ impl App {
             self.auto_scroll_to_beat(beat);
         }
         if let Some((start, end)) = action.loop_from_selection {
-            self.state.view.context_menu = None;
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             let _ = self.state.transport.update(
                 crate::domains::transport::TransportMsg::SetArrangementLoopRegion {
@@ -320,9 +316,6 @@ impl App {
         &mut self,
         action: crate::domains::piano_roll::PianoRollAction,
     ) {
-        if action.close_context_menu {
-            self.state.view.context_menu = None;
-        }
         if let Some(sel) = action.select_note_clip {
             if self.state.view.workspace == crate::state::Workspace::Perform
                 && self.state.perform.selected_section.is_some()

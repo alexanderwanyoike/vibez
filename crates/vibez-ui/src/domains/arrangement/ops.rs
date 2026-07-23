@@ -22,10 +22,7 @@ impl TimelineEditorState {
         end_beats: f64,
         track_id: Option<TrackId>,
     ) -> ArrangementAction {
-        let mut action = ArrangementAction {
-            close_context_menu: true,
-            ..Default::default()
-        };
+        let mut action = ArrangementAction::default();
         let target_track = track_id;
         let spb = ctx.samples_per_beat;
         // Preserve material outside the range. Splitting first turns
@@ -84,10 +81,7 @@ impl TimelineEditorState {
         end_beats: f64,
         track_id: Option<TrackId>,
     ) -> ArrangementAction {
-        let mut action = ArrangementAction {
-            close_context_menu: true,
-            ..Default::default()
-        };
+        let mut action = ArrangementAction::default();
         let target_track = track_id;
         let spb = ctx.samples_per_beat;
         let mut split_count = 0u32;
@@ -188,10 +182,7 @@ impl TimelineEditorState {
         _ctx: ArrangementCtx,
         track_id: TrackId,
     ) -> ArrangementAction {
-        let mut action = ArrangementAction {
-            close_context_menu: true,
-            ..Default::default()
-        };
+        let mut action = ArrangementAction::default();
         if !self.time_selection_active || self.selection_end_beats <= self.selection_start_beats {
             action.status = Some("No time selection active".to_string());
             return action;
