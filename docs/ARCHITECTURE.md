@@ -214,6 +214,28 @@ one undo step. Track Mute events join the Capture log at their engine-effective
 samples and materialize as `track_mute` step points with a closing point that
 restores the pre-take manual state.
 
+Live Instrument input and pointer automation join that same engine-timestamped
+Capture log. Free notes retain their audible onset, velocity, and duration with
+Groove Grid Off; Note Repeat retains the canonical straight-clock onset and
+matching Groove Grid so Track Swing is applied exactly once. Notes already held
+at the Capture boundary are excluded, open notes truncate at stop, and live
+notes remain independent from coincident Section notes and Section Record's
+quantized copy. A resident Section source refresh reports both its exact
+Perform timestamp and local Section playhead so Capture can close the old span
+and re-snapshot the newly audible source without rewriting earlier passes.
+
+On Perform-controlled Project Tracks, the resident Section automation is the
+baseline while a pointer gesture temporarily owns its target. The audio thread
+stores active target ownership in fixed-capacity channel-strip state, so
+automation evaluation cannot overwrite gain, pan, Track Swing, or device
+parameters during the gesture. Gesture events carry effective values and
+sample timestamps back to Capture; materialization thins each curve, pins the
+copied baseline around the gesture, and writes an immediate yield-back step on
+release. Transport Stop ends active ownership before closing Capture. Arrange
+automation remains suspended for those resident tracks and stays active on
+tracks outside Perform. Project Swing is locked for the whole Capture session
+because Capture has no master Project Swing lane.
+
 The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
 Project Swing, and optional Project Track Swing offsets as canonical project
 data and undo state. Swing uses the profile's native `50..75%` long/short pair

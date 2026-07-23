@@ -55,10 +55,14 @@ pub struct SwingKnobWidget {
 
 impl SwingKnobWidget {
     pub fn project(value: SwingAmount) -> Self {
+        Self::project_locked(value, false)
+    }
+
+    pub fn project_locked(value: SwingAmount, locked: bool) -> Self {
         Self {
             target: SwingTarget::Project,
             effective_value: value.get(),
-            automated: false,
+            automated: locked,
         }
     }
 
