@@ -279,16 +279,18 @@ fn arrangement_loop_does_not_wrap_section_engine_time() {
 
     engine.process(&mut [0.0; 3], 1);
 
-    assert_eq!(engine.transport().position(), 3);
-    assert!(
-        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
-            event,
-            EngineEvent::SectionPlaybackPosition {
-                section_id: actual,
-                position_samples: 3,
-            } if actual == section_id
-        ))
-    );
+    assert_eq!(engine.transport().position(), 0);
+    let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, EngineEvent::PerformancePosition(3))));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EngineEvent::SectionPlaybackPosition {
+            section_id: actual,
+            position_samples: 3,
+        } if *actual == section_id
+    )));
 }
 
 #[test]

@@ -47,6 +47,9 @@ pub struct TransportCtx {
     pub time_selection: Option<(f64, f64)>,
     /// Perform holds one project BPM until its Section transport stops.
     pub perform_tempo_locked: bool,
+    /// Perform owns the running playback source, so Stop must not seek the
+    /// independent Arrange cursor back to zero.
+    pub perform_playback_active: bool,
 }
 
 /// Cross-domain effects the transport cannot perform itself. The
@@ -88,9 +91,11 @@ impl TransportState {
             }
             TransportMsg::Stop => {
                 self.playing = false;
-                self.position_samples = 0;
                 engine.send(EngineCommand::Stop);
-                engine.send(EngineCommand::Seek(0));
+                if !ctx.perform_playback_active {
+                    self.position_samples = 0;
+                    engine.send(EngineCommand::Seek(0));
+                }
                 TransportAction::None
             }
             TransportMsg::TogglePlayback => {
@@ -235,6 +240,26 @@ mod tests {
         assert!(!t.playing);
         assert_eq!(t.position_samples, 0);
         assert!(matches!(engine.0[1], EngineCommand::Seek(0)));
+    }
+
+    #[test]
+    fn perform_stop_preserves_the_arrange_cursor_and_does_not_seek() {
+        let mut t = transport();
+        t.playing = true;
+        t.position_samples = 12_345;
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::Stop,
+            &mut engine,
+            TransportCtx {
+                perform_playback_active: true,
+                ..TransportCtx::default()
+            },
+        );
+
+        assert!(!t.playing);
+        assert_eq!(t.position_samples, 12_345);
+        assert!(matches!(engine.0.as_slice(), [EngineCommand::Stop]));
     }
 
     #[test]

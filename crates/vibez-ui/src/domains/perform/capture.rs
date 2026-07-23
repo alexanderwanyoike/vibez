@@ -210,6 +210,13 @@ impl CaptureState {
         self.phase != CapturePhase::Idle
     }
 
+    pub fn arrange_start_samples(&self) -> Option<u64> {
+        self.session
+            .as_ref()
+            .map(|session| session.clock.arrange_start_samples)
+            .or_else(|| self.prepared_clock.map(|clock| clock.arrange_start_samples))
+    }
+
     pub fn update(&mut self, msg: CaptureMsg) -> PerformAction {
         match (msg, self.phase) {
             (CaptureMsg::Toggle, CapturePhase::Idle) => {
@@ -529,8 +536,10 @@ mod tests {
         capture.phase = CapturePhase::Starting;
         capture.prepare(40, 8, 120.0);
         capture.start(3, Some((CapturedSectionSource::from_section(&first), 0)));
+        assert_eq!(capture.arrange_start_samples(), Some(40));
         capture.transition(CapturedSectionSource::from_section(&second), 10);
         let completed = capture.finish(15).unwrap();
+        assert_eq!(capture.arrange_start_samples(), None);
         let materialized = completed.materialize();
         let clips = &materialized.by_track[&track_id].clips;
 

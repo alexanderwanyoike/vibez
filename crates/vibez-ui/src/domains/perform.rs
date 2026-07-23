@@ -198,6 +198,9 @@ pub struct PerformState {
     pub queued_section: Option<SectionId>,
     pub pending_section_boundary_samples: Option<u64>,
     pub section_playhead_samples: u64,
+    /// Engine-owned, zero-based clock for the current Perform session.
+    /// This is deliberately independent of the Arrange cursor.
+    pub performance_position_samples: u64,
     active_computer_keys:
         HashMap<String, (PadPosition, PadGestureSource, Option<ActiveInstrumentNote>)>,
     track_mute_slots: Vec<Option<TrackId>>,

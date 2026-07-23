@@ -138,7 +138,7 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
             _ => None,
         })
         .collect();
-    assert_eq!(repeated, vec![36, 66, 84]);
+    assert_eq!(repeated, vec![0, 30, 48]);
 }
 
 #[test]

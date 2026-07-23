@@ -22,6 +22,8 @@ use crate::note_repeat::{NoteRepeatClock, NoteRepeatStart};
 use crate::playback_source::{calculate_total_length, PreparedSectionPlaybackSource};
 use crate::transport::Transport;
 
+use self::clock::ClockDomain;
+
 /// Capacity of the UI spectrum-analyser sample ring: roughly a third
 /// of a second of mono audio at 48 kHz, ample for a 60 fps drain.
 const SPECTRUM_RING_CAPACITY: usize = 16_384;
@@ -83,8 +85,12 @@ pub struct AudioEngine {
     /// it while existing playback remains untouched.
     project_swing: SwingAmount,
     /// Continues Note Repeat timing while transport is stopped. While playing,
-    /// this is kept aligned with the absolute transport position.
+    /// this follows the active clock domain.
     performance_position: u64,
+    /// The clock currently authorised to advance. Perform owns an independent
+    /// zero-based engine timeline; its playback must never mutate the
+    /// canonical Arrange cursor held by `transport.position()`.
+    clock_domain: ClockDomain,
     /// Vibez extends MPC Note Repeat to stopped transport. The first held pad
     /// establishes this shared musical downbeat until the last repeat stops.
     stopped_note_repeat_anchor: Option<u64>,
@@ -141,6 +147,7 @@ impl AudioEngine {
             arrangement_audio_length: None,
             project_swing: SwingAmount::default(),
             performance_position: 0,
+            clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
         };
 
@@ -201,7 +208,7 @@ impl AudioEngine {
         let block_beat = if self.transport.is_playing() {
             let bpm = self.transport.bpm();
             if bpm > 0.0 {
-                Some(self.transport.position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
+                Some(self.effective_position() as f64 * bpm / (self.sample_rate as f64 * 60.0))
             } else {
                 None
             }
@@ -302,17 +309,18 @@ impl AudioEngine {
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
         let pos_before = self.transport.position();
-        let section_count_in = self
-            .pending_section_record
-            .as_ref()
-            .is_some_and(|pending| pending.prepared.is_some());
-        let new_pos = if self.active_section.is_some() || section_count_in {
-            self.transport.advance_unbounded(frames as u64)
+        let performing = self.clock_domain == ClockDomain::Perform;
+        let new_pos = if performing {
+            self.transport.position()
         } else {
             self.transport.advance(frames as u64)
         };
         self.performance_position = if was_playing {
-            new_pos
+            if performing {
+                self.performance_position.saturating_add(frames as u64)
+            } else {
+                new_pos
+            }
         } else {
             self.performance_position.saturating_add(frames as u64)
         };
@@ -342,11 +350,12 @@ impl AudioEngine {
         if section_ended {
             self.stop_section_record();
             let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
-                effective_at_samples: new_pos,
+                effective_at_samples: self.performance_position,
             });
             self.transport.stop();
             let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
             self.active_section = None;
+            self.clock_domain = ClockDomain::Arrange;
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
         }
@@ -358,6 +367,7 @@ impl AudioEngine {
         // adjacent positions. When the split ran, notes started
         // after the wrap are legitimately sounding and must survive.
         if was_playing
+            && !performing
             && !self.split_wrap_handled
             && new_pos != pos_before.saturating_add(frames as u64)
         {
@@ -369,6 +379,11 @@ impl AudioEngine {
 
         // Position event.
         let _ = self.event_tx.push(EngineEvent::PlaybackPosition(new_pos));
+        if performing {
+            let _ = self
+                .event_tx
+                .push(EngineEvent::PerformancePosition(self.performance_position));
+        }
 
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
@@ -936,6 +951,9 @@ fn push_spectrum(tx: &mut Producer<f32>, buffer: &[f32], channels: usize) {
 
 #[path = "engine_drain_commands.rs"]
 mod drain_commands;
+
+#[path = "engine_clock.rs"]
+mod clock;
 
 #[path = "engine_section_queue.rs"]
 mod section_queue;

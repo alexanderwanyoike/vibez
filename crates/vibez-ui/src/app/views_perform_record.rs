@@ -40,7 +40,7 @@ impl App {
                         .then(|| {
                             count_in_beats_remaining(
                                 boundary,
-                                self.state.transport.position_samples,
+                                self.state.perform.performance_position_samples,
                                 self.state.transport.bpm,
                                 self.state.transport.sample_rate,
                             )
@@ -52,12 +52,14 @@ impl App {
             SectionRecordPhase::Recording => "RECORDING".into(),
             SectionRecordPhase::Stopping => "STOPPING".into(),
         };
-        let capture_phase = match capture.phase {
-            CapturePhase::Idle => "ARRANGE · READY",
-            CapturePhase::Starting => "ARRANGE · STARTING",
-            CapturePhase::Recording => "ARRANGE · CAPTURING",
-            CapturePhase::Stopping => "ARRANGE · STOPPING",
-        };
+        let arrange_destination = capture
+            .arrange_start_samples()
+            .unwrap_or(self.state.transport.position_samples);
+        let capture_phase = capture_destination_label(
+            arrange_destination,
+            self.state.transport.sample_rate,
+            capture.phase,
+        );
 
         let record_button = button(record_button_content(active))
             .on_press(Message::Perform(PerformMsg::SectionRecord(
@@ -213,6 +215,28 @@ fn count_in_beats_remaining(
     Some(remaining.saturating_add(beat_samples - 1) / beat_samples)
 }
 
+fn capture_destination_label(
+    arrange_samples: u64,
+    sample_rate: u32,
+    phase: CapturePhase,
+) -> String {
+    let seconds = if sample_rate == 0 {
+        0.0
+    } else {
+        arrange_samples as f64 / f64::from(sample_rate)
+    };
+    let phase = match phase {
+        CapturePhase::Idle => "READY",
+        CapturePhase::Starting => "STARTING",
+        CapturePhase::Recording => "CAPTURING",
+        CapturePhase::Stopping => "STOPPING",
+    };
+    format!(
+        "ARRANGE @ {} · {phase}",
+        crate::state::AppState::format_time(seconds)
+    )
+}
+
 fn record_button_content(active: bool) -> Element<'static, Message> {
     let color = if active { th::bg_dark() } else { th::danger() };
     row![
@@ -328,7 +352,8 @@ fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use super::count_in_beats_remaining;
+    use super::{capture_destination_label, count_in_beats_remaining};
+    use crate::domains::perform::CapturePhase;
 
     #[test]
     fn count_in_label_counts_whole_beats_down_to_one() {
@@ -348,6 +373,14 @@ mod tests {
         assert_eq!(
             count_in_beats_remaining(88_200, 88_200, 120.0, 44_100),
             None
+        );
+    }
+
+    #[test]
+    fn capture_label_keeps_the_fixed_arrange_destination_visible() {
+        assert_eq!(
+            capture_destination_label(240_000, 48_000, CapturePhase::Recording),
+            "ARRANGE @ 00:05.00 · CAPTURING"
         );
     }
 }

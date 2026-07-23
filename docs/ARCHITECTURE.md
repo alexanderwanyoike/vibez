@@ -177,14 +177,22 @@ duration and keep Groove Grid Off. `1/8` and `1/16` Note Repeat stores the
 canonical straight position with its matching Groove Grid, so playback applies
 live Swing once and later Swing edits remain effective.
 
-Capture into Arrange is a separate runtime log over the same engine clock.
+Capture into Arrange is a separate runtime log over the Perform clock. The
+engine owns two explicit clock domains: the canonical Arrange cursor advances
+only while Arrange renders, while a zero-based monotonic Perform clock advances
+during Section playback and stopped-start count-in. Section queue, Record,
+Note Repeat, monitored input, Track Mute, and Capture events use the latter.
+`PlaybackPosition` therefore always means Arrange cursor;
+`PerformancePosition` is the independent value shown as Performance time.
 `PerformanceCaptureStarted`, `SectionTransitioned`, and
 `PerformanceCaptureStopped` report exact effective samples, including a
 transition that splits an audio callback and a Capture begun partway through an
 already-playing Section. The UI snapshots each canonical Section timeline at
 the boundary where it becomes audible. On stop, it flattens those snapshots
 across Section loop passes into newly identified Arrange audio and MIDI clips,
-offset from the Arrange playhead captured at session start. The copied clips
+offset from the fixed Arrange cursor captured at session start. Elapsed Perform
+time is mapped onto that destination, so rehearsal and Section loops cannot
+move it. The copied clips
 share only immutable decoded audio; they retain no Section identity or mutable
 reference, so later Section edits and launches cannot rewrite Arrange.
 
@@ -360,7 +368,8 @@ clip `Arc`s and exposes no loader or I/O API.
 `EngineCommand::LaunchSection` retains the immediate Card 10 path.
 `EngineCommand::QueueSection` transfers a prepared owner plus its Immediate,
 beat, bar, or end-of-Section policy. The engine computes and owns the pending
-absolute sample boundary, returns displaced queued owners to the UI thread, and
+absolute Perform-sample boundary, returns displaced queued owners to the UI
+thread, and
 splits rendering when that boundary falls partway through a callback. Only then
 does it swap the resident pointers, reset the local Section playhead, and emit a
 sample-timestamped `SectionTransitioned` event. `SectionQueued` is likewise the
@@ -374,9 +383,10 @@ hold one Project BPM until Perform playback stops.
 
 `EngineCommand::ArmSectionRecord` adds a separate engine-clock state machine.
 An already-playing Section computes the next bar from its local playhead. A
-stopped-start count-in advances on an unbounded clock and, if its boundary falls
-inside a callback, renders the prefix before activating the resident Section at
-local sample zero for the suffix. Recording does not route notes through a
+stopped-start count-in advances the monotonic Perform clock without touching
+the Arrange cursor and, if its boundary falls inside a callback, renders the
+prefix before activating the resident Section at local sample zero for the
+suffix. Recording does not route notes through a
 second renderer: monitored input stays on the existing instrument path while
 `InstrumentNoteInput` and enriched `NoteRepeated` events report the exact
 effective/local positions. `StopSectionRecord` returns a cancelled resident

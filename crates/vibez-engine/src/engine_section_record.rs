@@ -56,6 +56,7 @@ impl AudioEngine {
             return;
         }
         self.cancel_section_queue();
+        self.begin_performance_clock();
 
         let now = self.performance_position;
         let count_in_beat_samples = self.section_length_samples(1.0);
@@ -94,7 +95,6 @@ impl AudioEngine {
                     .saturating_mul(u64::from(count_in_bars));
                 if !self.transport.is_playing() {
                     self.transport.play();
-                    self.performance_position = self.transport.position();
                     self.stopped_note_repeat_anchor = None;
                     let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
                 }
