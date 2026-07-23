@@ -125,6 +125,12 @@ impl AudioEngine {
                     let event = EngineEvent::SectionSourceRefreshed {
                         section_id,
                         applied,
+                        effective_at_samples: self.effective_position(),
+                        section_position_samples: applied.then(|| {
+                            self.active_section
+                                .map(|active| active.position_samples)
+                                .unwrap_or(0)
+                        }),
                         retired: prepared,
                     };
                     if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
@@ -280,9 +286,7 @@ impl AudioEngine {
                     self.recalculate_audio_length();
                 }
                 EngineCommand::SetTrackGain(id, gain) => {
-                    if let Some(track) = self.channel_mut(id) {
-                        track.gain = gain;
-                    }
+                    self.set_track_gain(id, gain);
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
                     if let Some(track) = self.channel_mut(track_id) {
@@ -303,55 +307,28 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
-                    if let Some(track) = self.channel_mut(id) {
-                        track.pan = pan.clamp(0.0, 1.0);
-                    }
+                    self.set_track_pan(id, pan);
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
-                    let effective_at_samples = self.effective_position();
-                    let playing = self.transport.is_playing();
-                    let (changed, override_changed) = if let Some(track) = self.channel_mut(id) {
-                        let override_changed = track.has_automation_target(
-                            vibez_core::automation::AutomationTarget::TrackMute,
-                        ) && track.set_automation_override(
-                            vibez_core::automation::AutomationTarget::TrackMute,
-                            true,
-                        );
-                        track.set_manual_mute(mute, !playing);
-                        (true, override_changed)
-                    } else {
-                        (false, false)
-                    };
-                    if changed {
-                        let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
-                            track_id: id,
-                            muted: mute,
-                            effective_at_samples,
-                        });
-                    }
-                    if override_changed {
-                        let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
-                            track_id: id,
-                            target: vibez_core::automation::AutomationTarget::TrackMute,
-                            overridden: true,
-                        });
-                    }
+                    self.set_track_mute(id, mute);
                 }
                 EngineCommand::SetAutomationOverride {
                     track_id,
                     target,
                     overridden,
                 } => {
-                    let changed = self
-                        .channel_mut(track_id)
-                        .is_some_and(|track| track.set_automation_override(target, overridden));
-                    if changed {
-                        let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
-                            track_id,
-                            target,
-                            overridden,
-                        });
-                    }
+                    self.set_automation_override(track_id, target, overridden);
+                }
+                EngineCommand::UpdateAutomationGesture {
+                    track_id,
+                    target,
+                    normalized_value,
+                    begin,
+                } => {
+                    self.update_automation_gesture(track_id, target, normalized_value, begin);
+                }
+                EngineCommand::EndAutomationGesture { track_id, target } => {
+                    self.end_automation_gesture(track_id, target);
                 }
 
                 // -- Busses --
@@ -392,9 +369,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackSwingOffset(id, offset) => {
-                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
-                        track.swing_offset = offset;
-                    }
+                    self.set_track_swing_offset(id, offset);
                 }
 
                 // -- Infrastructure --
@@ -447,11 +422,7 @@ impl AudioEngine {
                     param_index,
                     value,
                 } => {
-                    if let Some(track) = self.channel_mut(track_id) {
-                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
-                            slot.effect.set_param(param_index, value);
-                        }
-                    }
+                    self.set_effect_param(track_id, effect_id, param_index, value);
                 }
                 EngineCommand::SetEffectBypass {
                     track_id,

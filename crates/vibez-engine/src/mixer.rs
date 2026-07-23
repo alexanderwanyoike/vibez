@@ -63,26 +63,34 @@ impl MuteRamp {
     }
 }
 
-/// Runtime manual-overrides for automated parameters. Mute is the first
-/// consumer; later parameters extend this value without changing ownership.
+/// Runtime manual-overrides for automated parameters. The fixed-capacity
+/// storage keeps gesture changes allocation-free on the audio thread.
 #[derive(Debug, Default)]
 struct AutomationOverrides {
-    track_mute: bool,
+    targets: [Option<vibez_core::automation::AutomationTarget>; 16],
 }
 
 impl AutomationOverrides {
     fn contains(&self, target: vibez_core::automation::AutomationTarget) -> bool {
-        matches!(target, vibez_core::automation::AutomationTarget::TrackMute) && self.track_mute
+        self.targets.contains(&Some(target))
     }
 
     fn set(&mut self, target: vibez_core::automation::AutomationTarget, overridden: bool) -> bool {
-        let slot = match target {
-            vibez_core::automation::AutomationTarget::TrackMute => &mut self.track_mute,
-            _ => return false,
-        };
-        let changed = *slot != overridden;
-        *slot = overridden;
-        changed
+        let existing = self.targets.iter().position(|entry| *entry == Some(target));
+        match (existing, overridden) {
+            (Some(_), true) | (None, false) => false,
+            (Some(index), false) => {
+                self.targets[index] = None;
+                true
+            }
+            (None, true) => {
+                let Some(slot) = self.targets.iter_mut().find(|entry| entry.is_none()) else {
+                    return false;
+                };
+                *slot = Some(target);
+                true
+            }
+        }
     }
 }
 
