@@ -126,25 +126,6 @@ pub enum EngineCommand {
     SetTrackPan(TrackId, f32),
     /// Set the mute state for a track.
     SetTrackMute(TrackId, bool),
-    /// Enable or clear a manual override for one automated parameter.
-    SetAutomationOverride {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-        overridden: bool,
-    },
-    /// Mark the first or a subsequent effective value in one live pointer
-    /// gesture. The ordinary parameter command follows in the same drain.
-    UpdateAutomationGesture {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-        normalized_value: f32,
-        begin: bool,
-    },
-    /// Yield a live pointer gesture back to its active automation lane.
-    EndAutomationGesture {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-    },
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
     /// Set the optional Project Track Swing adjustment used by generated

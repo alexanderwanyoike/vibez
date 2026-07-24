@@ -148,7 +148,7 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
 
 #[test]
 fn refreshing_the_active_section_changes_content_without_restarting_its_playhead() {
-    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     let section_id = SectionId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
@@ -200,16 +200,6 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
         .expect("Section remains active")
         .position_samples;
     assert_eq!(position, 8, "refresh preserves the four elapsed samples");
-    let refresh = std::iter::from_fn(|| events.pop().ok()).find_map(|event| match event {
-        EngineEvent::SectionSourceRefreshed {
-            applied,
-            effective_at_samples,
-            section_position_samples,
-            ..
-        } => Some((applied, effective_at_samples, section_position_samples)),
-        _ => None,
-    });
-    assert_eq!(refresh, Some((true, 4, Some(4))));
 }
 
 #[test]

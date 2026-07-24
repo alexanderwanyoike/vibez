@@ -28,7 +28,7 @@ use crate::message::{
     ProjectSaveResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
-use crate::state::{AppState, AudioStreamHealth};
+use crate::state::AppState;
 use crate::theme as th;
 use crate::ui_settings::UiSettings;
 
@@ -134,7 +134,6 @@ mod capture;
 mod engine_events;
 mod keyboard;
 mod local_watcher;
-mod menu_lifecycle;
 mod tracked_request;
 
 use async_helpers::*;
@@ -151,10 +150,8 @@ mod section_record;
 mod update;
 mod update_media;
 mod update_policy;
-mod update_project;
 mod update_remote;
 mod update_timeline;
-mod update_view;
 mod views_arrangement;
 mod views_automation;
 mod views_browser;
@@ -187,25 +184,19 @@ impl App {
         let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
 
-        let (stream, sample_rate, audio_stream_health) =
-            match AudioOutputStream::open(engine, Some(512)) {
-                Ok(s) => {
-                    let sr = s.sample_rate();
-                    let health = match s.play() {
-                        Ok(()) => AudioStreamHealth::Running,
-                        Err(e) => {
-                            eprintln!("vibez: failed to start audio stream: {e}");
-                            AudioStreamHealth::Error(e.to_string())
-                        }
-                    };
-                    (Some(s), sr, health)
+        let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
+            Ok(s) => {
+                let sr = s.sample_rate();
+                if let Err(e) = s.play() {
+                    eprintln!("vibez: failed to start audio stream: {e}");
                 }
-                Err(e) => {
-                    eprintln!("vibez: failed to open audio stream: {e}");
-                    let cause = e.to_string();
-                    (None, 44_100, AudioStreamHealth::Error(cause))
-                }
-            };
+                (Some(s), sr)
+            }
+            Err(e) => {
+                eprintln!("vibez: failed to open audio stream: {e}");
+                (None, 44_100)
+            }
+        };
 
         let dropbox_settings = DropboxSettings::load();
         let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
@@ -259,7 +250,6 @@ impl App {
                 sample_rate,
                 ..Default::default()
             },
-            audio_stream_health,
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
@@ -283,9 +273,6 @@ impl App {
             },
             ..Default::default()
         };
-        if let AudioStreamHealth::Error(cause) = &state.audio_stream_health {
-            state.status_text = format!("Audio stream error: {cause}");
-        }
         state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
         state
             .perform

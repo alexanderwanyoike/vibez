@@ -56,15 +56,6 @@ pub enum DrumPadParam {
     FineTune,
 }
 
-/// Menus whose lifecycle is owned by their overlay rather than inferred from
-/// unrelated application messages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuOverlay {
-    ArrangementContext,
-    File,
-    Edit,
-}
-
 #[derive(Debug, Clone)]
 pub struct LoadedClipData {
     pub info: ClipInfo,
@@ -263,12 +254,6 @@ pub struct ProjectSaveResult {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// A menu item was chosen. The router dispatches the action, then closes
-    /// only the overlay that produced it.
-    MenuItemSelected(MenuOverlay, Box<Message>),
-    /// Explicit dismissal from an overlay backdrop or another first-class
-    /// lifecycle input such as Escape.
-    DismissMenu(MenuOverlay),
     /// One incremental update within a continuous pointer edit. Messages from
     /// the same gesture share one pre-edit undo snapshot.
     UndoGesture {
@@ -673,14 +658,6 @@ impl Message {
 }
 
 impl Message {
-    pub fn menu_item(overlay: MenuOverlay, action: Self) -> Self {
-        Self::MenuItemSelected(overlay, Box::new(action))
-    }
-
-    pub fn dismiss_menu(overlay: MenuOverlay) -> Self {
-        Self::DismissMenu(overlay)
-    }
-
     pub fn select_track(t: TrackId) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SelectTrack(t))
     }

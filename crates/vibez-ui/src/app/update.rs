@@ -5,7 +5,10 @@ use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::project::ProjectMsg;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::transport::TransportMsg;
+use crate::domains::view::ViewMsg;
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
@@ -13,7 +16,7 @@ use crate::services::plugin_loader::{load_plugin_effect_bg, load_plugin_instrume
 
 use crate::message::Message;
 
-use super::update_policy::apply_project_track_deletion_policy;
+use super::update_policy::{apply_project_track_deletion_policy, context_menu_message_keeps_open};
 use super::*;
 
 impl App {
@@ -24,14 +27,29 @@ impl App {
         };
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
-        if self.prepare_capture_message(undo_gesture, &message) {
-            return Task::none();
-        }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
-        let deferred_clipboard_project_edit = matches!(
-            &message,
-            Message::Arrangement(msg) if msg.is_clipboard_project_edit()
-        );
+        if self.state.view.edit_menu_open {
+            let keep_menu = matches!(
+                &message,
+                Message::Tick
+                    | Message::Transport(TransportMsg::EnginePosition(_))
+                    | Message::EngineMetering { .. }
+                    | Message::Transport(TransportMsg::EngineStopped)
+                    | Message::Arrangement(ArrangementMsg::EngineTrackMeter { .. })
+                    | Message::View(ViewMsg::ToggleEditMenu)
+                    | Message::View(ViewMsg::CursorMoved(_, _))
+                    | Message::View(ViewMsg::WindowResized(_, _))
+                    | Message::View(ViewMsg::MouseReleased)
+            );
+            if !keep_menu {
+                self.state.view.edit_menu_open = false;
+            }
+        }
+        // Auto-dismiss context menu on any action except tick/engine/menu events
+        if self.state.view.context_menu.is_some() && !context_menu_message_keeps_open(&message) {
+            self.state.view.context_menu = None;
+        }
+
         let should_mark_dirty = matches!(
             &message,
             Message::Transport(TransportMsg::BpmSubmit)
@@ -61,20 +79,12 @@ impl App {
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
             || matches!(&message, Message::Automation(m) if m.marks_dirty())
             || matches!(&message, Message::Perform(m) if m.marks_dirty());
-        if should_mark_dirty && !deferred_clipboard_project_edit {
+        if should_mark_dirty {
             self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();
         }
 
         match message {
-            Message::MenuItemSelected(overlay, action) => {
-                let task = self.update(*action);
-                menu_lifecycle::dismiss(&mut self.state, overlay);
-                return task;
-            }
-            Message::DismissMenu(overlay) => {
-                menu_lifecycle::dismiss(&mut self.state, overlay);
-            }
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
@@ -92,7 +102,6 @@ impl App {
                             if self.state.transport.playing
                     );
                 if stops_perform {
-                    self.end_capture_automation_gesture();
                     self.section_residency_request.cancel();
                 }
                 let perform_playback_active = self.state.perform.playing_section.is_some()
@@ -137,9 +146,6 @@ impl App {
                 self.apply_devices_action(action);
             }
             Message::Arrangement(msg) => {
-                let clipboard_snapshot = msg
-                    .is_clipboard_project_edit()
-                    .then(|| self.take_snapshot());
                 let ctx = crate::domains::arrangement::ArrangementCtx {
                     samples_per_beat: if self.state.transport.bpm > 0.0 {
                         60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
@@ -150,10 +156,6 @@ impl App {
                     playhead_beats: self.state.position_beats(),
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
-                if let (true, Some(snapshot)) = (action.mark_dirty, clipboard_snapshot) {
-                    self.state.project.history.push_edit(snapshot, undo_gesture);
-                    self.mark_project_dirty();
-                }
                 self.state
                     .perform
                     .sync_project_tracks(&self.state.project_tracks.tracks);
@@ -210,10 +212,118 @@ impl App {
                 self.finish_section_record_residency(request_id, request, resident);
             }
             Message::View(msg) => {
-                return self.route_view_message(msg);
+                if matches!(&msg, ViewMsg::ToggleEditMenu) {
+                    self.state.project.file_menu_open = false;
+                }
+                let browser_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::ResizeDock(
+                            self.state
+                                .browser
+                                .dock_drag_width(*x, self.state.view.window_width),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::EndDockResize)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = browser_resize {
+                    let action = self.state.browser.update(browser_msg);
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let detail_panel_resize = match &msg {
+                    ViewMsg::CursorMoved(_, y) if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::ResizeDetailPanel(
+                            self.detail_panel_drag_height(*y),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::EndDetailPanelResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = detail_panel_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let perform_surface_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::ResizePerformSurface(
+                            self.perform_surface_drag_width(*x),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::EndPerformSurfaceResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = perform_surface_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let pending_drag_msg = match &msg {
+                    ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = pending_drag_msg {
+                    let action = self.state.browser.update(browser_msg);
+                    if let Some(status) = action.status {
+                        self.state.status_text = status;
+                    }
+                }
+                let ctx = crate::domains::view::ViewCtx {
+                    total_beats: self.state.total_beats(),
+                };
+                let action = self.state.view.update(
+                    msg,
+                    self.state.arrangement.resolve_timeline().editor,
+                    ctx,
+                );
+                return self.apply_view_action(action);
             }
             Message::Project(msg) => {
-                return self.route_project_message(msg);
+                if matches!(&msg, ProjectMsg::ToggleFileMenu) {
+                    self.state.view.edit_menu_open = false;
+                }
+                let ctx = crate::domains::project::ProjectCtx {
+                    snapshot_now: self.take_snapshot(),
+                };
+                let action = self.state.project.update(msg, ctx);
+                if let Some(status) = action.status {
+                    self.state.status_text = status;
+                }
+                if let Some(snapshot) = action.apply_snapshot {
+                    self.apply_snapshot(snapshot);
+                }
             }
 
             // -- Workspace --
@@ -224,33 +334,100 @@ impl App {
 
             // -- File menu --
             Message::NewProject => {
-                return self.route_new_project();
+                self.state.project.file_menu_open = false;
+                self.reset_to_new_project();
             }
             Message::OpenProject => {
-                return self.route_open_project();
+                self.state.project.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Open Vibez Project")
+                            .add_filter("Vibez Project", &["vzp", "vibez", "json"])
+                            .pick_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectOpenPathSelected,
+                );
             }
             Message::SaveProject => {
-                return self.route_save_project();
+                self.state.project.file_menu_open = false;
+                let project = self.project_for_save();
+                if let Some(path) = self.state.project.current_path.clone() {
+                    return Task::perform(
+                        save_project_async(path.clone(), Some(path), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
+                }
+                return self.update(Message::SaveProjectAs);
             }
             Message::SaveProjectAs => {
-                return self.route_save_project_as();
+                self.state.project.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Save Vibez Project")
+                            .set_file_name("Untitled.vzp")
+                            .add_filter("Vibez Project Format V1", &["vzp"])
+                            .save_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectSavePathSelected,
+                );
             }
             Message::ProjectOpenPathSelected(path) => {
-                return self.route_project_open_path_selected(path);
+                if let Some(path) = path {
+                    self.state.status_text = format!("Opening {}...", path.display());
+                    let dropbox = self
+                        .dropbox_client
+                        .clone()
+                        .map(|client| (client, self.dropbox_cache.clone()));
+                    return Task::perform(load_project_async(path, dropbox), |result| {
+                        Message::ProjectLoaded(Box::new(result))
+                    });
+                }
             }
             Message::ProjectSavePathSelected(path) => {
-                return self.route_project_save_path_selected(path);
+                if let Some(mut path) = path {
+                    if !path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"))
+                    {
+                        path.set_extension("vzp");
+                    }
+                    let project = self.project_for_save();
+                    return Task::perform(
+                        save_project_async(path, self.state.project.current_path.clone(), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
+                }
             }
-            Message::ProjectLoaded(result) => {
-                return self.route_project_loaded(*result);
-            }
-            Message::ProjectSaved(result) => {
-                return self.route_project_saved(*result);
-            }
+            Message::ProjectLoaded(result) => match *result {
+                Ok(loaded) => {
+                    self.rebuild_from_loaded_project(loaded);
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project load error: {err}");
+                }
+            },
+            Message::ProjectSaved(result) => match *result {
+                Ok(saved) => {
+                    self.apply_saved_project_sources(&saved.project);
+                    self.state.project.current_path = Some(saved.path.clone());
+                    self.state.project.dirty = false;
+                    self.state.status_text = format!("Saved {}", saved.path.display());
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project save error: {err}");
+                }
+            },
 
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;
+                self.state.project.file_menu_open = false;
             }
             Message::CloseSettings => {
                 self.state.settings_open = false;
@@ -410,6 +587,7 @@ impl App {
 
             // -- Bounce / resample --
             Message::BounceSelectionToAudio => {
+                self.state.view.context_menu = None;
                 if !self.state.arrangement.time_selection_active
                     || self.state.arrangement.selection_end_beats
                         <= self.state.arrangement.selection_start_beats
@@ -450,6 +628,7 @@ impl App {
 
             // -- Quantize --
             Message::QuantizeAudioClip { track_id, clip_id } => {
+                self.state.view.context_menu = None;
                 let grid = self
                     .state
                     .view
@@ -533,6 +712,7 @@ impl App {
 
             // -- Export --
             Message::ExportProject => {
+                self.state.project.file_menu_open = false;
                 let default_name = self
                     .state
                     .project

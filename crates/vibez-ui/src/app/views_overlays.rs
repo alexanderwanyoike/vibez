@@ -10,13 +10,14 @@ use iced::{Element, Length, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::project::ProjectMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::effect::EffectType;
 use vibez_core::midi::InstrumentKind;
 use vibez_plugin_host::{PluginCategory, PluginFormat};
 
 use crate::icons;
-use crate::message::{MenuOverlay, Message};
+use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
 
@@ -165,7 +166,7 @@ impl App {
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::menu_item(MenuOverlay::Edit, message))
+            .on_press(message)
             .padding([7, 12])
             .width(Length::Fill)
             .style(|_theme: &Theme, status| button::Style {
@@ -196,9 +197,9 @@ impl App {
             ),
             item(
                 icons::COPY,
-                "Paste",
+                "Paste at Playhead",
                 "Ctrl+V",
-                Message::Arrangement(ArrangementMsg::PasteClips),
+                Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead),
             ),
             item(
                 icons::COPY,
@@ -247,7 +248,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .on_press(Message::dismiss_menu(MenuOverlay::Edit))
+        .on_press(Message::View(ViewMsg::DismissEditMenu))
         .into()
     }
 
@@ -553,7 +554,7 @@ impl App {
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::menu_item(MenuOverlay::File, msg))
+            .on_press(msg)
             .padding([8, 16])
             .width(Length::Fill)
             .style(|_theme: &Theme, status| {
@@ -597,7 +598,7 @@ impl App {
             .spacing(6)
             .align_y(iced::Alignment::Center),
         )
-        .on_press(Message::menu_item(MenuOverlay::File, Message::OpenSettings))
+        .on_press(Message::OpenSettings)
         .padding([8, 16])
         .width(Length::Fill)
         .style(|_theme: &Theme, status| {
@@ -640,7 +641,7 @@ impl App {
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))
-            .on_press(Message::dismiss_menu(MenuOverlay::File))
+            .on_press(Message::Project(ProjectMsg::DismissFileMenu))
             .into()
     }
 
@@ -691,7 +692,7 @@ impl App {
                     .spacing(8)
                     .align_y(iced::Alignment::Center),
                 )
-                .on_press(Message::menu_item(MenuOverlay::ArrangementContext, msg))
+                .on_press(msg)
                 .padding([6, 12])
                 .width(Length::Fill)
                 .style(|_theme: &Theme, status| {
@@ -879,7 +880,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .on_press(Message::dismiss_menu(MenuOverlay::ArrangementContext))
+        .on_press(Message::View(ViewMsg::DismissContextMenu))
         .into()
     }
 }

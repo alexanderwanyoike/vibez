@@ -175,14 +175,12 @@ pub struct UiNoteClip {
 pub enum ClipboardClip {
     Audio {
         track_id: TrackId,
-        track_offset: usize,
-        position_beats: f64,
+        offset_beats: f64,
         clip: UiClip,
     },
     Note {
         track_id: TrackId,
-        track_offset: usize,
-        position_beats: f64,
+        offset_beats: f64,
         clip: UiNoteClip,
     },
 }

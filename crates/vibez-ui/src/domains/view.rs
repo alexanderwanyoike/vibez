@@ -40,7 +40,9 @@ pub enum ViewMsg {
         y: f32,
         target: ContextMenuTarget,
     },
+    DismissContextMenu,
     ToggleEditMenu,
+    DismissEditMenu,
     StartEditingTrackName {
         track_id: TrackId,
         name: String,
@@ -201,8 +203,14 @@ impl ViewState {
                 }
                 self.context_menu = Some(crate::state::ContextMenu { x, y, target });
             }
+            ViewMsg::DismissContextMenu => {
+                self.context_menu = None;
+            }
             ViewMsg::ToggleEditMenu => {
                 self.edit_menu_open = !self.edit_menu_open;
+            }
+            ViewMsg::DismissEditMenu => {
+                self.edit_menu_open = false;
             }
             ViewMsg::StartEditingTrackName { track_id, name } => {
                 self.edit_name_text = name;
@@ -210,6 +218,7 @@ impl ViewState {
                 self.editing_clip_name = None;
             }
             ViewMsg::StartEditingClipName(track_id, clip_id) => {
+                self.context_menu = None;
                 let name = timeline.get(track_id).and_then(|t| {
                     t.clips
                         .iter()
@@ -358,30 +367,6 @@ mod tests {
 
         let menu = view.context_menu.expect("context menu");
         assert_eq!((menu.x, menu.y), (240.0, 180.0));
-    }
-
-    #[test]
-    fn passive_view_updates_do_not_dismiss_an_arrange_context_menu() {
-        let mut view = ViewState::default();
-        let timeline = TimelineEditorState::default();
-        view.update(
-            ViewMsg::ShowContextMenu {
-                x: 240.0,
-                y: 180.0,
-                target: ContextMenuTarget::ArrangementEmpty,
-            },
-            &timeline,
-            ViewCtx::default(),
-        );
-
-        for message in [
-            ViewMsg::CursorMoved(10.0, 20.0),
-            ViewMsg::WindowResized(1400.0, 900.0),
-            ViewMsg::MouseReleased,
-        ] {
-            view.update(message, &timeline, ViewCtx::default());
-            assert!(view.context_menu.is_some());
-        }
     }
 
     #[test]

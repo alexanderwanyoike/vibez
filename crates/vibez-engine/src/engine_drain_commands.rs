@@ -125,12 +125,6 @@ impl AudioEngine {
                     let event = EngineEvent::SectionSourceRefreshed {
                         section_id,
                         applied,
-                        effective_at_samples: self.effective_position(),
-                        section_position_samples: applied.then(|| {
-                            self.active_section
-                                .map(|active| active.position_samples)
-                                .unwrap_or(0)
-                        }),
                         retired: prepared,
                     };
                     if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
@@ -286,7 +280,9 @@ impl AudioEngine {
                     self.recalculate_audio_length();
                 }
                 EngineCommand::SetTrackGain(id, gain) => {
-                    self.set_track_gain(id, gain);
+                    if let Some(track) = self.channel_mut(id) {
+                        track.gain = gain;
+                    }
                 }
                 EngineCommand::SetAutomationLane { track_id, lane } => {
                     if let Some(track) = self.channel_mut(track_id) {
@@ -307,28 +303,25 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackPan(id, pan) => {
-                    self.set_track_pan(id, pan);
+                    if let Some(track) = self.channel_mut(id) {
+                        track.pan = pan.clamp(0.0, 1.0);
+                    }
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
-                    self.set_track_mute(id, mute);
-                }
-                EngineCommand::SetAutomationOverride {
-                    track_id,
-                    target,
-                    overridden,
-                } => {
-                    self.set_automation_override(track_id, target, overridden);
-                }
-                EngineCommand::UpdateAutomationGesture {
-                    track_id,
-                    target,
-                    normalized_value,
-                    begin,
-                } => {
-                    self.update_automation_gesture(track_id, target, normalized_value, begin);
-                }
-                EngineCommand::EndAutomationGesture { track_id, target } => {
-                    self.end_automation_gesture(track_id, target);
+                    let effective_at_samples = self.effective_position();
+                    let changed = if let Some(track) = self.channel_mut(id) {
+                        track.mute = mute;
+                        true
+                    } else {
+                        false
+                    };
+                    if changed {
+                        let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
+                            track_id: id,
+                            muted: mute,
+                            effective_at_samples,
+                        });
+                    }
                 }
 
                 // -- Busses --
@@ -369,7 +362,9 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::SetTrackSwingOffset(id, offset) => {
-                    self.set_track_swing_offset(id, offset);
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
+                        track.swing_offset = offset;
+                    }
                 }
 
                 // -- Infrastructure --
@@ -422,7 +417,11 @@ impl AudioEngine {
                     param_index,
                     value,
                 } => {
-                    self.set_effect_param(track_id, effect_id, param_index, value);
+                    if let Some(track) = self.channel_mut(track_id) {
+                        if let Some(slot) = track.effects.iter_mut().find(|e| e.id == effect_id) {
+                            slot.effect.set_param(param_index, value);
+                        }
+                    }
                 }
                 EngineCommand::SetEffectBypass {
                     track_id,

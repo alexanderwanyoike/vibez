@@ -331,17 +331,10 @@ fn perform_bpm_is_locked_and_live_mute_survives_transition() {
         })
         .unwrap();
 
-    let mut output = [1.0; 70];
+    let mut output = [1.0; 6];
     engine.process(&mut output, 1);
 
     assert_eq!(engine.transport().bpm(), 120.0);
     assert!(engine.tracks()[0].mute);
-    assert!(
-        output[0] > 0.0 && output[0] < 0.4,
-        "live mute must enter the shared anti-click ramp immediately"
-    );
-    assert!(
-        output[64..].iter().all(|sample| *sample == 0.0),
-        "mute must remain closed after the queued Section transition"
-    );
+    assert_eq!(output, [0.0; 6]);
 }

@@ -116,6 +116,8 @@ pub struct PianoRollAction {
     pub scroll_to_beat: Option<f64>,
     /// A resize drag is in flight (suppresses click-through selection).
     pub drag_resize_active: bool,
+    /// Dismiss the arrangement context menu.
+    pub close_context_menu: bool,
 }
 
 fn find_track(timeline: &TimelineContent, track_id: TrackId) -> Option<&TrackTimelineContent> {
@@ -712,6 +714,7 @@ impl PianoRollState {
                 action.status = Some(format!("Piano roll: {mode_name} mode"));
             }
             PianoRollMsg::QuantizeNoteClip { track_id, clip_id } => {
+                action.close_context_menu = true;
                 quantize_note_clip(
                     tracks,
                     track_id,
@@ -844,6 +847,7 @@ mod tests {
         let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert_eq!(clip.notes[0].start_beat, 0.0);
         assert_eq!(clip.notes[1].start_beat, 2.0);
+        assert!(action.close_context_menu);
         assert_eq!(action.status.as_deref(), Some("Quantized 2 note(s) to 1/4"));
     }
 

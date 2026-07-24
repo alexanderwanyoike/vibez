@@ -22,7 +22,6 @@ use crate::state::{
 
 mod messages;
 pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
-mod clipboard;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -688,10 +687,32 @@ impl TimelineEditorState {
                 }
             }
             ArrangementMsg::CopySelectedClips => {
-                unreachable!("clipboard messages are resolved at the application boundary")
+                return self.op_copy_selected_clips(ctx);
             }
-            ArrangementMsg::CutSelectedClips | ArrangementMsg::PasteClips => {
-                unreachable!("clipboard messages are resolved at the application boundary")
+            ArrangementMsg::CutSelectedClips => {
+                let start = self.selection_start_beats;
+                let end = self.selection_end_beats;
+                let track_id = self.time_selection_track;
+                let ranged = self.time_selection_active && end > start;
+                let copy = self.op_copy_selected_clips(ctx);
+                if copy.status.as_deref() == Some("Nothing to copy") {
+                    return copy;
+                }
+                let mut result = if ranged {
+                    self.op_delete_clips_in_region(engine, ctx, start, end, track_id)
+                } else {
+                    self.update(
+                        project_tracks,
+                        ArrangementMsg::DeleteSelectedClip,
+                        engine,
+                        ctx,
+                    )
+                };
+                result.status = Some("Cut to clipboard".to_string());
+                return result;
+            }
+            ArrangementMsg::PasteClipsAtPlayhead => {
+                return self.op_paste_clips_at_playhead(engine, ctx);
             }
             ArrangementMsg::ToggleSelectedClipLoop => {
                 return self.op_toggle_selected_clip_loop(engine);
@@ -950,8 +971,6 @@ impl TimelineEditorState {
 mod media_ops;
 mod ops;
 
-#[cfg(test)]
-mod clipboard_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

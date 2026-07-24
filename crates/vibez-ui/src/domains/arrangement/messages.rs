@@ -86,7 +86,7 @@ pub enum ArrangementMsg {
     DuplicateSelectedClip,
     CopySelectedClips,
     CutSelectedClips,
-    PasteClips,
+    PasteClipsAtPlayhead,
     ToggleSelectedClipLoop,
     ResizeSelectedClips {
         anchor: ArrangementSelection,
@@ -157,7 +157,7 @@ impl ArrangementMsg {
                 | Self::DuplicateSelectedClip
                 | Self::CopySelectedClips
                 | Self::CutSelectedClips
-                | Self::PasteClips
+                | Self::PasteClipsAtPlayhead
                 | Self::ToggleSelectedClipLoop
                 | Self::ResizeSelectedClips { .. }
                 | Self::DuplicateNoteClip(..)
@@ -192,17 +192,6 @@ impl ArrangementMsg {
                 | ArrangementMsg::ClipBpmInputChanged { .. }
         )
     }
-
-    pub(crate) const fn is_clipboard_message(&self) -> bool {
-        matches!(
-            self,
-            Self::CopySelectedClips | Self::CutSelectedClips | Self::PasteClips
-        )
-    }
-
-    pub(crate) const fn is_clipboard_project_edit(&self) -> bool {
-        matches!(self, Self::CutSelectedClips | Self::PasteClips)
-    }
 }
 
 /// Cross-domain effects requested by an arrangement update.
@@ -221,6 +210,8 @@ pub struct ArrangementAction {
     pub loop_from_selection: Option<(f64, f64)>,
     /// A drag moved a clip near the view edge; auto-scroll to it.
     pub scroll_to_beat: Option<f64>,
+    /// Dismiss the arrangement context menu.
+    pub close_context_menu: bool,
     /// The project content changed outside the undo-snapshot path.
     pub mark_dirty: bool,
 }

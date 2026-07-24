@@ -107,15 +107,6 @@ Browser import preparation, Remote catalog refresh, and Section residency keep
 separate tracker instances but do not duplicate request IDs, generations, or
 abort handles.
 
-Application menus and the Arrange context menu also use explicit router
-events. Their overlay backdrops emit dismissal, Escape targets the topmost
-visible menu, and a menu-item event dispatches its command before closing its
-origin overlay. Ordinary application messages never participate in menu
-lifecycle, so engine ticks, metering, catalog work, and future message variants
-cannot dismiss a menu accidentally. Buttons remain native iced controls for
-focus and keyboard activation; device and plug-in menus retain their separate
-domain-owned lifecycles.
-
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
 selection, and editor-focus state alongside an `Arc<SectionStore>` that enters
 project persistence and undo. Each Section owns its properties and an
@@ -205,36 +196,11 @@ move it. The copied clips
 share only immutable decoded audio; they retain no Section identity or mutable
 reference, so later Section edits and launches cannot rewrite Arrange.
 
-Capture treats every Project Track controlled by Perform as punch-replace,
-including tracks that produced silence. At the confirmed stop boundary it
-removes the recorded interval, preserves and splits material on either side,
-and pins existing automation values at both edges before inserting captured
-content. The still-open transaction therefore covers the whole replacement as
-one undo step. Track Mute events join the Capture log at their engine-effective
-samples and materialize as `track_mute` step points with a closing point that
-restores the pre-take manual state.
-
-Live Instrument input and pointer automation join that same engine-timestamped
-Capture log. Free notes retain their audible onset, velocity, and duration with
-Groove Grid Off; Note Repeat retains the canonical straight-clock onset and
-matching Groove Grid so Track Swing is applied exactly once. Notes already held
-at the Capture boundary are excluded, open notes truncate at stop, and live
-notes remain independent from coincident Section notes and Section Record's
-quantized copy. A resident Section source refresh reports both its exact
-Perform timestamp and local Section playhead so Capture can close the old span
-and re-snapshot the newly audible source without rewriting earlier passes.
-
-On Perform-controlled Project Tracks, the resident Section automation is the
-baseline while a pointer gesture temporarily owns its target. The audio thread
-stores active target ownership in fixed-capacity channel-strip state, so
-automation evaluation cannot overwrite gain, pan, Track Swing, or device
-parameters during the gesture. Gesture events carry effective values and
-sample timestamps back to Capture; materialization thins each curve, pins the
-copied baseline around the gesture, and writes an immediate yield-back step on
-release. Transport Stop ends active ownership before closing Capture. Arrange
-automation remains suspended for those resident tracks and stays active on
-tracks outside Perform. Project Swing is locked for the whole Capture session
-because Capture has no master Project Swing lane.
+Card 17 applies that materialization only when the destination interval is
+empty on every affected Project Track. Any overlap aborts the still-open
+project transaction without changing Arrange; interval replacement belongs to
+Card 18. Track Mutes, live notes, and effective automation are likewise later
+Capture log consumers rather than implicit work in this first slice.
 
 The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
 Project Swing, and optional Project Track Swing offsets as canonical project
@@ -281,18 +247,8 @@ Track control remains available but clip application is withheld.
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project
-Track and an active Capture log. `track_mute` automation is stepped: it imposes
-nothing before its first point and changes state at exact in-buffer sample
-boundaries. Both manual and automated mute feed one post-effects, pre-send
-anti-click ramp, so playback gates tails exactly like the performed mute.
-
-Automation overrides live beside evaluation in the shared `EngineTrack`
-channel strip. A manual mixer or Perform-pad mute on a track with a mute lane
-sets the Track Mute override; the manual value remains authoritative until the
-producer uses the visible `RE-ENABLE` affordance. The command/event protocol is
-parameter-shaped rather than mute-specific so gain and pan can adopt the same
-ownership later without introducing a second override model. Override state is
-runtime UI/engine state and is not persisted.
+Track. This keeps pad, mixer, persisted, and audible state aligned while giving
+later Capture work an engine-timestamped event source.
 
 ## Project Tracks and timeline content
 
@@ -309,15 +265,12 @@ one `TimelineContent`, while every Perform Section owns another store with the
 same shape and shared Project `TrackId`s.
 
 `TimelineEditorState` is the shared editing boundary around that content. It
-owns clip/note selection, time selection, and other timeline-local interaction
+owns clip/note selection, the clipboard, time selection, and other interaction
 state; clip operations, piano-roll editing, automation editing, and timeline
-view behavior receive this already-resolved target. `AppState` owns one runtime
-Clip clipboard shared by Arrange and every Section editor. The application
-resolves clipboard shortcuts from the focused editor and supplies that
-clipboard at the editor boundary. `ArrangementState` is a thin adapter that
-retains Arrange's Project Track/channel controls and implements
-`TimelineEditorAdapter` to resolve its editor. The editor never asks which
-workspace is active and contains no `Arrange | Section` branch.
+view behavior receive this already-resolved target. `ArrangementState` is a
+thin adapter that retains Arrange's Project Track/channel controls and
+implements `TimelineEditorAdapter` to resolve its editor. The editor never
+asks which workspace is active and contains no `Arrange | Section` branch.
 
 The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
@@ -371,8 +324,7 @@ Editor selections, meters, decoded/runtime caches, and live plugin pointers are
 outside the transaction snapshot and are neither cloned nor restored.
 Capture opens the same transaction before requesting its engine start boundary,
 then marks one edit and commits only after the engine-confirmed stop has
-materialized independent Arrange content and replaced the controlled interval.
-A session that has neither captured content nor anything to replace abandons
+materialized independent Arrange content. Empty or overlapping sessions abandon
 the transaction, while undo/redo replays the complete captured Arrangement as
 one project step.
 
