@@ -49,7 +49,7 @@ mod tests {
         super::super::App {
             state: AppState::default(),
             edge_shortcuts: Default::default(),
-            cmd_tx: None,
+            cmd_tx: Default::default(),
             event_rx: None,
             spectrum_rx: None,
             spectrum_tap: None,

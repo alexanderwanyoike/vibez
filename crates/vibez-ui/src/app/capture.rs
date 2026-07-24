@@ -277,7 +277,7 @@ fn capture_replaces_existing_content(
 fn apply_capture_to_arrangement(
     arrange: &mut Arc<crate::state::ArrangementTimeline>,
     captured: MaterializedCapture,
-    engine: &mut Option<rtrb::Producer<EngineCommand>>,
+    engine: &mut impl crate::domains::EngineHandle,
 ) -> usize {
     let MaterializedCapture {
         arrange_start_samples,
@@ -362,10 +362,8 @@ fn apply_capture_to_arrangement(
             }
         }
     }
-    if let Some(engine) = engine {
-        for command in commands {
-            let _ = engine.push(command);
-        }
+    for command in commands {
+        engine.send(command);
     }
     clip_count
 }
@@ -532,12 +530,45 @@ fn add_note_clip_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::{DiscardingEngine, EngineCommandQueue, EngineHandle};
     use crate::state::{AppState, ArrangementTimeline, ProjectSnapshot, UiNoteClip};
     use std::collections::HashMap;
+    use std::sync::Mutex;
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
     use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::midi::{InstrumentKind, MidiNote};
     use vibez_core::perform::GrooveGrid;
+
+    struct NoteLogInstrument(Arc<Mutex<Vec<u8>>>);
+
+    impl vibez_instruments::Instrument for NoteLogInstrument {
+        fn instrument_kind(&self) -> InstrumentKind {
+            InstrumentKind::SubtractiveSynth
+        }
+
+        fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
+            &[]
+        }
+
+        fn set_param(&mut self, _index: usize, _value: f32) -> bool {
+            false
+        }
+
+        fn get_param(&self, _index: usize) -> f32 {
+            0.0
+        }
+
+        fn note_on(&mut self, pitch: u8, _velocity: u8) {
+            self.0.lock().unwrap().push(pitch);
+        }
+
+        fn note_off(&mut self, _pitch: u8) {}
+
+        fn render(&mut self, _buffer: &mut [f32], _channels: usize) {}
+
+        fn reset(&mut self) {}
+    }
 
     #[test]
     fn capture_stop_uses_the_atomic_transport_stop_boundary() {
@@ -602,8 +633,9 @@ mod tests {
             samples_per_beat: 4.0,
         };
 
+        let mut engine = DiscardingEngine;
         assert_eq!(
-            apply_capture_to_arrangement(&mut arrange, captured, &mut None),
+            apply_capture_to_arrangement(&mut arrange, captured, &mut engine),
             0
         );
         assert_eq!(
@@ -692,8 +724,9 @@ mod tests {
             pre_capture_mutes: HashMap::new(),
             samples_per_beat: 1.0,
         };
+        let mut engine = DiscardingEngine;
         assert_eq!(
-            apply_capture_to_arrangement(&mut arrange, captured, &mut None),
+            apply_capture_to_arrangement(&mut arrange, captured, &mut engine),
             0
         );
         let content = arrange.get(track_id).unwrap();
@@ -763,8 +796,9 @@ mod tests {
             pre_capture_mutes: HashMap::new(),
             samples_per_beat: 4.0,
         };
+        let mut engine = DiscardingEngine;
         assert_eq!(
-            apply_capture_to_arrangement(&mut state.arrangement.timeline, captured, &mut None,),
+            apply_capture_to_arrangement(&mut state.arrangement.timeline, captured, &mut engine,),
             1
         );
         let changed = snapshot(&state);
@@ -789,6 +823,80 @@ mod tests {
                 .note_clips
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn long_capture_reaches_later_tracks_after_the_command_queue_boundary() {
+        let (mut audio_engine, mut producer, _events) = vibez_engine::engine::AudioEngine::new();
+        let filler_track = TrackId::new();
+        let audible_track = TrackId::new();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        producer
+            .push(EngineCommand::AddMidiTrack(filler_track, "Filler".into()))
+            .unwrap();
+        producer
+            .push(EngineCommand::AddMidiTrack(audible_track, "Audible".into()))
+            .unwrap();
+        producer
+            .push(EngineCommand::SetPluginInstrument {
+                track_id: audible_track,
+                instrument: Box::new(NoteLogInstrument(Arc::clone(&heard))),
+            })
+            .unwrap();
+        audio_engine.process(&mut [0.0; 2], 2);
+
+        let note_clip = |pitch, note_count| UiNoteClip {
+            id: ClipId::new(),
+            name: "Captured notes".into(),
+            position_beats: 0.0,
+            duration_beats: 1.0,
+            notes: (0..note_count)
+                .map(|_| MidiNote {
+                    pitch,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 0.25,
+                })
+                .collect(),
+            selected_notes: Default::default(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        let mut filler = crate::state::TrackTimelineContent::default();
+        filler.note_clips.push(note_clip(
+            36,
+            vibez_core::constants::RING_BUFFER_CAPACITY - 1,
+        ));
+        let mut audible = crate::state::TrackTimelineContent::default();
+        audible.note_clips.push(note_clip(72, 1));
+
+        let captured = MaterializedCapture {
+            arrange_start_samples: 0,
+            arrange_end_samples: 22_050,
+            by_track: HashMap::from([(filler_track, filler), (audible_track, audible)]),
+            controlled_track_ids: vec![filler_track, audible_track],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 22_050.0,
+        };
+        let mut timeline = Arc::new(ArrangementTimeline::default());
+        let mut commands = EngineCommandQueue::new(producer);
+        apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
+        assert_eq!(commands.pending_len(), 2);
+
+        audio_engine.process(&mut [0.0; 2], 2);
+        commands.flush();
+        assert_eq!(commands.pending_len(), 0);
+        audio_engine.process(&mut [0.0; 2], 2);
+        commands.send(EngineCommand::Seek(0));
+        commands.send(EngineCommand::Play);
+        audio_engine.process(&mut [0.0; 512], 2);
+
+        assert!(
+            heard.lock().unwrap().contains(&72),
+            "the UI committed the later Track, but its commands were dropped"
         );
     }
 }

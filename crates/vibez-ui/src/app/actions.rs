@@ -640,6 +640,7 @@ impl App {
     /// One frame of the 60fps subscription: drain engine events and
     /// pump every background service.
     pub(super) fn handle_tick(&mut self) -> Task<Message> {
+        self.cmd_tx.flush();
         self.poll_audio_stream_events();
         self.poll_engine_events();
         self.poll_spectrum();

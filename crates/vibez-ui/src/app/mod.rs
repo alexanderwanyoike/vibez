@@ -6,7 +6,7 @@ use iced::{Subscription, Task, Theme};
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
-use rtrb::{Consumer, Producer};
+use rtrb::Consumer;
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
@@ -35,7 +35,7 @@ use crate::ui_settings::UiSettings;
 struct App {
     state: AppState,
     edge_shortcuts: EdgeShortcutState,
-    cmd_tx: Option<Producer<EngineCommand>>,
+    cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
     /// Post-effects mono samples from the engine's spectrum tap,
     /// feeding the EQ analyser.
@@ -330,7 +330,7 @@ impl App {
         let mut app = Self {
             state,
             edge_shortcuts: EdgeShortcutState::default(),
-            cmd_tx: Some(cmd_tx),
+            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
             spectrum_rx,
             spectrum_tap: None,
@@ -436,9 +436,7 @@ impl App {
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {
-        if let Some(ref mut tx) = self.cmd_tx {
-            let _ = tx.push(cmd);
-        }
+        crate::domains::EngineHandle::send(&mut self.cmd_tx, cmd);
     }
 
     fn mark_project_dirty(&mut self) {
