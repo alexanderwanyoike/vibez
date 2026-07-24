@@ -11,12 +11,9 @@ use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 
-use crate::state::{ArrangementTimeline, TrackTimelineContent, UiClip, UiNoteClip, UndoGestureId};
+use crate::state::{ArrangementTimeline, TrackTimelineContent, UiClip, UiNoteClip};
 
 use super::{PerformAction, Section};
-
-mod performance_log;
-use performance_log::{CompletedPerformanceLog, PerformanceLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CapturePhase {
@@ -87,7 +84,6 @@ struct CaptureSession {
     spans: Vec<CapturedSectionSpan>,
     controlled_tracks: Vec<(TrackId, bool)>,
     mute_changes: Vec<CapturedMuteChange>,
-    performance: PerformanceLog,
 }
 
 #[derive(Debug)]
@@ -98,7 +94,6 @@ pub struct CompletedCapture {
     spans: Vec<CapturedSectionSpan>,
     controlled_tracks: Vec<(TrackId, bool)>,
     mute_changes: Vec<CapturedMuteChange>,
-    performance: CompletedPerformanceLog,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -229,12 +224,6 @@ impl CompletedCapture {
                 .push(lane);
         }
 
-        self.performance.materialize(
-            &mut result,
-            self.clock,
-            self.engine_start_samples,
-            self.engine_end_samples,
-        );
         for content in result.by_track.values_mut() {
             content.clips.sort_by_key(|clip| clip.position);
             content
@@ -257,8 +246,6 @@ pub struct CaptureState {
     prepared_clock: Option<CaptureClock>,
     session: Option<CaptureSession>,
     prepared_controlled_tracks: Vec<(TrackId, bool)>,
-    active_automation_gesture: Option<UndoGestureId>,
-    active_automation_targets: Vec<(TrackId, AutomationTarget)>,
 }
 
 impl CaptureState {
@@ -271,46 +258,6 @@ impl CaptureState {
             .as_ref()
             .map(|session| session.clock.arrange_start_samples)
             .or_else(|| self.prepared_clock.map(|clock| clock.arrange_start_samples))
-    }
-
-    pub fn is_controlled_track(&self, track_id: TrackId) -> bool {
-        self.session.as_ref().is_some_and(|session| {
-            session
-                .controlled_tracks
-                .iter()
-                .any(|(controlled_id, _)| *controlled_id == track_id)
-        })
-    }
-
-    pub fn begin_ui_automation_gesture(
-        &mut self,
-        gesture: UndoGestureId,
-    ) -> Vec<(TrackId, AutomationTarget)> {
-        if self.active_automation_gesture == Some(gesture) {
-            return Vec::new();
-        }
-        let ended = self.end_ui_automation_gesture();
-        self.active_automation_gesture = Some(gesture);
-        ended
-    }
-
-    pub fn register_ui_automation_target(
-        &mut self,
-        track_id: TrackId,
-        target: AutomationTarget,
-    ) -> bool {
-        let target = (track_id, target);
-        if self.active_automation_targets.contains(&target) {
-            false
-        } else {
-            self.active_automation_targets.push(target);
-            true
-        }
-    }
-
-    pub fn end_ui_automation_gesture(&mut self) -> Vec<(TrackId, AutomationTarget)> {
-        self.active_automation_gesture = None;
-        std::mem::take(&mut self.active_automation_targets)
     }
 
     pub fn update(&mut self, msg: CaptureMsg) -> PerformAction {
@@ -370,7 +317,6 @@ impl CaptureState {
             spans: Vec::new(),
             controlled_tracks: std::mem::take(&mut self.prepared_controlled_tracks),
             mute_changes: Vec::new(),
-            performance: PerformanceLog::default(),
         });
         self.phase = CapturePhase::Recording;
     }
@@ -384,7 +330,7 @@ impl CaptureState {
         let Some(session) = &mut self.session else {
             return;
         };
-        if !matches!(self.phase, CapturePhase::Recording | CapturePhase::Stopping)
+        if self.phase != CapturePhase::Recording
             || effective_at_samples < session.engine_start_samples
             || !session
                 .controlled_tracks
@@ -400,107 +346,7 @@ impl CaptureState {
         });
     }
 
-    pub fn input_note(
-        &mut self,
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        on: bool,
-        effective_at_samples: u64,
-    ) {
-        let Some(session) = &mut self.session else {
-            return;
-        };
-        if !matches!(self.phase, CapturePhase::Recording | CapturePhase::Stopping)
-            || !session
-                .controlled_tracks
-                .iter()
-                .any(|(controlled_id, _)| *controlled_id == track_id)
-        {
-            return;
-        }
-        session.performance.input_note(
-            track_id,
-            pitch,
-            velocity,
-            on,
-            effective_at_samples,
-            session.engine_start_samples,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn repeated_note(
-        &mut self,
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        rate: vibez_core::perform::NoteRepeatRate,
-        effective_at_samples: u64,
-        canonical_at_samples: u64,
-    ) {
-        let Some(session) = &mut self.session else {
-            return;
-        };
-        if !matches!(self.phase, CapturePhase::Recording | CapturePhase::Stopping)
-            || !session
-                .controlled_tracks
-                .iter()
-                .any(|(controlled_id, _)| *controlled_id == track_id)
-        {
-            return;
-        }
-        session.performance.repeated_note(
-            track_id,
-            pitch,
-            velocity,
-            rate,
-            effective_at_samples,
-            canonical_at_samples,
-            session.engine_start_samples,
-            session.clock,
-        );
-    }
-
-    pub fn automation_changed(
-        &mut self,
-        track_id: TrackId,
-        target: AutomationTarget,
-        value: f32,
-        phase: vibez_engine::events::AutomationGesturePhase,
-        effective_at_samples: u64,
-    ) {
-        let Some(session) = &mut self.session else {
-            return;
-        };
-        if !matches!(self.phase, CapturePhase::Recording | CapturePhase::Stopping)
-            || !session
-                .controlled_tracks
-                .iter()
-                .any(|(controlled_id, _)| *controlled_id == track_id)
-        {
-            return;
-        }
-        session.performance.automation_changed(
-            track_id,
-            target,
-            value,
-            phase,
-            effective_at_samples,
-            session.engine_start_samples,
-        );
-    }
-
     pub fn transition(&mut self, source: CapturedSectionSource, effective_at_samples: u64) {
-        self.refresh(source, effective_at_samples, 0);
-    }
-
-    pub fn refresh(
-        &mut self,
-        source: CapturedSectionSource,
-        effective_at_samples: u64,
-        source_start_samples: u64,
-    ) {
         let Some(session) = &mut self.session else {
             return;
         };
@@ -508,7 +354,7 @@ impl CaptureState {
         session.active = Some(ActiveSpan {
             source,
             effective_start_samples: effective_at_samples,
-            source_start_samples,
+            source_start_samples: 0,
         });
     }
 
@@ -518,11 +364,8 @@ impl CaptureState {
             return None;
         };
         close_active_span(&mut session, effective_at_samples);
-        let performance = session.performance.finish(effective_at_samples);
         self.phase = CapturePhase::Idle;
         self.prepared_clock = None;
-        self.active_automation_gesture = None;
-        self.active_automation_targets.clear();
         Some(CompletedCapture {
             clock: session.clock,
             engine_start_samples: session.engine_start_samples,
@@ -530,7 +373,6 @@ impl CaptureState {
             spans: session.spans,
             controlled_tracks: session.controlled_tracks,
             mute_changes: session.mute_changes,
-            performance,
         })
     }
 
@@ -539,8 +381,6 @@ impl CaptureState {
         self.prepared_clock = None;
         self.session = None;
         self.prepared_controlled_tracks.clear();
-        self.active_automation_gesture = None;
-        self.active_automation_targets.clear();
     }
 }
 
@@ -643,13 +483,6 @@ fn append_timeline_window(
                 .note_clips
                 .push(fragment);
         }
-        performance_log::append_automation_window(
-            destination.entry(*track_id).or_default(),
-            content,
-            window_start_beats,
-            window_end_beats,
-            destination_start_beats,
-        );
     }
 }
 
@@ -804,40 +637,6 @@ mod tests {
     }
 
     #[test]
-    fn source_refresh_resnapshots_at_the_exact_local_playhead() {
-        let first = audio_section("Before edit", 4.0, 16);
-        let track_id = *first.timeline.by_track.keys().next().unwrap();
-        let mut refreshed = audio_section("After edit", 4.0, 16);
-        let refreshed_track = *refreshed.timeline.by_track.keys().next().unwrap();
-        let content = Arc::make_mut(&mut refreshed.timeline)
-            .by_track
-            .remove(&refreshed_track)
-            .unwrap();
-        Arc::make_mut(&mut refreshed.timeline)
-            .by_track
-            .insert(track_id, content);
-
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
-        capture.refresh(CapturedSectionSource::from_section(&refreshed), 4, 4);
-        let materialized = capture.finish(8).unwrap().materialize();
-        let clips = &materialized.by_track[&track_id].clips;
-
-        assert_eq!(clips.len(), 2);
-        assert_eq!(
-            (clips[0].position, clips[0].source_offset, clips[0].duration),
-            (0, 0, 4)
-        );
-        assert_eq!(
-            (clips[1].position, clips[1].source_offset, clips[1].duration),
-            (4, 4, 4)
-        );
-        assert!(clips[0].name.contains("Before edit"));
-        assert!(clips[1].name.contains("After edit"));
-    }
-
-    #[test]
     fn looping_section_is_flattened_into_independent_linear_passes() {
         let mut section = audio_section("Groove A", 1.0, 4);
         section.looping = true;
@@ -883,35 +682,6 @@ mod tests {
             .iter()
             .all(|clip| clip.groove_grid == GrooveGrid::Sixteenth));
         assert!(clips.iter().all(|clip| !source_ids.contains(&clip.id)));
-    }
-
-    #[test]
-    fn coincident_live_and_section_notes_are_both_preserved_without_source_mutation() {
-        let track_id = TrackId::new();
-        let section = midi_section("Layer", track_id, 36);
-        let source_id = section.timeline.get(track_id).unwrap().note_clips[0].id;
-        let mut capture = starting_capture();
-        capture.prepare(0, 8, 120.0);
-        capture.prepare_controlled_tracks([(track_id, false)]);
-        capture.start(0, Some((CapturedSectionSource::from_section(&section), 0)));
-        capture.input_note(track_id, 36, 127, true, 0);
-        capture.input_note(track_id, 36, 0, false, 1);
-
-        let materialized = capture.finish(4).unwrap().materialize();
-        let clips = &materialized.by_track[&track_id].note_clips;
-        assert_eq!(
-            clips
-                .iter()
-                .flat_map(|clip| &clip.notes)
-                .filter(|note| note.pitch == 36)
-                .count(),
-            2
-        );
-        assert_eq!(
-            section.timeline.get(track_id).unwrap().note_clips[0].id,
-            source_id
-        );
-        assert!(clips.iter().all(|clip| clip.id != source_id));
     }
 
     #[test]

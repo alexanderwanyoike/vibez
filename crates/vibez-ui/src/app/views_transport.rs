@@ -184,7 +184,6 @@ impl App {
         let bpm_label = text("BPM").size(12).color(th::text_dim());
 
         let project_swing = self.state.perform.project_swing();
-        let project_swing_locked = self.state.perform.capture.is_active();
         let project_swing_submit = parse_swing_percent(self.state.perform.project_swing_input())
             .map(|swing| Message::Perform(PerformMsg::SetProjectSwing(swing.get())))
             .unwrap_or_else(|| {
@@ -194,34 +193,20 @@ impl App {
                 )))
             });
         let swing_input = text_input("%", self.state.perform.project_swing_input())
+            .on_input(|value| Message::Perform(PerformMsg::ProjectSwingInput(value)))
+            .on_submit(project_swing_submit)
             .width(Length::Fixed(42.0))
             .padding([2, 4])
             .size(11);
-        let swing_input = if project_swing_locked {
-            swing_input
-        } else {
-            swing_input
-                .on_input(|value| Message::Perform(PerformMsg::ProjectSwingInput(value)))
-                .on_submit(project_swing_submit)
-        };
-        let swing_knob: Element<'_, Message> = canvas(SwingKnobWidget::project_locked(
-            project_swing,
-            project_swing_locked,
-        ))
-        .width(Length::Fixed(30.0))
-        .height(Length::Fixed(30.0))
-        .into();
+        let swing_knob: Element<'_, Message> = canvas(SwingKnobWidget::project(project_swing))
+            .width(Length::Fixed(30.0))
+            .height(Length::Fixed(30.0))
+            .into();
         let swing_control = container(
             row![
                 swing_knob,
                 column![
-                    text(if project_swing_locked {
-                        "PROJECT SWING · CAPTURE LOCK"
-                    } else {
-                        "PROJECT SWING"
-                    })
-                    .size(8)
-                    .color(th::text_muted()),
+                    text("PROJECT SWING").size(8).color(th::text_muted()),
                     swing_input,
                 ]
                 .spacing(1),

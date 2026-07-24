@@ -24,9 +24,6 @@ impl App {
         };
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
-        if self.prepare_capture_message(undo_gesture, &message) {
-            return Task::none();
-        }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         let deferred_clipboard_project_edit = matches!(
             &message,
@@ -92,7 +89,6 @@ impl App {
                             if self.state.transport.playing
                     );
                 if stops_perform {
-                    self.end_capture_automation_gesture();
                     self.section_residency_request.cancel();
                 }
                 let perform_playback_active = self.state.perform.playing_section.is_some()

@@ -3,18 +3,12 @@
 use iced::Task;
 use std::sync::Arc;
 
-use vibez_core::automation::AutomationTarget;
-use vibez_core::id::TrackId;
-use vibez_core::perform::SwingOffset;
 use vibez_engine::commands::EngineCommand;
 
-use crate::domains::arrangement::ArrangementMsg;
-use crate::domains::devices::DevicesMsg;
 use crate::domains::perform::capture::CompletedCapture;
-use crate::domains::perform::{CaptureAction, MaterializedCapture, PerformMsg};
-use crate::domains::view::ViewMsg;
+use crate::domains::perform::{CaptureAction, MaterializedCapture};
 use crate::message::Message;
-use crate::state::{UndoGestureId, Workspace};
+use crate::state::Workspace;
 
 use super::*;
 
@@ -44,7 +38,6 @@ impl App {
                 self.state.status_text = "Starting Capture into Arrange…".into();
             }
             CaptureAction::Stop => {
-                self.end_capture_automation_gesture();
                 // Transport Stop publishes the Capture boundary first, then
                 // stops Section playback in the same audio callback.
                 self.send_command(capture_stop_command());
@@ -52,140 +45,6 @@ impl App {
             }
         }
         Task::none()
-    }
-
-    pub(super) fn prepare_capture_message(
-        &mut self,
-        undo_gesture: Option<UndoGestureId>,
-        message: &Message,
-    ) -> bool {
-        if self.state.perform.capture.is_active()
-            && matches!(message, Message::Perform(PerformMsg::SetProjectSwing(_)))
-        {
-            self.state.status_text = "Project Swing is locked while Capture records".to_string();
-            return true;
-        }
-        if matches!(message, Message::View(ViewMsg::MouseReleased)) {
-            self.end_capture_automation_gesture();
-        }
-        let Some(gesture) = undo_gesture else {
-            return false;
-        };
-        let values = self.capture_automation_values(message);
-        if values.is_empty() {
-            return false;
-        }
-        let ended = self
-            .state
-            .perform
-            .capture
-            .begin_ui_automation_gesture(gesture);
-        for (track_id, target) in ended {
-            self.send_command(EngineCommand::EndAutomationGesture { track_id, target });
-        }
-        for value in values {
-            if !self
-                .state
-                .perform
-                .capture
-                .is_controlled_track(value.track_id)
-            {
-                continue;
-            }
-            let begin = self
-                .state
-                .perform
-                .capture
-                .register_ui_automation_target(value.track_id, value.target);
-            self.send_command(EngineCommand::UpdateAutomationGesture {
-                track_id: value.track_id,
-                target: value.target,
-                normalized_value: value.normalized,
-                begin,
-            });
-        }
-        false
-    }
-
-    pub(super) fn end_capture_automation_gesture(&mut self) {
-        let targets = self.state.perform.capture.end_ui_automation_gesture();
-        for (track_id, target) in targets {
-            self.send_command(EngineCommand::EndAutomationGesture { track_id, target });
-        }
-    }
-
-    fn capture_automation_values(&self, message: &Message) -> Vec<CaptureAutomationValue> {
-        match message {
-            Message::Arrangement(ArrangementMsg::SetTrackGain(track_id, gain)) => {
-                vec![CaptureAutomationValue {
-                    track_id: *track_id,
-                    target: AutomationTarget::TrackGain,
-                    normalized: (*gain / 2.0).clamp(0.0, 1.0),
-                }]
-            }
-            Message::Arrangement(ArrangementMsg::SetTrackPan(track_id, pan)) => {
-                vec![CaptureAutomationValue {
-                    track_id: *track_id,
-                    target: AutomationTarget::TrackPan,
-                    normalized: (*pan).clamp(0.0, 1.0),
-                }]
-            }
-            Message::Devices(DevicesMsg::SetEffectParam(
-                track_id,
-                effect_id,
-                param_index,
-                value,
-            )) => self
-                .normalize_effect_value(*track_id, *effect_id, *param_index, *value)
-                .into_iter()
-                .collect(),
-            Message::Devices(DevicesMsg::SetEffectParams(track_id, effect_id, updates)) => updates
-                .iter()
-                .filter_map(|(param_index, value)| {
-                    self.normalize_effect_value(*track_id, *effect_id, *param_index, *value)
-                })
-                .collect(),
-            Message::Perform(PerformMsg::SetTrackSwingOffset { track_id, value }) => {
-                vec![CaptureAutomationValue {
-                    track_id: *track_id,
-                    target: AutomationTarget::TrackSwingOffset,
-                    normalized: value.map(SwingOffset::new).unwrap_or_default().normalized(),
-                }]
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    fn normalize_effect_value(
-        &self,
-        track_id: TrackId,
-        effect_id: vibez_core::id::EffectId,
-        param_index: usize,
-        value: f32,
-    ) -> Option<CaptureAutomationValue> {
-        let effect = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .find(|track| track.id == track_id)?
-            .effects
-            .iter()
-            .find(|effect| effect.id == effect_id)?;
-        let descriptor = effect.descriptors.get(param_index)?;
-        let span = descriptor.max - descriptor.min;
-        Some(CaptureAutomationValue {
-            track_id,
-            target: AutomationTarget::EffectParam {
-                effect_id,
-                param_index,
-            },
-            normalized: if span.abs() > f32::EPSILON {
-                ((value - descriptor.min) / span).clamp(0.0, 1.0)
-            } else {
-                0.0
-            },
-        })
     }
 
     pub(super) fn finish_performance_capture(&mut self, completed: Option<CompletedCapture>) {
@@ -239,13 +98,6 @@ impl App {
             self.state.project.dirty = dirty_before;
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CaptureAutomationValue {
-    track_id: TrackId,
-    target: AutomationTarget,
-    normalized: f32,
 }
 
 fn capture_stop_command() -> EngineCommand {

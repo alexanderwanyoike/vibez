@@ -52,21 +52,20 @@ impl EngineTrack {
             let Some(value) = lane.value_at(beat) else {
                 continue;
             };
-            let overridden = self.automation_overrides.contains(lane.target);
             match lane.target {
                 // Gain's native range is 0..2; pan is already 0..1.
-                AutomationTarget::TrackGain if !overridden => gain = Some(value * 2.0),
-                AutomationTarget::TrackPan if !overridden => pan = Some(value),
+                AutomationTarget::TrackGain => gain = Some(value * 2.0),
+                AutomationTarget::TrackPan => pan = Some(value),
                 AutomationTarget::TrackMute => {
                     mute = Some(value >= 0.5);
                 }
-                AutomationTarget::TrackSwingOffset if !overridden => {
+                AutomationTarget::TrackSwingOffset => {
                     swing_offset = Some(SwingOffset::from_normalized(value));
                 }
                 AutomationTarget::EffectParam {
                     effect_id,
                     param_index,
-                } if !overridden => {
+                } => {
                     if let Some(slot) = self.effects.iter_mut().find(|e| e.id == effect_id) {
                         // Lanes are normalized 0..1; parameters live in
                         // their native descriptor range.
@@ -94,10 +93,6 @@ impl EngineTrack {
                         None => self.sends.push((bus_id, value)),
                     }
                 }
-                AutomationTarget::TrackGain
-                | AutomationTarget::TrackPan
-                | AutomationTarget::TrackSwingOffset
-                | AutomationTarget::EffectParam { .. } => {}
             }
         }
         self.automation_swing_offset = swing_offset;
@@ -136,61 +131,6 @@ impl EngineTrack {
             self.mute_ramp.set_muted(effective_muted, false);
         }
         changed
-    }
-
-    pub(crate) fn normalized_target_value(
-        &self,
-        target: vibez_core::automation::AutomationTarget,
-        beat: f64,
-        section_active: bool,
-    ) -> f32 {
-        let source = if section_active {
-            self.section_playback_source.as_ref()
-        } else {
-            self.playback_source.as_ref()
-        };
-        if let Some(value) = source
-            .automation
-            .iter()
-            .find(|lane| lane.target == target)
-            .and_then(|lane| lane.value_at(beat))
-        {
-            return value.clamp(0.0, 1.0);
-        }
-        match target {
-            vibez_core::automation::AutomationTarget::TrackGain => {
-                (self.gain / 2.0).clamp(0.0, 1.0)
-            }
-            vibez_core::automation::AutomationTarget::TrackPan => self.pan.clamp(0.0, 1.0),
-            vibez_core::automation::AutomationTarget::TrackMute => {
-                if self.effective_muted() {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            vibez_core::automation::AutomationTarget::TrackSwingOffset => self
-                .swing_offset
-                .unwrap_or_default()
-                .normalized()
-                .clamp(0.0, 1.0),
-            vibez_core::automation::AutomationTarget::EffectParam {
-                effect_id,
-                param_index,
-            } => self
-                .effects
-                .iter()
-                .find(|slot| slot.id == effect_id)
-                .and_then(|slot| {
-                    let descriptor = slot.effect.param_descriptors().get(param_index)?;
-                    let span = descriptor.max - descriptor.min;
-                    (span.abs() > f32::EPSILON)
-                        .then(|| (slot.effect.get_param(param_index) - descriptor.min) / span)
-                })
-                .unwrap_or(0.0)
-                .clamp(0.0, 1.0),
-            _ => 0.0,
-        }
     }
 
     pub(crate) fn effective_muted(&self) -> bool {

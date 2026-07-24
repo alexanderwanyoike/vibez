@@ -100,40 +100,16 @@ impl App {
                             .automation_ui
                             .set_override(track_id, target, overridden);
                     }
-                    EngineEvent::AutomationGestureChanged {
-                        track_id,
-                        target,
-                        normalized_value,
-                        phase,
-                        effective_at_samples,
-                    } => {
-                        self.state.perform.capture.automation_changed(
-                            track_id,
-                            target,
-                            normalized_value,
-                            phase,
-                            effective_at_samples,
-                        );
-                    }
                     EngineEvent::NoteRepeated {
                         track_id,
                         pitch,
                         velocity,
                         rate,
                         effective_at_samples,
-                        canonical_at_samples,
                         section_id,
                         canonical_section_position_samples,
                         ..
                     } => {
-                        self.state.perform.capture.repeated_note(
-                            track_id,
-                            pitch,
-                            velocity,
-                            rate,
-                            effective_at_samples,
-                            canonical_at_samples,
-                        );
                         self.state.perform.section_record.repeated_note(
                             section_id,
                             track_id,
@@ -153,13 +129,6 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
-                        self.state.perform.capture.input_note(
-                            track_id,
-                            pitch,
-                            velocity,
-                            on,
-                            effective_at_samples,
-                        );
                         self.state.perform.section_record.input_note(
                             crate::domains::perform::section_record::SectionRecordInput {
                                 section_id,
@@ -301,29 +270,10 @@ impl App {
                             .observe_playhead(section_id, position_samples);
                     }
                     EngineEvent::SectionSourceRefreshed {
-                        section_id,
-                        applied,
-                        effective_at_samples,
-                        section_position_samples,
+                        section_id: _,
+                        applied: _,
                         retired,
-                    } => {
-                        if applied {
-                            if let Some(source) = self
-                                .state
-                                .perform
-                                .sections
-                                .by_id(section_id)
-                                .map(CapturedSectionSource::from_section)
-                            {
-                                self.state.perform.capture.refresh(
-                                    source,
-                                    effective_at_samples,
-                                    section_position_samples.unwrap_or(0),
-                                );
-                            }
-                        }
-                        drop(retired);
-                    }
+                    } => drop(retired),
                 }
             }
         }

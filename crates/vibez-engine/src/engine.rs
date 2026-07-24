@@ -517,9 +517,6 @@ fn push_spectrum(tx: &mut Producer<f32>, buffer: &[f32], channels: usize) {
 #[path = "engine_drain_commands.rs"]
 mod drain_commands;
 
-#[path = "engine_automation_commands.rs"]
-mod automation_commands;
-
 #[path = "engine_render.rs"]
 mod render_paths;
 
