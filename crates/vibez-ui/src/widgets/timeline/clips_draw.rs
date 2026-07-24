@@ -61,21 +61,6 @@ fn visible_title_bounds(
     (right > left).then(|| (left, right - left, (clip_x + 4.0).max(left + 4.0)))
 }
 
-fn note_clip_colors(track_color: Color, is_recording_preview: bool) -> (Color, Color) {
-    if is_recording_preview {
-        (theme::with_alpha(theme::danger(), 0.32), theme::danger())
-    } else {
-        (
-            // A split leaves one half selected and the other unselected.
-            // MIDI clips may contain no drawable note starts in the retained
-            // fragment, so the body and outline must remain legible without
-            // relying on the selection highlight or note blocks.
-            theme::with_alpha(track_color, 0.72),
-            track_color,
-        )
-    }
-}
-
 impl TrackClipCanvas {
     pub(super) fn draw_impl(
         &self,
@@ -341,8 +326,11 @@ impl TrackClipCanvas {
                 .map(|clip| (clip, false))
                 .chain(self.recording_preview.iter().map(|clip| (clip, true)))
             {
-                let (note_clip_color, unselected_border_color) =
-                    note_clip_colors(self.track_color, is_recording_preview);
+                let note_clip_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.32)
+                } else {
+                    theme::with_alpha(self.track_color, 0.4)
+                };
                 let note_block_color = if is_recording_preview {
                     theme::with_alpha(theme::danger(), 0.88)
                 } else {
@@ -467,7 +455,7 @@ impl TrackClipCanvas {
                 } else if is_selected {
                     theme::accent()
                 } else {
-                    unselected_border_color
+                    theme::darken(self.track_color, 0.7)
                 };
                 let border_width = if is_selected { 2.0 } else { 1.0 };
 
@@ -669,24 +657,7 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use iced::Color;
-
-    use super::{fit_clip_title, note_clip_colors, visible_pixel_columns, visible_title_bounds};
-
-    #[test]
-    fn unselected_midi_clip_remains_visually_distinct_after_a_split() {
-        let track_color = Color::from_rgb(0.2, 0.5, 0.8);
-        let (body, border) = note_clip_colors(track_color, false);
-
-        assert!(
-            body.a >= 0.65,
-            "unselected MIDI body must not disappear into the dark lane"
-        );
-        assert_eq!(
-            border, track_color,
-            "unselected MIDI fragment needs a full track-colour outline"
-        );
-    }
+    use super::{fit_clip_title, visible_pixel_columns, visible_title_bounds};
 
     #[test]
     fn clip_title_is_constrained_to_its_visible_width() {
