@@ -517,6 +517,15 @@ impl App {
 
             if let Some(track) = self.state.find_track_mut(track_id) {
                 track.has_instrument = true;
+                track.instrument_kind = None;
+                track.sample_name = None;
+                track.sample_source = None;
+                track.sample_audio = None;
+                track.instrument_params.clear();
+                track.drum_rack_pads = (0..16)
+                    .map(|_| crate::state::UiDrumPad::default())
+                    .collect();
+                track.selected_drum_pad = 0;
                 track.plugin_instrument_name = Some(plugin_name.clone());
                 track.plugin_instrument_ref = Some(result.device_ref.clone());
                 track.plugin_instrument_descriptors = instrument.param_descriptors();

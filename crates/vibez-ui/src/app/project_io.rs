@@ -41,6 +41,17 @@ pub(super) struct ExportJob {
     loader_finished: bool,
 }
 
+fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect::PluginDeviceInfo> {
+    // Native and plugin instruments are mutually exclusive. Older projects
+    // written by the replacement bug may contain both; prefer the complete
+    // native state so its sampler media cannot be shadowed by a stale plugin.
+    track
+        .instrument
+        .is_none()
+        .then(|| track.plugin_instrument.clone())
+        .flatten()
+}
+
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
         // Invalidate any Browser import still preparing (e.g. in its
@@ -290,12 +301,18 @@ impl App {
             })
             .collect();
 
-        let plugin_instrument = track.plugin_instrument_ref.as_ref().map(|dev| {
-            let mut dev = dev.clone();
-            dev.state_b64 =
-                self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
-            dev
-        });
+        let plugin_instrument = track
+            .instrument_kind
+            .is_none()
+            .then(|| {
+                track.plugin_instrument_ref.as_ref().map(|dev| {
+                    let mut dev = dev.clone();
+                    dev.state_b64 =
+                        self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
+                    dev
+                })
+            })
+            .flatten();
 
         let native_instrument = match track.instrument_kind {
             Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
@@ -479,8 +496,8 @@ impl App {
             self.state.arrange_content_mut(track_info.id).automation = automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
-            if let Some(dev) = &track_info.plugin_instrument {
-                plugin_instrument_requests.push((track_info.id, dev.clone()));
+            if let Some(dev) = plugin_instrument_for_replay(track_info) {
+                plugin_instrument_requests.push((track_info.id, dev));
             }
 
             match track.kind {
@@ -1178,4 +1195,45 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
             vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
             vibez_core::track::MediaProvenance::Local { .. } => None,
         })
+}
+
+#[cfg(test)]
+mod instrument_invariant_tests {
+    use super::*;
+
+    fn surge_device() -> vibez_core::effect::PluginDeviceInfo {
+        vibez_core::effect::PluginDeviceInfo {
+            format: "clap".to_string(),
+            uid: "org.surge-synth-team.surge-xt".to_string(),
+            path: "/usr/lib/clap/Surge XT.clap".into(),
+            name: "Surge XT".to_string(),
+            state_b64: Some("plugin-state".to_string()),
+        }
+    }
+
+    #[test]
+    fn legacy_dual_instrument_record_replays_the_native_sampler() {
+        let mut track = TrackInfo::new("MIDI 1");
+        track.instrument = Some(InstrumentKind::Sampler);
+        track.native_instrument = Some(InstrumentStateInfo::Sampler {
+            params: Vec::new(),
+            source: None,
+        });
+        track.plugin_instrument = Some(surge_device());
+
+        assert!(plugin_instrument_for_replay(&track).is_none());
+    }
+
+    #[test]
+    fn plugin_only_record_still_replays_its_plugin() {
+        let mut track = TrackInfo::new("Bass");
+        track.plugin_instrument = Some(surge_device());
+
+        assert_eq!(
+            plugin_instrument_for_replay(&track)
+                .as_ref()
+                .map(|plugin| plugin.name.as_str()),
+            Some("Surge XT")
+        );
+    }
 }
