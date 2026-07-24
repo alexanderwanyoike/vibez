@@ -2,7 +2,7 @@
 //! Split from views_shell.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
+    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -12,53 +12,12 @@ use crate::domains::view::ViewMsg;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{AppState, AudioStreamHealth, Workspace};
+use crate::state::{AppState, Workspace};
 use crate::theme as th;
 use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
-
-fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
-    let (color, description) = match health {
-        AudioStreamHealth::Running => (th::success(), health.description().to_string()),
-        AudioStreamHealth::Rebuilding => (th::meter_yellow(), health.description().to_string()),
-        AudioStreamHealth::Error(cause) => (th::danger(), format!("Audio stream error: {cause}")),
-    };
-    let control = container(
-        row![
-            icons::icon(icons::CIRCLE_DOT).size(10).color(color),
-            text("AUDIO").size(9).color(color),
-        ]
-        .spacing(4)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([4, 6])
-    .style(move |_theme: &Theme| container::Style {
-        background: Some(th::bg_elevated().into()),
-        border: iced::Border {
-            color,
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-        ..Default::default()
-    });
-    let hint = container(text(description).size(10).color(th::text()))
-        .padding([5, 7])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
-            border: iced::Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-    tooltip(control, hint, tooltip::Position::Bottom)
-        .gap(6)
-        .padding(0)
-        .into()
-}
 
 impl App {
     pub(super) fn view_transport(&self) -> Element<'_, Message> {
@@ -333,14 +292,12 @@ impl App {
             .into();
 
         let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::text_dim());
-        let stream_health = audio_stream_indicator(&self.state.audio_stream_health);
 
         let transport = row![
             transport_buttons,
             horizontal_space(),
             time_text,
             horizontal_space(),
-            stream_health,
             volume_icon,
             master_meter_canvas,
             row![bpm_input, bpm_spinner]
