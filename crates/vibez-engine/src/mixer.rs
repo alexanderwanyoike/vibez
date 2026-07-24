@@ -13,10 +13,86 @@ mod note_repeat;
 mod pan;
 mod render_context;
 pub use effect_slot::EffectSlot;
-use groove::{crossed_beat, mapped_note_end, mapped_note_start};
+use groove::collect_timed_note_events;
 pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
+
+const MUTE_RAMP_FRAMES: u32 = 64;
+
+#[derive(Debug, Clone, Copy)]
+struct MuteRamp {
+    gain: f32,
+    target: f32,
+    remaining: u32,
+}
+
+impl Default for MuteRamp {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            target: 1.0,
+            remaining: 0,
+        }
+    }
+}
+
+impl MuteRamp {
+    fn set_muted(&mut self, muted: bool, immediate: bool) {
+        let target = if muted { 0.0 } else { 1.0 };
+        if immediate {
+            self.gain = target;
+            self.target = target;
+            self.remaining = 0;
+        } else if self.target != target {
+            self.target = target;
+            self.remaining = MUTE_RAMP_FRAMES;
+        }
+    }
+
+    fn next_gain(&mut self) -> f32 {
+        if self.remaining == 0 {
+            return self.gain;
+        }
+        self.gain += (self.target - self.gain) / self.remaining as f32;
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            self.gain = self.target;
+        }
+        self.gain
+    }
+}
+
+/// Runtime manual-overrides for automated parameters. The fixed-capacity
+/// storage keeps gesture changes allocation-free on the audio thread.
+#[derive(Debug, Default)]
+struct AutomationOverrides {
+    targets: [Option<vibez_core::automation::AutomationTarget>; 16],
+}
+
+impl AutomationOverrides {
+    fn contains(&self, target: vibez_core::automation::AutomationTarget) -> bool {
+        self.targets.contains(&Some(target))
+    }
+
+    fn set(&mut self, target: vibez_core::automation::AutomationTarget, overridden: bool) -> bool {
+        let existing = self.targets.iter().position(|entry| *entry == Some(target));
+        match (existing, overridden) {
+            (Some(_), true) | (None, false) => false,
+            (Some(index), false) => {
+                self.targets[index] = None;
+                true
+            }
+            (None, true) => {
+                let Some(slot) = self.targets.iter_mut().find(|entry| entry.is_none()) else {
+                    return false;
+                };
+                *slot = Some(target);
+                true
+            }
+        }
+    }
+}
 
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
@@ -31,6 +107,9 @@ pub struct EngineTrack {
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
+    automation_mute: Option<bool>,
+    automation_overrides: AutomationOverrides,
+    mute_ramp: MuteRamp,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
@@ -43,9 +122,9 @@ pub struct EngineTrack {
     /// the routing graph stays acyclic by construction.
     pub sends: Vec<(TrackId, f32)>,
     pub instrument: Option<Box<dyn Instrument>>,
-    /// Scratch storage for batch rendering: (frame_offset, pitch, velocity)
+    /// Reused block-scheduler scratch: (frame_offset, pitch, velocity).
     timed_note_ons: Vec<(u32, u8, u8)>,
-    /// Scratch storage for batch rendering: (frame_offset, pitch)
+    /// Reused block-scheduler scratch: (frame_offset, pitch).
     timed_note_offs: Vec<(u32, u8)>,
     note_repeats: TrackNoteRepeats,
     /// Clip pitches sounding on the instrument. Lets the engine kill
@@ -126,12 +205,26 @@ impl EngineTrack {
             swing,
         } = block;
         let buf_size = frames * channels;
-        let beat_step = 1.0 / spb;
         let mut rendered = false;
 
-        // Pre-scan: collect all events with frame offsets
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
+        if !self.suppress_source_notes {
+            collect_timed_note_events(
+                &self.playback_source.note_clips,
+                pos,
+                frames,
+                spb,
+                swing,
+                &mut self.timed_note_ons,
+                &mut self.timed_note_offs,
+            );
+        }
+
+        // Note Repeat is generated from live held notes rather than resident
+        // clip events, so retain its frame walk while the clip scheduler is
+        // block-indexed.
         for frame in 0..frames {
-            let sample_pos = pos + frame as u64;
             let (triggers, count) =
                 self.note_repeats
                     .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
@@ -141,98 +234,6 @@ impl EngineTrack {
                 instrument.note_on_at(trigger.pitch, trigger.velocity, frame as u32);
                 on_repeat(trigger);
                 rendered = true;
-            }
-            let current_beat = sample_pos as f64 / spb;
-            let prev_beat = if sample_pos > 0 {
-                (sample_pos - 1) as f64 / spb
-            } else {
-                -1.0
-            };
-
-            let note_clips = if self.suppress_source_notes {
-                &[][..]
-            } else {
-                &self.playback_source.note_clips
-            };
-            for clip in note_clips {
-                let clip_start_beat = clip.position_beats;
-                let clip_end_beat = clip.position_beats + clip.duration_beats;
-
-                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
-                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
-
-                if was_in_clip && !in_clip {
-                    for note in &clip.notes {
-                        self.timed_note_offs.push((frame as u32, note.pitch));
-                    }
-                    continue;
-                }
-
-                if !in_clip {
-                    continue;
-                }
-
-                let local_beat = current_beat - clip_start_beat;
-                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-                let loop_len = if looping {
-                    clip.loop_end_beats - clip.loop_start_beats
-                } else {
-                    0.0
-                };
-
-                let effective_local = if looping && local_beat >= clip.loop_end_beats {
-                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
-                } else {
-                    local_beat
-                };
-
-                let prev_effective_local = if !was_in_clip {
-                    -1.0
-                } else {
-                    let prev_local = prev_beat - clip_start_beat;
-                    if looping && prev_local >= clip.loop_end_beats {
-                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
-                    } else {
-                        prev_local
-                    }
-                };
-
-                let wrapped = looping
-                    && was_in_clip
-                    && prev_effective_local > effective_local + beat_step * 0.5;
-                let clip_swing =
-                    clip.swing_for_pair(effective_local, swing, wrapped || !was_in_clip);
-
-                if wrapped {
-                    for note in &clip.notes {
-                        self.timed_note_offs.push((frame as u32, note.pitch));
-                    }
-                    for note in &clip.notes {
-                        let mapped_start = mapped_note_start(clip, note, clip_swing);
-                        if mapped_start >= clip.loop_start_beats && mapped_start <= effective_local
-                        {
-                            self.timed_note_ons
-                                .push((frame as u32, note.pitch, note.velocity));
-                        }
-                    }
-                } else {
-                    for (note_index, note) in clip.notes.iter().enumerate() {
-                        let mapped_start = mapped_note_start(clip, note, clip_swing);
-                        if mapped_start < clip.duration_beats
-                            && crossed_beat(prev_effective_local, effective_local, mapped_start)
-                        {
-                            self.timed_note_ons
-                                .push((frame as u32, note.pitch, note.velocity));
-                        }
-                        if crossed_beat(
-                            prev_effective_local,
-                            effective_local,
-                            mapped_note_end(clip, note_index, clip_swing),
-                        ) {
-                            self.timed_note_offs.push((frame as u32, note.pitch));
-                        }
-                    }
-                }
             }
         }
 
@@ -294,118 +295,44 @@ impl EngineTrack {
         } = block;
         let buf_size = frames * channels;
         let mut rendered = false;
-        let mut note_ons: Vec<(u8, u8)> = Vec::new();
-        let mut note_offs: Vec<u8> = Vec::new();
-        let beat_step = 1.0 / spb;
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
+        if !self.suppress_source_notes {
+            collect_timed_note_events(
+                &self.playback_source.note_clips,
+                pos,
+                frames,
+                spb,
+                swing,
+                &mut self.timed_note_ons,
+                &mut self.timed_note_offs,
+            );
+        }
+        let mut note_on_index = 0;
+        let mut note_off_index = 0;
 
         for frame in 0..frames {
-            let sample_pos = pos + frame as u64;
             let (repeat_triggers, repeat_count) =
                 self.note_repeats
                     .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
-            let current_beat = sample_pos as f64 / spb;
-            let prev_beat = if sample_pos > 0 {
-                (sample_pos - 1) as f64 / spb
-            } else {
-                -1.0
-            };
-
-            note_ons.clear();
-            note_offs.clear();
-
-            let note_clips = if self.suppress_source_notes {
-                &[][..]
-            } else {
-                &self.playback_source.note_clips
-            };
-            for clip in note_clips {
-                let clip_start_beat = clip.position_beats;
-                let clip_end_beat = clip.position_beats + clip.duration_beats;
-
-                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
-                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
-
-                if was_in_clip && !in_clip {
-                    for note in &clip.notes {
-                        note_offs.push(note.pitch);
-                    }
-                    continue;
-                }
-
-                if !in_clip {
-                    continue;
-                }
-
-                let local_beat = current_beat - clip_start_beat;
-                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-                let loop_len = if looping {
-                    clip.loop_end_beats - clip.loop_start_beats
-                } else {
-                    0.0
-                };
-
-                let effective_local = if looping && local_beat >= clip.loop_end_beats {
-                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
-                } else {
-                    local_beat
-                };
-
-                let prev_effective_local = if !was_in_clip {
-                    -1.0
-                } else {
-                    let prev_local = prev_beat - clip_start_beat;
-                    if looping && prev_local >= clip.loop_end_beats {
-                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
-                    } else {
-                        prev_local
-                    }
-                };
-
-                let wrapped = looping
-                    && was_in_clip
-                    && prev_effective_local > effective_local + beat_step * 0.5;
-                let clip_swing =
-                    clip.swing_for_pair(effective_local, swing, wrapped || !was_in_clip);
-
-                if wrapped {
-                    for note in &clip.notes {
-                        note_offs.push(note.pitch);
-                    }
-                    for note in &clip.notes {
-                        let mapped_start = mapped_note_start(clip, note, clip_swing);
-                        if mapped_start >= clip.loop_start_beats && mapped_start <= effective_local
-                        {
-                            note_ons.push((note.pitch, note.velocity));
-                        }
-                    }
-                } else {
-                    for (note_index, note) in clip.notes.iter().enumerate() {
-                        let mapped_start = mapped_note_start(clip, note, clip_swing);
-                        if mapped_start < clip.duration_beats
-                            && crossed_beat(prev_effective_local, effective_local, mapped_start)
-                        {
-                            note_ons.push((note.pitch, note.velocity));
-                        }
-                        if crossed_beat(
-                            prev_effective_local,
-                            effective_local,
-                            mapped_note_end(clip, note_index, clip_swing),
-                        ) {
-                            note_offs.push(note.pitch);
-                        }
-                    }
-                }
-            }
 
             let instrument = self.instrument.as_mut().unwrap();
-            for pitch in &note_offs {
-                instrument.note_off(*pitch);
-                self.active_notes &= !(1u128 << *pitch);
+            while note_off_index < self.timed_note_offs.len()
+                && self.timed_note_offs[note_off_index].0 == frame as u32
+            {
+                let pitch = self.timed_note_offs[note_off_index].1;
+                instrument.note_off(pitch);
+                self.active_notes &= !(1u128 << pitch);
+                note_off_index += 1;
             }
-            for (pitch, vel) in &note_ons {
-                instrument.note_on(*pitch, *vel);
-                self.active_notes |= 1u128 << *pitch;
+            while note_on_index < self.timed_note_ons.len()
+                && self.timed_note_ons[note_on_index].0 == frame as u32
+            {
+                let (_, pitch, velocity) = self.timed_note_ons[note_on_index];
+                instrument.note_on(pitch, velocity);
+                self.active_notes |= 1u128 << pitch;
                 rendered = true;
+                note_on_index += 1;
             }
             for trigger in repeat_triggers.into_iter().take(repeat_count).flatten() {
                 instrument.note_off(trigger.pitch);
@@ -418,6 +345,9 @@ impl EngineTrack {
             let end = start + channels;
             instrument.render(&mut self.mix_buffer[start..end], channels);
         }
+
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
 
         if !rendered {
             rendered = self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0);

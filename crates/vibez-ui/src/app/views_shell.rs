@@ -1,7 +1,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, stack, text,
+    button, canvas, column, container, horizontal_space, mouse_area, progress_bar, row, stack, text,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -405,8 +405,22 @@ impl App {
 
     pub(super) fn view_status(&self) -> Element<'_, Message> {
         let status = text(&self.state.status_text).size(11).color(th::text_dim());
+        let content: Element<'_, Message> = match self.state.export_progress {
+            Some(percent) => row![
+                status,
+                horizontal_space(),
+                progress_bar(0.0..=100.0, percent as f32)
+                    .width(180)
+                    .height(5),
+                text(format!("{percent}%")).size(11).color(th::text()),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into(),
+            None => status.into(),
+        };
 
-        container(status)
+        container(content)
             .width(Length::Fill)
             .padding([3, 12])
             .style(|_theme: &Theme| container::Style {

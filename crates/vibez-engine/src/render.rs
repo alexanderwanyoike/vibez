@@ -5,16 +5,16 @@
 //! [`DecodedAudio`] buffer. The same mixer and instrument paths that run on
 //! the audio thread are used, so what you bounce matches what you hear.
 //!
-//! Plugin instruments and plugin effects are **not** reconstructed offline in
-//! this version: tracks or effect slots backed by an external plugin are
-//! silently skipped and a warning is emitted. Native instruments and native
-//! effects (`vibez-dsp`) render fully.
+//! Third-party plugin instances are prepared by the UI (their main-thread
+//! initialization cannot happen in this crate) and supplied to
+//! [`render_offline_with_plugins`]. A declared plugin is never silently
+//! substituted or skipped by that strict export path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::NoteClipInfo;
 use vibez_core::time::TempoMap;
 use vibez_core::track::{ClipInfo, InstrumentStateInfo, TrackInfo};
@@ -73,13 +73,47 @@ pub struct BounceResult {
     pub warnings: Vec<String>,
 }
 
+/// Isolated third-party devices prepared for one offline render.
+///
+/// Keys are project ids, so each declared slot consumes exactly the instance
+/// prepared for it. Missing devices are fatal in the strict export path.
+#[derive(Default)]
+pub struct OfflinePlugins {
+    pub instruments: HashMap<TrackId, Box<dyn vibez_instruments::Instrument>>,
+    pub effects: HashMap<EffectId, Box<dyn vibez_dsp::effect::AudioEffect>>,
+}
+
 const BLOCK_FRAMES: usize = 512;
 const CHANNELS: usize = 2;
 
 /// Render the request and return interleaved stereo [`DecodedAudio`] at the
 /// project's sample rate.
 pub fn render_offline(req: &BounceRequest) -> BounceResult {
+    render_offline_inner(req, None, |_| {})
+        .expect("the compatibility renderer cannot fail without strict plugin preparation")
+}
+
+/// Strict production renderer used by project export.
+///
+/// Every plugin declared by the snapshot must have a matching isolated
+/// instance in `plugins`. `progress` receives monotonic percentages from
+/// 0 through 100.
+pub fn render_offline_with_plugins(
+    req: &BounceRequest,
+    plugins: &mut OfflinePlugins,
+    progress: impl FnMut(u8),
+) -> Result<BounceResult, String> {
+    validate_offline_plugins(req, plugins)?;
+    render_offline_inner(req, Some(plugins), progress)
+}
+
+fn render_offline_inner(
+    req: &BounceRequest,
+    mut plugins: Option<&mut OfflinePlugins>,
+    mut progress: impl FnMut(u8),
+) -> Result<BounceResult, String> {
     let mut warnings = Vec::new();
+    progress(0);
     let sr_f32 = req.sample_rate as f32;
     let tempo = TempoMap::new(req.bpm, req.sample_rate);
 
@@ -97,16 +131,35 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         engine.sends = track_info.sends.clone();
         match req.mode {
             BounceMode::Master => {
-                engine.mute = track_info.mute;
+                engine.set_manual_mute(track_info.mute, true);
                 engine.solo = track_info.solo;
             }
             _ => {
-                engine.mute = false;
+                engine.set_manual_mute(false, true);
                 engine.solo = false;
             }
         }
 
-        if let Some(kind) = track_info.instrument {
+        if let Some(device) = &track_info.plugin_instrument {
+            let instrument = plugins
+                .as_deref_mut()
+                .and_then(|prepared| prepared.instruments.remove(&track_info.id));
+            match instrument {
+                Some(instrument) => engine.instrument = Some(instrument),
+                None if plugins.is_some() => {
+                    return Err(format!(
+                        "Track '{}' requires {} plugin instrument '{}', but it was not prepared",
+                        track_info.name,
+                        device.format.to_uppercase(),
+                        device.name
+                    ));
+                }
+                None => warnings.push(format!(
+                    "Track '{}' plugin instrument is unavailable in this render",
+                    track_info.name
+                )),
+            }
+        } else if let Some(kind) = track_info.instrument {
             let mut instrument = create_instrument(kind, sr_f32);
             if let Some(state) = &track_info.native_instrument {
                 match state {
@@ -150,7 +203,31 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         }
 
         for info in &track_info.effects {
-            let fx = create_effect_with_params(info.effect_type, sr_f32, &info.params);
+            let fx = if let Some(device) = &info.plugin {
+                match plugins
+                    .as_deref_mut()
+                    .and_then(|prepared| prepared.effects.remove(&info.id))
+                {
+                    Some(effect) => effect,
+                    None if plugins.is_some() => {
+                        return Err(format!(
+                            "Track '{}' requires {} effect '{}', but it was not prepared",
+                            track_info.name,
+                            device.format.to_uppercase(),
+                            device.name
+                        ));
+                    }
+                    None => {
+                        warnings.push(format!(
+                            "Track '{}' plugin effect '{}' is unavailable in this render",
+                            track_info.name, device.name
+                        ));
+                        continue;
+                    }
+                }
+            } else {
+                create_effect_with_params(info.effect_type, sr_f32, &info.params)
+            };
             engine.effects.push(EffectSlot {
                 id: info.id,
                 effect: fx,
@@ -219,16 +296,34 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
             bus.mute = bus_info.mute;
             bus.solo = bus_info.solo;
             for info in &bus_info.effects {
-                if info.plugin.is_some() {
-                    warnings.push(format!(
-                        "Bus '{}' plugin effect not rendered offline",
-                        bus_info.name
-                    ));
-                    continue;
-                }
+                let effect = if let Some(device) = &info.plugin {
+                    match plugins
+                        .as_deref_mut()
+                        .and_then(|prepared| prepared.effects.remove(&info.id))
+                    {
+                        Some(effect) => effect,
+                        None if plugins.is_some() => {
+                            return Err(format!(
+                                "Bus '{}' requires {} effect '{}', but it was not prepared",
+                                bus_info.name,
+                                device.format.to_uppercase(),
+                                device.name
+                            ));
+                        }
+                        None => {
+                            warnings.push(format!(
+                                "Bus '{}' plugin effect '{}' is unavailable in this render",
+                                bus_info.name, device.name
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    create_effect_with_params(info.effect_type, sr_f32, &info.params)
+                };
                 bus.effects.push(EffectSlot {
                     id: info.id,
-                    effect: create_effect_with_params(info.effect_type, sr_f32, &info.params),
+                    effect,
                     bypass: info.bypass,
                 });
             }
@@ -246,20 +341,33 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         if let Some(info) = &req.master {
             master_gain = info.gain;
             for fx_info in &info.effects {
-                if fx_info.plugin.is_some() {
-                    warnings.push(format!(
-                        "Master plugin effect '{}' not rendered offline",
-                        fx_info
-                            .plugin
-                            .as_ref()
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    ));
-                    continue;
-                }
+                let effect = if let Some(device) = &fx_info.plugin {
+                    match plugins
+                        .as_deref_mut()
+                        .and_then(|prepared| prepared.effects.remove(&fx_info.id))
+                    {
+                        Some(effect) => effect,
+                        None if plugins.is_some() => {
+                            return Err(format!(
+                                "Master requires {} effect '{}', but it was not prepared",
+                                device.format.to_uppercase(),
+                                device.name
+                            ));
+                        }
+                        None => {
+                            warnings.push(format!(
+                                "Master plugin effect '{}' is unavailable in this render",
+                                device.name
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    create_effect_with_params(fx_info.effect_type, sr_f32, &fx_info.params)
+                };
                 master_fx.push(EffectSlot {
                     id: fx_info.id,
-                    effect: create_effect_with_params(fx_info.effect_type, sr_f32, &fx_info.params),
+                    effect,
                     bypass: fx_info.bypass,
                 });
             }
@@ -283,13 +391,12 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         }
 
         for track in tracks.iter_mut() {
-            if matches!(req.mode, BounceMode::Master) {
-                if track.mute {
-                    continue;
-                }
-                if has_track_solo && !track.solo && !has_bus_solo {
-                    continue;
-                }
+            if matches!(req.mode, BounceMode::Master)
+                && has_track_solo
+                && !track.solo
+                && !has_bus_solo
+            {
+                continue;
             }
 
             let beat = pos as f64 / tempo.samples_per_beat();
@@ -316,6 +423,9 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
                 continue;
             }
             track.process_effects(block, CHANNELS);
+            if matches!(req.mode, BounceMode::Master) {
+                track.apply_mute_envelope(pos, block, CHANNELS, tempo.samples_per_beat());
+            }
 
             let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let gain = auto_gain.unwrap_or(track.gain);
@@ -377,14 +487,138 @@ pub fn render_offline(req: &BounceRequest) -> BounceResult {
         }
 
         rendered += block;
+        let percent = if total_frames == 0 {
+            100
+        } else {
+            ((rendered as u128 * 100) / total_frames as u128).min(100) as u8
+        };
+        progress(percent);
     }
 
-    BounceResult {
+    if let Some(prepared) = plugins {
+        return_offline_plugins(req, prepared, &mut tracks, &mut buses, &mut master_fx);
+    }
+    progress(100);
+    Ok(BounceResult {
         audio: DecodedAudio {
             channels: vec![out_l, out_r],
             sample_rate: req.sample_rate,
         },
         warnings,
+    })
+}
+
+fn validate_offline_plugins(req: &BounceRequest, plugins: &OfflinePlugins) -> Result<(), String> {
+    for track in &req.tracks {
+        if !track_is_active_for_mode(track.id, req.mode) {
+            continue;
+        }
+        if let Some(device) = &track.plugin_instrument {
+            if !plugins.instruments.contains_key(&track.id) {
+                return Err(format!(
+                    "Track '{}' requires {} plugin instrument '{}', but it was not prepared",
+                    track.name,
+                    device.format.to_uppercase(),
+                    device.name
+                ));
+            }
+        }
+        for effect in &track.effects {
+            if let Some(device) = &effect.plugin {
+                if !plugins.effects.contains_key(&effect.id) {
+                    return Err(format!(
+                        "Track '{}' requires {} effect '{}', but it was not prepared",
+                        track.name,
+                        device.format.to_uppercase(),
+                        device.name
+                    ));
+                }
+            }
+        }
+    }
+    if matches!(req.mode, BounceMode::Master) {
+        for bus in &req.buses {
+            for effect in &bus.effects {
+                if let Some(device) = &effect.plugin {
+                    if !plugins.effects.contains_key(&effect.id) {
+                        return Err(format!(
+                            "Bus '{}' requires {} effect '{}', but it was not prepared",
+                            bus.name,
+                            device.format.to_uppercase(),
+                            device.name
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(master) = &req.master {
+            for effect in &master.effects {
+                if let Some(device) = &effect.plugin {
+                    if !plugins.effects.contains_key(&effect.id) {
+                        return Err(format!(
+                            "Master requires {} effect '{}', but it was not prepared",
+                            device.format.to_uppercase(),
+                            device.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn return_offline_plugins(
+    req: &BounceRequest,
+    prepared: &mut OfflinePlugins,
+    tracks: &mut [EngineTrack],
+    buses: &mut [EngineTrack],
+    master_fx: &mut Vec<EffectSlot>,
+) {
+    let plugin_effect_ids: HashSet<EffectId> = req
+        .tracks
+        .iter()
+        .chain(req.buses.iter())
+        .chain(req.master.iter())
+        .flat_map(|track| &track.effects)
+        .filter(|effect| effect.plugin.is_some())
+        .map(|effect| effect.id)
+        .collect();
+
+    for track in tracks {
+        if req
+            .tracks
+            .iter()
+            .find(|info| info.id == track.id)
+            .is_some_and(|info| info.plugin_instrument.is_some())
+        {
+            if let Some(mut instrument) = track.instrument.take() {
+                instrument.finish_offline_processing();
+                prepared.instruments.insert(track.id, instrument);
+            }
+        }
+        return_plugin_effects(&plugin_effect_ids, prepared, &mut track.effects);
+    }
+    for bus in buses {
+        return_plugin_effects(&plugin_effect_ids, prepared, &mut bus.effects);
+    }
+    return_plugin_effects(&plugin_effect_ids, prepared, master_fx);
+}
+
+fn return_plugin_effects(
+    plugin_effect_ids: &HashSet<EffectId>,
+    prepared: &mut OfflinePlugins,
+    slots: &mut Vec<EffectSlot>,
+) {
+    let mut index = 0;
+    while index < slots.len() {
+        if plugin_effect_ids.contains(&slots[index].id) {
+            let mut slot = slots.remove(index);
+            slot.effect.finish_offline_processing();
+            prepared.effects.insert(slot.id, slot.effect);
+        } else {
+            index += 1;
+        }
     }
 }
 
@@ -411,9 +645,73 @@ fn clip_included_for_mode(clip_id: ClipId, mode: BounceMode, is_note_clip: bool)
 mod tests {
     use super::*;
     use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
-    use vibez_core::effect::{EffectInfo, EffectType};
+    use vibez_core::effect::{EffectInfo, EffectType, ParamDescriptor, PluginDeviceInfo};
     use vibez_core::id::EffectId;
     use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+
+    struct ConstantPluginInstrument {
+        active: bool,
+    }
+
+    impl vibez_instruments::Instrument for ConstantPluginInstrument {
+        fn instrument_kind(&self) -> InstrumentKind {
+            InstrumentKind::SubtractiveSynth
+        }
+        fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+            &[]
+        }
+        fn set_param(&mut self, _index: usize, _value: f32) -> bool {
+            false
+        }
+        fn get_param(&self, _index: usize) -> f32 {
+            0.0
+        }
+        fn note_on(&mut self, _pitch: u8, _velocity: u8) {
+            self.active = true;
+        }
+        fn note_off(&mut self, _pitch: u8) {
+            self.active = false;
+        }
+        fn render(&mut self, buffer: &mut [f32], _channels: usize) {
+            if self.active {
+                buffer.iter_mut().for_each(|sample| *sample = 0.5);
+            }
+        }
+        fn reset(&mut self) {
+            self.active = false;
+        }
+    }
+
+    struct ScalePluginEffect(f32);
+
+    impl vibez_dsp::effect::AudioEffect for ScalePluginEffect {
+        fn effect_type(&self) -> EffectType {
+            EffectType::Gain
+        }
+        fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+            &[]
+        }
+        fn set_param(&mut self, _index: usize, _value: f32) -> bool {
+            false
+        }
+        fn get_param(&self, _index: usize) -> f32 {
+            self.0
+        }
+        fn process(&mut self, buffer: &mut [f32], _channels: usize) {
+            buffer.iter_mut().for_each(|sample| *sample *= self.0);
+        }
+        fn reset(&mut self) {}
+    }
+
+    fn plugin_device(name: &str) -> PluginDeviceInfo {
+        PluginDeviceInfo {
+            format: "clap".into(),
+            uid: format!("test.{name}"),
+            path: format!("/test/{name}.clap").into(),
+            name: name.into(),
+            state_b64: Some("c3RhdGU=".into()),
+        }
+    }
 
     fn audio_of(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
@@ -842,6 +1140,176 @@ mod tests {
         };
         let out = render_offline(&req);
         assert!(!out.warnings.is_empty());
+    }
+
+    #[test]
+    fn strict_render_uses_prepared_plugin_instrument_and_reports_progress() {
+        let tid = TrackId::new();
+        let cid = ClipId::new();
+        let mut track = bare_track("Plugin Bass");
+        track.id = tid;
+        track.kind = TrackKind::Midi;
+        track.plugin_instrument = Some(plugin_device("Surge XT"));
+        let note_clip = NoteClipInfo {
+            id: cid,
+            track_id: tid,
+            name: "bass".into(),
+            position_beats: 0.0,
+            duration_beats: 1.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+            notes: vec![MidiNote {
+                pitch: 36,
+                velocity: 100,
+                start_beat: 0.0,
+                duration_beats: 1.0,
+            }],
+        };
+        let req = BounceRequest {
+            master: None,
+            buses: Vec::new(),
+            tracks: vec![track],
+            audio_clips: Vec::new(),
+            note_clips: vec![note_clip],
+            clip_audio: HashMap::new(),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 2_048),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let mut plugins = OfflinePlugins::default();
+        plugins
+            .instruments
+            .insert(tid, Box::new(ConstantPluginInstrument { active: false }));
+        let mut progress = Vec::new();
+
+        let result =
+            render_offline_with_plugins(&req, &mut plugins, |value| progress.push(value)).unwrap();
+
+        assert!(result.audio.channels[0].iter().any(|sample| *sample > 0.1));
+        assert!(
+            plugins.instruments.contains_key(&tid),
+            "renderer must return the plugin for main-thread teardown"
+        );
+        assert_eq!(progress.first(), Some(&0));
+        assert_eq!(progress.last(), Some(&100));
+        assert!(progress.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    #[test]
+    fn strict_render_fails_when_declared_plugin_was_not_prepared() {
+        let mut track = bare_track("Plugin Bass");
+        track.kind = TrackKind::Midi;
+        track.plugin_instrument = Some(plugin_device("Surge XT"));
+        let req = BounceRequest {
+            master: None,
+            buses: Vec::new(),
+            tracks: vec![track],
+            audio_clips: Vec::new(),
+            note_clips: Vec::new(),
+            clip_audio: HashMap::new(),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 512),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+
+        let mut plugins = OfflinePlugins::default();
+        let error = match render_offline_with_plugins(&req, &mut plugins, |_| {}) {
+            Ok(_) => panic!("missing plugin must fail the strict render"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("Surge XT"));
+        assert!(error.contains("not prepared"));
+    }
+
+    #[test]
+    fn strict_render_uses_plugin_effects_on_tracks_buses_and_master() {
+        fn plugin_effect() -> EffectInfo {
+            EffectInfo {
+                id: EffectId::new(),
+                effect_type: EffectType::Gain,
+                bypass: false,
+                params: Vec::new(),
+                plugin: Some(plugin_device("Scale")),
+            }
+        }
+
+        let mut track = bare_track("audio");
+        let tid = track.id;
+        let cid = ClipId::new();
+        let track_fx = plugin_effect();
+        track.effects.push(track_fx.clone());
+        let mut bus = bare_track("Return");
+        let bus_fx = plugin_effect();
+        bus.effects.push(bus_fx.clone());
+        track.sends.push((bus.id, 1.0));
+        let mut master = bare_track("Master");
+        master.id = TrackId::MASTER;
+        let master_fx = plugin_effect();
+        master.effects.push(master_fx.clone());
+        let clip = ClipInfo {
+            id: cid,
+            track_id: tid,
+            name: "audio".into(),
+            position: 0,
+            source_offset: 0,
+            duration: 64,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        };
+        let req = BounceRequest {
+            master: Some(master),
+            buses: vec![bus],
+            tracks: vec![track],
+            audio_clips: vec![clip],
+            note_clips: Vec::new(),
+            clip_audio: HashMap::from([(cid, audio_of(64, 1.0))]),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 64),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let mut plugins = OfflinePlugins::default();
+        plugins
+            .effects
+            .insert(track_fx.id, Box::new(ScalePluginEffect(0.5)));
+        plugins
+            .effects
+            .insert(bus_fx.id, Box::new(ScalePluginEffect(0.5)));
+        plugins
+            .effects
+            .insert(master_fx.id, Box::new(ScalePluginEffect(0.5)));
+
+        let result = render_offline_with_plugins(&req, &mut plugins, |_| {}).unwrap();
+
+        // Track: 1 * .5. Dry + return(.5) = .75 before centered pan,
+        // then master .5.
+        let expected = 0.75 * std::f32::consts::FRAC_1_SQRT_2 * 0.5;
+        assert!((result.audio.channels[0][10] - expected).abs() < 1e-3);
+        assert_eq!(
+            plugins.effects.len(),
+            3,
+            "every effect must be returned for main-thread teardown"
+        );
     }
 
     #[test]

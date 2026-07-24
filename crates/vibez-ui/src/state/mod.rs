@@ -331,7 +331,6 @@ pub struct TimelineEditorState {
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
-    pub clipboard: ClipClipboard,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -353,7 +352,6 @@ impl Default for TimelineEditorState {
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
-            clipboard: ClipClipboard::default(),
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
@@ -410,6 +408,24 @@ pub struct ResolvedTimelineMut<'a> {
     pub editor: &'a mut TimelineEditorState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AudioStreamHealth {
+    #[default]
+    Running,
+    Rebuilding,
+    Error(String),
+}
+
+impl AudioStreamHealth {
+    pub fn description(&self) -> &str {
+        match self {
+            Self::Running => "Audio stream running",
+            Self::Rebuilding => "Rebuilding audio stream",
+            Self::Error(cause) => cause,
+        }
+    }
+}
+
 pub struct AppState {
     // Transport domain slice (playback, tempo, arrangement loop).
     pub transport: TransportState,
@@ -422,6 +438,9 @@ pub struct AppState {
     pub spectrum: crate::spectrum::SpectrumState,
 
     pub status_text: String,
+    /// Active project-export completion percentage.
+    pub export_progress: Option<u8>,
+    pub audio_stream_health: AudioStreamHealth,
     pub view: ViewState,
 
     pub piano_roll: PianoRollState,
@@ -434,6 +453,9 @@ pub struct AppState {
 
     // Arrange-owned timeline content and editor state.
     pub arrangement: ArrangementState,
+
+    // One runtime clipboard shared by Arrange and every Section editor.
+    pub clip_clipboard: ClipClipboard,
 
     /// In-progress manual BPM input text keyed by clip id. Only
     /// populated while the user is actively editing the field in the
@@ -480,6 +502,8 @@ impl Default for AppState {
             peak_r: 0.0,
             spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
+            export_progress: None,
+            audio_stream_health: AudioStreamHealth::default(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),
             perform: crate::domains::perform::PerformState::default(),
@@ -488,6 +512,7 @@ impl Default for AppState {
                 ..ProjectTracksState::default()
             }),
             arrangement: ArrangementState::default(),
+            clip_clipboard: ClipClipboard::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
@@ -513,6 +538,31 @@ pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
 }
 
 impl AppState {
+    pub fn apply_audio_stream_event(
+        &mut self,
+        event: vibez_audio_io::audio_stream::AudioStreamEvent,
+    ) {
+        use vibez_audio_io::audio_stream::AudioStreamEvent;
+
+        match event {
+            AudioStreamEvent::Running => {
+                self.audio_stream_health = AudioStreamHealth::Running;
+            }
+            AudioStreamEvent::Error(cause) => {
+                self.status_text = format!("Audio stream error: {cause}");
+                self.audio_stream_health = AudioStreamHealth::Error(cause);
+            }
+            AudioStreamEvent::Rebuilding => {
+                self.status_text = "Rebuilding audio stream…".into();
+                self.audio_stream_health = AudioStreamHealth::Rebuilding;
+            }
+            AudioStreamEvent::Recovered => {
+                self.status_text = "Audio stream recovered".into();
+                self.audio_stream_health = AudioStreamHealth::Running;
+            }
+        }
+    }
+
     pub fn position_seconds(&self) -> f64 {
         self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
@@ -692,6 +742,41 @@ impl AppState {
         };
 
         audio_max.max(note_max)
+    }
+}
+
+#[cfg(test)]
+mod audio_stream_health_tests {
+    use super::{AppState, AudioStreamHealth};
+    use vibez_audio_io::audio_stream::AudioStreamEvent;
+
+    #[test]
+    fn stream_error_and_recovery_update_persistent_health_and_status() {
+        let mut state = AppState::default();
+
+        state.apply_audio_stream_event(AudioStreamEvent::Error(
+            "device disconnected mid-session".into(),
+        ));
+        assert_eq!(
+            state.audio_stream_health,
+            AudioStreamHealth::Error("device disconnected mid-session".into())
+        );
+        assert_eq!(
+            state.status_text,
+            "Audio stream error: device disconnected mid-session"
+        );
+
+        state.apply_audio_stream_event(AudioStreamEvent::Rebuilding);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Rebuilding);
+        assert_eq!(state.status_text, "Rebuilding audio stream…");
+
+        state.apply_audio_stream_event(AudioStreamEvent::Recovered);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
+        assert_eq!(state.status_text, "Audio stream recovered");
+
+        state.apply_audio_stream_event(AudioStreamEvent::Running);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
+        assert_eq!(state.status_text, "Audio stream recovered");
     }
 }
 

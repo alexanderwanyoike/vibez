@@ -288,7 +288,12 @@ impl DevicesState {
                 }
                 let instrument_params =
                     default_instrument_params(instrument_kind, sample_rate as f32);
+                let mut replaced_plugin = false;
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    replaced_plugin = track.plugin_instrument_ref.is_some()
+                        || track.plugin_instrument_name.is_some()
+                        || !track.plugin_instrument_descriptors.is_empty()
+                        || track.has_plugin_instrument_gui;
                     track.has_instrument = true;
                     track.instrument_kind = Some(instrument_kind);
                     track.sample_name = None;
@@ -297,6 +302,10 @@ impl DevicesState {
                     track.instrument_params = instrument_params.clone();
                     track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
                     track.selected_drum_pad = 0;
+                    track.plugin_instrument_name = None;
+                    track.plugin_instrument_ref = None;
+                    track.plugin_instrument_descriptors = &[];
+                    track.has_plugin_instrument_gui = false;
                 }
                 engine.send(EngineCommand::SetTrackInstrument(track_id, instrument_kind));
                 for (param_index, value) in instrument_params.into_iter().enumerate() {
@@ -307,6 +316,9 @@ impl DevicesState {
                     });
                 }
                 self.context_menu = None;
+                if replaced_plugin {
+                    action.close_gui = Some(PluginGuiKey::Instrument { track_id });
+                }
                 action.status = Some(format!("Added {}", instrument_kind.name()));
             }
             DevicesMsg::RemoveTrackInstrument(track_id) => {
@@ -315,10 +327,13 @@ impl DevicesState {
                     track.instrument_kind = None;
                     track.sample_name = None;
                     track.sample_source = None;
+                    track.sample_audio = None;
                     track.instrument_params.clear();
                     track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
                     track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
+                    track.plugin_instrument_ref = None;
+                    track.plugin_instrument_descriptors = &[];
                     track.has_plugin_instrument_gui = false;
                 }
                 engine.send(EngineCommand::RemoveTrackInstrument(track_id));
@@ -487,6 +502,16 @@ mod tests {
     use super::super::test_support::RecordingEngine;
     use super::*;
 
+    fn surge_device() -> vibez_core::effect::PluginDeviceInfo {
+        vibez_core::effect::PluginDeviceInfo {
+            format: "clap".to_string(),
+            uid: "org.surge-synth-team.surge-xt".to_string(),
+            path: "/usr/lib/clap/Surge XT.clap".into(),
+            name: "Surge XT".to_string(),
+            state_b64: Some("plugin-state".to_string()),
+        }
+    }
+
     fn midi_track_with_effect() -> (Vec<ProjectTrack>, TrackId, EffectId) {
         let track_id = TrackId::new();
         let mut track = ProjectTrack::new_instrument(
@@ -532,6 +557,65 @@ mod tests {
             })
         );
         assert!(matches!(engine.0[0], EngineCommand::RemoveEffect(..)));
+    }
+
+    #[test]
+    fn selecting_sampler_atomically_replaces_a_plugin_instrument() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].has_instrument = true;
+        tracks[0].plugin_instrument_name = Some("Surge XT".to_string());
+        tracks[0].plugin_instrument_ref = Some(surge_device());
+        tracks[0].plugin_instrument_descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0).param_descriptors();
+        tracks[0].has_plugin_instrument_gui = true;
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+
+        let action = devices.update(
+            DevicesMsg::SetTrackInstrument(track_id, InstrumentKind::Sampler),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+
+        assert_eq!(tracks[0].instrument_kind, Some(InstrumentKind::Sampler));
+        assert!(tracks[0].plugin_instrument_name.is_none());
+        assert!(tracks[0].plugin_instrument_ref.is_none());
+        assert!(tracks[0].plugin_instrument_descriptors.is_empty());
+        assert!(!tracks[0].has_plugin_instrument_gui);
+        assert_eq!(
+            action.close_gui,
+            Some(PluginGuiKey::Instrument { track_id })
+        );
+    }
+
+    #[test]
+    fn removing_plugin_instrument_clears_its_persisted_identity() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].has_instrument = true;
+        tracks[0].plugin_instrument_name = Some("Surge XT".to_string());
+        tracks[0].plugin_instrument_ref = Some(surge_device());
+        tracks[0].plugin_instrument_descriptors =
+            vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0).param_descriptors();
+        tracks[0].has_plugin_instrument_gui = true;
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+
+        devices.update(
+            DevicesMsg::RemoveTrackInstrument(track_id),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+
+        assert!(tracks[0].plugin_instrument_name.is_none());
+        assert!(tracks[0].plugin_instrument_ref.is_none());
+        assert!(tracks[0].plugin_instrument_descriptors.is_empty());
+        assert!(!tracks[0].has_plugin_instrument_gui);
     }
 
     #[test]

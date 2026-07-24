@@ -6,6 +6,7 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,6 +39,33 @@ impl StreamHealth {
         } else {
             CallbackAction::Process
         }
+    }
+}
+
+/// A presentation-facing transition in the output stream lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioStreamEvent {
+    /// The stream started successfully.
+    Running,
+    /// The stream failed. The description is suitable for producer-facing UI.
+    Error(String),
+    /// The existing stream is being replaced.
+    Rebuilding,
+    /// A replacement stream was built successfully.
+    Recovered,
+}
+
+#[derive(Clone)]
+struct StreamEventReporter(SyncSender<AudioStreamEvent>);
+
+impl StreamEventReporter {
+    fn channel() -> (Self, Receiver<AudioStreamEvent>) {
+        let (tx, rx) = mpsc::sync_channel(16);
+        (Self(tx), rx)
+    }
+
+    fn report(&self, event: AudioStreamEvent) {
+        let _ = self.0.try_send(event);
     }
 }
 
@@ -151,6 +179,8 @@ pub struct AudioOutputStream {
     /// Shared engine slot.  The audio callback `try_lock`s this each
     /// invocation and calls `engine.process()` if the lock is obtained.
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
+    event_reporter: StreamEventReporter,
+    event_rx: Receiver<AudioStreamEvent>,
 }
 
 impl AudioOutputStream {
@@ -179,7 +209,20 @@ impl AudioOutputStream {
         buffer_size: Option<u32>,
     ) -> Result<Self, AudioStreamError> {
         let engine_slot = Arc::new(Mutex::new(Some(engine)));
-        Self::build_stream(engine_slot, device, buffer_size)
+        let (event_reporter, event_rx) = StreamEventReporter::channel();
+        let (stream, params) = Self::build_stream(
+            Arc::clone(&engine_slot),
+            device,
+            buffer_size,
+            event_reporter.clone(),
+        )?;
+        Ok(Self {
+            stream,
+            params,
+            engine_slot,
+            event_reporter,
+            event_rx,
+        })
     }
 
     /// Reconfigure the stream with a new buffer size, preserving the engine
@@ -189,25 +232,45 @@ impl AudioOutputStream {
     /// brief moment the engine is being moved between streams, the old
     /// callback outputs silence (one buffer, inaudible).
     pub fn reconfigure(&mut self, buffer_size: Option<u32>) -> Result<(), AudioStreamError> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or(AudioStreamError::NoOutputDevice)?;
+        self.event_reporter.report(AudioStreamEvent::Rebuilding);
+        let result: Result<(), AudioStreamError> = (|| {
+            let host = cpal::default_host();
+            let device = host
+                .default_output_device()
+                .ok_or(AudioStreamError::NoOutputDevice)?;
 
-        // Pause the old stream so the callback stops firing.
-        let _ = self.stream.pause();
+            // Pause the old stream so the callback stops firing.
+            let _ = self.stream.pause();
 
-        // Take the engine out of the shared slot.  The old callback will
-        // output silence if it fires between pause and drop.
-        let engine_slot = Arc::clone(&self.engine_slot);
+            // Take the engine out of the shared slot.  The old callback will
+            // output silence if it fires between pause and drop.
+            let engine_slot = Arc::clone(&self.engine_slot);
 
-        // Build a new stream that reuses the same engine slot.
-        let new = Self::build_stream(engine_slot, &device, buffer_size)?;
+            // Build a new stream that reuses the same engine slot.
+            let (stream, params) = Self::build_stream(
+                engine_slot,
+                &device,
+                buffer_size,
+                self.event_reporter.clone(),
+            )?;
 
-        self.stream = new.stream;
-        self.params = new.params;
-        // engine_slot is already the same Arc
-        Ok(())
+            self.stream = stream;
+            self.params = params;
+            self.stream.play()?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.event_reporter.report(AudioStreamEvent::Recovered);
+                Ok(())
+            }
+            Err(error) => {
+                self.event_reporter
+                    .report(AudioStreamEvent::Error(error.to_string()));
+                Err(error)
+            }
+        }
     }
 
     /// Internal: build a cpal stream around an existing engine slot.
@@ -215,7 +278,8 @@ impl AudioOutputStream {
         engine_slot: Arc<Mutex<Option<AudioEngine>>>,
         device: &cpal::Device,
         buffer_size: Option<u32>,
-    ) -> Result<Self, AudioStreamError> {
+        event_reporter: StreamEventReporter,
+    ) -> Result<(cpal::Stream, StreamParams), AudioStreamError> {
         let supported_config = device.default_output_config()?;
 
         // Prefer our default sample rate if the device supports it, otherwise
@@ -262,6 +326,7 @@ impl AudioOutputStream {
         let slot = Arc::clone(&engine_slot);
         let health = StreamHealth::default();
         let callback_health = health.clone();
+        let error_reporter = event_reporter;
 
         let stream = device.build_output_stream(
             &config,
@@ -312,22 +377,28 @@ impl AudioOutputStream {
             },
             move |err| {
                 health.mark_failed();
+                error_reporter.report(AudioStreamEvent::Error(err.to_string()));
                 eprintln!("vibez: audio stream error: {err}");
             },
             None,
         )?;
 
-        Ok(Self {
-            stream,
-            params,
-            engine_slot,
-        })
+        Ok((stream, params))
     }
 
     /// Start (or resume) audio playback.
     pub fn play(&self) -> Result<(), AudioStreamError> {
-        self.stream.play()?;
-        Ok(())
+        match self.stream.play().map_err(AudioStreamError::from) {
+            Ok(()) => {
+                self.event_reporter.report(AudioStreamEvent::Running);
+                Ok(())
+            }
+            Err(error) => {
+                self.event_reporter
+                    .report(AudioStreamEvent::Error(error.to_string()));
+                Err(error)
+            }
+        }
     }
 
     /// Pause audio playback.
@@ -352,6 +423,11 @@ impl AudioOutputStream {
     /// Return the channel count negotiated with the device.
     pub fn channels(&self) -> usize {
         self.params.channels
+    }
+
+    /// Return the next lifecycle event without blocking the UI thread.
+    pub fn try_next_event(&self) -> Option<AudioStreamEvent> {
+        self.event_rx.try_recv().ok()
     }
 }
 
@@ -409,6 +485,29 @@ mod tests {
 
         assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
         assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
+    }
+
+    #[test]
+    fn stream_lifecycle_reports_error_rebuild_and_recovery_in_order() {
+        let (reporter, events) = StreamEventReporter::channel();
+
+        reporter.report(AudioStreamEvent::Running);
+        reporter.report(AudioStreamEvent::Error(
+            "device disconnected mid-session".into(),
+        ));
+        reporter.report(AudioStreamEvent::Rebuilding);
+        reporter.report(AudioStreamEvent::Recovered);
+
+        assert_eq!(events.try_recv(), Ok(AudioStreamEvent::Running));
+        assert_eq!(
+            events.try_recv(),
+            Ok(AudioStreamEvent::Error(
+                "device disconnected mid-session".into()
+            ))
+        );
+        assert_eq!(events.try_recv(), Ok(AudioStreamEvent::Rebuilding));
+        assert_eq!(events.try_recv(), Ok(AudioStreamEvent::Recovered));
+        assert!(events.try_recv().is_err());
     }
 
     /// Verify `BufferSize::Default` is used for `None`.
