@@ -18,6 +18,10 @@ pub enum ViewMsg {
     ZoomIn,
     ZoomOut,
     SetZoom(f32),
+    ZoomAround {
+        factor: f32,
+        anchor_x: f32,
+    },
     ZoomToFit,
     ScrollArrangement(f64),
     SetSnapGrid(SnapGrid),
@@ -98,19 +102,22 @@ impl ViewState {
                 self.detail_panel_tab = tab;
             }
             ViewMsg::ZoomIn => {
-                self.zoom_level = (self.zoom_level * 1.25).min(16.0);
+                self.zoom_around(1.25, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::ZoomOut => {
-                self.zoom_level = (self.zoom_level / 1.25).max(0.01);
+                self.zoom_around(1.0 / 1.25, self.window_width / 2.0, ctx.total_beats);
             }
             ViewMsg::SetZoom(level) => {
-                self.zoom_level = level.clamp(0.01, 16.0);
+                let factor = level.clamp(0.01, 16.0) / self.zoom_level;
+                self.zoom_around(factor, self.window_width / 2.0, ctx.total_beats);
+            }
+            ViewMsg::ZoomAround { factor, anchor_x } => {
+                self.zoom_around(factor, anchor_x, ctx.total_beats);
             }
             ViewMsg::ZoomToFit => {
                 let content_beats = ctx.total_beats;
                 if content_beats > 0.0 {
-                    // Conservative estimate of canvas width (window minus track headers)
-                    let canvas_width = 1400.0_f32;
+                    let canvas_width = self.window_width.max(1.0);
                     let target_ppb = TimelineGeometry::fitted(content_beats, canvas_width, 0.0)
                         .pixels_per_beat();
                     self.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
@@ -255,6 +262,20 @@ impl ViewState {
         }
         action
     }
+
+    fn zoom_around(&mut self, factor: f32, anchor_x: f32, total_beats: f64) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let old_geometry = TimelineGeometry::from_zoom(self.zoom_level, 0.0);
+        let anchor_x = anchor_x.max(0.0);
+        let anchor_beat = self.scroll_offset_beats + old_geometry.beats_for_width(anchor_x);
+        let next_zoom = (self.zoom_level * factor).clamp(0.01, 16.0);
+        let next_geometry = TimelineGeometry::from_zoom(next_zoom, 0.0);
+        self.zoom_level = next_zoom;
+        self.scroll_offset_beats = (anchor_beat - next_geometry.beats_for_width(anchor_x))
+            .clamp(0.0, total_beats.max(0.0));
+    }
 }
 
 #[cfg(test)]
@@ -276,6 +297,33 @@ mod tests {
             ViewCtx::default(),
         );
         assert_eq!(v.zoom_level, 0.01);
+    }
+
+    #[test]
+    fn zoom_in_keeps_the_viewport_centre_on_the_same_beat() {
+        let mut view = ViewState {
+            zoom_level: 1.0,
+            scroll_offset_beats: 100.0,
+            window_width: 800.0,
+            ..ViewState::default()
+        };
+        let centre_x = view.window_width / 2.0;
+        let before = view.scroll_offset_beats
+            + centre_x as f64
+                / TimelineGeometry::from_zoom(view.zoom_level, 0.0).pixels_per_beat() as f64;
+
+        view.update(
+            ViewMsg::ZoomIn,
+            &TimelineEditorState::default(),
+            ViewCtx {
+                total_beats: 1_000.0,
+            },
+        );
+
+        let after = view.scroll_offset_beats
+            + centre_x as f64
+                / TimelineGeometry::from_zoom(view.zoom_level, 0.0).pixels_per_beat() as f64;
+        assert!((after - before).abs() < 1.0e-9);
     }
 
     #[test]

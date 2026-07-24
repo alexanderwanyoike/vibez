@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
@@ -32,6 +33,13 @@ const HOST_VERSION: &CStr = c"0.1.0";
 /// (so `init()` on the loader thread won't trigger plugin assertions).
 static CLAP_MAIN_THREAD_ID: OnceLock<ThreadId> = OnceLock::new();
 
+thread_local! {
+    /// Set on the callback thread immediately before the host invokes
+    /// `clap_plugin.process()`. Thread-local state survives stream rebuilds
+    /// without adding a lock to the realtime path.
+    static IS_CLAP_AUDIO_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
 /// Register the current thread as the CLAP "main thread" for GUI operations.
 /// Call this once from the UI thread at startup.
 pub fn set_clap_main_thread() {
@@ -47,6 +55,15 @@ fn is_on_clap_main_thread() -> bool {
     CLAP_MAIN_THREAD_ID
         .get()
         .is_none_or(|id| *id == std::thread::current().id())
+}
+
+/// Register the current thread as a CLAP audio thread.
+pub fn mark_clap_audio_thread() {
+    IS_CLAP_AUDIO_THREAD.set(true);
+}
+
+fn is_on_clap_audio_thread() -> bool {
+    IS_CLAP_AUDIO_THREAD.get()
 }
 
 // ── Per-plugin host data ──
@@ -358,9 +375,7 @@ unsafe extern "C" fn host_is_main_thread(_host: *const clap_host) -> bool {
 }
 
 unsafe extern "C" fn host_is_audio_thread(_host: *const clap_host) -> bool {
-    // We don't track the audio thread identity yet — return false as a safe default.
-    // Plugins will just skip their audio-thread assertions.
-    false
+    is_on_clap_audio_thread()
 }
 
 // ── Host GUI extension (returned to plugins that query CLAP_EXT_GUI) ──
@@ -965,6 +980,21 @@ mod tests {
         // process, this may return true or false depending on which thread
         // we're on. We test the function doesn't panic.
         let _ = is_on_clap_main_thread();
+    }
+
+    #[test]
+    fn clap_audio_thread_identity_is_local_to_the_processing_thread() {
+        assert!(!is_on_clap_audio_thread());
+
+        std::thread::spawn(|| {
+            assert!(!is_on_clap_audio_thread());
+            mark_clap_audio_thread();
+            assert!(is_on_clap_audio_thread());
+        })
+        .join()
+        .unwrap();
+
+        assert!(!is_on_clap_audio_thread());
     }
 
     // ── Minimal libc FFI for pipe tests (Unix-only, like poll_fds) ──

@@ -384,6 +384,7 @@ impl App {
                     2.0,
                     self.state.view.grid_config(),
                     0.0,
+                    (self.state.view.perform_surface_width - SECTION_TRACK_GUTTER_WIDTH).max(1.0),
                     total_beats,
                     self.state.transport.sample_rate,
                     selected_track,

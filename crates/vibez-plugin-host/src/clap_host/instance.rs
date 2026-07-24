@@ -341,6 +341,8 @@ impl PluginInstance for ClapPluginInstance {
             return;
         }
 
+        super::host_impl::mark_clap_audio_thread();
+
         let frames = buffer.len() / channels.max(1);
         if frames == 0 {
             return;

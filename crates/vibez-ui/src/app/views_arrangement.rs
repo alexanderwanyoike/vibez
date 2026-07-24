@@ -258,6 +258,9 @@ impl App {
                 zoom_level,
                 self.state.view.grid_config(),
                 scroll_offset,
+                (self.state.view.window_width
+                    - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
+                    .max(1.0),
                 total_beats,
                 sample_rate,
                 selected,

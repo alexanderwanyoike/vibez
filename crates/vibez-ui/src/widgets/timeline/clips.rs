@@ -47,6 +47,10 @@ pub enum ClipDragAction {
     RegionSelect {
         anchor_beat: f64,
     },
+    PanViewport {
+        start_local_x: f32,
+        start_scroll_beats: f64,
+    },
 }
 
 /// Interaction state for clip canvas.
@@ -110,6 +114,7 @@ impl TrackClipCanvas {
         zoom_level: f32,
         grid: GridConfig,
         scroll_offset_beats: f64,
+        viewport_width: f32,
         total_beats: f64,
         sample_rate: u32,
         selected: bool,
@@ -132,9 +137,24 @@ impl TrackClipCanvas {
         sample_drop_duration_beats: Option<f64>,
         sample_drop_detail: Option<String>,
     ) -> Self {
+        let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset_beats);
+        let visible_beats = geometry.visible_beats(viewport_width.max(1.0));
+        let prefetch = visible_beats * 0.25;
+        let visible_start = (scroll_offset_beats - prefetch).max(0.0);
+        let visible_end = scroll_offset_beats + visible_beats + prefetch;
+        let samples_per_beat = if bpm > 0.0 {
+            sample_rate as f64 * 60.0 / bpm
+        } else {
+            1.0
+        };
         let clips = content
             .clips
             .iter()
+            .filter(|clip| {
+                let start = clip.position as f64 / samples_per_beat;
+                let end = start + clip.duration as f64 / samples_per_beat;
+                start < visible_end && end > visible_start
+            })
             .map(|c| TimelineClip {
                 clip_id: c.id,
                 position: c.position,
@@ -153,16 +173,23 @@ impl TrackClipCanvas {
         let note_clips = content
             .note_clips
             .iter()
+            .filter(|clip| {
+                clip.position_beats < visible_end
+                    && clip.position_beats + clip.duration_beats > visible_start
+            })
             .map(|c| TimelineNoteClip {
                 clip_id: c.id,
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
-                notes: c
-                    .notes
-                    .iter()
-                    .map(|n| (n.pitch, n.start_beat, n.duration_beats))
-                    .collect(),
+                notes: if geometry.pixels_per_beat() >= 4.0 {
+                    c.notes
+                        .iter()
+                        .map(|n| (n.pitch, n.start_beat, n.duration_beats))
+                        .collect()
+                } else {
+                    Vec::new()
+                },
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,
                 loop_end_beats: c.loop_end_beats,
@@ -307,6 +334,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
             };
         }
 
@@ -338,6 +366,19 @@ impl canvas::Program<Message> for TrackClipCanvas {
         let track_id = self.track_id;
 
         match event {
+            // -- Middle drag: pan the timeline without changing selection --
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Middle,
+            )) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    state.drag = Some(ClipDragAction::PanViewport {
+                        start_local_x: pos.x,
+                        start_scroll_beats: self.scroll_offset_beats,
+                    });
+                    return (canvas::event::Status::Captured, None);
+                }
+            }
+
             // -- Left click: select clip, start drag, or seek --
             // Clip zones (Ableton-style):
             //   Title bar (top ~18px): move / resize (right edge)
@@ -640,8 +681,32 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     return (canvas::event::Status::Captured, Some(edit));
                                 }
                             }
+                            ClipDragAction::PanViewport {
+                                start_local_x,
+                                start_scroll_beats,
+                            } => {
+                                let target_scroll = (start_scroll_beats
+                                    - geometry.beats_for_width(local_x - start_local_x))
+                                .max(0.0);
+                                let delta = target_scroll - self.scroll_offset_beats;
+                                return (
+                                    canvas::event::Status::Captured,
+                                    (delta.abs() > f64::EPSILON).then_some(Message::View(
+                                        ViewMsg::ScrollArrangement(delta),
+                                    )),
+                                );
+                            }
                         }
                     }
+                }
+            }
+
+            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Middle,
+            )) => {
+                if matches!(state.drag, Some(ClipDragAction::PanViewport { .. })) {
+                    state.drag = None;
+                    return (canvas::event::Status::Captured, None);
                 }
             }
 
@@ -697,36 +762,37 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // -- Scroll: pan / Shift+scroll: zoom --
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
-                    let (dx, dy) = match delta {
-                        iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
-                        iced::mouse::ScrollDelta::Pixels { x, y } => (x / 20.0, y / 20.0),
-                    };
+                    let (dx, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
                     // Horizontal scroll for panning
                     if dx.abs() > dy.abs() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(ViewMsg::ScrollArrangement(-dx as f64 * 2.0))),
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                -self.geometry().beats_for_width(dx),
+                            ))),
                         );
                     }
                     // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
-                        if dy > 0.0 {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::View(ViewMsg::ZoomIn)),
-                            );
-                        } else {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::View(ViewMsg::ZoomOut)),
-                            );
-                        }
+                        let anchor_x = cursor
+                            .position_in(bounds)
+                            .map(|position| position.x)
+                            .unwrap_or(bounds.width / 2.0);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ZoomAround {
+                                factor: crate::timeline_geometry::zoom_factor_from_pixels(dy),
+                                anchor_x,
+                            })),
+                        );
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(ViewMsg::ScrollArrangement(dy as f64 * 2.0))),
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                self.geometry().beats_for_width(dy),
+                            ))),
                         );
                     }
                 }
@@ -790,17 +856,20 @@ mod tests {
     use iced::keyboard::key::{Code, Physical};
     use iced::keyboard::{Event, Key, Location, Modifiers};
     use iced::{Point, Size};
+    use vibez_core::midi::MidiNote;
+    use vibez_core::perform::GrooveGrid;
 
-    fn empty_track_canvas() -> TrackClipCanvas {
+    fn track_canvas(content: &TrackTimelineContent, zoom_level: f32) -> TrackClipCanvas {
         let track_id = TrackId::new();
         let track = ProjectTrack::new(track_id, "Track 1".into(), 0);
         TrackClipCanvas::from_track(
             &track,
-            &TrackTimelineContent::default(),
+            content,
             0.0,
-            1.0,
+            zoom_level,
             GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
             0.0,
+            800.0,
             16.0,
             44_100,
             true,
@@ -823,6 +892,134 @@ mod tests {
             None,
             None,
         )
+    }
+
+    fn empty_track_canvas() -> TrackClipCanvas {
+        track_canvas(&TrackTimelineContent::default(), 1.0)
+    }
+
+    fn note_clip(position_beats: f64) -> crate::state::UiNoteClip {
+        crate::state::UiNoteClip {
+            id: ClipId::new(),
+            name: "Dense capture".into(),
+            position_beats,
+            duration_beats: 32.0,
+            notes: (0..64)
+                .map(|index| MidiNote {
+                    pitch: 36 + (index % 12) as u8,
+                    velocity: 100,
+                    start_beat: index as f64 * 0.25,
+                    duration_beats: 0.2,
+                })
+                .collect(),
+            selected_notes: HashSet::new(),
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
+        }
+    }
+
+    #[test]
+    fn zoomed_out_note_clips_skip_individual_note_geometry() {
+        let mut content = TrackTimelineContent::default();
+        content.note_clips.push(note_clip(0.0));
+
+        let canvas = track_canvas(&content, 0.01);
+
+        assert_eq!(canvas.note_clips.len(), 1);
+        assert!(canvas.note_clips[0].notes.is_empty());
+    }
+
+    #[test]
+    fn track_canvas_materialises_only_the_visible_note_clips() {
+        let mut content = TrackTimelineContent::default();
+        let visible = note_clip(0.0);
+        let visible_id = visible.id;
+        content.note_clips.push(visible);
+        content.note_clips.push(note_clip(128.0));
+
+        let canvas = track_canvas(&content, 1.0);
+
+        assert_eq!(canvas.note_clips.len(), 1);
+        assert_eq!(canvas.note_clips[0].clip_id, visible_id);
+        assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    }
+
+    #[test]
+    fn one_pixel_shift_wheel_event_requests_continuous_cursor_anchored_zoom() {
+        let canvas = empty_track_canvas();
+        let mut state = ClipInteractionState {
+            shift_held: true,
+            ..ClipInteractionState::default()
+        };
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+        let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            &mut state,
+            canvas::Event::Mouse(iced::mouse::Event::WheelScrolled {
+                delta: iced::mouse::ScrollDelta::Pixels { x: 0.0, y: 1.0 },
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(320.0, 20.0)),
+        );
+
+        assert_eq!(status, canvas::event::Status::Captured);
+        assert!(matches!(
+            message,
+            Some(Message::View(ViewMsg::ZoomAround { factor, anchor_x }))
+                if factor > 1.0 && factor < 1.01 && anchor_x == 320.0
+        ));
+    }
+
+    #[test]
+    fn middle_drag_pans_continuously_without_seeking_or_selecting() {
+        let mut canvas = empty_track_canvas();
+        canvas.scroll_offset_beats = 32.0;
+        let mut state = ClipInteractionState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+
+        let (press_status, press_message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            &mut state,
+            canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                iced::mouse::Button::Middle,
+            )),
+            bounds,
+            mouse::Cursor::Available(Point::new(400.0, 20.0)),
+        );
+        assert_eq!(press_status, canvas::event::Status::Captured);
+        assert!(press_message.is_none());
+
+        let (drag_status, drag_message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            &mut state,
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: Point::new(420.0, 20.0),
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(420.0, 20.0)),
+        );
+        assert_eq!(drag_status, canvas::event::Status::Captured);
+        assert!(matches!(
+            drag_message,
+            Some(Message::View(ViewMsg::ScrollArrangement(delta)))
+                if (delta + 1.0).abs() < f64::EPSILON
+        ));
+
+        let (release_status, release_message) =
+            <TrackClipCanvas as canvas::Program<Message>>::update(
+                &canvas,
+                &mut state,
+                canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Middle,
+                )),
+                bounds,
+                mouse::Cursor::Available(Point::new(420.0, 20.0)),
+            );
+        assert_eq!(release_status, canvas::event::Status::Captured);
+        assert!(release_message.is_none());
+        assert!(state.drag.is_none());
     }
 
     fn right_click(
