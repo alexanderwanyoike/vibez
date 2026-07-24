@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
@@ -9,8 +10,8 @@ use crate::domains::perform::{PerformCtx, PerformMsg};
 use crate::domains::test_support::RecordingEngine;
 
 use super::{
-    AppState, ArrangementTimeline, ProjectSnapshot, ProjectTrack, TrackTimelineContent, UiEffect,
-    UiNoteClip, UndoGestureId,
+    AppState, ArrangementTimeline, ProjectSnapshot, ProjectTrack, TrackTimelineContent, UiClip,
+    UiEffect, UiNoteClip, UndoGestureId,
 };
 
 fn snapshot(state: &AppState) -> ProjectSnapshot {
@@ -463,4 +464,122 @@ fn empty_transaction_does_not_create_an_undo_step() {
         .begin_transaction(snapshot(&state), state.project.dirty));
     assert!(!state.project.history.commit_transaction());
     assert!(state.project.history.undo.is_empty());
+}
+
+#[test]
+fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Audio".into(), 0));
+    let source_id = ClipId::new();
+    Arc::make_mut(&mut state.arrangement.timeline)
+        .ensure(track_id)
+        .clips
+        .push(UiClip {
+            id: source_id,
+            name: "Source".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; 400]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position: 200,
+            source_offset: 0,
+            duration: 100,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        });
+    state.arrangement.selected_track = Some(track_id);
+    state
+        .arrangement
+        .selected_clips
+        .insert(crate::state::ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: source_id,
+        });
+    let project_tracks = Arc::clone(&state.project_tracks);
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        ..ArrangementCtx::default()
+    };
+    let mut engine = RecordingEngine::default();
+
+    let before_cut = snapshot(&state);
+    let cut = state.arrangement.editor.update_clipboard(
+        &project_tracks,
+        ArrangementMsg::CutSelectedClips,
+        &mut state.clip_clipboard,
+        &mut engine,
+        ctx,
+    );
+    assert!(cut.mark_dirty);
+    state.project.history.push_edit(before_cut, None);
+    assert!(state
+        .arrangement
+        .timeline
+        .get(track_id)
+        .unwrap()
+        .clips
+        .is_empty());
+
+    let before_paste = snapshot(&state);
+    let paste = state.arrangement.editor.update_clipboard(
+        &project_tracks,
+        ArrangementMsg::PasteClips,
+        &mut state.clip_clipboard,
+        &mut engine,
+        ctx,
+    );
+    assert!(paste.mark_dirty);
+    state.project.history.push_edit(before_paste, None);
+
+    let before_second_paste = snapshot(&state);
+    let second_paste = state.arrangement.editor.update_clipboard(
+        &project_tracks,
+        ArrangementMsg::PasteClips,
+        &mut state.clip_clipboard,
+        &mut engine,
+        ctx,
+    );
+    assert!(second_paste.mark_dirty);
+    state.project.history.push_edit(before_second_paste, None);
+    assert_eq!(state.project.history.undo.len(), 3);
+    assert_eq!(state.clip_clipboard.clips.len(), 1);
+
+    undo_once(&mut state);
+    assert_eq!(
+        state
+            .arrangement
+            .timeline
+            .get(track_id)
+            .unwrap()
+            .clips
+            .len(),
+        1
+    );
+    assert_eq!(state.clip_clipboard.clips.len(), 1);
+
+    undo_once(&mut state);
+    assert!(state
+        .arrangement
+        .timeline
+        .get(track_id)
+        .unwrap()
+        .clips
+        .is_empty());
+    assert_eq!(state.clip_clipboard.clips.len(), 1);
+
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0].id,
+        source_id
+    );
+    assert_eq!(state.clip_clipboard.clips.len(), 1);
 }
