@@ -107,15 +107,6 @@ Browser import preparation, Remote catalog refresh, and Section residency keep
 separate tracker instances but do not duplicate request IDs, generations, or
 abort handles.
 
-Application menus and the Arrange context menu also use explicit router
-events. Their overlay backdrops emit dismissal, Escape targets the topmost
-visible menu, and a menu-item event dispatches its command before closing its
-origin overlay. Ordinary application messages never participate in menu
-lifecycle, so engine ticks, metering, catalog work, and future message variants
-cannot dismiss a menu accidentally. Buttons remain native iced controls for
-focus and keyboard activation; device and plug-in menus retain their separate
-domain-owned lifecycles.
-
 Perform follows the same boundary. `PerformState` owns runtime-only mode, bank,
 selection, and editor-focus state alongside an `Arc<SectionStore>` that enters
 project persistence and undo. Each Section owns its properties and an

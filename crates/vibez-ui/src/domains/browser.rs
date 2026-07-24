@@ -75,6 +75,47 @@ pub enum BrowserMsg {
     SetDropboxAppKey(String),
 }
 
+impl BrowserMsg {
+    /// Whether this message is passive Browser traffic that must not dismiss
+    /// an unrelated context menu. Keep this match exhaustive so every new
+    /// Browser interaction declares its menu behavior deliberately.
+    pub(crate) fn keeps_context_menu(&self) -> bool {
+        match self {
+            Self::PendingDragMoved { .. }
+            | Self::DragHoverTrack { .. }
+            | Self::DragHoverEmptyArrangement { .. }
+            | Self::DragHoverSampler { .. }
+            | Self::DragHoverDrumRackPad { .. }
+            | Self::ClearDragTarget
+            | Self::LocalRootWatchEvent(_)
+            | Self::ReconcileLocalRoot { .. }
+            | Self::LocalRootCatalogReconciled { .. } => true,
+            Self::ToggleSampleBrowser
+            | Self::BeginDockResize
+            | Self::ResizeDock(_)
+            | Self::EndDockResize
+            | Self::NudgeDockWidth(_)
+            | Self::SampleBrowserSearchChanged(_)
+            | Self::SelectLocalFolder(_)
+            | Self::ToggleLocalFolder(_)
+            | Self::CycleSearchScope
+            | Self::ShowMoreLocalResults
+            | Self::SelectSampleBrowserEntry(_)
+            | Self::SetSampleBrowserMode(_)
+            | Self::BeginPendingDrag { .. }
+            | Self::CancelDrag(_)
+            | Self::EndDragSample
+            | Self::RemoveSampleLibraryRoot(_)
+            | Self::ToggleRemotePlace
+            | Self::ToggleRemoteConnection
+            | Self::SelectRemoteFolder(_)
+            | Self::ToggleRemoteFolder(_)
+            | Self::SelectRemoteEntry(_)
+            | Self::SetDropboxAppKey(_) => false,
+        }
+    }
+}
+
 /// Cross-domain effects requested by a browser update.
 #[derive(Debug, Default, PartialEq)]
 pub struct BrowserAction {

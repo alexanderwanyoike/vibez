@@ -23,11 +23,13 @@ impl App {
     }
 
     pub(super) fn route_new_project(&mut self) -> Task<Message> {
+        self.state.project.file_menu_open = false;
         self.reset_to_new_project();
         Task::none()
     }
 
     pub(super) fn route_open_project(&mut self) -> Task<Message> {
+        self.state.project.file_menu_open = false;
         Task::perform(
             async {
                 let handle = rfd::AsyncFileDialog::new()
@@ -42,6 +44,7 @@ impl App {
     }
 
     pub(super) fn route_save_project(&mut self) -> Task<Message> {
+        self.state.project.file_menu_open = false;
         let project = self.project_for_save();
         if let Some(path) = self.state.project.current_path.clone() {
             return Task::perform(
@@ -53,6 +56,7 @@ impl App {
     }
 
     pub(super) fn route_save_project_as(&mut self) -> Task<Message> {
+        self.state.project.file_menu_open = false;
         Task::perform(
             async {
                 let handle = rfd::AsyncFileDialog::new()

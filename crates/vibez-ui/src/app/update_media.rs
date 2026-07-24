@@ -410,11 +410,6 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
-        if let Some(overlay) = menu_lifecycle::visible(&self.state) {
-            menu_lifecycle::dismiss(&mut self.state, overlay);
-            return Task::none();
-        }
-
         // Escape abandons any pending browser import at whatever stage it is
         // in; the shared tracker aborts attached work and rejects late output.
         self.browser_import_request.cancel();

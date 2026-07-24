@@ -17,6 +17,7 @@ use crate::state::{ProjectSnapshot, ProjectState};
 #[derive(Debug, Clone)]
 pub enum ProjectMsg {
     ToggleFileMenu,
+    DismissFileMenu,
     Undo,
     Redo,
 }
@@ -50,6 +51,9 @@ impl ProjectState {
         match msg {
             ProjectMsg::ToggleFileMenu => {
                 self.file_menu_open = !self.file_menu_open;
+            }
+            ProjectMsg::DismissFileMenu => {
+                self.file_menu_open = false;
             }
             ProjectMsg::Undo => {
                 let Some(snapshot) = self.history.pop_undo() else {
