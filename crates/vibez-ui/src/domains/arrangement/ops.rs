@@ -4,10 +4,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
-use crate::state::{ArrangementSelection, ProjectTracksState, TimelineEditorState, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, ClipClipboard, ClipboardClip, ProjectTracksState, TimelineEditorState,
+    UiNoteClip,
+};
 
 impl TimelineEditorState {
     pub(super) fn op_delete_clips_in_region(
@@ -255,6 +259,270 @@ impl TimelineEditorState {
             action.status = Some("Join requires same type and track".to_string());
         }
         action
+    }
+
+    pub(super) fn op_copy_selected_clips(&mut self, ctx: ArrangementCtx) -> ArrangementAction {
+        let mut copied = Vec::new();
+        let spb = ctx.samples_per_beat;
+
+        if self.time_selection_active
+            && self.selection_end_beats > self.selection_start_beats
+            && spb > 0.0
+        {
+            let start = self.selection_start_beats;
+            let end = self.selection_end_beats;
+            for (content_track_id, track) in self.timeline.by_track.iter().filter(|(tid, _)| {
+                self.time_selection_track
+                    .is_none_or(|target| **tid == target)
+            }) {
+                for clip in &track.clips {
+                    let clip_start = clip.position as f64 / spb;
+                    let clip_end = (clip.position + clip.duration) as f64 / spb;
+                    let overlap_start = clip_start.max(start);
+                    let overlap_end = clip_end.min(end);
+                    if overlap_end <= overlap_start {
+                        continue;
+                    }
+                    let delta = ((overlap_start - clip_start) * spb).round() as u64;
+                    let duration = ((overlap_end - overlap_start) * spb).round() as u64;
+                    let mut fragment = clip.clone();
+                    fragment.position = 0;
+                    fragment.duration = duration.max(1);
+                    let raw_offset = clip.source_offset.saturating_add(delta);
+                    fragment.source_offset = if clip.loop_enabled && clip.loop_end > clip.loop_start
+                    {
+                        if raw_offset >= clip.loop_end {
+                            clip.loop_start
+                                + (raw_offset - clip.loop_start) % (clip.loop_end - clip.loop_start)
+                        } else {
+                            raw_offset
+                        }
+                    } else {
+                        raw_offset
+                    };
+                    copied.push(ClipboardClip::Audio {
+                        track_id: *content_track_id,
+                        offset_beats: overlap_start - start,
+                        clip: fragment,
+                    });
+                }
+
+                for clip in &track.note_clips {
+                    let clip_end = clip.position_beats + clip.duration_beats;
+                    let overlap_start = clip.position_beats.max(start);
+                    let overlap_end = clip_end.min(end);
+                    if overlap_end <= overlap_start {
+                        continue;
+                    }
+                    let local_start = overlap_start - clip.position_beats;
+                    let local_end = overlap_end - clip.position_beats;
+                    let mut notes = Vec::new();
+                    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
+                    for note in &clip.notes {
+                        let mut occurrences = vec![note.start_beat];
+                        if looping
+                            && note.start_beat >= clip.loop_start_beats
+                            && note.start_beat < clip.loop_end_beats
+                        {
+                            let loop_len = clip.loop_end_beats - clip.loop_start_beats;
+                            let mut occurrence = note.start_beat + loop_len;
+                            while occurrence < local_end {
+                                occurrences.push(occurrence);
+                                occurrence += loop_len;
+                            }
+                        }
+                        for occurrence in occurrences {
+                            let note_end = occurrence + note.duration_beats;
+                            let kept_start = occurrence.max(local_start);
+                            let kept_end = note_end.min(local_end);
+                            if kept_end > kept_start {
+                                notes.push(MidiNote {
+                                    start_beat: kept_start - local_start,
+                                    duration_beats: kept_end - kept_start,
+                                    ..*note
+                                });
+                            }
+                        }
+                    }
+                    let mut fragment = clip.clone();
+                    fragment.position_beats = 0.0;
+                    fragment.duration_beats = overlap_end - overlap_start;
+                    fragment.notes = notes;
+                    fragment.selected_notes.clear();
+                    fragment.loop_enabled = false;
+                    fragment.loop_start_beats = 0.0;
+                    fragment.loop_end_beats = 0.0;
+                    copied.push(ClipboardClip::Note {
+                        track_id: *content_track_id,
+                        offset_beats: overlap_start - start,
+                        clip: fragment,
+                    });
+                }
+            }
+        } else {
+            let mut starts = Vec::new();
+            for selection in &self.selected_clips {
+                match selection {
+                    ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
+                        if let Some(clip) = self
+                            .find_content(*track_id)
+                            .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            starts.push(clip.position as f64 / spb);
+                        }
+                    }
+                    ArrangementSelection::NoteClip { track_id, clip_id } => {
+                        if let Some(clip) = self
+                            .find_content(*track_id)
+                            .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            starts.push(clip.position_beats);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let anchor = starts.into_iter().reduce(f64::min).unwrap_or(0.0);
+            for selection in &self.selected_clips {
+                match selection {
+                    ArrangementSelection::AudioClip { track_id, clip_id } if spb > 0.0 => {
+                        if let Some(clip) = self
+                            .find_content(*track_id)
+                            .and_then(|t| t.clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            copied.push(ClipboardClip::Audio {
+                                track_id: *track_id,
+                                offset_beats: clip.position as f64 / spb - anchor,
+                                clip: clip.clone(),
+                            });
+                        }
+                    }
+                    ArrangementSelection::NoteClip { track_id, clip_id } => {
+                        if let Some(clip) = self
+                            .find_content(*track_id)
+                            .and_then(|t| t.note_clips.iter().find(|c| c.id == *clip_id))
+                        {
+                            copied.push(ClipboardClip::Note {
+                                track_id: *track_id,
+                                offset_beats: clip.position_beats - anchor,
+                                clip: clip.clone(),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let count = copied.len();
+        if count > 0 {
+            self.clipboard = ClipClipboard { clips: copied };
+        }
+        ArrangementAction {
+            status: Some(if count == 0 {
+                "Nothing to copy".to_string()
+            } else if count == 1 {
+                "Copied clip".to_string()
+            } else {
+                format!("Copied {count} clips")
+            }),
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn op_paste_clips_at_playhead(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+    ) -> ArrangementAction {
+        if self.clipboard.clips.is_empty() || ctx.samples_per_beat <= 0.0 {
+            return ArrangementAction {
+                status: Some("Clipboard is empty".to_string()),
+                ..Default::default()
+            };
+        }
+        let entries = self.clipboard.clips.clone();
+        let mut selected = HashSet::new();
+        for entry in entries {
+            match entry {
+                ClipboardClip::Audio {
+                    track_id,
+                    offset_beats,
+                    mut clip,
+                } => {
+                    if self.find_content(track_id).is_none() {
+                        continue;
+                    }
+                    clip.id = ClipId::new();
+                    clip.position = ctx.playhead_samples.saturating_add(
+                        (offset_beats * ctx.samples_per_beat).round().max(0.0) as u64,
+                    );
+                    engine.send(EngineCommand::AddClip {
+                        track_id,
+                        clip_id: clip.id,
+                        audio: Arc::clone(&clip.audio),
+                        position: clip.position,
+                        source_offset: clip.source_offset,
+                        duration: clip.duration,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start: clip.loop_start,
+                        loop_end: clip.loop_end,
+                    });
+                    selected.insert(ArrangementSelection::AudioClip {
+                        track_id,
+                        clip_id: clip.id,
+                    });
+                    self.find_content_mut(track_id).unwrap().clips.push(clip);
+                }
+                ClipboardClip::Note {
+                    track_id,
+                    offset_beats,
+                    mut clip,
+                } => {
+                    if self.find_content(track_id).is_none() {
+                        continue;
+                    }
+                    clip.id = ClipId::new();
+                    clip.position_beats = ctx.playhead_beats + offset_beats;
+                    engine.send(EngineCommand::AddNoteClip {
+                        track_id,
+                        clip_id: clip.id,
+                        position_beats: clip.position_beats,
+                        duration_beats: clip.duration_beats,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start_beats: clip.loop_start_beats,
+                        loop_end_beats: clip.loop_end_beats,
+                        groove_grid: clip.groove_grid,
+                    });
+                    for note in &clip.notes {
+                        engine.send(EngineCommand::AddNote {
+                            track_id,
+                            clip_id: clip.id,
+                            note: *note,
+                        });
+                    }
+                    selected.insert(ArrangementSelection::NoteClip {
+                        track_id,
+                        clip_id: clip.id,
+                    });
+                    self.find_content_mut(track_id)
+                        .unwrap()
+                        .note_clips
+                        .push(clip);
+                }
+            }
+        }
+        let count = selected.len();
+        self.selected_clips = selected;
+        self.time_selection_active = false;
+        ArrangementAction {
+            status: Some(if count == 1 {
+                "Pasted clip".to_string()
+            } else {
+                format!("Pasted {count} clips")
+            }),
+            ..Default::default()
+        }
     }
 
     pub(super) fn op_toggle_selected_clip_loop(

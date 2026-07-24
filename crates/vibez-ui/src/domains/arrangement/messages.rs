@@ -86,7 +86,7 @@ pub enum ArrangementMsg {
     DuplicateSelectedClip,
     CopySelectedClips,
     CutSelectedClips,
-    PasteClips,
+    PasteClipsAtPlayhead,
     ToggleSelectedClipLoop,
     ResizeSelectedClips {
         anchor: ArrangementSelection,
@@ -157,7 +157,7 @@ impl ArrangementMsg {
                 | Self::DuplicateSelectedClip
                 | Self::CopySelectedClips
                 | Self::CutSelectedClips
-                | Self::PasteClips
+                | Self::PasteClipsAtPlayhead
                 | Self::ToggleSelectedClipLoop
                 | Self::ResizeSelectedClips { .. }
                 | Self::DuplicateNoteClip(..)
@@ -191,17 +191,6 @@ impl ArrangementMsg {
                 | ArrangementMsg::CopySelectedClips
                 | ArrangementMsg::ClipBpmInputChanged { .. }
         )
-    }
-
-    pub(crate) const fn is_clipboard_message(&self) -> bool {
-        matches!(
-            self,
-            Self::CopySelectedClips | Self::CutSelectedClips | Self::PasteClips
-        )
-    }
-
-    pub(crate) const fn is_clipboard_project_edit(&self) -> bool {
-        matches!(self, Self::CutSelectedClips | Self::PasteClips)
     }
 }
 

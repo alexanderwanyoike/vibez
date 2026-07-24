@@ -25,10 +25,6 @@ impl App {
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
-        let deferred_clipboard_project_edit = matches!(
-            &message,
-            Message::Arrangement(msg) if msg.is_clipboard_project_edit()
-        );
         let should_mark_dirty = matches!(
             &message,
             Message::Transport(TransportMsg::BpmSubmit)
@@ -58,7 +54,7 @@ impl App {
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
             || matches!(&message, Message::Automation(m) if m.marks_dirty())
             || matches!(&message, Message::Perform(m) if m.marks_dirty());
-        if should_mark_dirty && !deferred_clipboard_project_edit {
+        if should_mark_dirty {
             self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();
         }
@@ -133,9 +129,6 @@ impl App {
                 self.apply_devices_action(action);
             }
             Message::Arrangement(msg) => {
-                let clipboard_snapshot = msg
-                    .is_clipboard_project_edit()
-                    .then(|| self.take_snapshot());
                 let ctx = crate::domains::arrangement::ArrangementCtx {
                     samples_per_beat: if self.state.transport.bpm > 0.0 {
                         60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
@@ -146,10 +139,6 @@ impl App {
                     playhead_beats: self.state.position_beats(),
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
-                if let (true, Some(snapshot)) = (action.mark_dirty, clipboard_snapshot) {
-                    self.state.project.history.push_edit(snapshot, undo_gesture);
-                    self.mark_project_dirty();
-                }
                 self.state
                     .perform
                     .sync_project_tracks(&self.state.project_tracks.tracks);

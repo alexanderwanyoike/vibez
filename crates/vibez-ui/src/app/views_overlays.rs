@@ -196,9 +196,9 @@ impl App {
             ),
             item(
                 icons::COPY,
-                "Paste",
+                "Paste at Playhead",
                 "Ctrl+V",
-                Message::Arrangement(ArrangementMsg::PasteClips),
+                Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead),
             ),
             item(
                 icons::COPY,

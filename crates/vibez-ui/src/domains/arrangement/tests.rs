@@ -506,7 +506,7 @@ fn submit_clip_bpm_parses_and_rejects_garbage() {
 }
 
 #[test]
-fn copy_and_paste_multiple_clips_preserves_original_positions_and_loops() {
+fn copy_and_paste_multiple_clips_at_playhead_preserves_layout_and_loops() {
     let mut a = arrangement_with_tracks(1);
     let (tid, first) = add_audio_clip(&mut a, 0, 0, 100);
     let (_, second) = add_audio_clip(&mut a, 0, 200, 100);
@@ -526,13 +526,13 @@ fn copy_and_paste_multiple_clips_preserves_original_positions_and_loops() {
     };
 
     a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
-    a.update(ArrangementMsg::PasteClips, &mut engine, ctx);
+    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
 
     assert_eq!(a.tracks[0].clips.len(), 4);
     let mut pasted: Vec<_> = a.tracks[0].clips[2..].iter().collect();
     pasted.sort_by_key(|clip| clip.position);
-    assert_eq!(pasted[0].position, 0);
-    assert_eq!(pasted[1].position, 200);
+    assert_eq!(pasted[0].position, 1_000);
+    assert_eq!(pasted[1].position, 1_200);
     assert!(pasted[0].loop_enabled);
     assert!(pasted.iter().all(|clip| clip.name == "Clip"));
     assert_eq!(a.selected_clips.len(), 2);
@@ -578,15 +578,14 @@ fn partial_time_selection_copies_audio_and_trimmed_midi() {
     };
 
     a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
-    a.selected_track = Some(audio_tid);
-    a.update(ArrangementMsg::PasteClips, &mut engine, ctx);
+    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
 
     let audio = a.find_track(audio_tid).unwrap().clips.last().unwrap();
-    assert_eq!(audio.position, 200);
+    assert_eq!(audio.position, 1_000);
     assert_eq!(audio.duration, 300);
     assert_eq!(audio.source_offset, 100);
     let notes = a.find_track(midi_tid).unwrap().note_clips.last().unwrap();
-    assert_eq!(notes.position_beats, 2.0);
+    assert_eq!(notes.position_beats, 10.0);
     assert_eq!(notes.duration_beats, 3.0);
     assert_eq!(notes.notes[0].start_beat, 0.0);
     assert_eq!(notes.notes[0].duration_beats, 2.0);

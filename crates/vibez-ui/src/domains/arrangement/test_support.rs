@@ -3,7 +3,7 @@
 use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::{
-    new_master_track, ClipClipboard, ProjectTrack, ProjectTracksState, TrackTimelineContent, UiClip,
+    new_master_track, ProjectTrack, ProjectTracksState, TrackTimelineContent, UiClip,
 };
 use vibez_core::automation::AutomationLane;
 
@@ -52,7 +52,6 @@ pub(super) struct ArrangementFixture {
     pub(super) tracks: Vec<TestTrack>,
     pub(super) master: TestTrack,
     pub(super) buses: Vec<TestTrack>,
-    pub(super) clipboard: ClipClipboard,
     next_track_number: u32,
 }
 
@@ -63,7 +62,6 @@ impl Default for ArrangementFixture {
             tracks: Vec::new(),
             master: TestTrack::from_parts(new_master_track(), TrackTimelineContent::default()),
             buses: Vec::new(),
-            clipboard: ClipClipboard::default(),
             next_track_number: 1,
         }
     }
@@ -114,18 +112,9 @@ impl ArrangementFixture {
             timeline.by_track.insert(track.id, track.content());
         }
 
-        let action = if msg.is_clipboard_message() {
-            self.arrangement.editor.update_clipboard(
-                &project_tracks,
-                msg,
-                &mut self.clipboard,
-                engine,
-                ctx,
-            )
-        } else {
-            self.arrangement
-                .update(&mut project_tracks, msg, engine, ctx)
-        };
+        let action = self
+            .arrangement
+            .update(&mut project_tracks, msg, engine, ctx);
         self.next_track_number = project_tracks.next_track_number;
         self.tracks = project_tracks
             .tracks

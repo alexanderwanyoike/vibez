@@ -287,15 +287,12 @@ one `TimelineContent`, while every Perform Section owns another store with the
 same shape and shared Project `TrackId`s.
 
 `TimelineEditorState` is the shared editing boundary around that content. It
-owns clip/note selection, time selection, and other timeline-local interaction
+owns clip/note selection, the clipboard, time selection, and other interaction
 state; clip operations, piano-roll editing, automation editing, and timeline
-view behavior receive this already-resolved target. `AppState` owns one runtime
-Clip clipboard shared by Arrange and every Section editor. The application
-resolves clipboard shortcuts from the focused editor and supplies that
-clipboard at the editor boundary. `ArrangementState` is a thin adapter that
-retains Arrange's Project Track/channel controls and implements
-`TimelineEditorAdapter` to resolve its editor. The editor never asks which
-workspace is active and contains no `Arrange | Section` branch.
+view behavior receive this already-resolved target. `ArrangementState` is a
+thin adapter that retains Arrange's Project Track/channel controls and
+implements `TimelineEditorAdapter` to resolve its editor. The editor never
+asks which workspace is active and contains no `Arrange | Section` branch.
 
 The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
