@@ -196,14 +196,11 @@ move it. The copied clips
 share only immutable decoded audio; they retain no Section identity or mutable
 reference, so later Section edits and launches cannot rewrite Arrange.
 
-Capture treats every Project Track controlled by Perform as punch-replace,
-including tracks that produced silence. At the confirmed stop boundary it
-removes the recorded interval, preserves and splits material on either side,
-and pins existing automation values at both edges before inserting captured
-content. The still-open transaction therefore covers the whole replacement as
-one undo step. Track Mute events join the Capture log at their engine-effective
-samples and materialize as `track_mute` step points with a closing point that
-restores the pre-take manual state.
+Card 17 applies that materialization only when the destination interval is
+empty on every affected Project Track. Any overlap aborts the still-open
+project transaction without changing Arrange; interval replacement belongs to
+Card 18. Track Mutes, live notes, and effective automation are likewise later
+Capture log consumers rather than implicit work in this first slice.
 
 The project document persists the immutable `mpc_2000xl_v1` Groove Profile,
 Project Swing, and optional Project Track Swing offsets as canonical project
@@ -250,18 +247,8 @@ Track control remains available but clip application is withheld.
 Track mute commands become authoritative when the audio callback drains them.
 The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
 absolute transport sample; the UI mirrors that result into the shared Project
-Track and an active Capture log. `track_mute` automation is stepped: it imposes
-nothing before its first point and changes state at exact in-buffer sample
-boundaries. Both manual and automated mute feed one post-effects, pre-send
-anti-click ramp, so playback gates tails exactly like the performed mute.
-
-Automation overrides live beside evaluation in the shared `EngineTrack`
-channel strip. A manual mixer or Perform-pad mute on a track with a mute lane
-sets the Track Mute override; the manual value remains authoritative until the
-producer uses the visible `RE-ENABLE` affordance. The command/event protocol is
-parameter-shaped rather than mute-specific so gain and pan can adopt the same
-ownership later without introducing a second override model. Override state is
-runtime UI/engine state and is not persisted.
+Track. This keeps pad, mixer, persisted, and audible state aligned while giving
+later Capture work an engine-timestamped event source.
 
 ## Project Tracks and timeline content
 
@@ -337,8 +324,7 @@ Editor selections, meters, decoded/runtime caches, and live plugin pointers are
 outside the transaction snapshot and are neither cloned nor restored.
 Capture opens the same transaction before requesting its engine start boundary,
 then marks one edit and commits only after the engine-confirmed stop has
-materialized independent Arrange content and replaced the controlled interval.
-A session that has neither captured content nor anything to replace abandons
+materialized independent Arrange content. Empty or overlapping sessions abandon
 the transaction, while undo/redo replays the complete captured Arrangement as
 one project step.
 

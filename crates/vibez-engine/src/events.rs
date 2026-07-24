@@ -85,13 +85,6 @@ pub enum EngineEvent {
         muted: bool,
         effective_at_samples: u64,
     },
-    /// A manual control took precedence over automation, or automation
-    /// was explicitly re-enabled.
-    AutomationOverrideChanged {
-        track_id: TrackId,
-        target: vibez_core::automation::AutomationTarget,
-        overridden: bool,
-    },
 
     /// A generated Note Repeat retrigger became effective at this exact
     /// engine sample. Later recording cards consume the same audible truth.
@@ -264,22 +257,6 @@ impl PartialEq for EngineEvent {
                 left_track == right_track
                     && left_muted == right_muted
                     && left_effective == right_effective
-            }
-            (
-                Self::AutomationOverrideChanged {
-                    track_id: left_track,
-                    target: left_target,
-                    overridden: left_overridden,
-                },
-                Self::AutomationOverrideChanged {
-                    track_id: right_track,
-                    target: right_target,
-                    overridden: right_overridden,
-                },
-            ) => {
-                left_track == right_track
-                    && left_target == right_target
-                    && left_overridden == right_overridden
             }
             (
                 Self::NoteRepeated {
@@ -515,11 +492,6 @@ mod tests {
             track_id: TrackId::new(),
             muted: true,
             effective_at_samples: 44_100,
-        };
-        let _automation_override = EngineEvent::AutomationOverrideChanged {
-            track_id: TrackId::new(),
-            target: vibez_core::automation::AutomationTarget::TrackMute,
-            overridden: true,
         };
         let _started = EngineEvent::PlaybackStarted;
         let _stopped = EngineEvent::PlaybackStopped;

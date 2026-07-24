@@ -75,11 +75,6 @@ pub enum AutomationMsg {
     OpenLanePicker(TrackId),
     LanePickerQuery(String),
     CloseLanePicker,
-    /// Return an overridden parameter to lane control (view/runtime only).
-    ReenableAutomation {
-        track_id: TrackId,
-        target: AutomationTarget,
-    },
 }
 
 impl AutomationMsg {
@@ -92,7 +87,6 @@ impl AutomationMsg {
                 | AutomationMsg::OpenLanePicker(_)
                 | AutomationMsg::LanePickerQuery(_)
                 | AutomationMsg::CloseLanePicker
-                | AutomationMsg::ReenableAutomation { .. }
         )
     }
 }
@@ -113,8 +107,6 @@ pub struct AutomationState {
     pub selected: Option<(TrackId, LaneId, usize)>,
     /// The open add-lane picker, with its search query.
     pub picker: Option<(TrackId, String)>,
-    /// Runtime parameters whose manual control currently wins over a lane.
-    pub overridden: HashSet<(TrackId, AutomationTarget)>,
 }
 
 fn sync_lane(engine: &mut impl EngineHandle, track_id: TrackId, lane: &AutomationLane) {
@@ -131,7 +123,6 @@ pub fn normalized_target_value(target: &AutomationTarget, track: &ProjectTrack) 
     match target {
         AutomationTarget::TrackGain => Some((track.gain / 2.0).clamp(0.0, 1.0)),
         AutomationTarget::TrackPan => Some(track.pan.clamp(0.0, 1.0)),
-        AutomationTarget::TrackMute => Some(if track.mute { 1.0 } else { 0.0 }),
         AutomationTarget::TrackSwingOffset => Some(
             track
                 .swing_offset
@@ -235,7 +226,6 @@ pub fn target_label(target: &AutomationTarget, track: &ProjectTrack) -> String {
     match target {
         AutomationTarget::TrackGain => "Volume".to_string(),
         AutomationTarget::TrackPan => "Pan".to_string(),
-        AutomationTarget::TrackMute => "Track Mute".to_string(),
         AutomationTarget::TrackSwingOffset => "Track Swing".to_string(),
         AutomationTarget::EffectParam {
             effect_id,
@@ -353,26 +343,10 @@ impl AutomationState {
                 action.status = Some(format!("Added automation lane: {label}"));
             }
             AutomationMsg::RemoveLane { track_id, lane_id } => {
-                let removed_target = timeline.get(track_id).and_then(|content| {
-                    content
-                        .automation
-                        .iter()
-                        .find(|lane| lane.id == lane_id)
-                        .map(|lane| lane.target)
-                });
                 if let Some(content) = timeline.get_mut(track_id) {
                     content.automation.retain(|l| l.id != lane_id);
                 }
                 engine.send(EngineCommand::RemoveAutomationLane { track_id, lane_id });
-                if let Some(target) = removed_target {
-                    if self.overridden.remove(&(track_id, target)) {
-                        engine.send(EngineCommand::SetAutomationOverride {
-                            track_id,
-                            target,
-                            overridden: false,
-                        });
-                    }
-                }
                 if matches!(self.selected, Some((t, l, _)) if t == track_id && l == lane_id) {
                     self.selected = None;
                 }
@@ -392,15 +366,7 @@ impl AutomationState {
                 };
                 let point = AutomationPoint {
                     beat: beat.max(0.0),
-                    value: if lane.target.is_stepped() {
-                        if value >= 0.5 {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        value.clamp(0.0, 1.0)
-                    },
+                    value: value.clamp(0.0, 1.0),
                     curve: 0.0,
                 };
                 lane.insert_point(point);
@@ -429,24 +395,11 @@ impl AutomationState {
                 if index >= lane.points.len() {
                     return action;
                 }
-                let stepped = lane.target.is_stepped();
-                let curve = if stepped {
-                    0.0
-                } else {
-                    lane.points[index].curve
-                };
+                let curve = lane.points[index].curve;
                 lane.points.remove(index);
                 let point = AutomationPoint {
                     beat: beat.max(0.0),
-                    value: if stepped {
-                        if value >= 0.5 {
-                            1.0
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        value.clamp(0.0, 1.0)
-                    },
+                    value: value.clamp(0.0, 1.0),
                     curve,
                 };
                 lane.insert_point(point);
@@ -503,9 +456,6 @@ impl AutomationState {
                 if index >= lane.points.len() {
                     return action;
                 }
-                if lane.target.is_stepped() {
-                    return action;
-                }
                 lane.points[index].curve = curve.clamp(-1.0, 1.0);
                 let lane = lane.clone();
                 sync_lane(engine, track_id, &lane);
@@ -549,21 +499,6 @@ impl AutomationState {
             AutomationMsg::CloseLanePicker => {
                 self.picker = None;
             }
-            AutomationMsg::ReenableAutomation { track_id, target } => {
-                self.overridden.remove(&(track_id, target));
-                engine.send(EngineCommand::SetAutomationOverride {
-                    track_id,
-                    target,
-                    overridden: false,
-                });
-                action.status = Some(format!(
-                    "{} automation re-enabled",
-                    project_tracks
-                        .find(track_id)
-                        .map(|track| target_label(&target, track))
-                        .unwrap_or_else(|| "Parameter".to_string())
-                ));
-            }
             AutomationMsg::DeleteSelectedPoint => {
                 if let Some((track_id, lane_id, index)) = self.selected.take() {
                     let Some(lane) = timeline.get_mut(track_id).and_then(|content| {
@@ -583,18 +518,6 @@ impl AutomationState {
             }
         }
         action
-    }
-
-    pub fn set_override(&mut self, track_id: TrackId, target: AutomationTarget, overridden: bool) {
-        if overridden {
-            self.overridden.insert((track_id, target));
-        } else {
-            self.overridden.remove(&(track_id, target));
-        }
-    }
-
-    pub fn is_overridden(&self, track_id: TrackId, target: AutomationTarget) -> bool {
-        self.overridden.contains(&(track_id, target))
     }
 }
 
@@ -724,78 +647,6 @@ mod tests {
         );
         assert_eq!(timeline.get(tid).unwrap().automation[0].points.len(), 1);
         assert_eq!(a.selected, None);
-    }
-
-    #[test]
-    fn track_mute_points_are_binary_and_curve_edits_are_ignored() {
-        let mut automation = AutomationState::default();
-        let mut engine = RecordingEngine::default();
-        let (mut tracks, mut timeline, track_id) = track();
-        automation.update(
-            AutomationMsg::AddLane {
-                track_id,
-                target: AutomationTarget::TrackMute,
-            },
-            &mut engine,
-            &mut tracks,
-            &mut timeline,
-        );
-        let lane_id = timeline.get(track_id).unwrap().automation[0].id;
-        automation.update(
-            AutomationMsg::AddPoint {
-                track_id,
-                lane_id,
-                beat: 4.0,
-                value: 0.7,
-            },
-            &mut engine,
-            &mut tracks,
-            &mut timeline,
-        );
-        automation.update(
-            AutomationMsg::SetCurve {
-                track_id,
-                lane_id,
-                index: 0,
-                curve: 1.0,
-            },
-            &mut engine,
-            &mut tracks,
-            &mut timeline,
-        );
-
-        let lane = &timeline.get(track_id).unwrap().automation[0];
-        assert_eq!(lane.value_at(4.0), Some(1.0));
-        assert!(lane.points.iter().all(|point| point.curve == 0.0));
-    }
-
-    #[test]
-    fn reenable_clears_visible_override_and_notifies_the_engine() {
-        let mut automation = AutomationState::default();
-        let mut engine = RecordingEngine::default();
-        let (mut tracks, mut timeline, track_id) = track();
-        automation.set_override(track_id, AutomationTarget::TrackMute, true);
-        assert!(automation.is_overridden(track_id, AutomationTarget::TrackMute));
-
-        automation.update(
-            AutomationMsg::ReenableAutomation {
-                track_id,
-                target: AutomationTarget::TrackMute,
-            },
-            &mut engine,
-            &mut tracks,
-            &mut timeline,
-        );
-
-        assert!(!automation.is_overridden(track_id, AutomationTarget::TrackMute));
-        assert!(matches!(
-            engine.0.last(),
-            Some(EngineCommand::SetAutomationOverride {
-                track_id: event_track,
-                target: AutomationTarget::TrackMute,
-                overridden: false,
-            }) if *event_track == track_id
-        ));
     }
 
     #[test]

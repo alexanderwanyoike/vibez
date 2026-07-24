@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 
@@ -82,8 +81,6 @@ struct CaptureSession {
     engine_start_samples: u64,
     active: Option<ActiveSpan>,
     spans: Vec<CapturedSectionSpan>,
-    controlled_tracks: Vec<(TrackId, bool)>,
-    mute_changes: Vec<CapturedMuteChange>,
 }
 
 #[derive(Debug)]
@@ -92,15 +89,6 @@ pub struct CompletedCapture {
     engine_start_samples: u64,
     engine_end_samples: u64,
     spans: Vec<CapturedSectionSpan>,
-    controlled_tracks: Vec<(TrackId, bool)>,
-    mute_changes: Vec<CapturedMuteChange>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CapturedMuteChange {
-    track_id: TrackId,
-    muted: bool,
-    effective_at_samples: u64,
 }
 
 #[derive(Debug, Default)]
@@ -108,12 +96,6 @@ pub struct MaterializedCapture {
     pub arrange_start_samples: u64,
     pub arrange_end_samples: u64,
     pub by_track: HashMap<TrackId, TrackTimelineContent>,
-    /// Every Project Track controlled by Perform, including tracks whose
-    /// recorded performance was silence.
-    pub controlled_track_ids: Vec<TrackId>,
-    /// Manual mute state heard at Capture start, used to close mute lanes and
-    /// return the mixer to its pre-take state after commit.
-    pub pre_capture_mutes: HashMap<TrackId, bool>,
     pub(crate) samples_per_beat: f64,
 }
 
@@ -123,6 +105,36 @@ impl MaterializedCapture {
             content.clips.is_empty()
                 && content.note_clips.is_empty()
                 && content.automation.is_empty()
+        })
+    }
+
+    /// Card 17 is deliberately safe only for an empty destination interval.
+    /// Replacement and lane surgery arrive in Card 18.
+    pub fn target_interval_is_empty(
+        &self,
+        arrange: &ArrangementTimeline,
+        perform_track_ids: &[TrackId],
+    ) -> bool {
+        if self.arrange_end_samples <= self.arrange_start_samples {
+            return true;
+        }
+        perform_track_ids.iter().all(|track_id| {
+            arrange.get(*track_id).is_none_or(|existing| {
+                let audio_clear = existing.clips.iter().all(|clip| {
+                    clip.position.saturating_add(clip.duration) <= self.arrange_start_samples
+                        || clip.position >= self.arrange_end_samples
+                });
+                let note_clear = existing.note_clips.iter().all(|clip| {
+                    let start = (clip.position_beats * self.samples_per_beat)
+                        .round()
+                        .max(0.0) as u64;
+                    let end = ((clip.position_beats + clip.duration_beats) * self.samples_per_beat)
+                        .round()
+                        .max(0.0) as u64;
+                    end <= self.arrange_start_samples || start >= self.arrange_end_samples
+                });
+                audio_clear && note_clear && existing.automation.is_empty()
+            })
         })
     }
 }
@@ -136,8 +148,6 @@ impl CompletedCapture {
                     .saturating_sub(self.engine_start_samples),
             ),
             by_track: HashMap::new(),
-            controlled_track_ids: Vec::new(),
-            pre_capture_mutes: HashMap::new(),
             samples_per_beat: samples_per_beat(self.clock.sample_rate, self.clock.bpm),
         };
         let samples_per_beat = result.samples_per_beat;
@@ -178,64 +188,12 @@ impl CompletedCapture {
             }
         }
 
-        for (track_id, pre_capture_muted) in &self.controlled_tracks {
-            let changes: Vec<_> = self
-                .mute_changes
-                .iter()
-                .filter(|change| change.track_id == *track_id)
-                .collect();
-            if changes.is_empty() {
-                continue;
-            }
-            let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
-            let start_beat = result.arrange_start_samples as f64 / samples_per_beat;
-            lane.insert_point(AutomationPoint {
-                beat: start_beat,
-                value: if *pre_capture_muted { 1.0 } else { 0.0 },
-                curve: 0.0,
-            });
-            for change in changes {
-                if change.effective_at_samples < self.engine_start_samples
-                    || change.effective_at_samples > self.engine_end_samples
-                {
-                    continue;
-                }
-                let arrange_samples = self.clock.arrange_start_samples.saturating_add(
-                    change
-                        .effective_at_samples
-                        .saturating_sub(self.engine_start_samples),
-                );
-                lane.insert_point(AutomationPoint {
-                    beat: arrange_samples as f64 / samples_per_beat,
-                    value: if change.muted { 1.0 } else { 0.0 },
-                    curve: 0.0,
-                });
-            }
-            lane.insert_point(AutomationPoint {
-                beat: result.arrange_end_samples as f64 / samples_per_beat,
-                value: if *pre_capture_muted { 1.0 } else { 0.0 },
-                curve: 0.0,
-            });
-            result
-                .by_track
-                .entry(*track_id)
-                .or_default()
-                .automation
-                .push(lane);
-        }
-
         for content in result.by_track.values_mut() {
             content.clips.sort_by_key(|clip| clip.position);
             content
                 .note_clips
                 .sort_by(|left, right| left.position_beats.total_cmp(&right.position_beats));
         }
-        result.controlled_track_ids = self
-            .controlled_tracks
-            .iter()
-            .map(|(track_id, _)| *track_id)
-            .collect();
-        result.pre_capture_mutes = self.controlled_tracks.iter().copied().collect();
         result
     }
 }
@@ -245,7 +203,6 @@ pub struct CaptureState {
     pub phase: CapturePhase,
     prepared_clock: Option<CaptureClock>,
     session: Option<CaptureSession>,
-    prepared_controlled_tracks: Vec<(TrackId, bool)>,
 }
 
 impl CaptureState {
@@ -290,10 +247,6 @@ impl CaptureState {
         });
     }
 
-    pub fn prepare_controlled_tracks(&mut self, tracks: impl IntoIterator<Item = (TrackId, bool)>) {
-        self.prepared_controlled_tracks = tracks.into_iter().collect();
-    }
-
     pub fn start(
         &mut self,
         effective_at_samples: u64,
@@ -315,35 +268,8 @@ impl CaptureState {
                 source_start_samples,
             }),
             spans: Vec::new(),
-            controlled_tracks: std::mem::take(&mut self.prepared_controlled_tracks),
-            mute_changes: Vec::new(),
         });
         self.phase = CapturePhase::Recording;
-    }
-
-    pub fn track_mute_changed(
-        &mut self,
-        track_id: TrackId,
-        muted: bool,
-        effective_at_samples: u64,
-    ) {
-        let Some(session) = &mut self.session else {
-            return;
-        };
-        if self.phase != CapturePhase::Recording
-            || effective_at_samples < session.engine_start_samples
-            || !session
-                .controlled_tracks
-                .iter()
-                .any(|(controlled_id, _)| *controlled_id == track_id)
-        {
-            return;
-        }
-        session.mute_changes.push(CapturedMuteChange {
-            track_id,
-            muted,
-            effective_at_samples,
-        });
     }
 
     pub fn transition(&mut self, source: CapturedSectionSource, effective_at_samples: u64) {
@@ -371,8 +297,6 @@ impl CaptureState {
             engine_start_samples: session.engine_start_samples,
             engine_end_samples: effective_at_samples,
             spans: session.spans,
-            controlled_tracks: session.controlled_tracks,
-            mute_changes: session.mute_changes,
         })
     }
 
@@ -380,7 +304,6 @@ impl CaptureState {
         self.phase = CapturePhase::Idle;
         self.prepared_clock = None;
         self.session = None;
-        self.prepared_controlled_tracks.clear();
     }
 }
 
@@ -435,7 +358,7 @@ fn append_timeline_window(
                 audio: Arc::clone(&clip.audio),
                 source: clip.source.clone(),
                 position: destination_start_samples + (overlap_start - window_start_samples),
-                source_offset: captured_audio_offset(clip, delta),
+                source_offset: mapped_audio_offset(clip, delta),
                 duration: overlap_end - overlap_start,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
@@ -464,7 +387,7 @@ fn append_timeline_window(
             }
             let local_start = overlap_start - clip.position_beats;
             let local_end = overlap_end - clip.position_beats;
-            let notes = captured_visible_notes(clip, local_start, local_end);
+            let notes = visible_notes(clip, local_start, local_end);
             let fragment = UiNoteClip {
                 id: ClipId::new(),
                 name: format!("Capture · {} · {}", source.name, clip.name),
@@ -486,7 +409,7 @@ fn append_timeline_window(
     }
 }
 
-pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
+fn mapped_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
     let raw = clip.source_offset.saturating_add(timeline_delta);
     if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
         clip.loop_start + (raw - clip.loop_start) % (clip.loop_end - clip.loop_start)
@@ -495,11 +418,7 @@ pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
     }
 }
 
-pub(crate) fn captured_visible_notes(
-    clip: &UiNoteClip,
-    local_start: f64,
-    local_end: f64,
-) -> Vec<MidiNote> {
+fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
     let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
     let mut visible = Vec::new();
     for note in &clip.notes {
@@ -598,13 +517,6 @@ mod tests {
         section
     }
 
-    fn starting_capture() -> CaptureState {
-        CaptureState {
-            phase: CapturePhase::Starting,
-            ..CaptureState::default()
-        }
-    }
-
     #[test]
     fn effective_mid_buffer_boundaries_become_exact_arrange_positions() {
         let first = audio_section("Groove A", 4.0, 16);
@@ -620,7 +532,8 @@ mod tests {
             .by_track
             .insert(track_id, second_content);
 
-        let mut capture = starting_capture();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(40, 8, 120.0);
         capture.start(3, Some((CapturedSectionSource::from_section(&first), 0)));
         assert_eq!(capture.arrange_start_samples(), Some(40));
@@ -641,7 +554,8 @@ mod tests {
         let mut section = audio_section("Groove A", 1.0, 4);
         section.looping = true;
         let track_id = *section.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(0, 8, 120.0);
         capture.start(0, Some((CapturedSectionSource::from_section(&section), 0)));
         let clips = &capture.finish(10).unwrap().materialize().by_track[&track_id].clips;
@@ -667,7 +581,8 @@ mod tests {
             first.timeline.get(track_id).unwrap().note_clips[0].id,
             second.timeline.get(track_id).unwrap().note_clips[0].id,
         ];
-        let mut capture = starting_capture();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(8, 8, 120.0);
         capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
         capture.transition(CapturedSectionSource::from_section(&second), 5);
@@ -689,7 +604,8 @@ mod tests {
         let first = audio_section("Groove A", 4.0, 16);
         let second = audio_section("Groove B", 4.0, 16);
         let track_id = *first.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(0, 8, 120.0);
         capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
         let completed = capture.finish(4).unwrap();
@@ -705,7 +621,8 @@ mod tests {
     fn source_edits_after_transition_cannot_rewrite_capture_snapshot() {
         let mut section = audio_section("Breakdown", 4.0, 16);
         let track_id = *section.timeline.by_track.keys().next().unwrap();
-        let mut capture = starting_capture();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(20, 8, 120.0);
         capture.start(
             100,
@@ -722,35 +639,22 @@ mod tests {
     }
 
     #[test]
-    fn effective_mute_event_materializes_as_steps_with_start_and_closing_state() {
-        let track_id = TrackId::new();
-        let section = midi_section("Groove A", track_id, 36);
-        let mut capture = starting_capture();
+    fn occupied_target_interval_is_rejected_without_touching_outside_content() {
+        let section = audio_section("Drop", 4.0, 16);
+        let track_id = *section.timeline.by_track.keys().next().unwrap();
+        let mut capture = CaptureState::default();
+        capture.phase = CapturePhase::Starting;
         capture.prepare(40, 8, 120.0);
-        capture.prepare_controlled_tracks([(track_id, false)]);
-        capture.start(
-            100,
-            Some((CapturedSectionSource::from_section(&section), 0)),
-        );
-        capture.track_mute_changed(track_id, true, 103);
-        // A Section transition while held must not synthesize another gesture.
-        capture.transition(CapturedSectionSource::from_section(&section), 105);
-        let materialized = capture.finish(110).unwrap().materialize();
-        let lane = materialized.by_track[&track_id]
-            .automation
-            .iter()
-            .find(|lane| lane.target == AutomationTarget::TrackMute)
-            .unwrap();
+        capture.start(0, Some((CapturedSectionSource::from_section(&section), 0)));
+        let completed = capture.finish(8).unwrap();
+        let mut arrange = ArrangementTimeline::default();
+        let silent_track = TrackId::new();
+        let mut outside = section.timeline.get(track_id).unwrap().clips[0].clone();
+        outside.position = 44;
+        arrange.ensure(silent_track).clips.push(outside);
 
-        assert_eq!(
-            lane.points
-                .iter()
-                .map(|point| (point.beat, point.value))
-                .collect::<Vec<_>>(),
-            [(10.0, 0.0), (10.75, 1.0), (12.5, 0.0)]
-        );
-        assert_eq!(lane.value_at(10.5), Some(0.0));
-        assert_eq!(lane.value_at(11.0), Some(1.0));
-        assert_eq!(lane.value_at(12.5), Some(0.0));
+        let materialized = completed.materialize();
+        assert!(materialized.target_interval_is_empty(&ArrangementTimeline::default(), &[track_id]));
+        assert!(!materialized.target_interval_is_empty(&arrange, &[track_id, silent_track]));
     }
 }

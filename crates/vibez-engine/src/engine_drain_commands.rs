@@ -309,47 +309,17 @@ impl AudioEngine {
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
                     let effective_at_samples = self.effective_position();
-                    let playing = self.transport.is_playing();
-                    let (changed, override_changed) = if let Some(track) = self.channel_mut(id) {
-                        let override_changed = track.has_automation_target(
-                            vibez_core::automation::AutomationTarget::TrackMute,
-                        ) && track.set_automation_override(
-                            vibez_core::automation::AutomationTarget::TrackMute,
-                            true,
-                        );
-                        track.set_manual_mute(mute, !playing);
-                        (true, override_changed)
+                    let changed = if let Some(track) = self.channel_mut(id) {
+                        track.mute = mute;
+                        true
                     } else {
-                        (false, false)
+                        false
                     };
                     if changed {
                         let _ = self.event_tx.push(EngineEvent::TrackMuteChanged {
                             track_id: id,
                             muted: mute,
                             effective_at_samples,
-                        });
-                    }
-                    if override_changed {
-                        let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
-                            track_id: id,
-                            target: vibez_core::automation::AutomationTarget::TrackMute,
-                            overridden: true,
-                        });
-                    }
-                }
-                EngineCommand::SetAutomationOverride {
-                    track_id,
-                    target,
-                    overridden,
-                } => {
-                    let changed = self
-                        .channel_mut(track_id)
-                        .is_some_and(|track| track.set_automation_override(target, overridden));
-                    if changed {
-                        let _ = self.event_tx.push(EngineEvent::AutomationOverrideChanged {
-                            track_id,
-                            target,
-                            overridden,
                         });
                     }
                 }
