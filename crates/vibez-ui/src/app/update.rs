@@ -5,6 +5,8 @@ use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::project::ProjectMsg;
+use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use vibez_engine::commands::EngineCommand;
@@ -210,10 +212,118 @@ impl App {
                 self.finish_section_record_residency(request_id, request, resident);
             }
             Message::View(msg) => {
-                return self.route_view_message(msg);
+                if matches!(&msg, ViewMsg::ToggleEditMenu) {
+                    self.state.project.file_menu_open = false;
+                }
+                let browser_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::ResizeDock(
+                            self.state
+                                .browser
+                                .dock_drag_width(*x, self.state.view.window_width),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.dock_resize_active => {
+                        Some(BrowserMsg::EndDockResize)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = browser_resize {
+                    let action = self.state.browser.update(browser_msg);
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let detail_panel_resize = match &msg {
+                    ViewMsg::CursorMoved(_, y) if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::ResizeDetailPanel(
+                            self.detail_panel_drag_height(*y),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.detail_panel_resize_active => {
+                        Some(ViewMsg::EndDetailPanelResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = detail_panel_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let perform_surface_resize = match &msg {
+                    ViewMsg::CursorMoved(x, _) if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::ResizePerformSurface(
+                            self.perform_surface_drag_width(*x),
+                        ))
+                    }
+                    ViewMsg::MouseReleased if self.state.view.perform_surface_resize_active => {
+                        Some(ViewMsg::EndPerformSurfaceResize)
+                    }
+                    _ => None,
+                };
+                if let Some(resize_msg) = perform_surface_resize {
+                    let ctx = crate::domains::view::ViewCtx {
+                        total_beats: self.state.total_beats(),
+                    };
+                    let action = self.state.view.update(
+                        resize_msg,
+                        self.state.arrangement.resolve_timeline().editor,
+                        ctx,
+                    );
+                    if action.persist_settings {
+                        self.persist_ui_settings();
+                    }
+                }
+                let pending_drag_msg = match &msg {
+                    ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+                        Some(BrowserMsg::EndDragSample)
+                    }
+                    _ => None,
+                };
+                if let Some(browser_msg) = pending_drag_msg {
+                    let action = self.state.browser.update(browser_msg);
+                    if let Some(status) = action.status {
+                        self.state.status_text = status;
+                    }
+                }
+                let ctx = crate::domains::view::ViewCtx {
+                    total_beats: self.state.total_beats(),
+                };
+                let action = self.state.view.update(
+                    msg,
+                    self.state.arrangement.resolve_timeline().editor,
+                    ctx,
+                );
+                return self.apply_view_action(action);
             }
             Message::Project(msg) => {
-                return self.route_project_message(msg);
+                if matches!(&msg, ProjectMsg::ToggleFileMenu) {
+                    self.state.view.edit_menu_open = false;
+                }
+                let ctx = crate::domains::project::ProjectCtx {
+                    snapshot_now: self.take_snapshot(),
+                };
+                let action = self.state.project.update(msg, ctx);
+                if let Some(status) = action.status {
+                    self.state.status_text = status;
+                }
+                if let Some(snapshot) = action.apply_snapshot {
+                    self.apply_snapshot(snapshot);
+                }
             }
 
             // -- Workspace --
@@ -224,29 +334,95 @@ impl App {
 
             // -- File menu --
             Message::NewProject => {
-                return self.route_new_project();
+                self.state.project.file_menu_open = false;
+                self.reset_to_new_project();
             }
             Message::OpenProject => {
-                return self.route_open_project();
+                self.state.project.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Open Vibez Project")
+                            .add_filter("Vibez Project", &["vzp", "vibez", "json"])
+                            .pick_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectOpenPathSelected,
+                );
             }
             Message::SaveProject => {
-                return self.route_save_project();
+                self.state.project.file_menu_open = false;
+                let project = self.project_for_save();
+                if let Some(path) = self.state.project.current_path.clone() {
+                    return Task::perform(
+                        save_project_async(path.clone(), Some(path), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
+                }
+                return self.update(Message::SaveProjectAs);
             }
             Message::SaveProjectAs => {
-                return self.route_save_project_as();
+                self.state.project.file_menu_open = false;
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Save Vibez Project")
+                            .set_file_name("Untitled.vzp")
+                            .add_filter("Vibez Project Format V1", &["vzp"])
+                            .save_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::ProjectSavePathSelected,
+                );
             }
             Message::ProjectOpenPathSelected(path) => {
-                return self.route_project_open_path_selected(path);
+                if let Some(path) = path {
+                    self.state.status_text = format!("Opening {}...", path.display());
+                    let dropbox = self
+                        .dropbox_client
+                        .clone()
+                        .map(|client| (client, self.dropbox_cache.clone()));
+                    return Task::perform(load_project_async(path, dropbox), |result| {
+                        Message::ProjectLoaded(Box::new(result))
+                    });
+                }
             }
             Message::ProjectSavePathSelected(path) => {
-                return self.route_project_save_path_selected(path);
+                if let Some(mut path) = path {
+                    if !path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("vzp"))
+                    {
+                        path.set_extension("vzp");
+                    }
+                    let project = self.project_for_save();
+                    return Task::perform(
+                        save_project_async(path, self.state.project.current_path.clone(), project),
+                        |result| Message::ProjectSaved(Box::new(result)),
+                    );
+                }
             }
-            Message::ProjectLoaded(result) => {
-                return self.route_project_loaded(*result);
-            }
-            Message::ProjectSaved(result) => {
-                return self.route_project_saved(*result);
-            }
+            Message::ProjectLoaded(result) => match *result {
+                Ok(loaded) => {
+                    self.rebuild_from_loaded_project(loaded);
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project load error: {err}");
+                }
+            },
+            Message::ProjectSaved(result) => match *result {
+                Ok(saved) => {
+                    self.apply_saved_project_sources(&saved.project);
+                    self.state.project.current_path = Some(saved.path.clone());
+                    self.state.project.dirty = false;
+                    self.state.status_text = format!("Saved {}", saved.path.display());
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Project save error: {err}");
+                }
+            },
 
             // -- Settings --
             Message::OpenSettings => {
