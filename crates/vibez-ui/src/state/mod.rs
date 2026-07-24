@@ -438,6 +438,8 @@ pub struct AppState {
     pub spectrum: crate::spectrum::SpectrumState,
 
     pub status_text: String,
+    /// Active project-export completion percentage.
+    pub export_progress: Option<u8>,
     pub audio_stream_health: AudioStreamHealth,
     pub view: ViewState,
 
@@ -500,6 +502,7 @@ impl Default for AppState {
             peak_r: 0.0,
             spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
+            export_progress: None,
             audio_stream_health: AudioStreamHealth::default(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),

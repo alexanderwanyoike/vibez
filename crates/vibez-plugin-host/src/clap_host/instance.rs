@@ -32,6 +32,7 @@ pub struct ClapPluginInstance {
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     active: bool,
+    processing: bool,
 }
 
 // Safety: CLAP plugins are expected to be thread-safe for audio processing.
@@ -205,6 +206,7 @@ impl ClapPluginInstance {
             note_events: Vec::new(),
             sample_rate,
             active: false,
+            processing: false,
         };
 
         instance.prepare(sample_rate, max_buffer_size);
@@ -342,6 +344,15 @@ impl PluginInstance for ClapPluginInstance {
         }
 
         super::host_impl::mark_clap_audio_thread();
+        if !self.processing {
+            let plugin_ref = unsafe { &*self.plugin_ptr };
+            let started = unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
+            if !started {
+                buffer.fill(0.0);
+                return;
+            }
+            self.processing = true;
+        }
 
         let frames = buffer.len() / channels.max(1);
         if frames == 0 {
@@ -521,21 +532,27 @@ impl PluginInstance for ClapPluginInstance {
         let ok =
             unsafe { (plugin_ref.activate.unwrap())(self.plugin_ptr, self.sample_rate, 32, 4096) };
         if ok {
-            unsafe { (plugin_ref.start_processing.unwrap())(self.plugin_ptr) };
             self.active = true;
         }
         ok
+    }
+
+    fn stop_processing(&mut self) {
+        if self.plugin_ptr.is_null() || !self.processing {
+            return;
+        }
+        let plugin_ref = unsafe { &*self.plugin_ptr };
+        unsafe { (plugin_ref.stop_processing.unwrap())(self.plugin_ptr) };
+        self.processing = false;
     }
 
     fn deactivate(&mut self) {
         if self.plugin_ptr.is_null() || !self.active {
             return;
         }
+        self.stop_processing();
         let plugin_ref = unsafe { &*self.plugin_ptr };
-        unsafe {
-            (plugin_ref.stop_processing.unwrap())(self.plugin_ptr);
-            (plugin_ref.deactivate.unwrap())(self.plugin_ptr);
-        }
+        unsafe { (plugin_ref.deactivate.unwrap())(self.plugin_ptr) };
         self.active = false;
     }
 }

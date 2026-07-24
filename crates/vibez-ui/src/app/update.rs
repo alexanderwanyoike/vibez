@@ -558,10 +558,13 @@ impl App {
                 return self.handle_export_path_selected(path);
             }
             Message::ExportComplete(Ok(path)) => {
+                self.finish_export_runtime();
                 self.state.status_text = format!("Exported: {}", path.display());
             }
             Message::ExportComplete(Err(err)) => {
-                self.state.status_text = format!("Export error: {err}");
+                self.finish_export_runtime();
+                self.state.status_text =
+                    format!("Export failed — {err}. No destination WAV was written.");
             }
 
             // -- Engine events --

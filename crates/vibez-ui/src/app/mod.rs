@@ -55,6 +55,11 @@ struct App {
     /// Raw pointers for live state capture at save time, keyed like
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
+    /// Plugin preflight and render progress for the one active project export.
+    export_job: Option<project_io::ExportJob>,
+    export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
+    export_plugin_return_rx:
+        Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
 
     // Dropbox
     dropbox_settings: DropboxSettings,
@@ -342,6 +347,9 @@ impl App {
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
             plugin_state_ptrs: std::collections::HashMap::new(),
+            export_job: None,
+            export_render_progress: None,
+            export_plugin_return_rx: None,
             dropbox_settings,
             dropbox_cache,
             dropbox_client,

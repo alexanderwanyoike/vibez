@@ -649,6 +649,7 @@ impl App {
         self.poll_midi_input();
         // Pump CLAP plugin timers and FDs (needed for JUCE event loop)
         vibez_plugin_host::poll_clap_events();
+        let export_task = self.poll_export();
 
         // Tick-driven auto-scroll: when dragging a clip and cursor is near the
         // window edge, continuously scroll the arrangement. The canvas can't
@@ -680,7 +681,7 @@ impl App {
                     (self.state.view.scroll_offset_beats - delta).max(0.0);
             }
         }
-        Task::none()
+        export_task
     }
 }
 

@@ -46,6 +46,7 @@ pub struct Vst3PluginInstance {
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     active: bool,
+    processing: bool,
 }
 
 unsafe impl Send for Vst3PluginInstance {}
@@ -825,6 +826,7 @@ impl Vst3PluginInstance {
             note_events: Vec::new(),
             sample_rate,
             active: false,
+            processing: false,
         };
 
         // Enumerate parameters from the edit controller (VST3 params
@@ -920,6 +922,17 @@ impl PluginInstance for Vst3PluginInstance {
     fn process_audio(&mut self, buffer: &mut [f32], channels: usize) {
         if !self.active || self.processor.is_null() {
             return;
+        }
+        if !self.processing {
+            type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+            let proc_vtbl = unsafe { vtbl(self.processor) };
+            let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
+            let result = unsafe { set_processing(self.processor, 1) };
+            if result != 0 {
+                buffer.fill(0.0);
+                return;
+            }
+            self.processing = true;
         }
 
         let frames = buffer.len() / channels.max(1);
@@ -1140,14 +1153,6 @@ impl PluginInstance for Vst3PluginInstance {
             eprintln!("vibez: {}: setActive(1) failed (hr={hr})", self.name);
         }
         if hr == 0 {
-            if !self.processor.is_null() {
-                // IAudioProcessor::setProcessing - vtable [8]
-                type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
-                let proc_vtbl = unsafe { vtbl(self.processor) };
-                let set_processing: SetProcessingFn =
-                    unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
-                unsafe { set_processing(self.processor, 1) };
-            }
             self.active = true;
             true
         } else {
@@ -1155,16 +1160,22 @@ impl PluginInstance for Vst3PluginInstance {
         }
     }
 
+    fn stop_processing(&mut self) {
+        if self.processor.is_null() || !self.processing {
+            return;
+        }
+        type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+        let proc_vtbl = unsafe { vtbl(self.processor) };
+        let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
+        unsafe { set_processing(self.processor, 0) };
+        self.processing = false;
+    }
+
     fn deactivate(&mut self) {
         if !self.active {
             return;
         }
-        if !self.processor.is_null() {
-            type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
-            let proc_vtbl = unsafe { vtbl(self.processor) };
-            let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
-            unsafe { set_processing(self.processor, 0) };
-        }
+        self.stop_processing();
         if !self.component.is_null() {
             type SetActiveFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
             let comp_vtbl = unsafe { vtbl(self.component) };

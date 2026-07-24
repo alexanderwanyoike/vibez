@@ -58,4 +58,8 @@ impl AudioEffect for PluginEffectWrapper {
     fn reset(&mut self) {
         self.inner.reset();
     }
+
+    fn finish_offline_processing(&mut self) {
+        self.inner.stop_processing();
+    }
 }
