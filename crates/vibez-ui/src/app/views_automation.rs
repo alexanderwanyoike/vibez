@@ -61,28 +61,41 @@ impl App {
                     border: iced::Border::default(),
                     ..Default::default()
                 });
-            let header = container(
-                row![
-                    text(label).size(11).color(th::text_dim()),
-                    horizontal_space(),
-                    remove
-                ]
-                .spacing(4)
-                .align_y(iced::Alignment::Center),
-            )
-            .padding([0, 10])
-            .width(Length::Fixed(layout.header_width))
-            .height(Length::Fixed(LANE_HEIGHT))
-            .align_y(iced::alignment::Vertical::Center)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::divider(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            let overridden = self
+                .state
+                .automation_ui
+                .is_overridden(track.id, lane.target);
+            let mut header_row = row![text(label).size(11).color(if overridden {
+                th::accent()
+            } else {
+                th::text_dim()
+            })]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+            if overridden {
+                header_row = header_row.push(
+                    button(text("RE-ENABLE").size(8).color(th::accent()))
+                        .on_press(Message::Automation(AutomationMsg::ReenableAutomation {
+                            track_id: track.id,
+                            target: lane.target,
+                        }))
+                        .padding([2, 4]),
+                );
+            }
+            let header = container(header_row.push(horizontal_space()).push(remove))
+                .padding([0, 10])
+                .width(Length::Fixed(layout.header_width))
+                .height(Length::Fixed(LANE_HEIGHT))
+                .align_y(iced::alignment::Vertical::Center)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_surface().into()),
+                    border: iced::Border {
+                        color: th::divider(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                });
 
             let selected = match self.state.automation_ui.selected {
                 Some((t, l, i)) if t == track.id && l == lane.id => Some(i),
@@ -102,6 +115,7 @@ impl App {
                 min_label,
                 max_label,
                 ref_label,
+                stepped: lane.target.is_stepped(),
             })
             .width(body_width())
             .height(Length::Fixed(LANE_HEIGHT));
@@ -312,6 +326,10 @@ impl App {
                 label: "Pan".into(),
                 target: vibez_core::automation::AutomationTarget::TrackPan,
             },
+            LaneChoice {
+                label: "Track Mute".into(),
+                target: vibez_core::automation::AutomationTarget::TrackMute,
+            },
         ];
         if track.kind.is_midi() {
             choices.push(LaneChoice {
@@ -434,6 +452,12 @@ fn lane_scale(
             };
             (reference, "L".into(), "R".into(), label)
         }
+        AutomationTarget::TrackMute => (
+            reference,
+            "Off".into(),
+            "On".into(),
+            if track.mute { "On" } else { "Off" }.into(),
+        ),
         _ => match target_descriptor(target, track) {
             Some(descriptor) => {
                 let label = reference

@@ -418,7 +418,7 @@ pub(crate) fn global_key_handler(
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
             "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
             "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
-            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead)),
+            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClips)),
             "t" | "T" => {
                 if modifiers.shift() {
                     Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))

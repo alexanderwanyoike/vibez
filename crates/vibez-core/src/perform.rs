@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// `Off` deliberately remains the default: Vibez never guesses the rhythmic
 /// intent of freely recorded notes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrooveGrid {
     #[default]

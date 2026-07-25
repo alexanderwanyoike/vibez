@@ -2,6 +2,21 @@
 
 /// Arrange's baseline horizontal scale before zoom is applied.
 pub const BASE_PIXELS_PER_BEAT: f32 = 20.0;
+const WHEEL_LINE_PIXELS: f32 = 40.0;
+const ZOOM_SENSITIVITY: f32 = 0.003;
+
+/// Normalise line- and pixel-based wheel input to physical-ish pixels.
+pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
+    match delta {
+        iced::mouse::ScrollDelta::Lines { x, y } => (x * WHEEL_LINE_PIXELS, y * WHEEL_LINE_PIXELS),
+        iced::mouse::ScrollDelta::Pixels { x, y } => (x, y),
+    }
+}
+
+/// Continuous zoom factor for a wheel or trackpad delta.
+pub fn zoom_factor_from_pixels(pixels: f32) -> f32 {
+    (pixels * ZOOM_SENSITIVITY).clamp(-0.5, 0.5).exp()
+}
 
 /// A resolved horizontal timeline viewport.
 ///
@@ -81,5 +96,12 @@ mod tests {
         assert_eq!(geometry.beat_to_x(4.0), 252.0);
         assert_eq!(geometry.x_to_beat(252.0), 4.0);
         assert_eq!(geometry.width_for_beats(2.0), 100.0);
+    }
+
+    #[test]
+    fn pixel_wheel_zoom_is_continuous_and_reversible() {
+        let one_pixel = zoom_factor_from_pixels(1.0);
+        assert!(one_pixel > 1.0 && one_pixel < 1.01);
+        assert!((one_pixel * zoom_factor_from_pixels(-1.0) - 1.0).abs() < 1.0e-6);
     }
 }

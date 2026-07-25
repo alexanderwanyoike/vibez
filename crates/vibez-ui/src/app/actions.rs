@@ -173,9 +173,6 @@ impl App {
         &mut self,
         action: crate::domains::arrangement::ArrangementAction,
     ) -> Task<Message> {
-        if action.close_context_menu {
-            self.state.view.context_menu = None;
-        }
         if action.focus_clip_tab {
             self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
@@ -183,7 +180,6 @@ impl App {
             self.auto_scroll_to_beat(beat);
         }
         if let Some((start, end)) = action.loop_from_selection {
-            self.state.view.context_menu = None;
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             let _ = self.state.transport.update(
                 crate::domains::transport::TransportMsg::SetArrangementLoopRegion {
@@ -320,9 +316,6 @@ impl App {
         &mut self,
         action: crate::domains::piano_roll::PianoRollAction,
     ) {
-        if action.close_context_menu {
-            self.state.view.context_menu = None;
-        }
         if let Some(sel) = action.select_note_clip {
             if self.state.view.workspace == crate::state::Workspace::Perform
                 && self.state.perform.selected_section.is_some()
@@ -524,6 +517,15 @@ impl App {
 
             if let Some(track) = self.state.find_track_mut(track_id) {
                 track.has_instrument = true;
+                track.instrument_kind = None;
+                track.sample_name = None;
+                track.sample_source = None;
+                track.sample_audio = None;
+                track.instrument_params.clear();
+                track.drum_rack_pads = (0..16)
+                    .map(|_| crate::state::UiDrumPad::default())
+                    .collect();
+                track.selected_drum_pad = 0;
                 track.plugin_instrument_name = Some(plugin_name.clone());
                 track.plugin_instrument_ref = Some(result.device_ref.clone());
                 track.plugin_instrument_descriptors = instrument.param_descriptors();
@@ -632,9 +634,23 @@ impl App {
             .analyse(self.state.transport.sample_rate as f32);
     }
 
+    pub(super) fn poll_audio_stream_events(&mut self) {
+        let mut events = Vec::new();
+        if let Some(stream) = self._stream.as_ref() {
+            while let Some(event) = stream.try_next_event() {
+                events.push(event);
+            }
+        }
+        for event in events {
+            self.state.apply_audio_stream_event(event);
+        }
+    }
+
     /// One frame of the 60fps subscription: drain engine events and
     /// pump every background service.
     pub(super) fn handle_tick(&mut self) -> Task<Message> {
+        self.cmd_tx.flush();
+        self.poll_audio_stream_events();
         self.poll_engine_events();
         self.poll_spectrum();
         self.poll_plugin_loads();
@@ -642,6 +658,7 @@ impl App {
         self.poll_midi_input();
         // Pump CLAP plugin timers and FDs (needed for JUCE event loop)
         vibez_plugin_host::poll_clap_events();
+        let export_task = self.poll_export();
 
         // Tick-driven auto-scroll: when dragging a clip and cursor is near the
         // window edge, continuously scroll the arrangement. The canvas can't
@@ -673,7 +690,7 @@ impl App {
                     (self.state.view.scroll_offset_beats - delta).max(0.0);
             }
         }
-        Task::none()
+        export_task
     }
 }
 

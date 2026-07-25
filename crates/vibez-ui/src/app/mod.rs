@@ -6,7 +6,7 @@ use iced::{Subscription, Task, Theme};
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
-use rtrb::{Consumer, Producer};
+use rtrb::Consumer;
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
@@ -28,14 +28,14 @@ use crate::message::{
     ProjectSaveResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
-use crate::state::AppState;
+use crate::state::{AppState, AudioStreamHealth};
 use crate::theme as th;
 use crate::ui_settings::UiSettings;
 
 struct App {
     state: AppState,
     edge_shortcuts: EdgeShortcutState,
-    cmd_tx: Option<Producer<EngineCommand>>,
+    cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
     /// Post-effects mono samples from the engine's spectrum tap,
     /// feeding the EQ analyser.
@@ -55,6 +55,11 @@ struct App {
     /// Raw pointers for live state capture at save time, keyed like
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
+    /// Plugin preflight and render progress for the one active project export.
+    export_job: Option<project_io::ExportJob>,
+    export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
+    export_plugin_return_rx:
+        Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
 
     // Dropbox
     dropbox_settings: DropboxSettings,
@@ -134,6 +139,7 @@ mod capture;
 mod engine_events;
 mod keyboard;
 mod local_watcher;
+mod menu_lifecycle;
 mod tracked_request;
 
 use async_helpers::*;
@@ -150,8 +156,10 @@ mod section_record;
 mod update;
 mod update_media;
 mod update_policy;
+mod update_project;
 mod update_remote;
 mod update_timeline;
+mod update_view;
 mod views_arrangement;
 mod views_automation;
 mod views_browser;
@@ -184,19 +192,25 @@ impl App {
         let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
 
-        let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
-            Ok(s) => {
-                let sr = s.sample_rate();
-                if let Err(e) = s.play() {
-                    eprintln!("vibez: failed to start audio stream: {e}");
+        let (stream, sample_rate, audio_stream_health) =
+            match AudioOutputStream::open(engine, Some(512)) {
+                Ok(s) => {
+                    let sr = s.sample_rate();
+                    let health = match s.play() {
+                        Ok(()) => AudioStreamHealth::Running,
+                        Err(e) => {
+                            eprintln!("vibez: failed to start audio stream: {e}");
+                            AudioStreamHealth::Error(e.to_string())
+                        }
+                    };
+                    (Some(s), sr, health)
                 }
-                (Some(s), sr)
-            }
-            Err(e) => {
-                eprintln!("vibez: failed to open audio stream: {e}");
-                (None, 44_100)
-            }
-        };
+                Err(e) => {
+                    eprintln!("vibez: failed to open audio stream: {e}");
+                    let cause = e.to_string();
+                    (None, 44_100, AudioStreamHealth::Error(cause))
+                }
+            };
 
         let dropbox_settings = DropboxSettings::load();
         let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
@@ -250,6 +264,7 @@ impl App {
                 sample_rate,
                 ..Default::default()
             },
+            audio_stream_health,
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
@@ -273,6 +288,9 @@ impl App {
             },
             ..Default::default()
         };
+        if let AudioStreamHealth::Error(cause) = &state.audio_stream_health {
+            state.status_text = format!("Audio stream error: {cause}");
+        }
         state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
         state
             .perform
@@ -317,7 +335,7 @@ impl App {
         let mut app = Self {
             state,
             edge_shortcuts: EdgeShortcutState::default(),
-            cmd_tx: Some(cmd_tx),
+            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
             spectrum_rx,
             spectrum_tap: None,
@@ -329,6 +347,9 @@ impl App {
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
             plugin_state_ptrs: std::collections::HashMap::new(),
+            export_job: None,
+            export_render_progress: None,
+            export_plugin_return_rx: None,
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
@@ -423,9 +444,7 @@ impl App {
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {
-        if let Some(ref mut tx) = self.cmd_tx {
-            let _ = tx.push(cmd);
-        }
+        crate::domains::EngineHandle::send(&mut self.cmd_tx, cmd);
     }
 
     fn mark_project_dirty(&mut self) {

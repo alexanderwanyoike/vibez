@@ -482,36 +482,37 @@ impl canvas::Program<Message> for RulerWidget {
             }
             canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                 if cursor.is_over(bounds) {
-                    let (dx, dy) = match delta {
-                        iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
-                        iced::mouse::ScrollDelta::Pixels { x, y } => (x / 20.0, y / 20.0),
-                    };
+                    let (dx, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
                     // Horizontal scroll for panning
                     if dx.abs() > dy.abs() {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(ViewMsg::ScrollArrangement(-dx as f64 * 2.0))),
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                -self.geometry().beats_for_width(dx),
+                            ))),
                         );
                     }
                     // Shift+scroll for zoom
                     if state.shift_held && dy.abs() > 0.0 {
-                        if dy > 0.0 {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::View(ViewMsg::ZoomIn)),
-                            );
-                        } else {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(Message::View(ViewMsg::ZoomOut)),
-                            );
-                        }
+                        let anchor_x = cursor
+                            .position_in(bounds)
+                            .map(|position| position.x)
+                            .unwrap_or(bounds.width / 2.0);
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ZoomAround {
+                                factor: crate::timeline_geometry::zoom_factor_from_pixels(dy),
+                                anchor_x,
+                            })),
+                        );
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(ViewMsg::ScrollArrangement(dy as f64 * 2.0))),
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                self.geometry().beats_for_width(dy),
+                            ))),
                         );
                     }
                 }

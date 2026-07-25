@@ -22,6 +22,14 @@ use super::views_automation::AutomationLaneLayout;
 use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
 use super::*;
 
+fn section_clip_materialization_width(timeline_width: f32) -> f32 {
+    // Section construction uses a full-width canvas inside a parent-owned
+    // horizontal scrollable. Unlike Arrange, the canvas has no beat scroll
+    // offset of its own, so viewport culling must cover the entire canvas;
+    // otherwise later clips exist in the model but are omitted before draw.
+    timeline_width.max(1.0)
+}
+
 impl App {
     pub(super) fn view_section_construction(&self, section_width: f32) -> Element<'_, Message> {
         let selected = self
@@ -384,6 +392,7 @@ impl App {
                     2.0,
                     self.state.view.grid_config(),
                     0.0,
+                    section_clip_materialization_width(timeline_width),
                     total_beats,
                     self.state.transport.sample_rate,
                     selected_track,
@@ -555,5 +564,21 @@ impl App {
                 PerformEditorFocus::SectionConstruction,
             )))
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::section_clip_materialization_width;
+
+    #[test]
+    fn horizontally_scrolled_section_materializes_its_full_timeline() {
+        let eight_bar_timeline_width = 1_280.0;
+
+        assert_eq!(
+            section_clip_materialization_width(eight_bar_timeline_width),
+            eight_bar_timeline_width,
+            "late split fragments must exist in the canvas before the parent scroll reveals them"
+        );
     }
 }

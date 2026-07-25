@@ -191,7 +191,6 @@ impl App {
         clip_id: ClipId,
         is_note_clip: bool,
     ) -> Task<Message> {
-        self.state.view.context_menu = None;
         let (range, insert_pos, name) = if is_note_clip {
             let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
             let nc = self

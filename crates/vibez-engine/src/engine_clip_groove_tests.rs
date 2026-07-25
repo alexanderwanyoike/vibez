@@ -150,7 +150,7 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 }
 
 #[test]
-fn dense_recorded_groove_uses_one_cached_note_end_lookup_per_note_and_frame() {
+fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
     let clip_id = ClipId::new();
@@ -197,10 +197,7 @@ fn dense_recorded_groove_uses_one_cached_note_end_lookup_per_note_and_frame() {
     crate::playback_source::reset_audio_thread_note_end_lookups();
     engine.process(&mut vec![0.0; 236 * 2], 2);
 
-    assert_eq!(
-        crate::playback_source::audio_thread_note_end_lookups(),
-        236 * 29
-    );
+    assert_eq!(crate::playback_source::audio_thread_note_end_lookups(), 29);
 }
 
 #[test]

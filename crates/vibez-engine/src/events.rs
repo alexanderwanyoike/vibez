@@ -3,6 +3,13 @@ use vibez_core::perform::NoteRepeatRate;
 
 use crate::playback_source::PreparedSectionPlaybackSource;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutomationGesturePhase {
+    Begin,
+    Update,
+    End,
+}
+
 /// Events sent from the audio engine back to the UI thread (via rtrb).
 ///
 /// These are pushed by the engine inside the real-time audio callback and
@@ -83,6 +90,22 @@ pub enum EngineEvent {
     TrackMuteChanged {
         track_id: TrackId,
         muted: bool,
+        effective_at_samples: u64,
+    },
+    /// A manual control took precedence over automation, or automation
+    /// was explicitly re-enabled.
+    AutomationOverrideChanged {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+        overridden: bool,
+    },
+    /// One engine-effective point in a live automation gesture. `End` carries
+    /// the baseline value that became audible again at the release boundary.
+    AutomationGestureChanged {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+        normalized_value: f32,
+        phase: AutomationGesturePhase,
         effective_at_samples: u64,
     },
 
@@ -177,6 +200,8 @@ pub enum EngineEvent {
     SectionSourceRefreshed {
         section_id: SectionId,
         applied: bool,
+        effective_at_samples: u64,
+        section_position_samples: Option<u64>,
         retired: Box<PreparedSectionPlaybackSource>,
     },
 
@@ -256,6 +281,44 @@ impl PartialEq for EngineEvent {
             ) => {
                 left_track == right_track
                     && left_muted == right_muted
+                    && left_effective == right_effective
+            }
+            (
+                Self::AutomationOverrideChanged {
+                    track_id: left_track,
+                    target: left_target,
+                    overridden: left_overridden,
+                },
+                Self::AutomationOverrideChanged {
+                    track_id: right_track,
+                    target: right_target,
+                    overridden: right_overridden,
+                },
+            ) => {
+                left_track == right_track
+                    && left_target == right_target
+                    && left_overridden == right_overridden
+            }
+            (
+                Self::AutomationGestureChanged {
+                    track_id: left_track,
+                    target: left_target,
+                    normalized_value: left_value,
+                    phase: left_phase,
+                    effective_at_samples: left_effective,
+                },
+                Self::AutomationGestureChanged {
+                    track_id: right_track,
+                    target: right_target,
+                    normalized_value: right_value,
+                    phase: right_phase,
+                    effective_at_samples: right_effective,
+                },
+            ) => {
+                left_track == right_track
+                    && left_target == right_target
+                    && left_value == right_value
+                    && left_phase == right_phase
                     && left_effective == right_effective
             }
             (
@@ -447,16 +510,22 @@ impl PartialEq for EngineEvent {
                 Self::SectionSourceRefreshed {
                     section_id: left_section,
                     applied: left_applied,
+                    effective_at_samples: left_effective,
+                    section_position_samples: left_position,
                     retired: left_retired,
                 },
                 Self::SectionSourceRefreshed {
                     section_id: right_section,
                     applied: right_applied,
+                    effective_at_samples: right_effective,
+                    section_position_samples: right_position,
                     retired: right_retired,
                 },
             ) => {
                 left_section == right_section
                     && left_applied == right_applied
+                    && left_effective == right_effective
+                    && left_position == right_position
                     && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
             }
             (Self::PlaybackStarted, Self::PlaybackStarted)
@@ -491,6 +560,18 @@ mod tests {
         let _track_mute = EngineEvent::TrackMuteChanged {
             track_id: TrackId::new(),
             muted: true,
+            effective_at_samples: 44_100,
+        };
+        let _automation_override = EngineEvent::AutomationOverrideChanged {
+            track_id: TrackId::new(),
+            target: vibez_core::automation::AutomationTarget::TrackMute,
+            overridden: true,
+        };
+        let _automation_gesture = EngineEvent::AutomationGestureChanged {
+            track_id: TrackId::new(),
+            target: vibez_core::automation::AutomationTarget::TrackPan,
+            normalized_value: 0.75,
+            phase: AutomationGesturePhase::Begin,
             effective_at_samples: 44_100,
         };
         let _started = EngineEvent::PlaybackStarted;
