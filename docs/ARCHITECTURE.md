@@ -316,9 +316,10 @@ Clip clipboard shared by Arrange and every Section editor. The application
 resolves clipboard shortcuts and the paste playhead from the focused editor,
 then supplies both at the editor boundary. The earliest clipboard Clip anchors
 at that playhead and all other musical and Track offsets remain relative.
-Arrange uses its transport edit cursor; each runtime Section editor owns an
-independent edit cursor so selected and playing Sections cannot redirect one
-another. `ArrangementState` is a thin adapter that retains Arrange's Project
+Arrange uses its transport edit cursor; the runtime Section editor remembers
+an independent edit cursor per Section across selection changes and canonical
+reloads, so selected and playing Sections cannot redirect one another.
+`ArrangementState` is a thin adapter that retains Arrange's Project
 Track/channel controls and implements `TimelineEditorAdapter` to resolve its
 editor. The editor never asks which workspace is active and contains no
 `Arrange | Section` branch.

@@ -21,6 +21,10 @@ fn clipboard_targets_section(
         && focus == PerformEditorFocus::SectionConstruction
 }
 
+pub(super) fn section_timeline_claims_focus(workspace: Workspace, selected_section: bool) -> bool {
+    workspace == Workspace::Perform && selected_section
+}
+
 fn focused_timeline_playhead_beats(
     workspace: Workspace,
     selected_section: bool,
@@ -62,7 +66,7 @@ impl App {
             self.state.perform.selected_section.is_some(),
             self.state.perform.editor_focus,
             self.state.position_beats(),
-            self.state.perform.section_editor.editor().playhead_beats,
+            self.state.perform.section_editor.edit_cursor_beats(),
         )
     }
 
@@ -78,9 +82,7 @@ impl App {
         ) else {
             return false;
         };
-        let editor = self.state.perform.section_editor.editor_mut();
-        editor.playhead_beats = beat;
-        editor.time_selection_active = false;
+        self.state.perform.section_editor.place_edit_cursor(beat);
         true
     }
 
@@ -372,5 +374,12 @@ mod clipboard_focus_tests {
             None,
             "hover and unrelated transport messages do not move the cursor"
         );
+    }
+
+    #[test]
+    fn section_timeline_messages_claim_focus_only_for_a_visible_selected_section() {
+        assert!(section_timeline_claims_focus(Workspace::Perform, true));
+        assert!(!section_timeline_claims_focus(Workspace::Arrange, true));
+        assert!(!section_timeline_claims_focus(Workspace::Perform, false));
     }
 }

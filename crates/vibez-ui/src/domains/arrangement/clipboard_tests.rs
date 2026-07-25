@@ -376,7 +376,11 @@ fn cross_section_paste_uses_selected_section_and_keeps_out_of_bounds_material() 
     };
 
     let mut source_editor = SectionTimelineEditor::default();
-    source_editor.load(Arc::clone(&source_section.timeline), Some(source_track));
+    source_editor.load(
+        source_section.id,
+        Arc::clone(&source_section.timeline),
+        Some(source_track),
+    );
     source_editor
         .editor_mut()
         .selected_clips
@@ -388,6 +392,7 @@ fn cross_section_paste_uses_selected_section_and_keeps_out_of_bounds_material() 
 
     let mut destination_editor = SectionTimelineEditor::default();
     destination_editor.load(
+        destination_section.id,
         Arc::clone(&destination_section.timeline),
         Some(destination_track),
     );
@@ -411,5 +416,101 @@ fn cross_section_paste_uses_selected_section_and_keeps_out_of_bounds_material() 
     assert_eq!(
         source_section.timeline.get(source_track).unwrap().clips[0].id,
         source_id
+    );
+}
+
+#[test]
+fn section_paste_after_undo_reload_keeps_the_same_edit_cursor_anchor() {
+    let project = project_tracks(&[TrackKind::Audio, TrackKind::Audio]);
+    let source_track = project.tracks[0].id;
+    let destination_track = project.tracks[1].id;
+    let source_clip = audio_clip(200);
+    let source_id = source_clip.id;
+    let mut source_section = Section::new(0);
+    Arc::make_mut(&mut source_section.timeline)
+        .ensure(source_track)
+        .clips
+        .push(source_clip);
+    let destination_section = Section::new(1);
+    let mut clipboard = ClipClipboard::default();
+    let mut source_editor = SectionTimelineEditor::default();
+    source_editor.load(
+        source_section.id,
+        Arc::clone(&source_section.timeline),
+        Some(source_track),
+    );
+    source_editor
+        .editor_mut()
+        .selected_clips
+        .insert(ArrangementSelection::AudioClip {
+            track_id: source_track,
+            clip_id: source_id,
+        });
+    copy(
+        source_editor.editor_mut(),
+        &project,
+        &mut clipboard,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..ArrangementCtx::default()
+        },
+    );
+
+    let empty_timeline = Arc::clone(&destination_section.timeline);
+    let mut destination_editor = SectionTimelineEditor::default();
+    destination_editor.load(
+        destination_section.id,
+        Arc::clone(&empty_timeline),
+        Some(destination_track),
+    );
+    destination_editor.place_edit_cursor(8.0);
+    let paste_ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_beats: destination_editor.edit_cursor_beats(),
+        ..ArrangementCtx::default()
+    };
+    paste(
+        destination_editor.editor_mut(),
+        &project,
+        &mut clipboard,
+        paste_ctx,
+    );
+    assert_eq!(
+        destination_editor
+            .editor()
+            .timeline
+            .get(destination_track)
+            .unwrap()
+            .clips[0]
+            .position,
+        800
+    );
+
+    destination_editor.load(
+        destination_section.id,
+        empty_timeline,
+        Some(destination_track),
+    );
+    assert_eq!(destination_editor.edit_cursor_beats(), 8.0);
+    let paste_ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_beats: destination_editor.edit_cursor_beats(),
+        ..ArrangementCtx::default()
+    };
+    paste(
+        destination_editor.editor_mut(),
+        &project,
+        &mut clipboard,
+        paste_ctx,
+    );
+    assert_eq!(
+        destination_editor
+            .editor()
+            .timeline
+            .get(destination_track)
+            .unwrap()
+            .clips[0]
+            .position,
+        800
     );
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, LaneId, SectionId, TrackId};
@@ -19,24 +20,48 @@ pub const MAX_SECTION_LENGTH_BEATS: f64 = 1024.0;
 ///
 /// Persisted Section content remains in [`Section::timeline`]. Selection and
 /// pointer interaction state stay outside the canonical Section store and are
-/// reset when a different Section is selected. The application owns the one
-/// clipboard shared with Arrange.
+/// reset when a different Section is selected. Per-Section edit cursors stay
+/// here across selection changes and canonical project reloads. The
+/// application owns the one clipboard shared with Arrange.
 #[derive(Debug, Default)]
 pub struct SectionTimelineEditor {
     editor: TimelineEditorState,
+    loaded_section: Option<SectionId>,
+    edit_cursors: HashMap<SectionId, f64>,
 }
 
 impl SectionTimelineEditor {
-    pub fn load(&mut self, timeline: Arc<ArrangementTimeline>, selected_track: Option<TrackId>) {
+    pub fn load(
+        &mut self,
+        section_id: SectionId,
+        timeline: Arc<ArrangementTimeline>,
+        selected_track: Option<TrackId>,
+    ) {
         self.editor = TimelineEditorState {
             timeline,
             selected_track,
             ..TimelineEditorState::default()
         };
+        self.loaded_section = Some(section_id);
+        self.edit_cursors.entry(section_id).or_insert(0.0);
     }
 
     pub fn clear(&mut self) {
         self.editor = TimelineEditorState::default();
+        self.loaded_section = None;
+    }
+
+    pub fn edit_cursor_beats(&self) -> f64 {
+        self.loaded_section
+            .and_then(|section_id| self.edit_cursors.get(&section_id).copied())
+            .unwrap_or(0.0)
+    }
+
+    pub fn place_edit_cursor(&mut self, beat: f64) {
+        if let Some(section_id) = self.loaded_section {
+            self.edit_cursors.insert(section_id, beat.max(0.0));
+        }
+        self.editor.time_selection_active = false;
     }
 
     pub fn editor(&self) -> &TimelineEditorState {
@@ -310,7 +335,11 @@ mod tests {
         let track_id = TrackId::new();
         let mut arrange = ArrangementState::default();
         let mut section = SectionTimelineEditor::default();
-        section.load(Arc::new(ArrangementTimeline::default()), Some(track_id));
+        section.load(
+            SectionId::new(),
+            Arc::new(ArrangementTimeline::default()),
+            Some(track_id),
+        );
 
         Arc::make_mut(&mut section.editor_mut().timeline)
             .ensure(track_id)
@@ -358,6 +387,31 @@ mod tests {
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
         assert_eq!(section_clip.position_beats, 0.0);
+    }
+
+    #[test]
+    fn section_edit_cursor_survives_reload_and_is_remembered_per_section() {
+        let first_id = SectionId::new();
+        let second_id = SectionId::new();
+        let first_timeline = Arc::new(ArrangementTimeline::default());
+        let second_timeline = Arc::new(ArrangementTimeline::default());
+        let mut editor = SectionTimelineEditor::default();
+
+        editor.load(first_id, Arc::clone(&first_timeline), None);
+        editor.place_edit_cursor(12.0);
+        editor.load(first_id, Arc::clone(&first_timeline), None);
+        assert_eq!(
+            editor.edit_cursor_beats(),
+            12.0,
+            "undo, redo, and project replay reload the selected Section"
+        );
+
+        editor.load(second_id, Arc::clone(&second_timeline), None);
+        editor.place_edit_cursor(3.0);
+        editor.load(first_id, first_timeline, None);
+        assert_eq!(editor.edit_cursor_beats(), 12.0);
+        editor.load(second_id, second_timeline, None);
+        assert_eq!(editor.edit_cursor_beats(), 3.0);
     }
 
     #[test]
