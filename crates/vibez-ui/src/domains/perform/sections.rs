@@ -29,6 +29,7 @@ pub struct SectionTimelineEditor {
     active_section: Option<SectionId>,
     viewport: TimelineViewport,
     viewports: HashMap<SectionId, TimelineViewport>,
+    edit_cursors: HashMap<SectionId, f64>,
 }
 
 impl SectionTimelineEditor {
@@ -49,6 +50,7 @@ impl SectionTimelineEditor {
         self.store_active_viewport();
         self.active_section = Some(section_id);
         self.viewport = self.viewports.get(&section_id).copied().unwrap_or_default();
+        self.edit_cursors.entry(section_id).or_insert(0.0);
         self.load(timeline, selected_track);
     }
 
@@ -75,8 +77,22 @@ impl SectionTimelineEditor {
         &mut self.viewport
     }
 
+    pub fn edit_cursor_beats(&self) -> f64 {
+        self.active_section
+            .and_then(|section_id| self.edit_cursors.get(&section_id).copied())
+            .unwrap_or(0.0)
+    }
+
+    pub fn place_edit_cursor(&mut self, beat: f64) {
+        if let Some(section_id) = self.active_section {
+            self.edit_cursors.insert(section_id, beat.max(0.0));
+        }
+        self.editor.time_selection_active = false;
+    }
+
     pub fn remove_viewport(&mut self, section_id: SectionId) {
         self.viewports.remove(&section_id);
+        self.edit_cursors.remove(&section_id);
         if self.active_section == Some(section_id) {
             self.active_section = None;
             self.viewport = TimelineViewport::default();
@@ -411,13 +427,19 @@ mod tests {
         editor.load_section(first, Arc::new(ArrangementTimeline::default()), None);
         editor.viewport_mut().zoom_level = 4.0;
         editor.viewport_mut().scroll_offset_beats = 12.0;
+        editor.place_edit_cursor(9.0);
         editor.load_section(second, Arc::new(ArrangementTimeline::default()), None);
         assert_eq!(editor.viewport().zoom_level, 2.0);
         assert_eq!(editor.viewport().scroll_offset_beats, 0.0);
+        assert_eq!(editor.edit_cursor_beats(), 0.0);
+        editor.place_edit_cursor(3.0);
 
         editor.load_section(first, Arc::new(ArrangementTimeline::default()), None);
         assert_eq!(editor.viewport().zoom_level, 4.0);
         assert_eq!(editor.viewport().scroll_offset_beats, 12.0);
+        assert_eq!(editor.edit_cursor_beats(), 9.0);
+        editor.load_section(second, Arc::new(ArrangementTimeline::default()), None);
+        assert_eq!(editor.edit_cursor_beats(), 3.0);
     }
 
     #[test]

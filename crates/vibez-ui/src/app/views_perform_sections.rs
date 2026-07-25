@@ -20,15 +20,13 @@ use crate::widgets::timeline::{
 };
 
 use super::views_automation::AutomationLaneLayout;
-use super::views_perform::SECTION_TRACK_GUTTER_WIDTH;
+use super::views_perform::{
+    SECTION_SCROLLBAR_SPACING, SECTION_SCROLLBAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH,
+};
 use super::*;
 
 const SECTION_RULER_HEIGHT: f32 = 28.0;
 const SECTION_MINIMAP_HEIGHT: f32 = 40.0;
-
-fn section_clip_materialization_width(viewport_width: f32) -> f32 {
-    viewport_width.max(1.0)
-}
 
 const fn section_navigation_header_height() -> f32 {
     SECTION_RULER_HEIGHT + SECTION_MINIMAP_HEIGHT
@@ -46,7 +44,10 @@ impl App {
         let recording_preview = self.state.perform.section_record.live_preview();
         let total_beats = selected.map_or(16.0, |section| section.length_beats);
         let viewport = *self.state.perform.section_editor.viewport();
-        let viewport_width = (section_width - SECTION_TRACK_GUTTER_WIDTH - 8.0).max(1.0);
+        let viewport_width = (section_width
+            - SECTION_TRACK_GUTTER_WIDTH
+            - super::views_perform::SECTION_SCROLLBAR_RESERVATION)
+            .max(1.0);
         let row_height = if self.state.perform.section_timeline_expanded {
             78.0
         } else {
@@ -140,15 +141,16 @@ impl App {
                 },
                 ..Default::default()
             });
-            let playhead_beats = if self.state.perform.playing_section == Some(section_id) {
+            let playback_playhead_beats = if self.state.perform.playing_section == Some(section_id)
+            {
                 let samples_per_beat = self.state.transport.sample_rate.max(1) as f64 * 60.0
                     / self.state.transport.bpm.max(f64::EPSILON);
-                self.state.perform.section_playhead_samples as f64 / samples_per_beat
+                Some(self.state.perform.section_playhead_samples as f64 / samples_per_beat)
             } else {
-                -1.0
+                None
             };
             let ruler = RulerWidget {
-                playhead_beats,
+                playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 bpm: self.state.transport.bpm,
                 zoom_level: viewport.zoom_level,
                 grid: self.state.view.grid_config(),
@@ -161,10 +163,12 @@ impl App {
                 selection_start_beats: editor.selection_start_beats,
                 selection_end_beats: editor.selection_end_beats,
             };
-            let ruler_canvas: Element<'_, Message> = canvas(ruler)
-                .width(Length::Fill)
-                .height(Length::Fixed(SECTION_RULER_HEIGHT))
-                .into();
+            let ruler_canvas: Element<'_, Message> = Element::from(
+                canvas(ruler)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(SECTION_RULER_HEIGHT)),
+            )
+            .map(|message| Message::SectionTimeline(Box::new(message)));
             let ruler_row = row![ruler_gutter, ruler_canvas].width(Length::Fill);
 
             let samples_per_beat = self.state.transport.sample_rate.max(1) as f64 * 60.0
@@ -173,7 +177,7 @@ impl App {
                 total_beats,
                 scroll_offset_beats: viewport.scroll_offset_beats,
                 zoom_level: viewport.zoom_level,
-                playhead_beats,
+                playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 bpm: self.state.transport.bpm,
                 loop_enabled: selected_section.looping,
                 loop_start_beats: 0.0,
@@ -222,10 +226,12 @@ impl App {
                     },
                     ..Default::default()
                 });
-            let minimap_canvas: Element<'_, Message> = canvas(minimap)
-                .width(Length::Fill)
-                .height(Length::Fixed(SECTION_MINIMAP_HEIGHT))
-                .into();
+            let minimap_canvas: Element<'_, Message> = Element::from(
+                canvas(minimap)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(SECTION_MINIMAP_HEIGHT)),
+            )
+            .map(|message| Message::SectionTimeline(Box::new(message)));
             let minimap_row = row![minimap_gutter, minimap_canvas].width(Length::Fill);
 
             let track_ids: Vec<_> = self
@@ -448,11 +454,11 @@ impl App {
                 let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
-                    playhead_beats,
+                    self.state.perform.section_editor.edit_cursor_beats(),
                     viewport.zoom_level,
                     self.state.view.grid_config(),
                     viewport.scroll_offset_beats,
-                    section_clip_materialization_width(viewport_width),
+                    viewport_width,
                     total_beats,
                     self.state.transport.sample_rate,
                     selected_track,
@@ -499,31 +505,34 @@ impl App {
                         loop_end_beats: 0.0,
                     });
                 }
+                clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
                 let grid = self.state.view.grid_config();
                 let compatible = !track.kind.is_midi();
-                let clip_lane: Element<'_, Message> = if self.state.browser.drag_source.is_some() {
-                    mouse_area(
-                        canvas(clip_canvas)
-                            .width(Length::Fill)
-                            .height(Length::Fixed(row_height)),
-                    )
-                    .on_move(move |point| {
-                        Message::Browser(BrowserMsg::DragHoverTrack {
-                            track_id,
-                            beat: grid
-                                .snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat())
-                                .max(0.0),
-                            compatible,
-                        })
-                    })
-                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-                    .into()
-                } else {
+                let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
                         .width(Length::Fill)
-                        .height(Length::Fixed(row_height))
+                        .height(Length::Fixed(row_height)),
+                )
+                .map(|message| Message::SectionTimeline(Box::new(message)));
+                let clip_lane: Element<'_, Message> = if self.state.browser.drag_source.is_some() {
+                    mouse_area(focused_clip_canvas)
+                        .on_move(move |point| {
+                            Message::Browser(BrowserMsg::DragHoverTrack {
+                                track_id,
+                                beat: grid
+                                    .snap_beat(
+                                        geometry.x_to_beat(point.x),
+                                        geometry.pixels_per_beat(),
+                                    )
+                                    .max(0.0),
+                                compatible,
+                            })
+                        })
+                        .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
                         .into()
+                } else {
+                    focused_clip_canvas
                 };
                 track_rows = track_rows.push(
                     row![gutter, clip_lane]
@@ -559,9 +568,9 @@ impl App {
                     }),
                 scrollable::Direction::Vertical(
                     scrollable::Scrollbar::new()
-                        .width(5)
-                        .scroller_width(5)
-                        .spacing(1),
+                        .width(SECTION_SCROLLBAR_WIDTH)
+                        .scroller_width(SECTION_SCROLLBAR_WIDTH)
+                        .spacing(SECTION_SCROLLBAR_SPACING),
                 ),
             )
             .width(Length::Fill)
@@ -593,41 +602,5 @@ impl App {
                 PerformEditorFocus::SectionConstruction,
             )))
             .into()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        section_clip_materialization_width, section_navigation_header_height,
-        SECTION_MINIMAP_HEIGHT, SECTION_RULER_HEIGHT,
-    };
-    use crate::timeline_geometry::TimelineViewport;
-
-    #[test]
-    fn long_section_materialization_stays_bounded_to_the_visible_viewport() {
-        assert_eq!(
-            section_clip_materialization_width(824.0),
-            824.0,
-            "timeline length must not expand the canvas beyond the visible viewport"
-        );
-    }
-
-    #[test]
-    fn ruler_and_minimap_form_one_sticky_header_above_the_track_scroller() {
-        assert_eq!(
-            section_navigation_header_height(),
-            SECTION_RULER_HEIGHT + SECTION_MINIMAP_HEIGHT
-        );
-    }
-
-    #[test]
-    fn section_playhead_and_lanes_share_the_same_viewport_alignment() {
-        let viewport = TimelineViewport::new(3.0, 9.5);
-        let beat = 13.25;
-        let ruler_x = viewport.geometry().beat_to_x(beat);
-        let lane_x = viewport.geometry().beat_to_x(beat);
-
-        assert_eq!(ruler_x, lane_x);
     }
 }

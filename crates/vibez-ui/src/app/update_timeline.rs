@@ -21,7 +21,39 @@ fn clipboard_targets_section(
         && focus == PerformEditorFocus::SectionConstruction
 }
 
+fn focused_section_seek_beat(
+    workspace: Workspace,
+    selected_section: bool,
+    focus: PerformEditorFocus,
+    msg: &crate::domains::transport::TransportMsg,
+) -> Option<f64> {
+    let crate::domains::transport::TransportMsg::SeekToBeat(beat) = msg else {
+        return None;
+    };
+    clipboard_targets_section(workspace, selected_section, focus).then(|| beat.max(0.0))
+}
+
+pub(super) fn section_timeline_claims_focus(workspace: Workspace, selected_section: bool) -> bool {
+    workspace == Workspace::Perform && selected_section
+}
+
 impl App {
+    pub(super) fn place_focused_section_playhead(
+        &mut self,
+        msg: &crate::domains::transport::TransportMsg,
+    ) -> bool {
+        let Some(beat) = focused_section_seek_beat(
+            self.state.view.workspace,
+            self.state.perform.selected_section.is_some(),
+            self.state.perform.editor_focus,
+            msg,
+        ) else {
+            return false;
+        };
+        self.state.perform.section_editor.place_edit_cursor(beat);
+        true
+    }
+
     pub(super) fn route_automation_editor_message(
         &mut self,
         msg: AutomationMsg,
@@ -241,5 +273,29 @@ mod clipboard_focus_tests {
             false,
             PerformEditorFocus::SectionConstruction,
         ));
+    }
+
+    #[test]
+    fn section_ruler_seek_targets_the_section_edit_cursor_not_arrange() {
+        use crate::domains::transport::TransportMsg;
+
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                &TransportMsg::SeekToBeat(13.0),
+            ),
+            Some(13.0)
+        );
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Arrange,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                &TransportMsg::SeekToBeat(13.0),
+            ),
+            None
+        );
     }
 }

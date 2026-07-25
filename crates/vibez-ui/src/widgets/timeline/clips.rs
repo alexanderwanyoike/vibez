@@ -74,7 +74,10 @@ pub struct TrackClipCanvas {
     /// Transient Section Record visualization. It is deliberately excluded
     /// from hit testing and edit messages.
     pub recording_preview: Option<TimelineNoteClip>,
+    /// Primary edit cursor (or Arrange's shared transport/edit cursor).
     pub playhead_beats: f64,
+    /// Section playback truth, rendered independently from the edit cursor.
+    pub playback_playhead_beats: Option<f64>,
     pub zoom_level: f32,
     pub grid: GridConfig,
     pub scroll_offset_beats: f64,
@@ -207,6 +210,7 @@ impl TrackClipCanvas {
             note_clips,
             recording_preview: None,
             playhead_beats,
+            playback_playhead_beats: None,
             zoom_level,
             grid,
             scroll_offset_beats,
@@ -232,6 +236,11 @@ impl TrackClipCanvas {
 
     pub fn with_recording_preview(mut self, preview: TimelineNoteClip) -> Self {
         self.recording_preview = Some(preview);
+        self
+    }
+
+    pub fn with_playback_playhead(mut self, playback_playhead_beats: Option<f64>) -> Self {
+        self.playback_playhead_beats = playback_playhead_beats;
         self
     }
 
@@ -862,6 +871,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::timeline::RulerWidget;
     use iced::keyboard::key::{Code, Physical};
     use iced::keyboard::{Event, Key, Location, Modifiers};
     use iced::{Point, Size};
@@ -869,6 +879,16 @@ mod tests {
     use vibez_core::perform::GrooveGrid;
 
     fn track_canvas(content: &TrackTimelineContent, zoom_level: f32) -> TrackClipCanvas {
+        track_canvas_at(content, zoom_level, 0.0, 800.0, 16.0)
+    }
+
+    fn track_canvas_at(
+        content: &TrackTimelineContent,
+        zoom_level: f32,
+        scroll_offset_beats: f64,
+        viewport_width: f32,
+        total_beats: f64,
+    ) -> TrackClipCanvas {
         let track_id = TrackId::new();
         let track = ProjectTrack::new(track_id, "Track 1".into(), 0);
         TrackClipCanvas::from_track(
@@ -877,9 +897,9 @@ mod tests {
             0.0,
             zoom_level,
             GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
-            0.0,
-            800.0,
-            16.0,
+            scroll_offset_beats,
+            viewport_width,
+            total_beats,
             44_100,
             true,
             Color::BLACK,
@@ -953,6 +973,56 @@ mod tests {
         assert_eq!(canvas.note_clips.len(), 1);
         assert_eq!(canvas.note_clips[0].clip_id, visible_id);
         assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    }
+
+    #[test]
+    fn scrolled_long_section_materializes_visible_split_midi_fragments() {
+        let mut content = TrackTimelineContent::default();
+        content.note_clips.push(note_clip(0.0));
+        let mut left_fragment = note_clip(96.0);
+        left_fragment.duration_beats = 4.0;
+        let left_id = left_fragment.id;
+        let mut right_fragment = note_clip(100.0);
+        right_fragment.duration_beats = 4.0;
+        let right_id = right_fragment.id;
+        content.note_clips.push(left_fragment);
+        content.note_clips.push(right_fragment);
+
+        let canvas = track_canvas_at(&content, 2.0, 94.0, 480.0, 128.0);
+        let materialized: HashSet<_> = canvas.note_clips.iter().map(|clip| clip.clip_id).collect();
+
+        assert_eq!(materialized, HashSet::from([left_id, right_id]));
+    }
+
+    #[test]
+    fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
+        let mut lane = empty_track_canvas();
+        lane.zoom_level = 3.0;
+        lane.scroll_offset_beats = 9.5;
+        let ruler = RulerWidget {
+            playhead_beats: -1.0,
+            bpm: 120.0,
+            zoom_level: 3.0,
+            grid: GridConfig::new(crate::state::SnapGrid::EIGHTH, true, false, 0),
+            scroll_offset_beats: 9.5,
+            total_beats: 64.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 64.0,
+            time_selection_active: false,
+            selection_start_beats: 0.0,
+            selection_end_beats: 0.0,
+        };
+
+        assert_eq!(ruler.beat_to_x(13.25, 800.0), lane.beat_to_x(13.25));
+    }
+
+    #[test]
+    fn section_lane_keeps_edit_cursor_and_playback_playhead_distinct() {
+        let canvas = empty_track_canvas().with_playback_playhead(Some(7.5));
+
+        assert_eq!(canvas.playhead_beats, 0.0);
+        assert_eq!(canvas.playback_playhead_beats, Some(7.5));
     }
 
     #[test]

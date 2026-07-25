@@ -18,6 +18,19 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        let message = match message {
+            Message::SectionTimeline(edit) => {
+                if super::update_timeline::section_timeline_claims_focus(
+                    self.state.view.workspace,
+                    self.state.perform.selected_section.is_some(),
+                ) {
+                    self.state.perform.editor_focus =
+                        crate::domains::perform::PerformEditorFocus::SectionConstruction;
+                }
+                *edit
+            }
+            message => message,
+        };
         let (message, undo_gesture) = match message {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
@@ -67,6 +80,9 @@ impl App {
         }
 
         match message {
+            Message::SectionTimeline(_) => {
+                unreachable!("section timeline wrappers are removed before routing")
+            }
             Message::MenuItemSelected(overlay, action) => {
                 let task = self.update(*action);
                 menu_lifecycle::dismiss(&mut self.state, overlay);
@@ -85,6 +101,9 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                if self.place_focused_section_playhead(&msg) {
+                    return Task::none();
+                }
                 let stops_perform = matches!(&msg, crate::domains::transport::TransportMsg::Stop)
                     || matches!(
                         &msg,

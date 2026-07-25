@@ -13,6 +13,9 @@ use crate::state::{ArrangementSelection, DetailPanelTab, UiEffect};
 
 use super::*;
 
+/// Keep edge-scroll activation inside the window border/shadow hit area.
+const TIMELINE_WINDOW_EDGE_INSET: f32 = 8.0;
+
 fn apply_track_mute_request(
     project_tracks: &mut Arc<crate::state::ProjectTracksState>,
     history: &mut crate::state::UndoHistory,
@@ -686,7 +689,7 @@ impl App {
         // A stationary pointer does not produce canvas events. Drive the
         // active editor's bounded edge-scroll from the 60fps UI clock.
         let cursor_x = self.state.view.cursor_x;
-        let right_boundary = (self.state.view.window_width - 8.0).max(1.0);
+        let right_boundary = (self.state.view.window_width - TIMELINE_WINDOW_EDGE_INSET).max(1.0);
         let section_drag = self.state.view.workspace == crate::state::Workspace::Perform
             && self
                 .state

@@ -324,10 +324,11 @@ runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
 persisted Timeline Content into the adapter while preserving the project-wide
 Project Track selection; clip and piano-roll selection remain local to the
 resolved Section editor. The adapter also retains an independent runtime-only
-`TimelineViewport` for every Section. Section ruler, minimap, clip lanes,
-automation, recording preview, and playhead all resolve through that viewport;
-the ruler and minimap sit outside the vertically scrolling Track body. Every
-edit commits the adapter's copy-on-write
+`TimelineViewport` and edit cursor for every Section. Section ruler, minimap,
+clip lanes, automation, recording preview, edit cursor, and engine-owned
+playback playhead all resolve through that viewport; edit and playback markers
+remain distinct. The ruler and minimap sit outside the vertically scrolling
+Track body. Every edit commits the adapter's copy-on-write
 Timeline Content back into the selected Section store for undo and project
 persistence. Section authoring still uses a discarding engine handle so edits
 to a selected, non-playing Section cannot mutate either resident audio source;

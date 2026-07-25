@@ -263,6 +263,9 @@ pub struct ProjectSaveResult {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// A message emitted by one of the selected Section timeline canvases.
+    /// The router focuses that editor before dispatching the enclosed action.
+    SectionTimeline(Box<Message>),
     /// A menu item was chosen. The router dispatches the action, then closes
     /// only the overlay that produced it.
     MenuItemSelected(MenuOverlay, Box<Message>),
