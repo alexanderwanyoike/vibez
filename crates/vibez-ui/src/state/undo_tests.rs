@@ -507,6 +507,7 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
     let project_tracks = Arc::clone(&state.project_tracks);
     let ctx = ArrangementCtx {
         samples_per_beat: 100.0,
+        playhead_beats: 7.0,
         ..ArrangementCtx::default()
     };
     let mut engine = RecordingEngine::default();
@@ -552,6 +553,11 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
     state.project.history.push_edit(before_second_paste, None);
     assert_eq!(state.project.history.undo.len(), 3);
     assert_eq!(state.clip_clipboard.clips.len(), 1);
+    let pasted = &state.arrangement.timeline.get(track_id).unwrap().clips;
+    assert_eq!(pasted.len(), 2);
+    assert!(pasted.iter().all(|clip| clip.position == 700));
+    assert_ne!(pasted[0].id, pasted[1].id);
+    assert!(pasted.iter().all(|clip| clip.id != source_id));
 
     undo_once(&mut state);
     assert_eq!(

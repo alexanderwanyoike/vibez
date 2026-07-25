@@ -388,7 +388,7 @@ impl App {
                 let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
-                    -1.0,
+                    editor.playhead_beats,
                     2.0,
                     self.state.view.grid_config(),
                     0.0,

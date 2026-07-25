@@ -313,11 +313,15 @@ owns clip/note selection, time selection, and other timeline-local interaction
 state; clip operations, piano-roll editing, automation editing, and timeline
 view behavior receive this already-resolved target. `AppState` owns one runtime
 Clip clipboard shared by Arrange and every Section editor. The application
-resolves clipboard shortcuts from the focused editor and supplies that
-clipboard at the editor boundary. `ArrangementState` is a thin adapter that
-retains Arrange's Project Track/channel controls and implements
-`TimelineEditorAdapter` to resolve its editor. The editor never asks which
-workspace is active and contains no `Arrange | Section` branch.
+resolves clipboard shortcuts and the paste playhead from the focused editor,
+then supplies both at the editor boundary. The earliest clipboard Clip anchors
+at that playhead and all other musical and Track offsets remain relative.
+Arrange uses its transport edit cursor; each runtime Section editor owns an
+independent edit cursor so selected and playing Sections cannot redirect one
+another. `ArrangementState` is a thin adapter that retains Arrange's Project
+Track/channel controls and implements `TimelineEditorAdapter` to resolve its
+editor. The editor never asks which workspace is active and contains no
+`Arrange | Section` branch.
 
 The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its

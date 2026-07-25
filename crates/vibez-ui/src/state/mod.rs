@@ -329,6 +329,9 @@ pub type ArrangementTimeline = TimelineContent;
 pub struct TimelineEditorState {
     pub timeline: Arc<TimelineContent>,
     pub selected_track: Option<TrackId>,
+    /// Runtime edit cursor for this resolved timeline. Section editors keep
+    /// this independent from both Arrange transport and Section playback.
+    pub playhead_beats: f64,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
     // Time selection (visible brackets; independent from the loop).
@@ -350,6 +353,7 @@ impl Default for TimelineEditorState {
         Self {
             timeline: Arc::new(TimelineContent::default()),
             selected_track: None,
+            playhead_beats: 0.0,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
             time_selection_active: false,
