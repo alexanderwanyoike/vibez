@@ -21,7 +21,6 @@ const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-pub(super) const SECTION_BAR_WIDTH: f32 = 160.0;
 
 pub(super) fn perform_tool_button(
     icon: char,
@@ -118,9 +117,7 @@ impl App {
         let workspace_width = self.perform_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
-        let section_width =
-            (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-                .max(0.0);
+        let section_width = self.section_construction_width();
         let mode_selector = self.view_perform_mode_selector(surface_width);
         let pad_surface = self.view_pad_surface(surface_width);
         let section_construction = self.view_section_construction(section_width);
@@ -161,6 +158,18 @@ impl App {
             0.0
         };
         (self.state.view.window_width - browser_width).max(0.0)
+    }
+
+    pub(super) fn section_construction_width(&self) -> f32 {
+        let workspace_width = self.perform_workspace_width();
+        let surface_width =
+            effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
+        (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
+            .max(0.0)
+    }
+
+    pub(super) fn section_timeline_viewport_width(&self) -> f32 {
+        (self.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH - 8.0).max(1.0)
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {

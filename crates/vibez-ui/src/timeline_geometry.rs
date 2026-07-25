@@ -4,6 +4,8 @@
 pub const BASE_PIXELS_PER_BEAT: f32 = 20.0;
 const WHEEL_LINE_PIXELS: f32 = 40.0;
 const ZOOM_SENSITIVITY: f32 = 0.003;
+pub const EDGE_SCROLL_ZONE_PIXELS: f32 = 64.0;
+pub const MAX_EDGE_SCROLL_BEATS_PER_SECOND: f64 = 8.0;
 
 /// Normalise line- and pixel-based wheel input to physical-ish pixels.
 pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
@@ -16,6 +18,95 @@ pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
 /// Continuous zoom factor for a wheel or trackpad delta.
 pub fn zoom_factor_from_pixels(pixels: f32) -> f32 {
     (pixels * ZOOM_SENSITIVITY).clamp(-0.5, 0.5).exp()
+}
+
+/// Signed edge-scroll speed for a screen-space lane viewport.
+///
+/// The quadratic ramp is deliberately gentle at the inner edge while still
+/// reaching a fixed musical maximum at and beyond the viewport boundary.
+pub fn edge_scroll_velocity(cursor_x: f32, left: f32, right: f32) -> f64 {
+    if !cursor_x.is_finite() || !left.is_finite() || !right.is_finite() || right <= left {
+        return 0.0;
+    }
+    let left_proximity =
+        ((left + EDGE_SCROLL_ZONE_PIXELS - cursor_x) / EDGE_SCROLL_ZONE_PIXELS).clamp(0.0, 1.0);
+    if left_proximity > 0.0 {
+        return -MAX_EDGE_SCROLL_BEATS_PER_SECOND * f64::from(left_proximity * left_proximity);
+    }
+    let right_proximity =
+        ((cursor_x - (right - EDGE_SCROLL_ZONE_PIXELS)) / EDGE_SCROLL_ZONE_PIXELS).clamp(0.0, 1.0);
+    MAX_EDGE_SCROLL_BEATS_PER_SECOND * f64::from(right_proximity * right_proximity)
+}
+
+/// Resolve a move drag after the viewport has panned since pointer-down.
+pub fn compensated_drag_beat(
+    original_beat: f64,
+    pointer_delta_pixels: f32,
+    pixels_per_beat: f32,
+    start_scroll_beats: f64,
+    current_scroll_beats: f64,
+) -> f64 {
+    let pointer_delta_beats =
+        f64::from(pointer_delta_pixels) / f64::from(pixels_per_beat.max(f32::EPSILON));
+    original_beat + pointer_delta_beats + (current_scroll_beats - start_scroll_beats)
+}
+
+/// Runtime horizontal navigation state for one timeline editor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimelineViewport {
+    pub zoom_level: f32,
+    pub scroll_offset_beats: f64,
+}
+
+impl TimelineViewport {
+    pub const fn new(zoom_level: f32, scroll_offset_beats: f64) -> Self {
+        Self {
+            zoom_level,
+            scroll_offset_beats,
+        }
+    }
+
+    pub fn geometry(self) -> TimelineGeometry {
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+    }
+
+    pub fn scroll_by(&mut self, delta_beats: f64, total_beats: f64, viewport_width: f32) {
+        self.scroll_offset_beats = (self.scroll_offset_beats + delta_beats)
+            .clamp(0.0, self.max_scroll(total_beats, viewport_width));
+    }
+
+    pub fn zoom_around(
+        &mut self,
+        factor: f32,
+        anchor_x: f32,
+        total_beats: f64,
+        viewport_width: f32,
+    ) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let anchor_x = anchor_x.clamp(0.0, viewport_width.max(0.0));
+        let anchor_beat = self.geometry().x_to_beat(anchor_x);
+        self.zoom_level = (self.zoom_level * factor).clamp(0.01, 16.0);
+        self.scroll_offset_beats = anchor_beat - self.geometry().beats_for_width(anchor_x);
+        self.clamp(total_beats, viewport_width);
+    }
+
+    pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {
+        self.scroll_offset_beats = self
+            .scroll_offset_beats
+            .clamp(0.0, self.max_scroll(total_beats, viewport_width));
+    }
+
+    pub fn max_scroll(self, total_beats: f64, viewport_width: f32) -> f64 {
+        (total_beats.max(0.0) - self.geometry().visible_beats(viewport_width)).max(0.0)
+    }
+}
+
+impl Default for TimelineViewport {
+    fn default() -> Self {
+        Self::new(2.0, 0.0)
+    }
 }
 
 /// A resolved horizontal timeline viewport.
@@ -103,5 +194,42 @@ mod tests {
         let one_pixel = zoom_factor_from_pixels(1.0);
         assert!(one_pixel > 1.0 && one_pixel < 1.01);
         assert!((one_pixel * zoom_factor_from_pixels(-1.0) - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn edge_scroll_velocity_is_zero_outside_the_zone_and_conservatively_bounded() {
+        assert_eq!(edge_scroll_velocity(400.0, 100.0, 900.0), 0.0);
+        assert_eq!(edge_scroll_velocity(200.0, 100.0, 900.0), 0.0);
+        assert!(edge_scroll_velocity(890.0, 100.0, 900.0) > 0.0);
+        assert!(edge_scroll_velocity(110.0, 100.0, 900.0) < 0.0);
+        assert!(edge_scroll_velocity(2_000.0, 100.0, 900.0).abs() <= 8.0);
+    }
+
+    #[test]
+    fn move_drag_compensates_for_viewport_motion_under_a_stationary_pointer() {
+        assert_eq!(
+            compensated_drag_beat(12.0, 160.0, 80.0, 4.0, 7.0),
+            17.0,
+            "two pointer beats plus three auto-scrolled beats must move the Clip five beats"
+        );
+    }
+
+    #[test]
+    fn explicit_viewport_zoom_keeps_the_pointer_on_the_same_beat() {
+        let mut viewport = TimelineViewport::new(2.0, 4.0);
+        let before = viewport.geometry().x_to_beat(300.0);
+
+        viewport.zoom_around(2.0, 300.0, 64.0, 800.0);
+
+        assert!((viewport.geometry().x_to_beat(300.0) - before).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn explicit_viewport_clamps_to_the_last_full_view() {
+        let mut viewport = TimelineViewport::new(2.0, 0.0);
+        viewport.scroll_by(1_000.0, 64.0, 800.0);
+        assert_eq!(viewport.scroll_offset_beats, 44.0);
+        viewport.scroll_by(-1_000.0, 64.0, 800.0);
+        assert_eq!(viewport.scroll_offset_beats, 0.0);
     }
 }

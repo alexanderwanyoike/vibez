@@ -483,6 +483,7 @@ impl PerformState {
             }
             PerformMsg::DeleteSection(id) => {
                 if ctx.workspace_visible && Arc::make_mut(&mut self.sections).remove(id).is_some() {
+                    self.section_editor.remove_viewport(id);
                     if self.selected_section == Some(id) {
                         self.selected_section = None;
                         self.section_editor.clear();
@@ -904,7 +905,7 @@ impl PerformState {
         if let Some(section) = self.sections.by_id(id) {
             self.selected_section = Some(id);
             self.section_editor
-                .load(Arc::clone(&section.timeline), selected_track);
+                .load_section(id, Arc::clone(&section.timeline), selected_track);
             self.editing_section_name = None;
             self.section_name_edit = section.name.clone();
             self.editor_focus = PerformEditorFocus::SectionConstruction;
@@ -917,8 +918,11 @@ impl PerformState {
 
     pub fn sync_selected_section_editor(&mut self, selected_track: Option<TrackId>) {
         if let Some(section) = self.selected_section.and_then(|id| self.sections.by_id(id)) {
-            self.section_editor
-                .load(Arc::clone(&section.timeline), selected_track);
+            self.section_editor.load_section(
+                section.id,
+                Arc::clone(&section.timeline),
+                selected_track,
+            );
         } else {
             self.selected_section = None;
             self.section_editor.clear();

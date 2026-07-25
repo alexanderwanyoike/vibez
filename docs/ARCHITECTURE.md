@@ -323,7 +323,11 @@ The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its
 persisted Timeline Content into the adapter while preserving the project-wide
 Project Track selection; clip and piano-roll selection remain local to the
-resolved Section editor. Every edit commits the adapter's copy-on-write
+resolved Section editor. The adapter also retains an independent runtime-only
+`TimelineViewport` for every Section. Section ruler, minimap, clip lanes,
+automation, recording preview, and playhead all resolve through that viewport;
+the ruler and minimap sit outside the vertically scrolling Track body. Every
+edit commits the adapter's copy-on-write
 Timeline Content back into the selected Section store for undo and project
 persistence. Section authoring still uses a discarding engine handle so edits
 to a selected, non-playing Section cannot mutate either resident audio source;
@@ -333,8 +337,11 @@ Every horizontal editor surface uses `TimelineGeometry` for beat-to-pixel,
 pixel-to-beat, fitted viewport, visible-range, and beat-width conversions.
 Ruler, clip lanes, automation, piano roll, minimap, drag/drop, and auto-scroll
 therefore share one geometry implementation even when they use different
-resolved scales. A generic conformance harness currently runs against the
-Arrange adapter and is reusable unchanged by the Section adapter.
+resolved scales. Clip gestures compensate for viewport motion, while one
+tick-driven edge-zone policy scrolls only the active Arrange or Section
+viewport at a bounded musical rate. A generic conformance harness currently
+runs against the Arrange adapter and is reusable unchanged by the Section
+adapter.
 
 ```mermaid
 flowchart LR

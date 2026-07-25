@@ -31,6 +31,7 @@ pub enum ClipDragAction {
         is_note_clip: bool,
         /// Initial local x pixel where the drag started.
         start_local_x: f32,
+        start_scroll_beats: f64,
         original_position_beats: f64,
         start_y: f32,
     },
@@ -412,6 +413,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 start_local_x: pos.x,
+                                start_scroll_beats: self.scroll_offset_beats,
                                 original_position_beats: pos_beats,
                                 start_y: pos.y,
                             });
@@ -576,12 +578,19 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 is_note_clip,
                                 start_local_x,
+                                start_scroll_beats,
                                 original_position_beats,
                                 start_y,
                             } => {
                                 let delta_px = local_x - start_local_x;
-                                let delta_beats = geometry.beats_for_width(delta_px);
-                                let new_pos = (original_position_beats + delta_beats).max(0.0);
+                                let new_pos = crate::timeline_geometry::compensated_drag_beat(
+                                    *original_position_beats,
+                                    delta_px,
+                                    geometry.pixels_per_beat(),
+                                    *start_scroll_beats,
+                                    self.scroll_offset_beats,
+                                )
+                                .max(0.0);
 
                                 let snapped = self.snapped_beat(new_pos);
 

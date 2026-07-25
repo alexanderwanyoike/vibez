@@ -473,6 +473,17 @@ impl App {
                 .pixels_per_beat();
             }
         }
+        if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.selected_section.is_some()
+        {
+            return self
+                .state
+                .perform
+                .section_editor
+                .viewport()
+                .geometry()
+                .pixels_per_beat();
+        }
         crate::timeline_geometry::TimelineGeometry::from_zoom(
             self.state.view.zoom_level,
             self.state.view.scroll_offset_beats,
