@@ -5,7 +5,7 @@ use std::sync::Arc;
 use vibez_engine::events::EngineEvent;
 
 use crate::domains::perform::CapturedSectionSource;
-use crate::state::{AuditionMode, ProjectSnapshot};
+use crate::state::AuditionMode;
 
 use super::*;
 
@@ -16,16 +16,7 @@ fn apply_track_mute_event(
 ) -> bool {
     let pending = state.perform.pending_track_mute(track_id).is_some();
     if pending && state.project_tracks.find(track_id).is_some() {
-        let snapshot = ProjectSnapshot {
-            project_tracks: Arc::clone(&state.project_tracks),
-            arrange_timeline: Arc::clone(&state.arrangement.timeline),
-            sections: Arc::clone(&state.perform.sections),
-            bpm: state.transport.bpm,
-            project_swing: state.perform.project_swing(),
-            loop_enabled: state.transport.loop_enabled,
-            loop_start_beats: state.transport.loop_start_beats,
-            loop_end_beats: state.transport.loop_end_beats,
-        };
+        let snapshot = state.project_snapshot();
         state.project.history.push_edit(snapshot, None);
         state.project.dirty = true;
     }
@@ -130,7 +121,7 @@ impl App {
                     }
                     EngineEvent::TrackMuteQueueCancelled { track_id } => {
                         self.state.perform.cancel_track_mute_ui(track_id);
-                        self.state.status_text = "Track Mute change cancelled".into();
+                        self.state.status_text = "Pending Track Mute cleared".into();
                     }
                     EngineEvent::AutomationOverrideChanged {
                         track_id,

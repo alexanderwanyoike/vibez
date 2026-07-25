@@ -9,13 +9,28 @@ use iced::{Element, Length, Shadow, Theme, Vector};
 use super::views_perform::{perform_pad_grid_height, perform_tool_button};
 use super::*;
 use crate::domains::perform::{
-    PadPosition, PerformEditorFocus, PerformMode, PerformMsg, SixteenLevelsParameter,
+    PadPosition, PendingTrackMute, PerformEditorFocus, PerformMode, PerformMsg,
+    SixteenLevelsParameter,
 };
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use vibez_core::perform::TrackMuteQuantization;
+
+fn pending_track_mute_label(
+    pending: PendingTrackMute,
+    current_samples: u64,
+    bpm: f64,
+    sample_rate: u32,
+) -> String {
+    let remaining_samples = pending.effective_at_samples.saturating_sub(current_samples);
+    let remaining_beats = remaining_samples as f64 * bpm / (f64::from(sample_rate.max(1)) * 60.0);
+    format!(
+        "PENDING {} · IN {remaining_beats:.2} BEATS",
+        if pending.muted { "MUTE" } else { "LIVE" }
+    )
+}
 
 fn perform_bank_button(
     label: &'static str,
@@ -342,11 +357,16 @@ impl App {
             PerformMode::TrackMutes => {
                 if let Some(track) = mute_track {
                     let state = if let Some(pending) = pending_mute {
-                        let beat = pending.effective_at_samples as f64 * self.state.transport.bpm
-                            / (self.state.transport.sample_rate as f64 * 60.0);
-                        format!(
-                            "PENDING {} @ BEAT {beat:.2}",
-                            if pending.muted { "MUTE" } else { "LIVE" }
+                        let current_samples = if self.state.perform.playing_section.is_some() {
+                            self.state.perform.performance_position_samples
+                        } else {
+                            self.state.transport.position_samples
+                        };
+                        pending_track_mute_label(
+                            pending,
+                            current_samples,
+                            self.state.transport.bpm,
+                            self.state.transport.sample_rate,
                         )
                     } else if track.mute {
                         "MUTED".to_string()
@@ -579,5 +599,37 @@ impl App {
             }
             _ => pad,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending_track_mute_label;
+    use crate::domains::perform::PendingTrackMute;
+
+    #[test]
+    fn pending_track_mute_reports_time_remaining_in_the_active_clock() {
+        let pending = PendingTrackMute {
+            muted: true,
+            effective_at_samples: 96_000,
+        };
+
+        assert_eq!(
+            pending_track_mute_label(pending, 72_000, 120.0, 48_000),
+            "PENDING MUTE · IN 1.00 BEATS"
+        );
+    }
+
+    #[test]
+    fn overdue_pending_track_mute_never_reports_negative_time() {
+        let pending = PendingTrackMute {
+            muted: false,
+            effective_at_samples: 48_000,
+        };
+
+        assert_eq!(
+            pending_track_mute_label(pending, 72_000, 120.0, 48_000),
+            "PENDING LIVE · IN 0.00 BEATS"
+        );
     }
 }

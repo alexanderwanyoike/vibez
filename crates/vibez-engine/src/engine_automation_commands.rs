@@ -106,11 +106,9 @@ impl AudioEngine {
             return;
         }
 
-        let beats = match quantization {
-            TrackMuteQuantization::Immediate => 0.0,
-            TrackMuteQuantization::OneBeat => 1.0,
-            TrackMuteQuantization::OneBar => 4.0,
-        };
+        let beats = quantization
+            .beats()
+            .expect("Immediate Track Mutes return before boundary resolution");
         let effective_at_samples = self.next_grid_boundary(now, beats);
         if effective_at_samples <= now {
             let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {

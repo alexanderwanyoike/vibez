@@ -175,6 +175,50 @@ fn one_bar_mute_uses_the_next_bar_boundary() {
 }
 
 #[test]
+fn one_bar_mute_at_an_arrangement_loop_end_applies_on_the_wrap() {
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    cmd_tx.push(EngineCommand::SetSampleRate(8)).unwrap();
+    cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
+    cmd_tx
+        .push(EngineCommand::AddTrack(track_id, "Track 1".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoopRegion { start: 0, end: 16 })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoop(true))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+    engine.process(&mut [0.0], 1);
+    while event_rx.pop().is_ok() {}
+
+    cmd_tx
+        .push(EngineCommand::QueueTrackMute {
+            track_id,
+            muted: true,
+            quantization: TrackMuteQuantization::OneBar,
+        })
+        .unwrap();
+    for _ in 0..40 {
+        engine.process(&mut [0.0], 1);
+    }
+
+    assert!(
+        std::iter::from_fn(|| event_rx.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::TrackMuteChanged {
+                track_id: event_track,
+                muted: true,
+                effective_at_samples: 16,
+            } if event_track == track_id
+        )),
+        "the loop wrap is the next traversable bar boundary"
+    );
+    assert!(engine.tracks()[0].mute);
+}
+
+#[test]
 fn stopping_cancels_a_pending_quantized_mute() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     let track_id = TrackId::new();

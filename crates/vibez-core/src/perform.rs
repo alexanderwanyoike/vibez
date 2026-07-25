@@ -325,6 +325,43 @@ mod groove_tests {
     }
 }
 
+/// Reusable musical grid boundary for deferred Perform actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicalBoundary {
+    #[default]
+    Immediate,
+    OneBeat,
+    OneBar,
+}
+
+impl MusicalBoundary {
+    pub const ALL: [Self; 3] = [Self::Immediate, Self::OneBeat, Self::OneBar];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Immediate => "Immediate",
+            Self::OneBeat => "1 Beat",
+            Self::OneBar => "1 Bar",
+        }
+    }
+
+    /// Grid size for deferred boundaries. Immediate has no future grid.
+    pub const fn beats(self) -> Option<f64> {
+        match self {
+            Self::Immediate => None,
+            Self::OneBeat => Some(1.0),
+            Self::OneBar => Some(4.0),
+        }
+    }
+}
+
+impl std::fmt::Display for MusicalBoundary {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
 /// Musical boundary at which a resident Section launch becomes effective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -345,11 +382,19 @@ impl SectionLaunchQuantization {
     ];
 
     pub const fn label(self) -> &'static str {
+        if let Some(boundary) = self.musical_boundary() {
+            boundary.label()
+        } else {
+            "End of Section"
+        }
+    }
+
+    pub const fn musical_boundary(self) -> Option<MusicalBoundary> {
         match self {
-            Self::Immediate => "Immediate",
-            Self::OneBeat => "1 Beat",
-            Self::OneBar => "1 Bar",
-            Self::EndOfSection => "End of Section",
+            Self::Immediate => Some(MusicalBoundary::Immediate),
+            Self::OneBeat => Some(MusicalBoundary::OneBeat),
+            Self::OneBar => Some(MusicalBoundary::OneBar),
+            Self::EndOfSection => None,
         }
     }
 }
@@ -360,37 +405,23 @@ impl std::fmt::Display for SectionLaunchQuantization {
     }
 }
 
-/// Musical boundary at which a live Track Mute Pad Gesture becomes effective.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrackMuteQuantization {
-    #[default]
-    Immediate,
-    OneBeat,
-    OneBar,
-}
-
-impl TrackMuteQuantization {
-    pub const ALL: [Self; 3] = [Self::Immediate, Self::OneBeat, Self::OneBar];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Immediate => "Immediate",
-            Self::OneBeat => "1 Beat",
-            Self::OneBar => "1 Bar",
-        }
-    }
-}
-
-impl std::fmt::Display for TrackMuteQuantization {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
+/// Track Mutes accept every reusable grid boundary and no Section-only policy.
+pub type TrackMuteQuantization = MusicalBoundary;
 
 #[cfg(test)]
 mod track_mute_quantization_tests {
     use super::*;
+
+    #[test]
+    fn section_launch_and_track_mute_share_one_musical_boundary_descriptor() {
+        assert_eq!(MusicalBoundary::Immediate.beats(), None);
+        assert_eq!(MusicalBoundary::OneBeat.beats(), Some(1.0));
+        assert_eq!(MusicalBoundary::OneBar.beats(), Some(4.0));
+        assert_eq!(
+            SectionLaunchQuantization::OneBar.musical_boundary(),
+            Some(MusicalBoundary::OneBar)
+        );
+    }
 
     #[test]
     fn immediate_is_the_stable_compatibility_default() {

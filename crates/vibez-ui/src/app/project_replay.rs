@@ -13,16 +13,7 @@ use super::*;
 
 impl App {
     pub(super) fn take_snapshot(&self) -> crate::state::ProjectSnapshot {
-        crate::state::ProjectSnapshot {
-            project_tracks: Arc::clone(&self.state.project_tracks),
-            arrange_timeline: Arc::clone(&self.state.arrangement.timeline),
-            sections: Arc::clone(&self.state.perform.sections),
-            bpm: self.state.transport.bpm,
-            project_swing: self.state.perform.project_swing(),
-            loop_enabled: self.state.transport.loop_enabled,
-            loop_start_beats: self.state.transport.loop_start_beats,
-            loop_end_beats: self.state.transport.loop_end_beats,
-        }
+        self.state.project_snapshot()
     }
 
     pub(super) fn push_undo_snapshot(&mut self, gesture: Option<crate::state::UndoGestureId>) {
