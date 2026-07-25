@@ -359,3 +359,52 @@ impl std::fmt::Display for SectionLaunchQuantization {
         formatter.write_str(self.label())
     }
 }
+
+/// Musical boundary at which a live Track Mute Pad Gesture becomes effective.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackMuteQuantization {
+    #[default]
+    Immediate,
+    OneBeat,
+    OneBar,
+}
+
+impl TrackMuteQuantization {
+    pub const ALL: [Self; 3] = [Self::Immediate, Self::OneBeat, Self::OneBar];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Immediate => "Immediate",
+            Self::OneBeat => "1 Beat",
+            Self::OneBar => "1 Bar",
+        }
+    }
+}
+
+impl std::fmt::Display for TrackMuteQuantization {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
+
+#[cfg(test)]
+mod track_mute_quantization_tests {
+    use super::*;
+
+    #[test]
+    fn immediate_is_the_stable_compatibility_default() {
+        assert_eq!(
+            TrackMuteQuantization::default(),
+            TrackMuteQuantization::Immediate
+        );
+        assert_eq!(
+            TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
+            ["Immediate", "1 Beat", "1 Bar"]
+        );
+        assert_eq!(
+            serde_json::to_string(&TrackMuteQuantization::OneBar).unwrap(),
+            "\"one_bar\""
+        );
+    }
+}

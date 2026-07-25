@@ -276,7 +276,7 @@ impl AudioEngine {
         }
     }
 
-    fn next_grid_boundary(&self, now: u64, beats: f64) -> u64 {
+    pub(super) fn next_grid_boundary(&self, now: u64, beats: f64) -> u64 {
         if self.transport.bpm() <= 0.0 {
             return now;
         }

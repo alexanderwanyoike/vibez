@@ -4,7 +4,9 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::perform::SectionLaunchQuantization;
-use vibez_core::perform::{GrooveGrid, NoteRepeatRate, SwingAmount, SwingOffset};
+use vibez_core::perform::{
+    GrooveGrid, NoteRepeatRate, SwingAmount, SwingOffset, TrackMuteQuantization,
+};
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
@@ -126,6 +128,12 @@ pub enum EngineCommand {
     SetTrackPan(TrackId, f32),
     /// Set the mute state for a track.
     SetTrackMute(TrackId, bool),
+    /// Queue a live Track Mute for an engine-owned musical boundary.
+    QueueTrackMute {
+        track_id: TrackId,
+        muted: bool,
+        quantization: TrackMuteQuantization,
+    },
     /// Enable or clear a manual override for one automated parameter.
     SetAutomationOverride {
         track_id: TrackId,

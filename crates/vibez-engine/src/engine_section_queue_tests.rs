@@ -7,7 +7,9 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
-use vibez_core::perform::{NoteRepeatRate, SectionLaunchQuantization, SwingAmount};
+use vibez_core::perform::{
+    NoteRepeatRate, SectionLaunchQuantization, SwingAmount, TrackMuteQuantization,
+};
 
 use crate::playback_source::{EngineClip, PreparedPlaybackSource, PreparedSectionPlaybackSource};
 
@@ -344,4 +346,44 @@ fn perform_bpm_is_locked_and_live_mute_survives_transition() {
         output[64..].iter().all(|sample| *sample == 0.0),
         "mute must remain closed after the queued Section transition"
     );
+}
+
+#[test]
+fn queued_track_mute_survives_a_section_transition_until_its_own_boundary() {
+    let (mut engine, mut commands, mut events, track_id) = playing_engine(0.4, 8.0);
+    commands
+        .push(EngineCommand::QueueTrackMute {
+            track_id,
+            muted: true,
+            quantization: TrackMuteQuantization::OneBar,
+        })
+        .unwrap();
+    let next_section = SectionId::new();
+    commands
+        .push(EngineCommand::QueueSection {
+            prepared: source(next_section, track_id, 8.0, 0.7),
+            quantization: SectionLaunchQuantization::OneBeat,
+        })
+        .unwrap();
+
+    engine.process(&mut [0.0; 20], 1);
+
+    let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EngineEvent::SectionTransitioned {
+            section_id,
+            effective_at_samples: 4,
+            ..
+        } if *section_id == next_section
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EngineEvent::TrackMuteChanged {
+            track_id: event_track,
+            muted: true,
+            effective_at_samples: 16,
+        } if *event_track == track_id
+    )));
+    assert!(engine.tracks()[0].mute);
 }

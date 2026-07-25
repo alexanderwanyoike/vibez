@@ -21,6 +21,12 @@ pub(crate) use render_context::InstrumentRenderContext;
 const MUTE_RAMP_FRAMES: u32 = 64;
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct QueuedTrackMute {
+    pub muted: bool,
+    pub effective_at_samples: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct MuteRamp {
     gain: f32,
     target: f32,
@@ -107,6 +113,7 @@ pub struct EngineTrack {
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
+    pub(crate) queued_mute: Option<QueuedTrackMute>,
     automation_mute: Option<bool>,
     automation_overrides: AutomationOverrides,
     mute_ramp: MuteRamp,
