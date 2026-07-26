@@ -1,4 +1,14 @@
 fn main() -> iced::Result {
+    // Answer version queries before touching X11, audio, or the GUI, so a
+    // packaged build can identify itself on a headless machine.
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("vibez {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Call XInitThreads() before any X11/OpenGL operations.
     // JUCE-based plugins (Dexed, Surge, etc.) call XInitThreads internally
     // during gui.create(). If Xlib has already been used by wgpu/GLX (iced's
