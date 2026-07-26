@@ -278,13 +278,22 @@ Swing supplies the effective amount, and `OFF | 1/8 | 1/16` decides whether and
 on which grid that individual clip follows it. With no MIDI clip selected, the
 Track control remains available but clip application is withheld.
 
-Track mute commands become authoritative when the audio callback drains them.
-The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
-absolute transport sample; the UI mirrors that result into the shared Project
-Track and an active Capture log. `track_mute` automation is stepped: it imposes
-nothing before its first point and changes state at exact in-buffer sample
-boundaries. Both manual and automated mute feed one post-effects, pre-send
-anti-click ramp, so playback gates tails exactly like the performed mute.
+Track Mute Pad Gestures use a global `Immediate | 1 Beat | 1 Bar` interaction
+preference; `Immediate` is the compatibility default and stopped transport
+always applies directly. During playback the UI sends the requested state and
+quantization without mutating the Project Track. Each shared engine channel
+holds at most one allocation-free pending change, resolves its musical boundary
+from the active engine clock, and splits rendering at that exact sample. A
+second pre-boundary gesture cancels it. Queue, cancellation, and effective
+events mirror pending UI state, while only `EngineEvent::TrackMuteChanged`
+updates the Project Track, opens the undo step, and enters an active Capture
+log. The pending state survives Section transitions because Track Mute remains
+live Perform state rather than Section content.
+
+`track_mute` automation is stepped: it imposes nothing before its first point
+and changes state at exact in-buffer sample boundaries. Both manual and
+automated mute feed one post-effects, pre-send anti-click ramp, so playback
+gates tails exactly like the performed mute.
 
 Automation overrides live beside evaluation in the shared `EngineTrack`
 channel strip. A manual mixer or Perform-pad mute on a track with a mute lane
@@ -313,11 +322,16 @@ owns clip/note selection, time selection, and other timeline-local interaction
 state; clip operations, piano-roll editing, automation editing, and timeline
 view behavior receive this already-resolved target. `AppState` owns one runtime
 Clip clipboard shared by Arrange and every Section editor. The application
-resolves clipboard shortcuts from the focused editor and supplies that
-clipboard at the editor boundary. `ArrangementState` is a thin adapter that
-retains Arrange's Project Track/channel controls and implements
-`TimelineEditorAdapter` to resolve its editor. The editor never asks which
-workspace is active and contains no `Arrange | Section` branch.
+resolves clipboard shortcuts and the paste playhead from the focused editor,
+then supplies both at the editor boundary. The earliest clipboard Clip anchors
+at that playhead and all other musical and Track offsets remain relative.
+Arrange uses its transport edit cursor; the runtime Section editor remembers
+an independent edit cursor per Section across selection changes and canonical
+reloads, so selected and playing Sections cannot redirect one another.
+`ArrangementState` is a thin adapter that retains Arrange's Project
+Track/channel controls and implements `TimelineEditorAdapter` to resolve its
+editor. The editor never asks which workspace is active and contains no
+`Arrange | Section` branch.
 
 The selected Perform Section provides the editor adapter through a
 runtime-only `SectionTimelineEditor`. Selecting a Section resolves its

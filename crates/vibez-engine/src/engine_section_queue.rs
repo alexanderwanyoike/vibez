@@ -73,12 +73,12 @@ impl AudioEngine {
             return;
         }
 
-        let effective_at_samples = match quantization {
-            SectionLaunchQuantization::Immediate => now,
-            SectionLaunchQuantization::OneBeat => self.next_grid_boundary(now, 1.0),
-            SectionLaunchQuantization::OneBar => self.next_grid_boundary(now, 4.0),
-            SectionLaunchQuantization::EndOfSection => self
-                .active_section
+        let effective_at_samples = if let Some(boundary) = quantization.musical_boundary() {
+            boundary
+                .beats()
+                .map_or(now, |beats| self.next_grid_boundary(now, beats))
+        } else {
+            self.active_section
                 .map(|active| {
                     now.saturating_add(
                         active
@@ -86,7 +86,7 @@ impl AudioEngine {
                             .saturating_sub(active.position_samples),
                     )
                 })
-                .unwrap_or(now),
+                .unwrap_or(now)
         };
 
         if effective_at_samples <= now {
@@ -276,7 +276,7 @@ impl AudioEngine {
         }
     }
 
-    fn next_grid_boundary(&self, now: u64, beats: f64) -> u64 {
+    pub(super) fn next_grid_boundary(&self, now: u64, beats: f64) -> u64 {
         if self.transport.bpm() <= 0.0 {
             return now;
         }

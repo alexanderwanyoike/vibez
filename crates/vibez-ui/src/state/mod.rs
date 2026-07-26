@@ -538,6 +538,21 @@ pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
 }
 
 impl AppState {
+    /// Capture the complete canonical project state shared by Undo, Capture,
+    /// engine-event commits, and project replay.
+    pub fn project_snapshot(&self) -> ProjectSnapshot {
+        ProjectSnapshot {
+            project_tracks: Arc::clone(&self.project_tracks),
+            arrange_timeline: Arc::clone(&self.arrangement.timeline),
+            sections: Arc::clone(&self.perform.sections),
+            bpm: self.transport.bpm,
+            project_swing: self.perform.project_swing(),
+            loop_enabled: self.transport.loop_enabled,
+            loop_start_beats: self.transport.loop_start_beats,
+            loop_end_beats: self.transport.loop_end_beats,
+        }
+    }
+
     pub fn apply_audio_stream_event(
         &mut self,
         event: vibez_audio_io::audio_stream::AudioStreamEvent,

@@ -576,16 +576,7 @@ mod tests {
     }
 
     fn snapshot(state: &AppState) -> ProjectSnapshot {
-        ProjectSnapshot {
-            project_tracks: Arc::clone(&state.project_tracks),
-            arrange_timeline: Arc::clone(&state.arrangement.timeline),
-            sections: Arc::clone(&state.perform.sections),
-            bpm: state.transport.bpm,
-            project_swing: state.perform.project_swing(),
-            loop_enabled: state.transport.loop_enabled,
-            loop_start_beats: state.transport.loop_start_beats,
-            loop_end_beats: state.transport.loop_end_beats,
-        }
+        state.project_snapshot()
     }
 
     fn audio_clip(position: u64, duration: u64) -> crate::state::UiClip {

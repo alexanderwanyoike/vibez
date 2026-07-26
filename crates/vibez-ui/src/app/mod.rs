@@ -295,6 +295,9 @@ impl App {
         state
             .perform
             .set_fixed_computer_velocity(ui_settings.fixed_computer_velocity);
+        state
+            .perform
+            .set_track_mute_quantization(ui_settings.track_mute_quantization);
 
         // Themes: scan the user's .vzt collection, then restore the
         // saved selection (built-in name or user theme name).

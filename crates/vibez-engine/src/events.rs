@@ -85,13 +85,21 @@ pub enum EngineEvent {
     },
 
     /// A track mute command became effective in the audio engine at this
-    /// absolute transport sample. This is the authoritative event later
-    /// Capture work consumes.
+    /// active engine-clock sample. This is the authoritative event Capture
+    /// consumes.
     TrackMuteChanged {
         track_id: TrackId,
         muted: bool,
         effective_at_samples: u64,
     },
+    /// A live Track Mute is waiting for an engine-owned musical boundary.
+    TrackMuteQueued {
+        track_id: TrackId,
+        muted: bool,
+        effective_at_samples: u64,
+    },
+    /// A second Pad Gesture cancelled the pending Track Mute.
+    TrackMuteQueueCancelled { track_id: TrackId },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
     AutomationOverrideChanged {
