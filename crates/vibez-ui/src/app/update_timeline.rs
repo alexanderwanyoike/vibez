@@ -343,7 +343,7 @@ mod clipboard_focus_tests {
     }
 
     #[test]
-    fn pointer_seek_places_only_the_focused_section_edit_cursor() {
+    fn section_ruler_seek_targets_only_the_focused_section_edit_cursor() {
         use crate::domains::transport::TransportMsg;
 
         assert_eq!(
@@ -354,6 +354,16 @@ mod clipboard_focus_tests {
                 &TransportMsg::SeekToBeat(13.0),
             ),
             Some(13.0)
+        );
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Arrange,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                &TransportMsg::SeekToBeat(13.0),
+            ),
+            None,
+            "a Section surface must never seek Arrange"
         );
         assert_eq!(
             focused_section_seek_beat(

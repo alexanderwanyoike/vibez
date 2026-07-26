@@ -3,8 +3,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
-    stack, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -16,18 +15,21 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
-use crate::widgets::timeline::{TimelineNoteClip, TrackClipCanvas};
+use crate::widgets::timeline::{
+    ArrangementMinimap, MinimapTrack, RulerWidget, TimelineNoteClip, TrackClipCanvas,
+};
 
 use super::views_automation::AutomationLaneLayout;
-use super::views_perform::{SECTION_BAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH};
+use super::views_perform::{
+    SECTION_SCROLLBAR_SPACING, SECTION_SCROLLBAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH,
+};
 use super::*;
 
-fn section_clip_materialization_width(timeline_width: f32) -> f32 {
-    // Section construction uses a full-width canvas inside a parent-owned
-    // horizontal scrollable. Unlike Arrange, the canvas has no beat scroll
-    // offset of its own, so viewport culling must cover the entire canvas;
-    // otherwise later clips exist in the model but are omitted before draw.
-    timeline_width.max(1.0)
+const SECTION_RULER_HEIGHT: f32 = 28.0;
+const SECTION_MINIMAP_HEIGHT: f32 = 40.0;
+
+const fn section_navigation_header_height() -> f32 {
+    SECTION_RULER_HEIGHT + SECTION_MINIMAP_HEIGHT
 }
 
 impl App {
@@ -40,12 +42,12 @@ impl App {
         let toolbar = self.view_section_toolbar(selected, section_width);
         let editor = self.state.perform.section_editor.editor();
         let recording_preview = self.state.perform.section_record.live_preview();
-        let bar_count = selected
-            .map(|section| (section.length_beats / 4.0).round() as usize)
-            .unwrap_or(4)
-            .max(1);
         let total_beats = selected.map_or(16.0, |section| section.length_beats);
-        let timeline_width = SECTION_BAR_WIDTH * bar_count as f32;
+        let viewport = *self.state.perform.section_editor.viewport();
+        let viewport_width = (section_width
+            - SECTION_TRACK_GUTTER_WIDTH
+            - super::views_perform::SECTION_SCROLLBAR_RESERVATION)
+            .max(1.0);
         let row_height = if self.state.perform.section_timeline_expanded {
             78.0
         } else {
@@ -128,7 +130,7 @@ impl App {
                 .spacing(3),
             )
             .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-            .height(Length::Fixed(32.0))
+            .height(Length::Fixed(SECTION_RULER_HEIGHT))
             .padding([6, 9])
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
@@ -139,32 +141,98 @@ impl App {
                 },
                 ..Default::default()
             });
+            let playback_playhead_beats = if self.state.perform.playing_section == Some(section_id)
+            {
+                let samples_per_beat = self.state.transport.sample_rate.max(1) as f64 * 60.0
+                    / self.state.transport.bpm.max(f64::EPSILON);
+                Some(self.state.perform.section_playhead_samples as f64 / samples_per_beat)
+            } else {
+                None
+            };
+            let ruler = RulerWidget {
+                playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
+                bpm: self.state.transport.bpm,
+                zoom_level: viewport.zoom_level,
+                grid: self.state.view.grid_config(),
+                scroll_offset_beats: viewport.scroll_offset_beats,
+                total_beats,
+                loop_enabled: selected_section.looping,
+                loop_start_beats: 0.0,
+                loop_end_beats: total_beats,
+                time_selection_active: editor.time_selection_active,
+                selection_start_beats: editor.selection_start_beats,
+                selection_end_beats: editor.selection_end_beats,
+            };
+            let ruler_canvas: Element<'_, Message> = Element::from(
+                canvas(ruler)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(SECTION_RULER_HEIGHT)),
+            )
+            .map(|message| Message::SectionTimeline(Box::new(message)));
+            let ruler_row = row![ruler_gutter, ruler_canvas].width(Length::Fill);
 
-            let mut ruler_marks = row![]
-                .width(Length::Fixed(timeline_width))
-                .height(Length::Fixed(32.0));
-            for bar in 0..bar_count {
-                ruler_marks = ruler_marks.push(
-                    container(
-                        text((bar + 1).to_string())
-                            .font(PERFORM_TECH_STRONG)
-                            .size(10)
-                            .color(th::text_dim()),
-                    )
-                    .width(Length::Fixed(SECTION_BAR_WIDTH))
-                    .height(Length::Fixed(32.0))
-                    .padding([8, 10])
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(th::bg_dark().into()),
-                        border: iced::Border {
-                            color: th::perform_grid_line(),
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-                );
-            }
+            let samples_per_beat = self.state.transport.sample_rate.max(1) as f64 * 60.0
+                / self.state.transport.bpm.max(f64::EPSILON);
+            let minimap = ArrangementMinimap {
+                total_beats,
+                scroll_offset_beats: viewport.scroll_offset_beats,
+                zoom_level: viewport.zoom_level,
+                playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
+                bpm: self.state.transport.bpm,
+                loop_enabled: selected_section.looping,
+                loop_start_beats: 0.0,
+                loop_end_beats: total_beats,
+                tracks: self
+                    .state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| {
+                        let content = editor.timeline.get(track.id);
+                        let mut clips: Vec<_> = content
+                            .into_iter()
+                            .flat_map(|content| {
+                                content.clips.iter().map(|clip| {
+                                    (
+                                        clip.position as f64 / samples_per_beat,
+                                        clip.duration as f64 / samples_per_beat,
+                                    )
+                                })
+                            })
+                            .collect();
+                        clips.extend(content.into_iter().flat_map(|content| {
+                            content
+                                .note_clips
+                                .iter()
+                                .map(|clip| (clip.position_beats, clip.duration_beats))
+                        }));
+                        MinimapTrack {
+                            color: th::track_color(track.color_index),
+                            clips,
+                        }
+                    })
+                    .collect(),
+            };
+            let minimap_gutter = container(text("SECTION OVERVIEW").font(PERFORM_TECH).size(7))
+                .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
+                .height(Length::Fixed(SECTION_MINIMAP_HEIGHT))
+                .padding([13, 9])
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_surface().into()),
+                    border: iced::Border {
+                        color: th::perform_grid_line(),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                });
+            let minimap_canvas: Element<'_, Message> = Element::from(
+                canvas(minimap)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(SECTION_MINIMAP_HEIGHT)),
+            )
+            .map(|message| Message::SectionTimeline(Box::new(message)));
+            let minimap_row = row![minimap_gutter, minimap_canvas].width(Length::Fill);
 
             let track_ids: Vec<_> = self
                 .state
@@ -182,9 +250,7 @@ impl App {
                 .collect();
             let total_tracks = track_ids.len();
             let empty_content = TrackTimelineContent::default();
-            let mut gutters = column![];
-            let mut lanes = column![].width(Length::Fixed(timeline_width));
-            let mut content_height = 32.0;
+            let mut track_rows = column![].width(Length::Fill);
 
             for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
                 let content = editor.timeline.get(track.id).unwrap_or(&empty_content);
@@ -389,10 +455,10 @@ impl App {
                     track,
                     content,
                     self.state.perform.section_editor.edit_cursor_beats(),
-                    2.0,
+                    viewport.zoom_level,
                     self.state.view.grid_config(),
-                    0.0,
-                    section_clip_materialization_width(timeline_width),
+                    viewport.scroll_offset_beats,
+                    viewport_width,
                     total_beats,
                     self.state.transport.sample_rate,
                     selected_track,
@@ -439,13 +505,13 @@ impl App {
                         loop_end_beats: 0.0,
                     });
                 }
-                let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(2.0, 0.0);
+                clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
+                let geometry = viewport.geometry();
                 let grid = self.state.view.grid_config();
                 let compatible = !track.kind.is_midi();
-                gutters = gutters.push(gutter);
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
-                        .width(Length::Fixed(timeline_width))
+                        .width(Length::Fill)
                         .height(Length::Fixed(row_height)),
                 )
                 .map(|message| Message::SectionTimeline(Box::new(message)));
@@ -468,84 +534,54 @@ impl App {
                 } else {
                     focused_clip_canvas
                 };
-                lanes = lanes.push(clip_lane);
-                content_height += row_height;
+                track_rows = track_rows.push(
+                    row![gutter, clip_lane]
+                        .width(Length::Fill)
+                        .height(Length::Fixed(row_height)),
+                );
 
                 if automation_open {
                     let layout = AutomationLaneLayout {
                         header_width: SECTION_TRACK_GUTTER_WIDTH,
-                        body_width: Some(timeline_width),
-                        zoom_level: 2.0,
-                        scroll_offset_beats: 0.0,
+                        body_width: None,
+                        zoom_level: viewport.zoom_level,
+                        scroll_offset_beats: viewport.scroll_offset_beats,
                     };
                     for part in
                         self.automation_lane_parts(track, &content.automation, track_color, layout)
                     {
-                        gutters = gutters.push(part.header);
-                        lanes = lanes.push(part.body);
-                        content_height += part.height;
+                        track_rows = track_rows.push(
+                            row![part.header, part.body]
+                                .width(Length::Fill)
+                                .height(Length::Fixed(part.height)),
+                        );
                     }
                 }
             }
 
-            let fixed_gutter =
-                column![ruler_gutter, gutters].width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH));
-            let timeline_base: Element<'_, Message> = container(column![ruler_marks, lanes])
-                .width(Length::Fixed(timeline_width))
-                .height(Length::Fixed(content_height))
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::display_bg().into()),
-                    ..Default::default()
-                })
-                .into();
-            let timeline_content: Element<'_, Message> =
-                if self.state.perform.playing_section == Some(section_id) {
-                    let fraction = super::views_perform_playhead::section_playhead_fraction(
-                        self.state.perform.section_playhead_samples,
-                        selected_section.length_beats,
-                        self.state.transport.bpm,
-                        self.state.transport.sample_rate,
-                    );
-                    let playhead = row![
-                        horizontal_space().width(Length::Fixed(timeline_width * fraction)),
-                        super::views_perform_playhead::section_playhead_line(Length::Fixed(
-                            content_height,
-                        )),
-                    ]
-                    .width(Length::Fixed(timeline_width))
-                    .height(Length::Fixed(content_height));
-                    stack![timeline_base, playhead]
-                        .width(Length::Fixed(timeline_width))
-                        .height(Length::Fixed(content_height))
-                        .into()
-                } else {
-                    timeline_base
-                };
-            let scrolling_timeline = scrollable::Scrollable::with_direction(
-                timeline_content,
-                scrollable::Direction::Horizontal(
-                    scrollable::Scrollbar::new()
-                        .width(5)
-                        .scroller_width(5)
-                        .spacing(1),
-                ),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(content_height));
-            scrollable::Scrollable::with_direction(
-                row![fixed_gutter, scrolling_timeline]
+            let body = scrollable::Scrollable::with_direction(
+                container(track_rows)
                     .width(Length::Fill)
-                    .height(Length::Fixed(content_height)),
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::display_bg().into()),
+                        ..Default::default()
+                    }),
                 scrollable::Direction::Vertical(
                     scrollable::Scrollbar::new()
-                        .width(5)
-                        .scroller_width(5)
-                        .spacing(1),
+                        .width(SECTION_SCROLLBAR_WIDTH)
+                        .scroller_width(SECTION_SCROLLBAR_WIDTH)
+                        .spacing(SECTION_SCROLLBAR_SPACING),
                 ),
             )
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+            let navigation_header = column![ruler_row, minimap_row]
+                .width(Length::Fill)
+                .height(Length::Fixed(section_navigation_header_height()));
+            column![navigation_header, body]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         };
 
         let construction = container(column![toolbar, timeline].height(Length::Fill))
@@ -566,21 +602,5 @@ impl App {
                 PerformEditorFocus::SectionConstruction,
             )))
             .into()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::section_clip_materialization_width;
-
-    #[test]
-    fn horizontally_scrolled_section_materializes_its_full_timeline() {
-        let eight_bar_timeline_width = 1_280.0;
-
-        assert_eq!(
-            section_clip_materialization_width(eight_bar_timeline_width),
-            eight_bar_timeline_width,
-            "late split fragments must exist in the canvas before the parent scroll reveals them"
-        );
     }
 }

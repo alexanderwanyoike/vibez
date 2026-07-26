@@ -55,7 +55,7 @@ impl RulerWidget {
         self.geometry().visible_beats(width)
     }
 
-    fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
+    pub(crate) fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
         self.geometry().beat_to_x(beat)
     }
 

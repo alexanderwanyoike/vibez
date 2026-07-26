@@ -555,7 +555,26 @@ impl TrackClipCanvas {
             }
         }
 
-        // Playhead overlay
+        // A playing Section has an engine-owned playback marker in addition
+        // to its runtime edit cursor. Draw it first and in the accent colour
+        // so overlapping markers remain recognisable.
+        if let Some(playback_beat) = self.playback_playhead_beats {
+            let playback_x = self.beat_to_x(playback_beat);
+            if playback_x >= 0.0 && playback_x <= w {
+                let playback_line = canvas::Path::line(
+                    iced::Point::new(playback_x, 0.0),
+                    iced::Point::new(playback_x, h),
+                );
+                frame.stroke(
+                    &playback_line,
+                    canvas::Stroke::default()
+                        .with_color(theme::with_alpha(theme::accent(), 0.8))
+                        .with_width(3.0),
+                );
+            }
+        }
+
+        // Edit cursor overlay (Arrange uses its shared transport/edit cursor).
         let playhead_x = self.beat_to_x(self.playhead_beats);
         if playhead_x >= 0.0 && playhead_x <= w {
             let playhead_line = canvas::Path::line(

@@ -481,6 +481,7 @@ impl PerformState {
             }
             PerformMsg::DeleteSection(id) => {
                 if ctx.workspace_visible && Arc::make_mut(&mut self.sections).remove(id).is_some() {
+                    self.section_editor.remove_viewport(id);
                     if self.selected_section == Some(id) {
                         self.selected_section = None;
                         self.section_editor.clear();

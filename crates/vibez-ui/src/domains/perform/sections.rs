@@ -11,6 +11,7 @@ use crate::domains::timeline_editor::TimelineEditorAdapter;
 use crate::state::{
     ArrangementTimeline, ResolvedTimeline, ResolvedTimelineMut, TimelineEditorState,
 };
+use crate::timeline_geometry::TimelineViewport;
 
 pub const DEFAULT_SECTION_LENGTH_BEATS: f64 = 16.0;
 pub const MIN_SECTION_LENGTH_BEATS: f64 = 4.0;
@@ -19,14 +20,16 @@ pub const MAX_SECTION_LENGTH_BEATS: f64 = 1024.0;
 /// Runtime-only editor adapter for the selected Section.
 ///
 /// Persisted Section content remains in [`Section::timeline`]. Selection and
-/// pointer interaction state stay outside the canonical Section store and are
-/// reset when a different Section is selected. Per-Section edit cursors stay
-/// here across selection changes and canonical project reloads. The
-/// application owns the one clipboard shared with Arrange.
+/// pointer interaction state stay outside the canonical Section store.
+/// Per-Section navigation state stays here across selection changes and
+/// canonical project reloads. The application owns the one clipboard shared
+/// with Arrange.
 #[derive(Debug, Default)]
 pub struct SectionTimelineEditor {
     editor: TimelineEditorState,
-    loaded_section: Option<SectionId>,
+    active_section: Option<SectionId>,
+    viewport: TimelineViewport,
+    viewports: HashMap<SectionId, TimelineViewport>,
     edit_cursors: HashMap<SectionId, f64>,
 }
 
@@ -37,31 +40,22 @@ impl SectionTimelineEditor {
         timeline: Arc<ArrangementTimeline>,
         selected_track: Option<TrackId>,
     ) {
+        self.store_active_viewport();
+        self.active_section = Some(section_id);
+        self.viewport = self.viewports.get(&section_id).copied().unwrap_or_default();
+        self.edit_cursors.entry(section_id).or_insert(0.0);
         self.editor = TimelineEditorState {
             timeline,
             selected_track,
             ..TimelineEditorState::default()
         };
-        self.loaded_section = Some(section_id);
-        self.edit_cursors.entry(section_id).or_insert(0.0);
     }
 
     pub fn clear(&mut self) {
+        self.store_active_viewport();
+        self.active_section = None;
+        self.viewport = TimelineViewport::default();
         self.editor = TimelineEditorState::default();
-        self.loaded_section = None;
-    }
-
-    pub fn edit_cursor_beats(&self) -> f64 {
-        self.loaded_section
-            .and_then(|section_id| self.edit_cursors.get(&section_id).copied())
-            .unwrap_or(0.0)
-    }
-
-    pub fn place_edit_cursor(&mut self, beat: f64) {
-        if let Some(section_id) = self.loaded_section {
-            self.edit_cursors.insert(section_id, beat.max(0.0));
-        }
-        self.editor.time_selection_active = false;
     }
 
     pub fn editor(&self) -> &TimelineEditorState {
@@ -70,6 +64,42 @@ impl SectionTimelineEditor {
 
     pub fn editor_mut(&mut self) -> &mut TimelineEditorState {
         &mut self.editor
+    }
+
+    pub const fn viewport(&self) -> &TimelineViewport {
+        &self.viewport
+    }
+
+    pub fn viewport_mut(&mut self) -> &mut TimelineViewport {
+        &mut self.viewport
+    }
+
+    pub fn edit_cursor_beats(&self) -> f64 {
+        self.active_section
+            .and_then(|section_id| self.edit_cursors.get(&section_id).copied())
+            .unwrap_or(0.0)
+    }
+
+    pub fn place_edit_cursor(&mut self, beat: f64) {
+        if let Some(section_id) = self.active_section {
+            self.edit_cursors.insert(section_id, beat.max(0.0));
+        }
+        self.editor.time_selection_active = false;
+    }
+
+    pub fn remove_viewport(&mut self, section_id: SectionId) {
+        self.viewports.remove(&section_id);
+        self.edit_cursors.remove(&section_id);
+        if self.active_section == Some(section_id) {
+            self.active_section = None;
+            self.viewport = TimelineViewport::default();
+        }
+    }
+
+    fn store_active_viewport(&mut self) {
+        if let Some(section_id) = self.active_section {
+            self.viewports.insert(section_id, self.viewport);
+        }
     }
 }
 
@@ -387,6 +417,30 @@ mod tests {
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
         assert_eq!(section_clip.position_beats, 0.0);
+    }
+
+    #[test]
+    fn every_section_restores_its_independent_runtime_viewport() {
+        let first = SectionId::new();
+        let second = SectionId::new();
+        let mut editor = SectionTimelineEditor::default();
+
+        editor.load(first, Arc::new(ArrangementTimeline::default()), None);
+        editor.viewport_mut().zoom_level = 4.0;
+        editor.viewport_mut().scroll_offset_beats = 12.0;
+        editor.place_edit_cursor(9.0);
+        editor.load(second, Arc::new(ArrangementTimeline::default()), None);
+        assert_eq!(editor.viewport().zoom_level, 2.0);
+        assert_eq!(editor.viewport().scroll_offset_beats, 0.0);
+        assert_eq!(editor.edit_cursor_beats(), 0.0);
+        editor.place_edit_cursor(3.0);
+
+        editor.load(first, Arc::new(ArrangementTimeline::default()), None);
+        assert_eq!(editor.viewport().zoom_level, 4.0);
+        assert_eq!(editor.viewport().scroll_offset_beats, 12.0);
+        assert_eq!(editor.edit_cursor_beats(), 9.0);
+        editor.load(second, Arc::new(ArrangementTimeline::default()), None);
+        assert_eq!(editor.edit_cursor_beats(), 3.0);
     }
 
     #[test]

@@ -13,6 +13,9 @@ use crate::state::{ArrangementSelection, DetailPanelTab, UiEffect};
 
 use super::*;
 
+/// Keep edge-scroll activation inside the window border/shadow hit area.
+const TIMELINE_WINDOW_EDGE_INSET: f32 = 8.0;
+
 fn apply_track_mute_request(
     project_tracks: &mut Arc<crate::state::ProjectTracksState>,
     history: &mut crate::state::UndoHistory,
@@ -202,7 +205,16 @@ impl App {
             self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
         if let Some(beat) = action.scroll_to_beat {
-            self.auto_scroll_to_beat(beat);
+            if !self.state.arrangement.drag_resize_active
+                && !self
+                    .state
+                    .perform
+                    .section_editor
+                    .editor()
+                    .drag_resize_active
+            {
+                self.auto_scroll_to_beat(beat);
+            }
         }
         if let Some((start, end)) = action.loop_from_selection {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -266,6 +278,11 @@ impl App {
         }
         if action.end_drag_resize {
             self.state.arrangement.drag_resize_active = false;
+            self.state
+                .perform
+                .section_editor
+                .editor_mut()
+                .drag_resize_active = false;
         }
         if action.close_device_menu {
             self.state.devices.context_menu = None;
@@ -384,7 +401,16 @@ impl App {
             }
         }
         if let Some(beat) = action.scroll_to_beat {
-            self.auto_scroll_to_beat(beat);
+            if !self.state.arrangement.drag_resize_active
+                && !self
+                    .state
+                    .perform
+                    .section_editor
+                    .editor()
+                    .drag_resize_active
+            {
+                self.auto_scroll_to_beat(beat);
+            }
         }
         if action.drag_resize_active {
             if self.state.view.workspace == crate::state::Workspace::Perform
@@ -685,34 +711,62 @@ impl App {
         vibez_plugin_host::poll_clap_events();
         let export_task = self.poll_export();
 
-        // Tick-driven auto-scroll: when dragging a clip and cursor is near the
-        // window edge, continuously scroll the arrangement. The canvas can't
-        // generate new events when the cursor is stationary at the screen edge,
-        // so this tick loop drives the scrolling at 60fps.
-        if self.state.arrangement.drag_resize_active {
-            let edge_zone = 60.0_f32;
-            // Right edge: estimate window right ~= track header + canvas
-            // Use cursor_x relative to a conservative right boundary
-            let right_boundary = 1600.0_f32; // reasonable default
-            if self.state.view.cursor_x > right_boundary - edge_zone {
-                let overshoot = ((self.state.view.cursor_x - (right_boundary - edge_zone))
-                    / edge_zone)
-                    .clamp(0.0, 3.0) as f64;
-                let delta = overshoot * 2.0;
-                let total = self.state.total_beats();
-                self.state.view.scroll_offset_beats =
-                    (self.state.view.scroll_offset_beats + delta).clamp(0.0, total);
+        // A stationary pointer does not produce canvas events. Drive the
+        // active editor's bounded edge-scroll from the 60fps UI clock.
+        let cursor_x = self.state.view.cursor_x;
+        let right_boundary = (self.state.view.window_width - TIMELINE_WINDOW_EDGE_INSET).max(1.0);
+        let section_drag = self.state.view.workspace == crate::state::Workspace::Perform
+            && self
+                .state
+                .perform
+                .section_editor
+                .editor()
+                .drag_resize_active;
+        if section_drag {
+            let viewport_width = self.section_timeline_viewport_width();
+            let left_boundary = (right_boundary - viewport_width).max(0.0);
+            let velocity = crate::timeline_geometry::edge_scroll_velocity(
+                cursor_x,
+                left_boundary,
+                right_boundary,
+            );
+            if velocity != 0.0 {
+                let total_beats = self
+                    .state
+                    .perform
+                    .selected_section
+                    .and_then(|id| self.state.perform.sections.by_id(id))
+                    .map_or(0.0, |section| section.length_beats);
+                self.state.perform.section_editor.viewport_mut().scroll_by(
+                    velocity / 60.0,
+                    total_beats,
+                    viewport_width,
+                );
             }
-            // Left edge
-            let left_boundary = 230.0_f32; // ~track header width
-            if self.state.view.cursor_x < left_boundary + edge_zone
-                && self.state.view.scroll_offset_beats > 0.0
-            {
-                let overshoot = ((left_boundary + edge_zone - self.state.view.cursor_x) / edge_zone)
-                    .clamp(0.0, 3.0) as f64;
-                let delta = overshoot * 2.0;
-                self.state.view.scroll_offset_beats =
-                    (self.state.view.scroll_offset_beats - delta).max(0.0);
+        } else if self.state.arrangement.drag_resize_active {
+            let browser_width = if self.state.browser.open {
+                self.state
+                    .browser
+                    .effective_dock_width(self.state.view.window_width)
+                    + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
+            } else {
+                0.0
+            };
+            let left_boundary =
+                browser_width + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
+            let viewport_width = (right_boundary - left_boundary).max(1.0);
+            let velocity = crate::timeline_geometry::edge_scroll_velocity(
+                cursor_x,
+                left_boundary,
+                right_boundary,
+            );
+            if velocity != 0.0 {
+                let mut viewport = crate::timeline_geometry::TimelineViewport::new(
+                    self.state.view.zoom_level,
+                    self.state.view.scroll_offset_beats,
+                );
+                viewport.scroll_by(velocity / 60.0, self.state.total_beats(), viewport_width);
+                self.state.view.scroll_offset_beats = viewport.scroll_offset_beats;
             }
         }
         export_task
