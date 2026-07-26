@@ -796,6 +796,7 @@ fn track_mute_mode_resolves_keyboard_press_to_shared_track_request_once() {
         Some(TrackMuteRequest {
             track_id: tracks[0].id,
             muted: true,
+            quantization: TrackMuteQuantization::Immediate,
         })
     );
     assert!(repeat.track_mute_request.is_none());
@@ -853,6 +854,7 @@ fn pointer_pad_uses_the_same_track_mute_resolution() {
         Some(TrackMuteRequest {
             track_id: tracks[0].id,
             muted: false,
+            quantization: TrackMuteQuantization::Immediate,
         })
     );
 }

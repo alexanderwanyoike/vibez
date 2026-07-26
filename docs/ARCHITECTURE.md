@@ -278,13 +278,22 @@ Swing supplies the effective amount, and `OFF | 1/8 | 1/16` decides whether and
 on which grid that individual clip follows it. With no MIDI clip selected, the
 Track control remains available but clip application is withheld.
 
-Track mute commands become authoritative when the audio callback drains them.
-The engine emits `EngineEvent::TrackMuteChanged` with the effective state and
-absolute transport sample; the UI mirrors that result into the shared Project
-Track and an active Capture log. `track_mute` automation is stepped: it imposes
-nothing before its first point and changes state at exact in-buffer sample
-boundaries. Both manual and automated mute feed one post-effects, pre-send
-anti-click ramp, so playback gates tails exactly like the performed mute.
+Track Mute Pad Gestures use a global `Immediate | 1 Beat | 1 Bar` interaction
+preference; `Immediate` is the compatibility default and stopped transport
+always applies directly. During playback the UI sends the requested state and
+quantization without mutating the Project Track. Each shared engine channel
+holds at most one allocation-free pending change, resolves its musical boundary
+from the active engine clock, and splits rendering at that exact sample. A
+second pre-boundary gesture cancels it. Queue, cancellation, and effective
+events mirror pending UI state, while only `EngineEvent::TrackMuteChanged`
+updates the Project Track, opens the undo step, and enters an active Capture
+log. The pending state survives Section transitions because Track Mute remains
+live Perform state rather than Section content.
+
+`track_mute` automation is stepped: it imposes nothing before its first point
+and changes state at exact in-buffer sample boundaries. Both manual and
+automated mute feed one post-effects, pre-send anti-click ramp, so playback
+gates tails exactly like the performed mute.
 
 Automation overrides live beside evaluation in the shared `EngineTrack`
 channel strip. A manual mixer or Perform-pad mute on a track with a mute lane

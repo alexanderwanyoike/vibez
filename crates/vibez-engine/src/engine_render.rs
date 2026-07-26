@@ -42,7 +42,7 @@ impl AudioEngine {
 
         let pos = self.transport.position();
         if let Some((loop_start, loop_end)) = self.transport.active_loop_region() {
-            if pos < loop_end && pos + frames as u64 > loop_end {
+            if pos < loop_end && pos + frames as u64 >= loop_end {
                 let first = (loop_end - pos) as usize;
                 let rest = frames - first;
                 self.render_multitrack_segment(
@@ -53,6 +53,10 @@ impl AudioEngine {
                     channels,
                     self.transport.active_loop_region(),
                 );
+                // The transport jumps directly from loop_end to loop_start.
+                // Apply work owned by that exact musical boundary before the
+                // clock wraps so it cannot remain pending forever.
+                self.apply_track_mutes_due(loop_end);
                 // Kill anything sounding across the boundary, then
                 // continue sample-accurately from the loop start.
                 for track in &mut self.tracks {
@@ -83,6 +87,40 @@ impl AudioEngine {
     }
 
     pub(super) fn render_multitrack_segment(
+        &mut self,
+        output: &mut [f32],
+        pos: u64,
+        repeat_pos: u64,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) {
+        let mut rendered_frames = 0usize;
+        while rendered_frames < frames {
+            let segment_start = repeat_pos.saturating_add(rendered_frames as u64);
+            self.apply_track_mutes_due(segment_start);
+            let segment_end = repeat_pos.saturating_add(frames as u64);
+            let next_boundary = self
+                .next_track_mute_boundary()
+                .filter(|boundary| *boundary > segment_start && *boundary < segment_end);
+            let segment_frames = next_boundary
+                .map(|boundary| (boundary - segment_start) as usize)
+                .unwrap_or(frames - rendered_frames);
+            let start = rendered_frames * channels;
+            let end = (rendered_frames + segment_frames) * channels;
+            self.render_multitrack_frames(
+                &mut output[start..end],
+                pos.saturating_add(rendered_frames as u64),
+                segment_start,
+                segment_frames,
+                channels,
+                loop_region,
+            );
+            rendered_frames += segment_frames;
+        }
+    }
+
+    fn render_multitrack_frames(
         &mut self,
         output: &mut [f32],
         pos: u64,

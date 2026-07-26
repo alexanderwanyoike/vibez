@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use vibez_core::id::{SectionId, TrackId};
-use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
+use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset, TrackMuteQuantization};
 use vibez_project::SectionLaunchQuantization;
 
 use super::EngineHandle;
@@ -20,6 +20,7 @@ mod instrument;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
+mod track_mutes;
 pub use capture::{
     CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedSectionSource,
     MaterializedCapture,
@@ -32,6 +33,7 @@ pub use section_record::{
     SectionRecordMsg, SectionRecordPhase, SectionRecordQuantization, SectionRecordStartRequest,
 };
 pub use sections::{Section, SectionStore, SectionTimelineEditor, TimelineContentLocation};
+pub use track_mutes::{PendingTrackMute, TrackMuteRequest};
 
 /// The three Perform Modes exposed in V1. Macros stays absent until its
 /// behavior and Capture semantics are defined.
@@ -184,6 +186,8 @@ pub struct PerformState {
     note_repeat_momentary: bool,
     note_repeat_momentary_key_id: Option<String>,
     note_repeat_latched: bool,
+    track_mute_quantization: TrackMuteQuantization,
+    pending_track_mutes: HashMap<TrackId, PendingTrackMute>,
     pub capture: CaptureState,
     pub section_record: section_record::SectionRecordState,
     pub sections: Arc<SectionStore>,
@@ -235,6 +239,7 @@ pub enum PerformMsg {
     },
     PreviousBank,
     NextBank,
+    SetTrackMuteQuantization(TrackMuteQuantization),
     ToggleTrackMuteFromPad(PadPosition),
     SetInstrumentTargetOverlay(bool),
     SelectInstrumentTarget(TrackId),
@@ -297,14 +302,6 @@ pub struct PerformCtx<'a> {
     pub workspace_visible: bool,
     pub project_tracks: &'a [ProjectTrack],
     pub selected_project_track: Option<TrackId>,
-}
-
-/// A semantic mute request resolved by Perform against a stable pad slot.
-/// The router applies it to the single shared Project Track state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TrackMuteRequest {
-    pub track_id: TrackId,
-    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -379,6 +376,7 @@ impl PerformState {
         Some(TrackMuteRequest {
             track_id,
             muted: !track.mute,
+            quantization: self.track_mute_quantization,
         })
     }
 
@@ -653,6 +651,13 @@ impl PerformState {
                         }
                     }
                 }
+            }
+            PerformMsg::SetTrackMuteQuantization(quantization) => {
+                self.track_mute_quantization = quantization;
+                return PerformAction {
+                    persist_settings: true,
+                    ..PerformAction::default()
+                };
             }
             PerformMsg::ToggleTrackMuteFromPad(position) => {
                 if ctx.workspace_visible && self.mode == PerformMode::TrackMutes {
@@ -947,3 +952,7 @@ mod focus_tests;
 #[cfg(test)]
 #[path = "perform_note_repeat_tests.rs"]
 mod note_repeat_tests;
+
+#[cfg(test)]
+#[path = "perform_track_mute_tests.rs"]
+mod track_mute_tests;

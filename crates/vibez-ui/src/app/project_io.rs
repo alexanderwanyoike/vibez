@@ -257,6 +257,7 @@ impl App {
         let settings = UiSettings {
             perform_input_mapping: self.state.perform.input_mapping.clone(),
             fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
+            track_mute_quantization: self.state.perform.track_mute_quantization(),
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,

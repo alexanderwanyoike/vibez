@@ -18,13 +18,24 @@ fn apply_track_mute_request(
     history: &mut crate::state::UndoHistory,
     pre_edit_snapshot: crate::state::ProjectSnapshot,
     request: crate::domains::perform::TrackMuteRequest,
+    transport_playing: bool,
     engine: &mut impl crate::domains::EngineHandle,
 ) -> Option<String> {
-    project_tracks.find(request.track_id)?;
+    let track_name = project_tracks.find(request.track_id)?.name.clone();
+    if transport_playing
+        && request.quantization != vibez_core::perform::TrackMuteQuantization::Immediate
+    {
+        engine.send(EngineCommand::QueueTrackMute {
+            track_id: request.track_id,
+            muted: request.muted,
+            quantization: request.quantization,
+        });
+        return Some(track_name);
+    }
+
     history.push_edit(pre_edit_snapshot, None);
     let track = Arc::make_mut(project_tracks).find_mut(request.track_id)?;
     track.mute = request.muted;
-    let track_name = track.name.clone();
     engine.send(EngineCommand::SetTrackMute(request.track_id, request.muted));
     Some(track_name)
 }
@@ -107,6 +118,8 @@ impl App {
             self.state.status_text = "Perform settings saved".into();
         }
         if let Some(request) = action.track_mute_request {
+            let queued = self.state.transport.playing
+                && request.quantization != vibez_core::perform::TrackMuteQuantization::Immediate;
             let pre_edit_snapshot = self.take_snapshot();
             let changed = {
                 let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -115,15 +128,27 @@ impl App {
                     &mut self.state.project.history,
                     pre_edit_snapshot,
                     request,
+                    self.state.transport.playing,
                     &mut engine,
                 )
             };
             if let Some(track_name) = changed {
-                self.mark_project_dirty();
-                self.state.status_text = format!(
-                    "{} {track_name}",
-                    if request.muted { "Muted" } else { "Unmuted" }
-                );
+                if queued {
+                    self.state.status_text = format!(
+                        "{} {track_name}",
+                        if request.muted {
+                            "Mute queued for"
+                        } else {
+                            "Unmute queued for"
+                        }
+                    );
+                } else {
+                    self.mark_project_dirty();
+                    self.state.status_text = format!(
+                        "{} {track_name}",
+                        if request.muted { "Muted" } else { "Unmuted" }
+                    );
+                }
             }
         }
         if let Some(request) = action.track_swing_request {
@@ -702,16 +727,7 @@ mod perform_action_tests {
     use vibez_core::id::TrackId;
 
     fn snapshot(state: &AppState) -> ProjectSnapshot {
-        ProjectSnapshot {
-            project_tracks: Arc::clone(&state.project_tracks),
-            arrange_timeline: Arc::clone(&state.arrangement.timeline),
-            sections: Arc::clone(&state.perform.sections),
-            bpm: state.transport.bpm,
-            project_swing: state.perform.project_swing(),
-            loop_enabled: state.transport.loop_enabled,
-            loop_start_beats: state.transport.loop_start_beats,
-            loop_end_beats: state.transport.loop_end_beats,
-        }
+        state.project_snapshot()
     }
 
     #[test]
@@ -731,7 +747,9 @@ mod perform_action_tests {
             crate::domains::perform::TrackMuteRequest {
                 track_id,
                 muted: true,
+                quantization: vibez_core::perform::TrackMuteQuantization::Immediate,
             },
+            false,
             &mut engine,
         );
 
@@ -759,13 +777,51 @@ mod perform_action_tests {
             crate::domains::perform::TrackMuteRequest {
                 track_id: TrackId::new(),
                 muted: true,
+                quantization: vibez_core::perform::TrackMuteQuantization::Immediate,
             },
+            false,
             &mut engine,
         );
 
         assert_eq!(name, None);
         assert!(state.project.history.undo.is_empty());
         assert!(engine.0.is_empty());
+    }
+
+    #[test]
+    fn running_quantized_mute_waits_for_engine_truth_before_editing_project_state() {
+        let track_id = TrackId::new();
+        let mut state = AppState::default();
+        Arc::make_mut(&mut state.project_tracks)
+            .tracks
+            .push(ProjectTrack::new(track_id, "Bass".into(), 0));
+        let mut engine = RecordingEngine::default();
+        let pre_edit_snapshot = snapshot(&state);
+
+        let name = apply_track_mute_request(
+            &mut state.project_tracks,
+            &mut state.project.history,
+            pre_edit_snapshot,
+            crate::domains::perform::TrackMuteRequest {
+                track_id,
+                muted: true,
+                quantization: vibez_core::perform::TrackMuteQuantization::OneBar,
+            },
+            true,
+            &mut engine,
+        );
+
+        assert_eq!(name.as_deref(), Some("Bass"));
+        assert!(!state.project_tracks.tracks[0].mute);
+        assert!(state.project.history.undo.is_empty());
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::QueueTrackMute {
+                track_id: event_track,
+                muted: true,
+                quantization: vibez_core::perform::TrackMuteQuantization::OneBar,
+            }] if *event_track == track_id
+        ));
     }
 
     #[test]

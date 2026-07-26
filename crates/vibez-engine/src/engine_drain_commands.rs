@@ -26,6 +26,7 @@ impl AudioEngine {
                     self.clock_domain = ClockDomain::Arrange;
                     self.performance_position = self.transport.position();
                     self.cancel_section_queue();
+                    self.cancel_queued_track_mutes();
                     self.active_section = None;
                     self.transport
                         .set_audio_length(self.arrangement_audio_length);
@@ -311,6 +312,13 @@ impl AudioEngine {
                 }
                 EngineCommand::SetTrackMute(id, mute) => {
                     self.set_track_mute(id, mute);
+                }
+                EngineCommand::QueueTrackMute {
+                    track_id,
+                    muted,
+                    quantization,
+                } => {
+                    self.queue_track_mute(track_id, muted, quantization);
                 }
                 EngineCommand::SetAutomationOverride {
                     track_id,

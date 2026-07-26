@@ -9,6 +9,8 @@ pub struct UiSettings {
     #[serde(default = "default_fixed_computer_velocity")]
     pub fixed_computer_velocity: u8,
     #[serde(default)]
+    pub track_mute_quantization: vibez_core::perform::TrackMuteQuantization,
+    #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
@@ -58,6 +60,7 @@ impl Default for UiSettings {
         Self {
             perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
             fixed_computer_velocity: default_fixed_computer_velocity(),
+            track_mute_quantization: vibez_core::perform::TrackMuteQuantization::default(),
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
@@ -316,8 +319,31 @@ mod tests {
     }
 
     #[test]
+    fn track_mute_quantization_defaults_to_immediate_and_roundtrips_globally() {
+        use vibez_core::perform::TrackMuteQuantization;
+
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.track_mute_quantization,
+            TrackMuteQuantization::Immediate
+        );
+
+        let settings = UiSettings {
+            track_mute_quantization: TrackMuteQuantization::OneBar,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            loaded.track_mute_quantization,
+            TrackMuteQuantization::OneBar
+        );
+    }
+
+    #[test]
     fn rebinding_global_input_does_not_change_project_bytes() {
         use crate::domains::perform::{ComputerKey, PadPosition};
+        use vibez_core::perform::TrackMuteQuantization;
 
         let project = vibez_project::Project::default();
         let before = serde_json::to_vec(&project).unwrap();
@@ -325,6 +351,7 @@ mod tests {
         settings
             .perform_input_mapping
             .rebind(PadPosition::ALL[0], ComputerKey::Y);
+        settings.track_mute_quantization = TrackMuteQuantization::OneBar;
         let after = serde_json::to_vec(&project).unwrap();
 
         assert_eq!(before, after);

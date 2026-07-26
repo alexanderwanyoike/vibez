@@ -18,6 +18,7 @@ impl EngineTrack {
             gain: DEFAULT_TRACK_GAIN,
             pan: DEFAULT_TRACK_PAN,
             mute: false,
+            queued_mute: None,
             automation_mute: None,
             automation_overrides: AutomationOverrides::default(),
             mute_ramp: MuteRamp::default(),

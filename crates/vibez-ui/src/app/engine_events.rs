@@ -9,6 +9,24 @@ use crate::state::AuditionMode;
 
 use super::*;
 
+fn apply_track_mute_event(
+    state: &mut crate::state::AppState,
+    track_id: vibez_core::id::TrackId,
+    muted: bool,
+) -> bool {
+    let pending = state.perform.pending_track_mute(track_id).is_some();
+    if pending && state.project_tracks.find(track_id).is_some() {
+        let snapshot = state.project_snapshot();
+        state.project.history.push_edit(snapshot, None);
+        state.project.dirty = true;
+    }
+    state.perform.take_pending_track_mute(track_id);
+    if let Some(track) = state.find_track_mut(track_id) {
+        track.mute = muted;
+    }
+    pending
+}
+
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
         let mut completed_section_recordings = Vec::new();
@@ -40,6 +58,7 @@ impl App {
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;
                         self.state.perform.section_playhead_samples = 0;
+                        self.state.perform.clear_pending_track_mutes();
                     }
                     EngineEvent::PlaybackStarted => {
                         self.state.transport.playing = true;
@@ -87,9 +106,22 @@ impl App {
                             muted,
                             effective_at_samples,
                         );
-                        if let Some(track) = self.state.find_track_mut(track_id) {
-                            track.mute = muted;
-                        }
+                        apply_track_mute_event(&mut self.state, track_id, muted);
+                    }
+                    EngineEvent::TrackMuteQueued {
+                        track_id,
+                        muted,
+                        effective_at_samples,
+                    } => {
+                        self.state.perform.queue_track_mute_ui(
+                            track_id,
+                            muted,
+                            effective_at_samples,
+                        );
+                    }
+                    EngineEvent::TrackMuteQueueCancelled { track_id } => {
+                        self.state.perform.cancel_track_mute_ui(track_id);
+                        self.state.status_text = "Pending Track Mute cleared".into();
                     }
                     EngineEvent::AutomationOverrideChanged {
                         track_id,
@@ -333,5 +365,33 @@ impl App {
         for completed in completed_captures {
             self.finish_performance_capture(completed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::perform::PendingTrackMute;
+    use crate::state::ProjectTrack;
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn effective_quantized_mute_commits_one_undoable_project_edit() {
+        let track_id = TrackId::new();
+        let mut state = AppState::default();
+        Arc::make_mut(&mut state.project_tracks)
+            .tracks
+            .push(ProjectTrack::new(track_id, "Bass".into(), 0));
+        state.perform.queue_track_mute_ui(track_id, true, 48_000);
+
+        assert!(apply_track_mute_event(&mut state, track_id, true));
+        assert!(state.project_tracks.tracks[0].mute);
+        assert_eq!(state.project.history.undo.len(), 1);
+        let before = state.project.history.pop_undo().expect("mute undo");
+        assert!(!before.project_tracks.tracks[0].mute);
+        assert_eq!(
+            state.perform.pending_track_mute(track_id),
+            None::<PendingTrackMute>
+        );
     }
 }

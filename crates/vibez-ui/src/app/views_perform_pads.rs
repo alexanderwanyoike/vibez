@@ -1,19 +1,36 @@
 //! Pad Surface rendering for the Perform workspace.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, stack, text, tooltip,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, stack, text,
+    tooltip,
 };
 use iced::{Element, Length, Shadow, Theme, Vector};
 
 use super::views_perform::{perform_pad_grid_height, perform_tool_button};
 use super::*;
 use crate::domains::perform::{
-    PadPosition, PerformEditorFocus, PerformMode, PerformMsg, SixteenLevelsParameter,
+    PadPosition, PendingTrackMute, PerformEditorFocus, PerformMode, PerformMsg,
+    SixteenLevelsParameter,
 };
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use vibez_core::perform::TrackMuteQuantization;
+
+fn pending_track_mute_label(
+    pending: PendingTrackMute,
+    current_samples: u64,
+    bpm: f64,
+    sample_rate: u32,
+) -> String {
+    let remaining_samples = pending.effective_at_samples.saturating_sub(current_samples);
+    let remaining_beats = remaining_samples as f64 * bpm / (f64::from(sample_rate.max(1)) * 60.0);
+    format!(
+        "PENDING {} · IN {remaining_beats:.2} BEATS",
+        if pending.muted { "MUTE" } else { "LIVE" }
+    )
+}
 
 fn perform_bank_button(
     label: &'static str,
@@ -150,9 +167,33 @@ impl App {
             ]
             .spacing(5)
             .align_y(iced::Alignment::Center);
-            row![heading, horizontal_space(), bank_navigation]
+            if mode == PerformMode::TrackMutes {
+                let quantization = pick_list(
+                    TrackMuteQuantization::ALL,
+                    Some(self.state.perform.track_mute_quantization()),
+                    |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
+                )
+                .width(Length::Fixed(104.0))
+                .padding([4, 7])
+                .text_size(9);
+                row![
+                    heading,
+                    horizontal_space(),
+                    text("MUTE")
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(th::text_dim()),
+                    quantization,
+                    bank_navigation
+                ]
+                .spacing(7)
                 .align_y(iced::Alignment::End)
                 .into()
+            } else {
+                row![heading, horizontal_space(), bank_navigation]
+                    .align_y(iced::Alignment::End)
+                    .into()
+            }
         };
 
         let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
@@ -260,6 +301,8 @@ impl App {
                     .track_for_mute_pad(position, &self.state.project_tracks.tracks)
             })
             .flatten();
+        let pending_mute =
+            mute_track.and_then(|track| self.state.perform.pending_track_mute(track.id));
         let instrument_target = (mode == PerformMode::Instrument
             && self.state.perform.instrument_target_overlay)
             .then(|| {
@@ -313,6 +356,23 @@ impl App {
             },
             PerformMode::TrackMutes => {
                 if let Some(track) = mute_track {
+                    let state = if let Some(pending) = pending_mute {
+                        let current_samples = if self.state.perform.playing_section.is_some() {
+                            self.state.perform.performance_position_samples
+                        } else {
+                            self.state.transport.position_samples
+                        };
+                        pending_track_mute_label(
+                            pending,
+                            current_samples,
+                            self.state.transport.bpm,
+                            self.state.transport.sample_rate,
+                        )
+                    } else if track.mute {
+                        "MUTED".to_string()
+                    } else {
+                        "LIVE".to_string()
+                    };
                     (
                         track.name.clone(),
                         format!(
@@ -322,7 +382,7 @@ impl App {
                             } else {
                                 "AUDIO"
                             },
-                            if track.mute { "MUTED" } else { "LIVE" }
+                            state
                         ),
                         th::track_color(track.color_index),
                         track.mute,
@@ -427,6 +487,8 @@ impl App {
                             th::blend(th::accent_dim(), color, 0.35)
                         } else if queued {
                             th::blend(th::accent_dim(), th::bg_hover(), 0.42)
+                        } else if pending_mute.is_some() {
+                            th::blend(th::accent_dim(), color, 0.24)
                         } else if muted {
                             th::blend(th::mute_active(), color, 0.28)
                         } else if selected {
@@ -445,6 +507,8 @@ impl App {
                     th::accent()
                 } else if queued || selected {
                     th::accent_dim()
+                } else if pending_mute.is_some() {
+                    th::accent()
                 } else if muted {
                     th::mute_active()
                 } else {
@@ -535,5 +599,37 @@ impl App {
             }
             _ => pad,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending_track_mute_label;
+    use crate::domains::perform::PendingTrackMute;
+
+    #[test]
+    fn pending_track_mute_reports_time_remaining_in_the_active_clock() {
+        let pending = PendingTrackMute {
+            muted: true,
+            effective_at_samples: 96_000,
+        };
+
+        assert_eq!(
+            pending_track_mute_label(pending, 72_000, 120.0, 48_000),
+            "PENDING MUTE · IN 1.00 BEATS"
+        );
+    }
+
+    #[test]
+    fn overdue_pending_track_mute_never_reports_negative_time() {
+        let pending = PendingTrackMute {
+            muted: false,
+            effective_at_samples: 48_000,
+        };
+
+        assert_eq!(
+            pending_track_mute_label(pending, 72_000, 120.0, 48_000),
+            "PENDING LIVE · IN 0.00 BEATS"
+        );
     }
 }

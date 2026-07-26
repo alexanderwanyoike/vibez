@@ -3,8 +3,10 @@
 use vibez_core::automation::AutomationTarget;
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::perform::SwingOffset;
+use vibez_core::perform::TrackMuteQuantization;
 
 use crate::events::{AutomationGesturePhase, EngineEvent};
+use crate::mixer::QueuedTrackMute;
 
 use super::AudioEngine;
 
@@ -43,8 +45,21 @@ impl AudioEngine {
 
     pub(super) fn set_track_mute(&mut self, id: TrackId, muted: bool) {
         let effective_at_samples = self.effective_position();
+        let cancelled = self
+            .channel_mut(id)
+            .is_some_and(|track| track.queued_mute.take().is_some());
+        if cancelled {
+            let _ = self
+                .event_tx
+                .push(EngineEvent::TrackMuteQueueCancelled { track_id: id });
+        }
+        self.apply_track_mute_at(id, muted, effective_at_samples);
+    }
+
+    fn apply_track_mute_at(&mut self, id: TrackId, muted: bool, effective_at_samples: u64) {
         let playing = self.transport.is_playing();
         let (changed, override_changed) = if let Some(track) = self.channel_mut(id) {
+            track.queued_mute = None;
             let target = AutomationTarget::TrackMute;
             let override_changed =
                 track.has_automation_target(target) && track.set_automation_override(target, true);
@@ -66,6 +81,83 @@ impl AudioEngine {
                 target: AutomationTarget::TrackMute,
                 overridden: true,
             });
+        }
+    }
+
+    pub(super) fn queue_track_mute(
+        &mut self,
+        track_id: TrackId,
+        muted: bool,
+        quantization: TrackMuteQuantization,
+    ) {
+        let now = self.effective_position();
+        if quantization == TrackMuteQuantization::Immediate || !self.transport.is_playing() {
+            self.apply_track_mute_at(track_id, muted, now);
+            return;
+        }
+
+        let Some(track) = self.channel_mut(track_id) else {
+            return;
+        };
+        if track.queued_mute.take().is_some() {
+            let _ = self
+                .event_tx
+                .push(EngineEvent::TrackMuteQueueCancelled { track_id });
+            return;
+        }
+
+        let beats = quantization
+            .beats()
+            .expect("Immediate Track Mutes return before boundary resolution");
+        let effective_at_samples = self.next_grid_boundary(now, beats);
+        if effective_at_samples <= now {
+            let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {
+                track_id,
+                muted,
+                effective_at_samples: now,
+            });
+            self.apply_track_mute_at(track_id, muted, now);
+            return;
+        }
+        let Some(track) = self.channel_mut(track_id) else {
+            return;
+        };
+        track.queued_mute = Some(QueuedTrackMute {
+            muted,
+            effective_at_samples,
+        });
+        let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {
+            track_id,
+            muted,
+            effective_at_samples,
+        });
+    }
+
+    pub(super) fn next_track_mute_boundary(&self) -> Option<u64> {
+        self.tracks
+            .iter()
+            .filter_map(|track| track.queued_mute.map(|queued| queued.effective_at_samples))
+            .min()
+    }
+
+    pub(super) fn apply_track_mutes_due(&mut self, at_samples: u64) {
+        while let Some((track_id, queued)) = self.tracks.iter().find_map(|track| {
+            track
+                .queued_mute
+                .filter(|queued| queued.effective_at_samples <= at_samples)
+                .map(|queued| (track.id, queued))
+        }) {
+            self.apply_track_mute_at(track_id, queued.muted, queued.effective_at_samples);
+        }
+    }
+
+    pub(super) fn cancel_queued_track_mutes(&mut self) {
+        for track in &mut self.tracks {
+            if track.queued_mute.take().is_some() {
+                let _ = self
+                    .event_tx
+                    .push(EngineEvent::TrackMuteQueueCancelled { track_id: track.id });
+            }
         }
     }
 

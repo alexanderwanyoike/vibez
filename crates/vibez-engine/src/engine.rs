@@ -349,6 +349,7 @@ impl AudioEngine {
         }
         if section_ended {
             self.stop_section_record();
+            self.cancel_queued_track_mutes();
             let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
                 effective_at_samples: self.performance_position,
             });
