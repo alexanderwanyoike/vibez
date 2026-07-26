@@ -51,7 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: Format

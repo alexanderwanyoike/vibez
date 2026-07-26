@@ -120,7 +120,7 @@ fn immediate_section_launch_reanchors_held_repeat_to_the_section_downbeat() {
             rate: NoteRepeatRate::Sixteenth,
         })
         .unwrap();
-    engine.process(&mut vec![0.0; 2], 2);
+    engine.process(&mut [0.0; 2], 2);
     while events.pop().is_ok() {}
 
     commands

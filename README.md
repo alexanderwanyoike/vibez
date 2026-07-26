@@ -75,7 +75,9 @@ and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Contributing
 
 Issues and pull requests are welcome. CI must stay green on Linux, macOS, and
-Windows (`cargo test --workspace` and `cargo clippy --workspace -- -D warnings`).
+Windows (`cargo test --workspace` and
+`cargo clippy --workspace --all-targets -- -D warnings`). Note `--all-targets`:
+lints apply to test code too.
 
 ## License
 

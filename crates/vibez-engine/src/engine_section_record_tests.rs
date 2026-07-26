@@ -395,11 +395,11 @@ fn note_at_block_start_boundary_is_reported_after_recording_starts() {
                 ..
             } => Some(("record-started", effective_at_samples)),
             EngineEvent::InstrumentNoteInput {
-                pitch,
+                pitch: 42,
                 on: true,
                 effective_at_samples,
                 ..
-            } if pitch == 42 => Some(("note-on", effective_at_samples)),
+            } => Some(("note-on", effective_at_samples)),
             _ => None,
         })
         .collect();

@@ -312,7 +312,7 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
         .push(EngineCommand::AddTrack(track_id, "Audio".into()))
         .unwrap();
     engine.process(&mut [], 1);
-    engine.tracks[0].playback_source = Box::new(PreparedPlaybackSource::new(
+    *engine.tracks[0].playback_source = PreparedPlaybackSource::new(
         vec![EngineClip {
             id: ClipId::new(),
             audio: constant_audio(16, 0.75),
@@ -325,7 +325,7 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
         }],
         Vec::new(),
         Vec::new(),
-    ));
+    );
     commands
         .push(EngineCommand::LaunchSection(Box::new(
             PreparedSectionPlaybackSource::new(
