@@ -18,6 +18,19 @@ use super::*;
 
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+        let message = match message {
+            Message::SectionTimeline(edit) => {
+                if super::update_timeline::section_timeline_claims_focus(
+                    self.state.view.workspace,
+                    self.state.perform.selected_section.is_some(),
+                ) {
+                    self.state.perform.editor_focus =
+                        crate::domains::perform::PerformEditorFocus::SectionConstruction;
+                }
+                *edit
+            }
+            message => message,
+        };
         let (message, undo_gesture) = match message {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
@@ -67,6 +80,9 @@ impl App {
         }
 
         match message {
+            Message::SectionTimeline(_) => {
+                unreachable!("section timeline wrappers are removed before routing")
+            }
             Message::MenuItemSelected(overlay, action) => {
                 let task = self.update(*action);
                 menu_lifecycle::dismiss(&mut self.state, overlay);
@@ -85,6 +101,9 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                if self.place_focused_section_playhead(&msg) {
+                    return Task::none();
+                }
                 let stops_perform = matches!(&msg, crate::domains::transport::TransportMsg::Stop)
                     || matches!(
                         &msg,
@@ -140,14 +159,21 @@ impl App {
                 let clipboard_snapshot = msg
                     .is_clipboard_project_edit()
                     .then(|| self.take_snapshot());
+                let playhead_beats = self.focused_editor_playhead_beats();
+                let samples_per_beat = if self.state.transport.bpm > 0.0 {
+                    60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
+                } else {
+                    0.0
+                };
+                let playhead_samples = if self.focused_editor_is_section() {
+                    (playhead_beats * samples_per_beat).round().max(0.0) as u64
+                } else {
+                    self.state.transport.position_samples
+                };
                 let ctx = crate::domains::arrangement::ArrangementCtx {
-                    samples_per_beat: if self.state.transport.bpm > 0.0 {
-                        60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
-                    } else {
-                        0.0
-                    },
-                    playhead_samples: self.state.transport.position_samples,
-                    playhead_beats: self.state.position_beats(),
+                    samples_per_beat,
+                    playhead_samples,
+                    playhead_beats,
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
                 if let (true, Some(snapshot)) = (action.mark_dirty, clipboard_snapshot) {

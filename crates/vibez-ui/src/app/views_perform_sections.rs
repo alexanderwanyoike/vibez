@@ -388,7 +388,7 @@ impl App {
                 let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
-                    -1.0,
+                    self.state.perform.section_editor.edit_cursor_beats(),
                     2.0,
                     self.state.view.grid_config(),
                     0.0,
@@ -443,28 +443,30 @@ impl App {
                 let grid = self.state.view.grid_config();
                 let compatible = !track.kind.is_midi();
                 gutters = gutters.push(gutter);
-                let clip_lane: Element<'_, Message> = if self.state.browser.drag_source.is_some() {
-                    mouse_area(
-                        canvas(clip_canvas)
-                            .width(Length::Fixed(timeline_width))
-                            .height(Length::Fixed(row_height)),
-                    )
-                    .on_move(move |point| {
-                        Message::Browser(BrowserMsg::DragHoverTrack {
-                            track_id,
-                            beat: grid
-                                .snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat())
-                                .max(0.0),
-                            compatible,
-                        })
-                    })
-                    .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-                    .into()
-                } else {
+                let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
                         .width(Length::Fixed(timeline_width))
-                        .height(Length::Fixed(row_height))
+                        .height(Length::Fixed(row_height)),
+                )
+                .map(|message| Message::SectionTimeline(Box::new(message)));
+                let clip_lane: Element<'_, Message> = if self.state.browser.drag_source.is_some() {
+                    mouse_area(focused_clip_canvas)
+                        .on_move(move |point| {
+                            Message::Browser(BrowserMsg::DragHoverTrack {
+                                track_id,
+                                beat: grid
+                                    .snap_beat(
+                                        geometry.x_to_beat(point.x),
+                                        geometry.pixels_per_beat(),
+                                    )
+                                    .max(0.0),
+                                compatible,
+                            })
+                        })
+                        .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
                         .into()
+                } else {
+                    focused_clip_canvas
                 };
                 lanes = lanes.push(clip_lane);
                 content_height += row_height;

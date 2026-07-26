@@ -21,7 +21,71 @@ fn clipboard_targets_section(
         && focus == PerformEditorFocus::SectionConstruction
 }
 
+pub(super) fn section_timeline_claims_focus(workspace: Workspace, selected_section: bool) -> bool {
+    workspace == Workspace::Perform && selected_section
+}
+
+fn focused_timeline_playhead_beats(
+    workspace: Workspace,
+    selected_section: bool,
+    focus: PerformEditorFocus,
+    arrange_playhead_beats: f64,
+    section_playhead_beats: f64,
+) -> f64 {
+    if clipboard_targets_section(workspace, selected_section, focus) {
+        section_playhead_beats
+    } else {
+        arrange_playhead_beats
+    }
+}
+
+fn focused_section_seek_beat(
+    workspace: Workspace,
+    selected_section: bool,
+    focus: PerformEditorFocus,
+    msg: &crate::domains::transport::TransportMsg,
+) -> Option<f64> {
+    let crate::domains::transport::TransportMsg::SeekToBeat(beat) = msg else {
+        return None;
+    };
+    clipboard_targets_section(workspace, selected_section, focus).then(|| beat.max(0.0))
+}
+
 impl App {
+    pub(super) fn focused_editor_is_section(&self) -> bool {
+        clipboard_targets_section(
+            self.state.view.workspace,
+            self.state.perform.selected_section.is_some(),
+            self.state.perform.editor_focus,
+        )
+    }
+
+    pub(super) fn focused_editor_playhead_beats(&self) -> f64 {
+        focused_timeline_playhead_beats(
+            self.state.view.workspace,
+            self.state.perform.selected_section.is_some(),
+            self.state.perform.editor_focus,
+            self.state.position_beats(),
+            self.state.perform.section_editor.edit_cursor_beats(),
+        )
+    }
+
+    pub(super) fn place_focused_section_playhead(
+        &mut self,
+        msg: &crate::domains::transport::TransportMsg,
+    ) -> bool {
+        let Some(beat) = focused_section_seek_beat(
+            self.state.view.workspace,
+            self.state.perform.selected_section.is_some(),
+            self.state.perform.editor_focus,
+            msg,
+        ) else {
+            return false;
+        };
+        self.state.perform.section_editor.place_edit_cursor(beat);
+        true
+    }
+
     pub(super) fn route_automation_editor_message(
         &mut self,
         msg: AutomationMsg,
@@ -241,5 +305,81 @@ mod clipboard_focus_tests {
             false,
             PerformEditorFocus::SectionConstruction,
         ));
+    }
+
+    #[test]
+    fn paste_playhead_follows_arrange_or_selected_section_editor_focus() {
+        assert_eq!(
+            focused_timeline_playhead_beats(
+                Workspace::Arrange,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                5.0,
+                11.0,
+            ),
+            5.0
+        );
+        assert_eq!(
+            focused_timeline_playhead_beats(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                5.0,
+                11.0,
+            ),
+            11.0
+        );
+        assert_eq!(
+            focused_timeline_playhead_beats(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::PadSurface,
+                5.0,
+                11.0,
+            ),
+            5.0,
+            "playing a Section must not redirect Arrange-focused paste"
+        );
+    }
+
+    #[test]
+    fn pointer_seek_places_only_the_focused_section_edit_cursor() {
+        use crate::domains::transport::TransportMsg;
+
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                &TransportMsg::SeekToBeat(13.0),
+            ),
+            Some(13.0)
+        );
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::PadSurface,
+                &TransportMsg::SeekToBeat(13.0),
+            ),
+            None
+        );
+        assert_eq!(
+            focused_section_seek_beat(
+                Workspace::Perform,
+                true,
+                PerformEditorFocus::SectionConstruction,
+                &TransportMsg::Play,
+            ),
+            None,
+            "hover and unrelated transport messages do not move the cursor"
+        );
+    }
+
+    #[test]
+    fn section_timeline_messages_claim_focus_only_for_a_visible_selected_section() {
+        assert!(section_timeline_claims_focus(Workspace::Perform, true));
+        assert!(!section_timeline_claims_focus(Workspace::Arrange, true));
+        assert!(!section_timeline_claims_focus(Workspace::Perform, false));
     }
 }

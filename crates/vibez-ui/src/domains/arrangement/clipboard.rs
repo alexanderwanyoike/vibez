@@ -32,6 +32,14 @@ impl ClipboardClip {
             Self::Audio { track_offset, .. } | Self::Note { track_offset, .. } => *track_offset,
         }
     }
+
+    fn position_beats(&self) -> f64 {
+        match self {
+            Self::Audio { position_beats, .. } | Self::Note { position_beats, .. } => {
+                *position_beats
+            }
+        }
+    }
 }
 
 impl TimelineEditorState {
@@ -325,14 +333,19 @@ impl TimelineEditorState {
             destinations.push(track.id);
         }
 
+        let earliest_position_beats = clipboard
+            .clips
+            .iter()
+            .map(ClipboardClip::position_beats)
+            .min_by(f64::total_cmp)
+            .unwrap_or(0.0);
+        let paste_anchor_beats = ctx.playhead_beats.max(0.0);
         let mut selected = HashSet::new();
         for (entry, track_id) in clipboard.clips.iter().cloned().zip(destinations) {
+            let position_beats =
+                paste_anchor_beats + (entry.position_beats() - earliest_position_beats);
             match entry {
-                ClipboardClip::Audio {
-                    position_beats,
-                    mut clip,
-                    ..
-                } => {
+                ClipboardClip::Audio { mut clip, .. } => {
                     clip.id = ClipId::new();
                     clip.position = (position_beats * ctx.samples_per_beat).round().max(0.0) as u64;
                     engine.send(EngineCommand::AddClip {
@@ -355,11 +368,7 @@ impl TimelineEditorState {
                         .clips
                         .push(clip);
                 }
-                ClipboardClip::Note {
-                    position_beats,
-                    mut clip,
-                    ..
-                } => {
+                ClipboardClip::Note { mut clip, .. } => {
                     clip.id = ClipId::new();
                     clip.position_beats = position_beats;
                     clip.selected_notes.clear();
