@@ -51,7 +51,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --all-targets --exclude vibez-plugin-host -- -D warnings
+      # vibez-plugin-host stays at lib-only lint coverage on purpose. Its tests
+      # drive the VST3 vtable ABI directly, where a cast that looks redundant
+      # on x86_64 is load-bearing on targets whose c_char is u8. Do not widen
+      # this to --all-targets and "fix" what it then reports.
+      - run: cargo clippy -p vibez-plugin-host -- -D warnings
 
   fmt:
     name: Format

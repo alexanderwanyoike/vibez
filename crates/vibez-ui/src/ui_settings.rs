@@ -147,6 +147,16 @@ fn default_warp_confidence_threshold() -> f32 {
 }
 
 #[cfg(test)]
+impl UiSettings {
+    fn input_mapping_key(
+        &self,
+        position: crate::domains::perform::PadPosition,
+    ) -> crate::domains::perform::ComputerKey {
+        self.perform_input_mapping.key_for(position)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -359,15 +369,5 @@ mod tests {
             settings.perform_input_mapping,
             crate::domains::perform::PerformInputMapping::default()
         );
-    }
-}
-
-#[cfg(test)]
-impl UiSettings {
-    fn input_mapping_key(
-        &self,
-        position: crate::domains::perform::PadPosition,
-    ) -> crate::domains::perform::ComputerKey {
-        self.perform_input_mapping.key_for(position)
     }
 }

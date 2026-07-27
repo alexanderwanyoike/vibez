@@ -128,7 +128,7 @@ fn stopped_repeat_pads_share_one_anchor_until_the_last_pad_stops() {
             rate: NoteRepeatRate::Sixteenth,
         })
         .unwrap();
-    engine.process(&mut vec![0.0; 10 * 2], 2);
+    engine.process(&mut [0.0; 10 * 2], 2);
     assert_eq!(repeat_events(&mut events), vec![(42, 29)]);
 
     commands
@@ -153,7 +153,7 @@ fn stopped_repeat_pads_share_one_anchor_until_the_last_pad_stops() {
         .push(EngineCommand::StopNoteRepeat { id: 1, track_id })
         .unwrap();
     engine.process(&mut [], 2);
-    engine.process(&mut vec![0.0; 7 * 2], 2);
+    engine.process(&mut [0.0; 7 * 2], 2);
     commands
         .push(EngineCommand::StartNoteRepeat {
             id: 2,
@@ -205,7 +205,7 @@ fn project_swing_changes_wait_for_the_next_stopped_pair_and_preserve_the_anchor(
             rate: NoteRepeatRate::Sixteenth,
         })
         .unwrap();
-    engine.process(&mut vec![0.0; 10 * 2], 2);
+    engine.process(&mut [0.0; 10 * 2], 2);
     assert_eq!(repeat_timestamps(&mut events), vec![29]);
 
     commands
