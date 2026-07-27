@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="vibez">
+  <rect width="32" height="32" rx="6" fill="#0c0d10"/>
+  <g>
+    <rect x="5" y="5" width="5" height="5" rx="1" fill="#cc7f3d"/>
+    <rect x="12" y="5" width="5" height="5" rx="1" fill="#cc7f3d"/>
+    <rect x="19" y="5" width="5" height="5" rx="1" fill="#cc7f3d"/>
+    <rect x="26" y="5" width="1" height="5" rx="0.5" fill="#cc7f3d"/>
+    <rect x="5" y="12" width="5" height="5" rx="1" fill="#bcae40"/>
+    <rect x="12" y="12" width="5" height="5" rx="1" fill="#bcae40"/>
+    <rect x="19" y="12" width="5" height="5" rx="1" fill="#bcae40"/>
+    <rect x="26" y="12" width="1" height="5" rx="0.5" fill="#bcae40"/>
+    <rect x="5" y="19" width="5" height="5" rx="1" fill="#52a460"/>
+    <rect x="12" y="19" width="5" height="5" rx="1" fill="#3d82d8"/>
+    <rect x="19" y="19" width="5" height="5" rx="1" fill="#52a460"/>
+    <rect x="26" y="19" width="1" height="5" rx="0.5" fill="#52a460"/>
+    <rect x="5" y="26" width="5" height="1" rx="0.5" fill="#3f95a4"/>
+    <rect x="12" y="26" width="5" height="1" rx="0.5" fill="#3f95a4"/>
+    <rect x="19" y="26" width="5" height="1" rx="0.5" fill="#3f95a4"/>
+  </g>
+</svg>
