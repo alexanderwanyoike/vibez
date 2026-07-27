@@ -75,9 +75,10 @@ and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Contributing
 
 Issues and pull requests are welcome. CI must stay green on Linux, macOS, and
-Windows (`cargo test --workspace` and
-`cargo clippy --workspace --all-targets -- -D warnings`). Note `--all-targets`:
-lints apply to test code too.
+Windows: `cargo test --workspace`, and Clippy with `-D warnings` over
+`--all-targets`, so lints apply to test code too. `vibez-plugin-host` is
+deliberately excluded from `--all-targets`; its tests drive the VST3 vtable ABI
+where a redundant-looking cast can be load-bearing on another target.
 
 ## License
 
