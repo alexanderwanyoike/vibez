@@ -74,20 +74,10 @@ selected one.
 
 - **Sample browser** with local library indexing, audition, and Dropbox
 - **Project save/load, undo/redo, and WAV export** from the master bus
+- **Partial MIDI support**: one input port at a time, notes only, into the
+  selected instrument track. More is planned for later versions
 - Real-time safe audio engine: lock-free and allocation-free in the audio
   callback
-
-### No MIDI hardware support yet
-
-Worth being blunt about, because a DAW README saying "MIDI" implies far more
-than is here. There is one narrow path: a single input port at a time, notes
-only, played into whichever instrument track is selected.
-
-There is no MIDI recording, no MIDI output, no `.mid` file import, no
-controller mapping, and no way to use more than one device at once. Perform's
-pads are computer keys for the same reason. Multiple input ports, `.vdc`
-controller profiles, and MIDI settings are the next milestone, and they are
-what will make Perform playable on hardware.
 
 ## Status
 
