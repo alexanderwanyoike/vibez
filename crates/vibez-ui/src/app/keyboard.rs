@@ -284,6 +284,24 @@ fn perform_workspace_key_handler(
     }
 }
 
+/// Whether the platform's command modifier is held: Cmd on macOS, Ctrl
+/// everywhere else.
+///
+/// The platform is a parameter rather than a `cfg!` read inside the body so
+/// that both behaviours are testable from any host. `Modifiers::command()`
+/// resolves at compile time, so a macOS-only regression is invisible to a
+/// Linux test run.
+pub(crate) fn command_held(modifiers: iced::keyboard::Modifiers, on_macos: bool) -> bool {
+    if on_macos {
+        modifiers.logo()
+    } else {
+        modifiers.control()
+    }
+}
+
+/// Compile-time host platform, passed to [`command_held`] in production.
+pub(crate) const ON_MACOS: bool = cfg!(target_os = "macos");
+
 pub(crate) fn truncate_end(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         text.to_string()
@@ -389,7 +407,7 @@ pub(crate) fn global_key_handler(
         }
     }
 
-    if modifiers.command() {
+    if command_held(modifiers, ON_MACOS) {
         if let iced::keyboard::Key::Character(ref c) = key {
             let grid_message = match c.as_str() {
                 "1" => Some(ViewMsg::NarrowGrid),
@@ -405,7 +423,9 @@ pub(crate) fn global_key_handler(
         }
     }
 
-    if !modifiers.control() {
+    // Editing shares the grid's command modifier. Binding these to Ctrl
+    // directly gave macOS Cmd for the grid and Ctrl for copy and undo.
+    if !command_held(modifiers, ON_MACOS) {
         return None;
     }
     match key {
@@ -454,6 +474,90 @@ pub(crate) fn global_key_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The modifier a producer actually holds for a command shortcut: Cmd on
+    /// macOS, Ctrl everywhere else. Every command shortcut is expected to
+    /// answer to this one modifier, so a Mac does not end up with Cmd for the
+    /// grid and Ctrl for editing.
+    fn command_modifier() -> iced::keyboard::Modifiers {
+        #[cfg(target_os = "macos")]
+        {
+            iced::keyboard::Modifiers::LOGO
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            iced::keyboard::Modifiers::CTRL
+        }
+    }
+
+    #[test]
+    fn the_command_modifier_is_cmd_on_macos_and_control_elsewhere() {
+        use iced::keyboard::Modifiers;
+
+        // Asserted for both platforms from any host. `Modifiers::command()`
+        // resolves at compile time, so on Linux it silently answers Ctrl and
+        // a macOS regression would go unnoticed until someone opened the app.
+        assert!(command_held(Modifiers::LOGO, true));
+        assert!(!command_held(Modifiers::CTRL, true));
+
+        assert!(command_held(Modifiers::CTRL, false));
+        assert!(!command_held(Modifiers::LOGO, false));
+    }
+
+    #[test]
+    fn clipboard_shortcuts_answer_the_platform_command_modifier() {
+        use iced::keyboard::Key;
+
+        assert!(matches!(
+            global_key_handler(Key::Character("c".into()), command_modifier()),
+            Some(Message::Arrangement(ArrangementMsg::CopySelectedClips))
+        ));
+    }
+
+    #[test]
+    fn editing_shortcuts_share_the_grid_shortcuts_modifier() {
+        use iced::keyboard::Key;
+
+        // The whole point of the fix: one modifier reaches both, so a Mac
+        // cannot end up with Cmd for the grid and Ctrl for undo.
+        let command = command_modifier();
+
+        assert!(matches!(
+            global_key_handler(Key::Character("1".into()), command),
+            Some(Message::View(ViewMsg::NarrowGrid))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("v".into()), command),
+            Some(Message::Arrangement(ArrangementMsg::PasteClips))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("z".into()), command),
+            Some(Message::Project(ProjectMsg::Undo))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("0".into()), command),
+            Some(Message::View(ViewMsg::ZoomToFit))
+        ));
+    }
+
+    #[test]
+    fn the_super_key_never_stands_in_for_the_command_modifier_off_macos() {
+        use iced::keyboard::{Key, Modifiers};
+
+        // Accepting both Ctrl and Logo everywhere would be the lazy fix, and
+        // would quietly capture the desktop's own Super shortcuts on Linux
+        // and Windows.
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(global_key_handler(Key::Character("c".into()), Modifiers::LOGO).is_none());
+            assert!(global_key_handler(Key::Character("z".into()), Modifiers::LOGO).is_none());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert!(global_key_handler(Key::Character("c".into()), Modifiers::CTRL).is_none());
+            assert!(global_key_handler(Key::Character("z".into()), Modifiers::CTRL).is_none());
+        }
+    }
 
     #[test]
     fn command_number_shortcuts_control_the_shared_grid() {
@@ -519,7 +623,7 @@ mod tests {
         assert!(matches!(
             global_key_handler(
                 Key::Character("M".into()),
-                Modifiers::CTRL | Modifiers::SHIFT
+                command_modifier() | Modifiers::SHIFT
             ),
             Some(Message::Arrangement(
                 ArrangementMsg::CreateClipFromSelection
@@ -582,7 +686,7 @@ mod tests {
             Some(Message::SelectAdjacentBrowserResult(1))
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::CTRL),
+            global_key_handler(Key::Named(Named::ArrowUp), command_modifier()),
             Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
         ));
     }
