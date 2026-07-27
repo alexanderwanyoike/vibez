@@ -61,6 +61,7 @@ impl TrackId {
 typed_id!(ClipId);
 typed_id!(EffectId);
 typed_id!(LaneId);
+typed_id!(SectionId);
 
 #[cfg(test)]
 mod tests {

@@ -4,12 +4,285 @@
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::perform::{CaptureMsg, PerformMode, PerformMsg, SectionRecordMsg};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
+
+#[derive(Default)]
+pub(crate) struct EdgeShortcutState {
+    pressed_keys: std::collections::HashSet<String>,
+    released_at: std::collections::HashMap<String, std::time::Instant>,
+}
+
+impl EdgeShortcutState {
+    fn should_dispatch(
+        &mut self,
+        key_id: &str,
+        message: &Message,
+        occurred_at: std::time::Instant,
+    ) -> bool {
+        let edge_triggered = matches!(
+            message,
+            Message::Arrangement(ArrangementMsg::AddTrack | ArrangementMsg::AddInstrumentTrack)
+        );
+        if !edge_triggered {
+            return true;
+        }
+
+        let release_gap = self
+            .released_at
+            .get(key_id)
+            .map(|released_at| occurred_at.saturating_duration_since(*released_at));
+        let synthetic_repeat =
+            release_gap.is_some_and(|gap| gap <= std::time::Duration::from_millis(30));
+        let first_press = self.pressed_keys.insert(key_id.to_owned());
+        first_press && !synthetic_repeat
+    }
+
+    fn release(&mut self, key_id: &str, occurred_at: std::time::Instant) {
+        self.pressed_keys.remove(key_id);
+        self.released_at.insert(key_id.to_owned(), occurred_at);
+    }
+}
+
+pub(crate) fn keyboard_input_message(
+    event: iced::keyboard::Event,
+    status: iced::event::Status,
+) -> Option<Message> {
+    let should_forward = match &event {
+        iced::keyboard::Event::KeyPressed { .. } => status == iced::event::Status::Ignored,
+        // A release must clear a press that began before focus moved into a
+        // text field. Unpaired releases are harmless in the adapter.
+        iced::keyboard::Event::KeyReleased { .. } => true,
+        iced::keyboard::Event::ModifiersChanged(modifiers) => {
+            status == iced::event::Status::Ignored || !modifiers.shift()
+        }
+    };
+    should_forward.then(|| Message::KeyboardInput {
+        event,
+        occurred_at: std::time::Instant::now(),
+    })
+}
+
+fn computer_key_from_physical(
+    physical: iced::keyboard::key::Physical,
+) -> Option<crate::domains::perform::ComputerKey> {
+    use crate::domains::perform::ComputerKey;
+    use iced::keyboard::key::Code;
+
+    let iced::keyboard::key::Physical::Code(code) = physical else {
+        return None;
+    };
+    Some(match code {
+        Code::Digit0 => ComputerKey::Digit0,
+        Code::Digit1 => ComputerKey::Digit1,
+        Code::Digit2 => ComputerKey::Digit2,
+        Code::Digit3 => ComputerKey::Digit3,
+        Code::Digit4 => ComputerKey::Digit4,
+        Code::Digit5 => ComputerKey::Digit5,
+        Code::Digit6 => ComputerKey::Digit6,
+        Code::Digit7 => ComputerKey::Digit7,
+        Code::Digit8 => ComputerKey::Digit8,
+        Code::Digit9 => ComputerKey::Digit9,
+        Code::KeyA => ComputerKey::A,
+        Code::KeyB => ComputerKey::B,
+        Code::KeyC => ComputerKey::C,
+        Code::KeyD => ComputerKey::D,
+        Code::KeyE => ComputerKey::E,
+        Code::KeyF => ComputerKey::F,
+        Code::KeyG => ComputerKey::G,
+        Code::KeyH => ComputerKey::H,
+        Code::KeyI => ComputerKey::I,
+        Code::KeyJ => ComputerKey::J,
+        Code::KeyK => ComputerKey::K,
+        Code::KeyL => ComputerKey::L,
+        Code::KeyM => ComputerKey::M,
+        Code::KeyN => ComputerKey::N,
+        Code::KeyO => ComputerKey::O,
+        Code::KeyP => ComputerKey::P,
+        Code::KeyQ => ComputerKey::Q,
+        Code::KeyR => ComputerKey::R,
+        Code::KeyS => ComputerKey::S,
+        Code::KeyT => ComputerKey::T,
+        Code::KeyU => ComputerKey::U,
+        Code::KeyV => ComputerKey::V,
+        Code::KeyW => ComputerKey::W,
+        Code::KeyX => ComputerKey::X,
+        Code::KeyY => ComputerKey::Y,
+        Code::KeyZ => ComputerKey::Z,
+        _ => return None,
+    })
+}
+
+fn runtime_key_id(key: &iced::keyboard::Key) -> String {
+    format!("{key:?}")
+}
+
+fn is_note_repeat_key(physical: iced::keyboard::key::Physical) -> bool {
+    matches!(
+        physical,
+        iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::KeyN)
+    )
+}
+
+fn is_note_repeat_release(
+    key: &iced::keyboard::Key,
+    key_id: &str,
+    momentary_key_id: Option<&str>,
+) -> bool {
+    momentary_key_id == Some(key_id)
+        || matches!(key, iced::keyboard::Key::Character(value) if value.eq_ignore_ascii_case("n"))
+}
+
+impl super::App {
+    pub(super) fn handle_keyboard_input(
+        &mut self,
+        event: iced::keyboard::Event,
+        occurred_at: std::time::Instant,
+    ) -> iced::Task<Message> {
+        use iced::keyboard::key::Named;
+
+        let (perform_msg, fallback) = match event {
+            iced::keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                modifiers,
+                ..
+            } => {
+                let edge_key_id = runtime_key_id(&key);
+                if self.state.perform.key_rebind_target.is_some()
+                    && matches!(key, iced::keyboard::Key::Named(Named::Escape))
+                {
+                    (Some(PerformMsg::CancelKeyRebind), None)
+                } else if self.state.perform.key_rebind_target.is_some()
+                    && is_note_repeat_key(physical_key)
+                {
+                    self.state.status_text = "N is reserved for Note Repeat".into();
+                    return iced::Task::none();
+                } else if is_note_repeat_key(physical_key)
+                    && modifiers.is_empty()
+                    && self.state.view.workspace == crate::state::Workspace::Perform
+                    && self.state.perform.mode == PerformMode::Instrument
+                {
+                    (
+                        Some(PerformMsg::SetNoteRepeatMomentary {
+                            active: true,
+                            key_id: Some(edge_key_id),
+                        }),
+                        None,
+                    )
+                } else if let Some(computer_key) = computer_key_from_physical(physical_key) {
+                    if modifiers.is_empty()
+                        || (self.state.perform.instrument_target_overlay
+                            && self.state.perform.mode == PerformMode::Instrument
+                            && modifiers == iced::keyboard::Modifiers::SHIFT)
+                        || self.state.perform.key_rebind_target.is_some()
+                    {
+                        (
+                            Some(PerformMsg::ComputerKeyPressed {
+                                key: computer_key,
+                                key_id: runtime_key_id(&key),
+                                occurred_at,
+                            }),
+                            Some((key, modifiers, edge_key_id)),
+                        )
+                    } else {
+                        (None, Some((key, modifiers, edge_key_id)))
+                    }
+                } else if self.state.perform.key_rebind_target.is_some() {
+                    self.state.status_text = "Perform keys must be letters or numbers".into();
+                    return iced::Task::none();
+                } else {
+                    (None, Some((key, modifiers, edge_key_id)))
+                }
+            }
+            iced::keyboard::Event::KeyReleased { key, .. } => {
+                let key_id = runtime_key_id(&key);
+                self.edge_shortcuts.release(&key_id, occurred_at);
+                if is_note_repeat_release(
+                    &key,
+                    &key_id,
+                    self.state.perform.note_repeat_momentary_key_id(),
+                ) {
+                    (
+                        Some(PerformMsg::SetNoteRepeatMomentary {
+                            active: false,
+                            key_id: None,
+                        }),
+                        None,
+                    )
+                } else {
+                    (
+                        Some(PerformMsg::ComputerKeyReleased {
+                            key_id,
+                            occurred_at,
+                        }),
+                        None,
+                    )
+                }
+            }
+            iced::keyboard::Event::ModifiersChanged(modifiers) => (
+                Some(PerformMsg::SetInstrumentTargetOverlay(modifiers.shift())),
+                None,
+            ),
+        };
+
+        if let Some(msg) = perform_msg {
+            let ctx = crate::domains::perform::PerformCtx {
+                workspace_visible: self.state.view.workspace == crate::state::Workspace::Perform,
+                project_tracks: &self.state.project_tracks.tracks,
+                selected_project_track: self.state.arrangement.selected_track,
+            };
+            let action = {
+                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                self.state.perform.update(msg, &mut engine, ctx)
+            };
+            let keyboard_consumed = action.keyboard_consumed;
+            let task = self.apply_perform_action(action);
+            if keyboard_consumed {
+                return task;
+            }
+        }
+
+        fallback
+            .and_then(|(key, modifiers, key_id)| {
+                let message = if self.state.view.workspace == crate::state::Workspace::Perform {
+                    perform_workspace_key_handler(&key, modifiers)
+                } else {
+                    None
+                }
+                .or_else(|| global_key_handler(key, modifiers))?;
+                self.edge_shortcuts
+                    .should_dispatch(&key_id, &message, occurred_at)
+                    .then_some(message)
+            })
+            .map_or_else(iced::Task::none, iced::Task::done)
+    }
+}
+
+fn perform_workspace_key_handler(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<Message> {
+    use iced::keyboard::key::Named;
+
+    if !modifiers.is_empty() {
+        return None;
+    }
+    match key {
+        iced::keyboard::Key::Named(Named::F4) => Some(Message::Perform(PerformMsg::SectionRecord(
+            SectionRecordMsg::Toggle,
+        ))),
+        iced::keyboard::Key::Named(Named::F5) => {
+            Some(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+        }
+        _ => None,
+    }
+}
 
 pub(crate) fn truncate_end(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
@@ -29,6 +302,28 @@ pub(crate) fn global_key_handler(
     // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
         return Some(Message::Transport(TransportMsg::TogglePlayback));
+    }
+
+    if modifiers.is_empty() {
+        let mode = match key {
+            iced::keyboard::Key::Named(Named::F1) => Some(PerformMode::Sections),
+            iced::keyboard::Key::Named(Named::F2) => Some(PerformMode::TrackMutes),
+            iced::keyboard::Key::Named(Named::F3) => Some(PerformMode::Instrument),
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            return Some(Message::Perform(PerformMsg::SelectMode(mode)));
+        }
+        if let iced::keyboard::Key::Character(ref character) = key {
+            let bank = match character.as_str() {
+                "[" => Some(PerformMsg::PreviousBank),
+                "]" => Some(PerformMsg::NextBank),
+                _ => None,
+            };
+            if let Some(bank) = bank {
+                return Some(Message::Perform(bank));
+            }
+        }
     }
 
     // Escape: the router stops Audition first, then falls back to cancel editing.
@@ -123,7 +418,7 @@ pub(crate) fn global_key_handler(
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
             "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
             "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
-            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClipsAtPlayhead)),
+            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClips)),
             "t" | "T" => {
                 if modifiers.shift() {
                     Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
@@ -131,7 +426,7 @@ pub(crate) fn global_key_handler(
                     Some(Message::Arrangement(ArrangementMsg::AddTrack))
                 }
             }
-            "m" => Some(Message::create_clip_from_selection()),
+            "m" | "M" => Some(Message::create_clip_from_selection()),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
             "l" | "L" => {
@@ -218,6 +513,52 @@ mod tests {
     }
 
     #[test]
+    fn create_clip_shortcut_accepts_shifted_m() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(
+                Key::Character("M".into()),
+                Modifiers::CTRL | Modifiers::SHIFT
+            ),
+            Some(Message::Arrangement(
+                ArrangementMsg::CreateClipFromSelection
+            ))
+        ));
+    }
+
+    #[test]
+    fn held_track_shortcut_dispatches_once_until_key_release() {
+        let mut state = EdgeShortcutState::default();
+        let add = Message::Arrangement(ArrangementMsg::AddInstrumentTrack);
+        let started = std::time::Instant::now();
+
+        assert!(state.should_dispatch("Character(\"T\")", &add, started));
+        assert!(!state.should_dispatch("Character(\"T\")", &add, started));
+
+        // X11 auto-repeat is delivered as a synthetic release/press pair.
+        state.release(
+            "Character(\"T\")",
+            started + std::time::Duration::from_millis(500),
+        );
+        assert!(!state.should_dispatch(
+            "Character(\"T\")",
+            &add,
+            started + std::time::Duration::from_millis(501),
+        ));
+
+        state.release(
+            "Character(\"T\")",
+            started + std::time::Duration::from_millis(900),
+        );
+        assert!(state.should_dispatch(
+            "Character(\"T\")",
+            &add,
+            started + std::time::Duration::from_millis(1_000),
+        ));
+    }
+
+    #[test]
     fn enter_is_always_arrangement_import() {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
@@ -258,5 +599,145 @@ mod tests {
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
             Some(Message::EscapePressed)
         ));
+    }
+
+    #[test]
+    fn function_keys_select_the_three_perform_modes() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        let expected = [
+            (Named::F1, PerformMode::Sections),
+            (Named::F2, PerformMode::TrackMutes),
+            (Named::F3, PerformMode::Instrument),
+        ];
+        for (key, expected_mode) in expected {
+            assert!(matches!(
+                global_key_handler(Key::Named(key), Modifiers::empty()),
+                Some(Message::Perform(PerformMsg::SelectMode(mode))) if mode == expected_mode
+            ));
+        }
+
+        assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn f4_and_f5_toggle_recording_controls_only_without_modifiers_in_perform() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::SectionRecord(
+                SectionRecordMsg::Toggle
+            )))
+        ));
+        assert!(perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::SHIFT).is_none());
+        assert!(global_key_handler(Key::Named(Named::F4), Modifiers::empty()).is_none());
+        assert!(matches!(
+            perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
+        ));
+        assert!(perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::ALT).is_none());
+        assert!(global_key_handler(Key::Named(Named::F5), Modifiers::empty()).is_none());
+    }
+
+    #[test]
+    fn brackets_navigate_the_active_perform_mode_bank() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Character("[".into()), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::PreviousBank))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("]".into()), Modifiers::empty()),
+            Some(Message::Perform(PerformMsg::NextBank))
+        ));
+        assert!(global_key_handler(Key::Character("]".into()), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn physical_n_is_the_momentary_note_repeat_control() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::Key;
+
+        assert!(is_note_repeat_key(Physical::Code(Code::KeyN)));
+        assert!(!is_note_repeat_key(Physical::Code(Code::KeyM)));
+        let n = Key::Character("n".into());
+        let n_id = runtime_key_id(&n);
+        assert!(is_note_repeat_release(&n, &n_id, None));
+        let upper_n = Key::Character("N".into());
+        let upper_n_id = runtime_key_id(&upper_n);
+        assert!(is_note_repeat_release(&upper_n, &upper_n_id, None));
+
+        let non_qwerty_logical_key = Key::Character("j".into());
+        let non_qwerty_id = runtime_key_id(&non_qwerty_logical_key);
+        assert!(is_note_repeat_release(
+            &non_qwerty_logical_key,
+            &non_qwerty_id,
+            Some(&non_qwerty_id),
+        ));
+        assert!(!is_note_repeat_release(
+            &non_qwerty_logical_key,
+            &non_qwerty_id,
+            None,
+        ));
+    }
+
+    #[test]
+    fn text_field_capture_suppresses_computer_pad_presses() {
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Event, Key, Location, Modifiers};
+
+        let event = Event::KeyPressed {
+            key: Key::Character("q".into()),
+            modified_key: Key::Character("q".into()),
+            physical_key: Physical::Code(Code::KeyQ),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: Some("q".into()),
+        };
+
+        assert!(keyboard_input_message(event.clone(), iced::event::Status::Captured).is_none());
+        assert!(matches!(
+            keyboard_input_message(event, iced::event::Status::Ignored),
+            Some(Message::KeyboardInput { .. })
+        ));
+    }
+
+    #[test]
+    fn uncaptured_shift_changes_reach_the_instrument_target_overlay() {
+        use iced::keyboard::{Event, Modifiers};
+
+        assert!(matches!(
+            keyboard_input_message(
+                Event::ModifiersChanged(Modifiers::SHIFT),
+                iced::event::Status::Ignored,
+            ),
+            Some(Message::KeyboardInput {
+                event: Event::ModifiersChanged(modifiers),
+                ..
+            }) if modifiers.shift()
+        ));
+        assert!(keyboard_input_message(
+            Event::ModifiersChanged(Modifiers::SHIFT),
+            iced::event::Status::Captured,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn repeated_t_taps_dispatch_while_control_stays_held() {
+        let mut state = EdgeShortcutState::default();
+        let add = Message::Arrangement(ArrangementMsg::AddTrack);
+        let started = std::time::Instant::now();
+
+        for tap in 0..4 {
+            let pressed_at = started + std::time::Duration::from_millis(tap * 300);
+            assert!(state.should_dispatch("Character(\"t\")", &add, pressed_at));
+            state.release(
+                "Character(\"t\")",
+                pressed_at + std::time::Duration::from_millis(100),
+            );
+        }
     }
 }

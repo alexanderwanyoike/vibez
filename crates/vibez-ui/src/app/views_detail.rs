@@ -10,7 +10,8 @@ use iced::{Color, Element, Length, Theme};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
-use vibez_core::id::{ClipId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
+use vibez_core::perform::GrooveGrid;
 
 use crate::icons;
 use crate::message::Message;
@@ -21,13 +22,38 @@ use crate::widgets::piano_roll::PianoRollWidget;
 
 use super::*;
 
+const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
+const STATUS_BAR_HEIGHT: f32 = 24.0;
+
+fn resolved_detail_playhead_samples(
+    editing_perform: bool,
+    selected_section: Option<SectionId>,
+    playing_section: Option<SectionId>,
+    arrange_samples: u64,
+    section_samples: u64,
+) -> Option<u64> {
+    if !editing_perform {
+        return Some(arrange_samples);
+    }
+    selected_section
+        .filter(|selected| Some(*selected) == playing_section)
+        .map(|_| section_samples)
+}
+
+fn effective_detail_panel_height(preferred_height: f32, window_height: f32) -> f32 {
+    let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
+    preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
+}
+
 impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
+        let editor = self.state.active_timeline_editor();
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
-            .arrangement
+            .active_timeline_editor()
             .selected_track
             .and_then(|id| self.state.find_track(id))
         {
@@ -97,34 +123,36 @@ impl App {
                     let is_midi = track.kind.is_midi();
                     // Check for note clip selection on this MIDI track
                     let has_note_clip = is_midi
-                        && (self.state.arrangement.selected_clips.iter().any(|s| {
+                        && (editor.selected_clips.iter().any(|s| {
                             matches!(s, ArrangementSelection::NoteClip { track_id: tid, .. } if *tid == track_id)
                         }) || self
                             .state
-                            .arrangement
+                            .active_timeline_editor()
                             .selected_note_clip
                             .is_some_and(|(tid, _)| tid == track_id));
 
                     if has_note_clip {
                         self.view_piano_roll_panel(track_id, track_color)
+                    } else if is_midi {
+                        self.view_midi_track_clip_placeholder(track_id, track_color)
                     } else {
                         // Find a single selected audio clip on this track
-                        let audio_sel =
-                            self.state
-                                .arrangement
-                                .selected_clips
-                                .iter()
-                                .find_map(|s| match s {
-                                    ArrangementSelection::AudioClip {
-                                        track_id: tid,
-                                        clip_id: cid,
-                                    } if *tid == track_id => Some(*cid),
-                                    _ => None,
-                                });
+                        let audio_sel = self
+                            .state
+                            .active_timeline_editor()
+                            .selected_clips
+                            .iter()
+                            .find_map(|s| match s {
+                                ArrangementSelection::AudioClip {
+                                    track_id: tid,
+                                    clip_id: cid,
+                                } if *tid == track_id => Some(*cid),
+                                _ => None,
+                            });
                         if let Some(sel_cid) = audio_sel {
                             if let Some(clip) = self
                                 .state
-                                .arrange_content(track_id)
+                                .active_timeline_content(track_id)
                                 .and_then(|content| content.clips.iter().find(|c| c.id == sel_cid))
                             {
                                 self.view_audio_clip_panel(track_id, clip, track_color)
@@ -150,19 +178,13 @@ impl App {
                 .into()
         };
 
-        // Ableton-style panel heights: the Devices tab is a FIXED
-        // strip that device cards are designed to fit exactly (the
-        // arrangement flexes instead); the Clip tab keeps flexible
-        // height for the piano roll. Window-fraction heights clipped
-        // cards or demanded ugly vertical scrollbars.
-        let panel_height = if self.state.view.detail_panel_tab == DetailPanelTab::Devices {
-            Length::Fixed(th::DEVICE_BODY_H + 96.0)
-        } else {
-            Length::FillPortion(2)
-        };
+        let panel_height = effective_detail_panel_height(
+            self.state.view.detail_panel_height,
+            self.state.view.window_height,
+        );
         container(detail_content)
             .width(Length::Fill)
-            .height(panel_height)
+            .height(Length::Fixed(panel_height))
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_dark().into()),
                 border: iced::Border {
@@ -173,6 +195,13 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
+        effective_detail_panel_height(
+            self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
+            self.state.view.window_height,
+        )
     }
 
     pub(super) fn view_clip_placeholder(&self) -> Element<'_, Message> {
@@ -193,14 +222,25 @@ impl App {
     ) -> Element<'_, Message> {
         use crate::state::PianoRollEditMode;
 
-        let playhead_beats = self.state.position_beats();
+        let playhead_beats = resolved_detail_playhead_samples(
+            self.state.view.workspace == crate::state::Workspace::Perform,
+            self.state.perform.selected_section,
+            self.state.perform.playing_section,
+            self.state.transport.position_samples,
+            self.state.perform.section_playhead_samples,
+        )
+        .map(|samples| {
+            samples as f64 * self.state.transport.bpm
+                / (f64::from(self.state.transport.sample_rate.max(1)) * 60.0)
+        })
+        .unwrap_or(-1.0);
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
-        let clip_data: Option<(String, f64, f64, bool, TrackId, ClipId)> =
-            if let Some((tid, cid)) = self.state.arrangement.selected_note_clip {
+        let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> =
+            if let Some((tid, cid)) = self.state.active_timeline_editor().selected_note_clip {
                 if tid == track_id {
                     self.state
-                        .arrange_content(track_id)
+                        .active_timeline_content(track_id)
                         .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
                         .map(|c| {
                             (
@@ -208,6 +248,7 @@ impl App {
                                 c.position_beats,
                                 c.duration_beats,
                                 c.loop_enabled,
+                                c.groove_grid,
                                 tid,
                                 cid,
                             )
@@ -220,8 +261,8 @@ impl App {
             };
 
         let piano_widget = if let Some(ref cd) = clip_data {
-            if let Some(content) = self.state.arrange_content(track_id) {
-                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.5) {
+            if let Some(content) = self.state.active_timeline_content(track_id) {
+                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.6) {
                     let clip_relative_playhead = playhead_beats - clip.position_beats;
                     PianoRollWidget::from_clip(
                         track_id,
@@ -251,7 +292,9 @@ impl App {
         // ── Clip properties bar (shown when a clip is selected) ──
         let mut content_col = column![].spacing(2).padding(4);
 
-        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, tid, cid)) = clip_data {
+        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, groove_grid, tid, cid)) =
+            clip_data
+        {
             let clip_name = text(clip_name_str.clone()).size(11).color(th::text());
             let pos_label = text(format!("Pos: {clip_pos:.1}"))
                 .size(10)
@@ -259,6 +302,9 @@ impl App {
             let dur_label = text(format!("Dur: {clip_dur:.1}"))
                 .size(10)
                 .color(th::text_dim());
+
+            let swing_relationship =
+                self.view_clip_swing_relationship(tid, track_color, Some((cid, groove_grid)));
 
             // Loop toggle
             let loop_icon_color = if clip_loop {
@@ -337,7 +383,15 @@ impl App {
             .style(op_btn_style);
 
             let props_row = row![
-                clip_name, pos_label, dur_label, loop_btn, dup_btn, double_btn, halve_btn,
+                clip_name,
+                swing_relationship,
+                horizontal_space(),
+                pos_label,
+                dur_label,
+                loop_btn,
+                dup_btn,
+                double_btn,
+                halve_btn,
                 crop_btn,
             ]
             .spacing(6)
@@ -445,15 +499,21 @@ impl App {
         clip: &UiClip,
         track_color: Color,
     ) -> Element<'_, Message> {
-        let playhead_samples = self.state.transport.position_samples;
-        let playhead_normalized = if clip.duration > 0
-            && playhead_samples >= clip.position
-            && playhead_samples < clip.position + clip.duration
-        {
-            (playhead_samples - clip.position) as f64 / clip.duration as f64
-        } else {
-            -1.0
-        };
+        let playhead_samples = resolved_detail_playhead_samples(
+            self.state.view.workspace == crate::state::Workspace::Perform,
+            self.state.perform.selected_section,
+            self.state.perform.playing_section,
+            self.state.transport.position_samples,
+            self.state.perform.section_playhead_samples,
+        );
+        let playhead_normalized = playhead_samples
+            .filter(|playhead| {
+                clip.duration > 0
+                    && *playhead >= clip.position
+                    && *playhead < clip.position + clip.duration
+            })
+            .map(|playhead| (playhead - clip.position) as f64 / clip.duration as f64)
+            .unwrap_or(-1.0);
 
         let waveform_widget = AudioClipDetailWidget {
             audio: Arc::clone(&clip.audio),
@@ -662,5 +722,38 @@ impl App {
         .spacing(6)
         .align_y(iced::Alignment::Center)
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{effective_detail_panel_height, resolved_detail_playhead_samples};
+    use vibez_core::id::SectionId;
+
+    #[test]
+    fn detail_panel_height_preserves_the_workspace_at_small_windows() {
+        assert_eq!(effective_detail_panel_height(80.0, 900.0), 180.0);
+        assert_eq!(effective_detail_panel_height(360.0, 900.0), 360.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0), 540.0);
+        assert_eq!(effective_detail_panel_height(320.0, 520.0), 180.0);
+    }
+
+    #[test]
+    fn detail_playhead_resolves_arrange_and_section_clocks_without_crossing_targets() {
+        let playing = SectionId::new();
+        let other = SectionId::new();
+
+        assert_eq!(
+            resolved_detail_playhead_samples(false, None, None, 96_000, 12_000),
+            Some(96_000)
+        );
+        assert_eq!(
+            resolved_detail_playhead_samples(true, Some(playing), Some(playing), 96_000, 12_000,),
+            Some(12_000)
+        );
+        assert_eq!(
+            resolved_detail_playhead_samples(true, Some(other), Some(playing), 96_000, 12_000,),
+            None
+        );
     }
 }

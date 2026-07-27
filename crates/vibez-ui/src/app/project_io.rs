@@ -9,23 +9,55 @@ use iced::Task;
 
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
-use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef, TrackInfo};
+use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
 
-use vibez_project::Project;
+use vibez_project::{Project, TimelineLocation};
 
 use crate::message::{Message, ProjectLoadResult};
-use crate::state::{ProjectTrack, UiClip, UiDrumPad, UiEffect, UiNoteClip};
+use crate::state::{ProjectTrack, UiDrumPad, UiEffect, UiNoteClip};
 use crate::ui_settings::UiSettings;
 
 use super::*;
+
+pub(super) enum ExportPluginLoadEvent {
+    Effect(crate::services::plugin_loader::PluginLoadResult),
+    Instrument(crate::services::plugin_loader::PluginInstrumentLoadResult),
+    Failed(String),
+    Finished,
+}
+
+type ExportEffectRequest = (TrackId, EffectId, vibez_core::effect::PluginDeviceInfo);
+type ExportInstrumentRequest = (TrackId, vibez_core::effect::PluginDeviceInfo);
+
+pub(super) struct ExportJob {
+    request: Option<vibez_engine::render::BounceRequest>,
+    path: PathBuf,
+    receiver: std::sync::mpsc::Receiver<ExportPluginLoadEvent>,
+    plugins: vibez_engine::render::OfflinePlugins,
+    expected_plugins: usize,
+    prepared_plugins: usize,
+    loader_finished: bool,
+}
+
+fn plugin_instrument_for_replay(track: &TrackInfo) -> Option<vibez_core::effect::PluginDeviceInfo> {
+    // Native and plugin instruments are mutually exclusive. Older projects
+    // written by the replacement bug may contain both; prefer the complete
+    // native state so its sampler media cannot be shadowed by a stale plugin.
+    track
+        .instrument
+        .is_none()
+        .then(|| track.plugin_instrument.clone())
+        .flatten()
+}
 
 impl App {
     pub(super) fn clear_project_runtime(&mut self) {
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
-        self.browser_import_generation = self.browser_import_generation.wrapping_add(1);
+        self.browser_import_request.cancel();
+        self.section_residency_request.cancel();
         self.stop_browser_audition();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
@@ -56,6 +88,12 @@ impl App {
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
+        self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
+        self.state.perform.selected_section = None;
+        self.state.perform.section_editor.clear();
+        self.state.perform.editing_section_name = None;
+        self.state.perform.section_name_edit.clear();
+        self.state.perform.duplicate_source = None;
         self.reset_master_channel();
         // The engine drops all plugin instances with their tracks;
         // their GUI windows and stale raw pointers must go with them
@@ -191,23 +229,24 @@ impl App {
     }
 
     pub(super) fn reset_to_new_project(&mut self) {
-        if let Some(handle) = self.remote_import_abort.take() {
-            handle.abort();
-            self.remote_import_request_id = self.remote_import_request_id.saturating_add(1);
-            self.remote_import_in_flight = None;
-        }
-        if let Some(handle) = self.remote_materialization_abort.take() {
-            handle.abort();
-            self.remote_materialization_request_id =
-                self.remote_materialization_request_id.saturating_add(1);
-        }
+        self.remote_import_request.cancel();
+        self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
         let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
         self.clear_project_runtime();
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
         self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
+        self.state
+            .perform
+            .set_project_swing(vibez_core::perform::SwingAmount::default());
         self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
+        self.send_command(EngineCommand::SetProjectSwing(
+            vibez_core::perform::SwingAmount::default(),
+        ));
         self.state.project.current_path = None;
         self.state.project.dirty = false;
         self.state.project.history.clear();
@@ -216,9 +255,14 @@ impl App {
 
     pub(super) fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
+            perform_input_mapping: self.state.perform.input_mapping.clone(),
+            fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
+            track_mute_quantization: self.state.perform.track_mute_quantization(),
             sample_library_roots: self.state.browser.roots.clone(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,
+            perform_surface_width: self.state.view.perform_surface_width,
+            detail_panel_height: self.state.view.detail_panel_height,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
             audition_loop: self.state.browser.audition_loop,
@@ -228,6 +272,7 @@ impl App {
             theme: Some(self.state.current_theme_name.clone()),
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
+            confirm_project_track_deletion: self.state.confirm_project_track_deletion,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -257,12 +302,18 @@ impl App {
             })
             .collect();
 
-        let plugin_instrument = track.plugin_instrument_ref.as_ref().map(|dev| {
-            let mut dev = dev.clone();
-            dev.state_b64 =
-                self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
-            dev
-        });
+        let plugin_instrument = track
+            .instrument_kind
+            .is_none()
+            .then(|| {
+                track.plugin_instrument_ref.as_ref().map(|dev| {
+                    let mut dev = dev.clone();
+                    dev.state_b64 =
+                        self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id });
+                    dev
+                })
+            })
+            .flatten();
 
         let native_instrument = match track.instrument_kind {
             Some(InstrumentKind::SubtractiveSynth) => Some(InstrumentStateInfo::SubtractiveSynth {
@@ -289,17 +340,14 @@ impl App {
             pan: track.pan,
             mute: track.mute,
             solo: track.solo,
+            swing_offset: track.swing_offset,
             effects,
             kind: track.kind,
             color_index: track.color_index,
             instrument: track.instrument_kind,
             native_instrument,
             plugin_instrument,
-            automation: self
-                .state
-                .arrange_content(track.id)
-                .map(|content| content.automation.clone())
-                .unwrap_or_default(),
+            automation: Vec::new(),
             sends: track.sends.clone(),
         }
     }
@@ -322,69 +370,6 @@ impl App {
             .map(|track| self.track_info_from_ui(track))
             .collect();
 
-        let clips = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .flat_map(|track| {
-                self.state
-                    .arrange_content(track.id)
-                    .into_iter()
-                    .flat_map(move |content| {
-                        content.clips.iter().map(move |clip| ClipInfo {
-                            id: clip.id,
-                            track_id: track.id,
-                            name: clip.name.clone(),
-                            position: clip.position,
-                            source_offset: clip.source_offset,
-                            duration: clip.duration,
-                            source: clip.source.clone(),
-                            file_path: clip.source.as_ref().and_then(|source| match source {
-                                MediaSourceRef::LocalFile { path } => Some(path.clone()),
-                                MediaSourceRef::StagedProjectMedia { .. }
-                                | MediaSourceRef::StagedRemoteProjectMedia { .. }
-                                | MediaSourceRef::ProjectMedia { .. }
-                                | MediaSourceRef::DropboxFile { .. } => None,
-                            }),
-                            loop_enabled: clip.loop_enabled,
-                            loop_start: clip.loop_start,
-                            loop_end: clip.loop_end,
-                            original_bpm: clip.original_bpm,
-                            warped: clip.warped,
-                            warped_to_bpm: clip.warped_to_bpm,
-                        })
-                    })
-            })
-            .collect();
-
-        let note_clips =
-            self.state
-                .project_tracks
-                .tracks
-                .iter()
-                .flat_map(|track| {
-                    self.state
-                        .arrange_content(track.id)
-                        .into_iter()
-                        .flat_map(move |content| {
-                            content.note_clips.iter().map(move |clip| {
-                                vibez_core::midi::NoteClipInfo {
-                                    id: clip.id,
-                                    track_id: track.id,
-                                    name: clip.name.clone(),
-                                    position_beats: clip.position_beats,
-                                    duration_beats: clip.duration_beats,
-                                    notes: clip.notes.clone(),
-                                    loop_enabled: clip.loop_enabled,
-                                    loop_start_beats: clip.loop_start_beats,
-                                    loop_end_beats: clip.loop_end_beats,
-                                }
-                            })
-                        })
-                })
-                .collect();
-
         Project {
             name: self
                 .state
@@ -395,10 +380,13 @@ impl App {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Untitled".to_string()),
             bpm: self.state.transport.bpm,
+            groove_profile: vibez_core::perform::GrooveProfile::default(),
+            swing: self.state.perform.project_swing(),
             sample_rate: self.state.transport.sample_rate,
             tracks,
-            clips,
-            note_clips,
+            arrange: super::project_sections::timeline_info_from_ui(
+                &self.state.arrangement.timeline,
+            ),
             master: Some(self.track_info_from_ui(&self.state.project_tracks.master)),
             buses: self
                 .state
@@ -406,6 +394,14 @@ impl App {
                 .buses
                 .iter()
                 .map(|bus| self.track_info_from_ui(bus))
+                .collect(),
+            sections: self
+                .state
+                .perform
+                .sections
+                .sections
+                .iter()
+                .map(super::project_sections::section_info_from_ui)
                 .collect(),
         }
     }
@@ -416,22 +412,20 @@ impl App {
     /// clips have no audio to render.
     pub(super) fn project_for_save(&self) -> Project {
         let mut project = self.project_from_state();
-        project
-            .clips
-            .extend(self.state.project.unresolved_clips.iter().cloned());
+        for unresolved in &self.state.project.unresolved_clips {
+            if let Some(timeline) = project.timeline_mut(unresolved.location) {
+                timeline.clips.push(unresolved.info.clone());
+            }
+        }
         project
     }
 
     pub(super) fn apply_saved_project_sources(&mut self, project: &Project) {
-        for saved_clip in &project.clips {
-            if let Some(clip) = self
-                .state
-                .arrange_content_mut(saved_clip.track_id)
-                .clips
-                .iter_mut()
-                .find(|clip| clip.id == saved_clip.id)
+        for (location, saved) in project.timelines() {
+            if let Some(timeline) =
+                super::project_sections::runtime_timeline_mut(&mut self.state, location)
             {
-                clip.source = saved_clip.source.clone();
+                super::project_sections::apply_timeline_sources(Arc::make_mut(timeline), saved);
             }
         }
         for saved_track in &project.tracks {
@@ -456,31 +450,16 @@ impl App {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
+        self.state.perform.sections = Arc::new(
+            super::project_sections::section_store_from_project(&loaded.project.sections),
+        );
 
         // Seed the global id counter past every persisted id BEFORE
         // anything new is created: loaded ids come from a previous
         // session's counter, and a collision makes two objects
         // answer to the same id (double selection, engine commands
         // hitting both).
-        let max_loaded_id = loaded
-            .project
-            .tracks
-            .iter()
-            .flat_map(|t| std::iter::once(t.id.raw()).chain(t.effects.iter().map(|e| e.id.raw())))
-            .chain(loaded.project.clips.iter().map(|c| c.id.raw()))
-            .chain(loaded.project.note_clips.iter().map(|c| c.id.raw()))
-            .chain(
-                loaded
-                    .project
-                    .master
-                    .iter()
-                    .chain(loaded.project.buses.iter())
-                    .flat_map(|m| {
-                        std::iter::once(m.id.raw()).chain(m.effects.iter().map(|e| e.id.raw()))
-                    }),
-            )
-            .max()
-            .unwrap_or(0);
+        let max_loaded_id = loaded.project.max_persisted_id();
         vibez_core::id::ensure_ids_above(max_loaded_id);
         // Third-party plugin devices load asynchronously after the
         // built-in rebuild; collected here, spawned at the end.
@@ -495,7 +474,9 @@ impl App {
         self.state.project.history.clear();
         self.state.transport.bpm = loaded.project.bpm;
         self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
+        self.state.perform.set_project_swing(loaded.project.swing);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
+        self.send_command(EngineCommand::SetProjectSwing(loaded.project.swing));
 
         for track_info in &loaded.project.tracks {
             let mut track = ProjectTrack::new_instrument(
@@ -508,12 +489,16 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
-            self.state.arrange_content_mut(track_info.id).automation =
-                track_info.automation.clone();
+            track.swing_offset = track_info.swing_offset;
+            let automation = super::project_sections::legacy_automation_for_track(
+                &loaded.project,
+                track_info.id,
+            );
+            self.state.arrange_content_mut(track_info.id).automation = automation.clone();
             track.instrument_kind = track_info.instrument;
             track.has_instrument = track_info.instrument.is_some();
-            if let Some(dev) = &track_info.plugin_instrument {
-                plugin_instrument_requests.push((track_info.id, dev.clone()));
+            if let Some(dev) = plugin_instrument_for_replay(track_info) {
+                plugin_instrument_requests.push((track_info.id, dev));
             }
 
             match track.kind {
@@ -535,6 +520,10 @@ impl App {
             self.send_command(EngineCommand::SetTrackPan(track_info.id, track_info.pan));
             self.send_command(EngineCommand::SetTrackMute(track_info.id, track_info.mute));
             self.send_command(EngineCommand::SetTrackSolo(track_info.id, track_info.solo));
+            self.send_command(EngineCommand::SetTrackSwingOffset(
+                track_info.id,
+                track_info.swing_offset,
+            ));
 
             if let Some(kind) = track_info.instrument {
                 self.send_command(EngineCommand::SetTrackInstrument(track_info.id, kind));
@@ -578,7 +567,7 @@ impl App {
                 }
             }
 
-            for lane in &track_info.automation {
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track_info.id,
                     lane: lane.clone(),
@@ -694,9 +683,12 @@ impl App {
                 &mut plugin_effect_requests,
             );
             Arc::make_mut(&mut self.state.project_tracks).master.effects = effects;
-            self.state.arrange_content_mut(TrackId::MASTER).automation =
-                master_info.automation.clone();
-            for lane in &master_info.automation {
+            let automation = super::project_sections::legacy_automation_for_track(
+                &loaded.project,
+                TrackId::MASTER,
+            );
+            self.state.arrange_content_mut(TrackId::MASTER).automation = automation.clone();
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: TrackId::MASTER,
                     lane: lane.clone(),
@@ -724,8 +716,10 @@ impl App {
                 bus_info.id,
                 &mut plugin_effect_requests,
             );
-            self.state.arrange_content_mut(bus_info.id).automation = bus_info.automation.clone();
-            for lane in &bus_info.automation {
+            let automation =
+                super::project_sections::legacy_automation_for_track(&loaded.project, bus_info.id);
+            self.state.arrange_content_mut(bus_info.id).automation = automation.clone();
+            for lane in &automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: bus_info.id,
                     lane: lane.clone(),
@@ -738,42 +732,31 @@ impl App {
         }
 
         for loaded_clip in loaded.clips {
-            self.send_command(EngineCommand::AddClip {
-                track_id: loaded_clip.info.track_id,
-                clip_id: loaded_clip.info.id,
-                audio: Arc::clone(&loaded_clip.audio),
-                position: loaded_clip.info.position,
-                source_offset: loaded_clip.info.source_offset,
-                duration: loaded_clip.info.duration,
-                loop_enabled: loaded_clip.info.loop_enabled,
-                loop_start: loaded_clip.info.loop_start,
-                loop_end: loaded_clip.info.loop_end,
-            });
-
-            if self.state.find_track(loaded_clip.info.track_id).is_some() {
-                self.state
-                    .arrange_content_mut(loaded_clip.info.track_id)
-                    .clips
-                    .push(UiClip {
-                        id: loaded_clip.info.id,
-                        name: loaded_clip.info.name,
-                        audio: loaded_clip.audio,
-                        source: loaded_clip.info.source.clone(),
-                        position: loaded_clip.info.position,
-                        source_offset: loaded_clip.info.source_offset,
-                        duration: loaded_clip.info.duration,
-                        loop_enabled: loaded_clip.info.loop_enabled,
-                        loop_start: loaded_clip.info.loop_start,
-                        loop_end: loaded_clip.info.loop_end,
-                        original_bpm: loaded_clip.info.original_bpm,
-                        warped: loaded_clip.info.warped,
-                        warped_to_bpm: loaded_clip.info.warped_to_bpm,
-                        original_audio: loaded_clip.original_audio,
-                    });
+            let location = loaded_clip.location;
+            let clip = loaded_clip.clip;
+            if location == TimelineLocation::Arrange {
+                self.send_command(EngineCommand::AddClip {
+                    track_id: clip.info.track_id,
+                    clip_id: clip.info.id,
+                    audio: Arc::clone(&clip.audio),
+                    position: clip.info.position,
+                    source_offset: clip.info.source_offset,
+                    duration: clip.info.duration,
+                    loop_enabled: clip.info.loop_enabled,
+                    loop_start: clip.info.loop_start,
+                    loop_end: clip.info.loop_end,
+                });
+            }
+            if self.state.find_track(clip.info.track_id).is_some() {
+                if let Some(timeline) =
+                    super::project_sections::runtime_timeline_mut(&mut self.state, location)
+                {
+                    super::project_sections::install_loaded_clip(Arc::make_mut(timeline), clip);
+                }
             }
         }
 
-        for note_clip in &loaded.project.note_clips {
+        for note_clip in &loaded.project.arrange.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
                 track_id: note_clip.track_id,
                 clip_id: note_clip.id,
@@ -782,6 +765,7 @@ impl App {
                 loop_enabled: note_clip.loop_enabled,
                 loop_start_beats: note_clip.loop_start_beats,
                 loop_end_beats: note_clip.loop_end_beats,
+                groove_grid: note_clip.groove_grid,
             });
             for note in &note_clip.notes {
                 self.send_command(EngineCommand::AddNote {
@@ -804,6 +788,7 @@ impl App {
                         loop_enabled: note_clip.loop_enabled,
                         loop_start_beats: note_clip.loop_start_beats,
                         loop_end_beats: note_clip.loop_end_beats,
+                        groove_grid: note_clip.groove_grid,
                     });
             }
         }
@@ -848,6 +833,27 @@ impl App {
             .tracks
             .first()
             .map(|track| track.id);
+        self.state.perform.selected_section = self
+            .state
+            .perform
+            .sections
+            .sections
+            .first()
+            .map(|section| section.id);
+        self.state
+            .perform
+            .sync_selected_section_editor(self.state.arrangement.selected_track);
+        self.state.perform.section_name_edit = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id))
+            .map(|section| section.name.clone())
+            .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
         let provenance_suffix = remote_provenance
@@ -894,6 +900,10 @@ impl App {
     }
 
     pub(super) fn handle_export_path_selected(&mut self, path: Option<PathBuf>) -> Task<Message> {
+        if self.export_job.is_some() || self.export_render_progress.is_some() {
+            self.state.status_text = "An export is already in progress".to_string();
+            return Task::none();
+        }
         let Some(mut path) = path else {
             return Task::none();
         };
@@ -913,8 +923,8 @@ impl App {
             tracks: project.tracks,
             master: project.master,
             buses: project.buses,
-            audio_clips: project.clips,
-            note_clips: project.note_clips,
+            audio_clips: project.arrange.clips,
+            note_clips: project.arrange.note_clips,
             clip_audio: assets.clips,
             sampler_audio: assets.samplers,
             drum_pad_audio: assets.pads,
@@ -922,10 +932,247 @@ impl App {
             range_samples: (0, total),
             bpm,
             sample_rate,
+            swing: project.swing,
         };
-        self.state.status_text = format!("Exporting to {}...", path.display());
-        Task::perform(export_async(request, path), Message::ExportComplete)
+        let (effect_requests, instrument_requests) = export_plugin_requests(&request);
+        let expected_plugins = effect_requests.len() + instrument_requests.len();
+        self.state.export_progress = Some(0);
+        self.state.status_text = if expected_plugins == 0 {
+            format!("Exporting… 0% · {}", path.display())
+        } else {
+            format!("Preparing {expected_plugins} plugin(s)… 0%")
+        };
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        spawn_export_plugin_preflight(
+            effect_requests,
+            instrument_requests,
+            sender,
+            sample_rate as f64,
+        );
+        self.export_job = Some(ExportJob {
+            request: Some(request),
+            path,
+            receiver,
+            plugins: vibez_engine::render::OfflinePlugins::default(),
+            expected_plugins,
+            prepared_plugins: 0,
+            loader_finished: false,
+        });
+        Task::none()
     }
+
+    pub(super) fn poll_export(&mut self) -> Task<Message> {
+        use std::sync::atomic::Ordering;
+
+        if let Some(progress) = &self.export_render_progress {
+            let percent = progress.load(Ordering::Relaxed).min(100);
+            self.state.export_progress = Some(percent);
+            self.state.status_text = format!("Exporting… {percent}%");
+            return Task::none();
+        }
+
+        let Some(mut job) = self.export_job.take() else {
+            return Task::none();
+        };
+        let mut failure = None;
+        match job.receiver.try_recv() {
+            Ok(ExportPluginLoadEvent::Effect(mut loaded)) => {
+                let label = loaded.plugin_name.clone();
+                match crate::services::plugin_loader::finish_effect_init_for_export(&mut loaded) {
+                    Ok(Some(effect)) => {
+                        job.plugins.effects.insert(loaded.effect_id, effect);
+                        job.prepared_plugins += 1;
+                    }
+                    Ok(None) => failure = Some(format!("{label} produced no effect instance")),
+                    Err(error) => failure = Some(format!("{label}: {error}")),
+                }
+            }
+            Ok(ExportPluginLoadEvent::Instrument(mut loaded)) => {
+                let label = loaded.plugin_name.clone();
+                match crate::services::plugin_loader::finish_instrument_init_for_export(&mut loaded)
+                {
+                    Ok(Some(instrument)) => {
+                        job.plugins.instruments.insert(loaded.track_id, instrument);
+                        job.prepared_plugins += 1;
+                    }
+                    Ok(None) => failure = Some(format!("{label} produced no instrument instance")),
+                    Err(error) => failure = Some(format!("{label}: {error}")),
+                }
+            }
+            Ok(ExportPluginLoadEvent::Failed(error)) => {
+                failure = Some(error);
+            }
+            Ok(ExportPluginLoadEvent::Finished) => {
+                job.loader_finished = true;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                if !job.loader_finished {
+                    failure = Some("plugin preparation stopped unexpectedly".to_string());
+                }
+            }
+        }
+
+        if let Some(error) = failure {
+            self.state.export_progress = None;
+            self.state.status_text =
+                format!("Export failed — {error}. No destination WAV was written.");
+            return Task::none();
+        }
+
+        if !job.loader_finished || job.prepared_plugins != job.expected_plugins {
+            let percent = job
+                .prepared_plugins
+                .saturating_mul(10)
+                .checked_div(job.expected_plugins)
+                .unwrap_or(0)
+                .min(10) as u8;
+            self.state.export_progress = Some(percent);
+            self.state.status_text = format!(
+                "Preparing plugins… {}/{} · {percent}%",
+                job.prepared_plugins, job.expected_plugins
+            );
+            self.export_job = Some(job);
+            return Task::none();
+        }
+
+        let progress = Arc::new(std::sync::atomic::AtomicU8::new(10));
+        self.export_render_progress = Some(Arc::clone(&progress));
+        self.state.export_progress = Some(10);
+        self.state.status_text = "Exporting… 10%".to_string();
+        let request = job.request.take().expect("export request is consumed once");
+        let path = job.path;
+        let (plugin_return, plugin_return_rx) = std::sync::mpsc::channel();
+        self.export_plugin_return_rx = Some(plugin_return_rx);
+        Task::perform(
+            export_async(request, job.plugins, path, progress, plugin_return),
+            Message::ExportComplete,
+        )
+    }
+
+    pub(super) fn finish_export_runtime(&mut self) {
+        self.export_render_progress = None;
+        self.state.export_progress = None;
+        if let Some(receiver) = self.export_plugin_return_rx.take() {
+            // ExportTask has completed, so this is either immediately ready
+            // or disconnected. Dropping the returned devices here satisfies
+            // CLAP/VST3 main-thread teardown requirements.
+            drop(receiver.recv().ok());
+        }
+    }
+}
+
+fn export_plugin_requests(
+    request: &vibez_engine::render::BounceRequest,
+) -> (Vec<ExportEffectRequest>, Vec<ExportInstrumentRequest>) {
+    let mut effects = Vec::new();
+    let mut instruments = Vec::new();
+    for track in &request.tracks {
+        if let Some(device) = &track.plugin_instrument {
+            instruments.push((track.id, device.clone()));
+        }
+        effects.extend(track.effects.iter().filter_map(|effect| {
+            effect
+                .plugin
+                .clone()
+                .map(|device| (track.id, effect.id, device))
+        }));
+    }
+    for bus in &request.buses {
+        effects.extend(bus.effects.iter().filter_map(|effect| {
+            effect
+                .plugin
+                .clone()
+                .map(|device| (bus.id, effect.id, device))
+        }));
+    }
+    if let Some(master) = &request.master {
+        effects.extend(master.effects.iter().filter_map(|effect| {
+            effect
+                .plugin
+                .clone()
+                .map(|device| (TrackId::MASTER, effect.id, device))
+        }));
+    }
+    (effects, instruments)
+}
+
+fn spawn_export_plugin_preflight(
+    effects: Vec<ExportEffectRequest>,
+    instruments: Vec<ExportInstrumentRequest>,
+    sender: std::sync::mpsc::Sender<ExportPluginLoadEvent>,
+    sample_rate: f64,
+) {
+    std::thread::spawn(move || {
+        for (track_id, effect_id, device) in effects {
+            let prepared = (|| {
+                let info = crate::services::plugin_loader::plugin_info_from_device(
+                    &device,
+                    vibez_plugin_host::PluginCategory::Effect,
+                )?;
+                let state = crate::services::plugin_loader::decode_plugin_state(&device)?;
+                let mut loaded = crate::services::plugin_loader::load_plugin_effect_bg(
+                    &info,
+                    sample_rate,
+                    state,
+                )?;
+                loaded.track_id = track_id;
+                loaded.effect_id = effect_id;
+                Ok::<_, String>(loaded)
+            })();
+            match prepared {
+                Ok(loaded) => {
+                    if sender.send(ExportPluginLoadEvent::Effect(loaded)).is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(ExportPluginLoadEvent::Failed(format!(
+                        "{} effect '{}': {error}",
+                        device.format.to_uppercase(),
+                        device.name
+                    )));
+                    return;
+                }
+            }
+        }
+        for (track_id, device) in instruments {
+            let prepared = (|| {
+                let info = crate::services::plugin_loader::plugin_info_from_device(
+                    &device,
+                    vibez_plugin_host::PluginCategory::Instrument,
+                )?;
+                let state = crate::services::plugin_loader::decode_plugin_state(&device)?;
+                let mut loaded = crate::services::plugin_loader::load_plugin_instrument_bg(
+                    &info,
+                    sample_rate,
+                    state,
+                )?;
+                loaded.track_id = track_id;
+                Ok::<_, String>(loaded)
+            })();
+            match prepared {
+                Ok(loaded) => {
+                    if sender
+                        .send(ExportPluginLoadEvent::Instrument(loaded))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(ExportPluginLoadEvent::Failed(format!(
+                        "{} instrument '{}': {error}",
+                        device.format.to_uppercase(),
+                        device.name
+                    )));
+                    return;
+                }
+            }
+        }
+        let _ = sender.send(ExportPluginLoadEvent::Finished);
+    });
 }
 
 fn first_remote_provenance_label(project: &Project) -> Option<String> {
@@ -940,8 +1187,8 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
         sampler
     });
     project
-        .clips
-        .iter()
+        .timelines()
+        .flat_map(|(_, timeline)| timeline.clips.iter())
         .filter_map(|clip| clip.source.as_ref())
         .chain(track_sources)
         .filter_map(MediaSourceRef::provenance)
@@ -949,4 +1196,45 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
             vibez_core::track::MediaProvenance::Remote { .. } => Some(provenance.display_label()),
             vibez_core::track::MediaProvenance::Local { .. } => None,
         })
+}
+
+#[cfg(test)]
+mod instrument_invariant_tests {
+    use super::*;
+
+    fn surge_device() -> vibez_core::effect::PluginDeviceInfo {
+        vibez_core::effect::PluginDeviceInfo {
+            format: "clap".to_string(),
+            uid: "org.surge-synth-team.surge-xt".to_string(),
+            path: "/usr/lib/clap/Surge XT.clap".into(),
+            name: "Surge XT".to_string(),
+            state_b64: Some("plugin-state".to_string()),
+        }
+    }
+
+    #[test]
+    fn legacy_dual_instrument_record_replays_the_native_sampler() {
+        let mut track = TrackInfo::new("MIDI 1");
+        track.instrument = Some(InstrumentKind::Sampler);
+        track.native_instrument = Some(InstrumentStateInfo::Sampler {
+            params: Vec::new(),
+            source: None,
+        });
+        track.plugin_instrument = Some(surge_device());
+
+        assert!(plugin_instrument_for_replay(&track).is_none());
+    }
+
+    #[test]
+    fn plugin_only_record_still_replays_its_plugin() {
+        let mut track = TrackInfo::new("Bass");
+        track.plugin_instrument = Some(surge_device());
+
+        assert_eq!(
+            plugin_instrument_for_replay(&track)
+                .as_ref()
+                .map(|plugin| plugin.name.as_str()),
+            Some("Surge XT")
+        );
+    }
 }

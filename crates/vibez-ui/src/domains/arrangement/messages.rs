@@ -10,6 +10,10 @@ pub enum ArrangementMsg {
     AddTrack,
     AddMidiTrack,
     AddInstrumentTrack,
+    RequestRemoveTrack(TrackId),
+    CancelRemoveTrack,
+    ConfirmRemoveTrack(TrackId),
+    /// Delete immediately without opening the optional confirmation UI.
     RemoveTrack(TrackId),
     SelectTrack(TrackId),
     RenameTrack(TrackId, String),
@@ -82,7 +86,7 @@ pub enum ArrangementMsg {
     DuplicateSelectedClip,
     CopySelectedClips,
     CutSelectedClips,
-    PasteClipsAtPlayhead,
+    PasteClips,
     ToggleSelectedClipLoop,
     ResizeSelectedClips {
         anchor: ArrangementSelection,
@@ -134,11 +138,51 @@ pub enum ArrangementMsg {
 }
 
 impl ArrangementMsg {
+    pub(crate) fn is_timeline_editor_message(&self) -> bool {
+        matches!(
+            self,
+            Self::RenameClip(..)
+                | Self::RemoveClip(..)
+                | Self::SelectArrangementClip { .. }
+                | Self::MoveAudioClip { .. }
+                | Self::MoveNoteClipPosition { .. }
+                | Self::ResizeAudioClip { .. }
+                | Self::MoveClipToTrack { .. }
+                | Self::ToggleClipLoop(..)
+                | Self::SetClipLoopRegion { .. }
+                | Self::SetTimeSelection { .. }
+                | Self::SetTimeSelectionActive(_)
+                | Self::SetSelectionAsLoop
+                | Self::DeleteSelectedClip
+                | Self::DuplicateSelectedClip
+                | Self::CopySelectedClips
+                | Self::CutSelectedClips
+                | Self::PasteClips
+                | Self::ToggleSelectedClipLoop
+                | Self::ResizeSelectedClips { .. }
+                | Self::DuplicateNoteClip(..)
+                | Self::SplitAudioClip { .. }
+                | Self::SplitNoteClip { .. }
+                | Self::SplitSelectedAtPlayhead
+                | Self::JoinSelectedClips
+                | Self::DeleteClipsInRegion { .. }
+                | Self::SplitClipsAtRegion { .. }
+                | Self::CreateClipFromSelection
+                | Self::CreateNoteClipFromSelection(_)
+                | Self::ClipBpmInputChanged { .. }
+                | Self::SubmitClipBpm { .. }
+                | Self::SetClipNominalBpm { .. }
+                | Self::ClearClipWarp { .. }
+        )
+    }
+
     /// Whether this message edits the project (drives the dirty flag).
     pub fn marks_dirty(&self) -> bool {
         !matches!(
             self,
             ArrangementMsg::SelectTrack(_)
+                | ArrangementMsg::RequestRemoveTrack(_)
+                | ArrangementMsg::CancelRemoveTrack
                 | ArrangementMsg::EngineTrackMeter { .. }
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }
@@ -148,6 +192,17 @@ impl ArrangementMsg {
                 | ArrangementMsg::ClipBpmInputChanged { .. }
         )
     }
+
+    pub(crate) const fn is_clipboard_message(&self) -> bool {
+        matches!(
+            self,
+            Self::CopySelectedClips | Self::CutSelectedClips | Self::PasteClips
+        )
+    }
+
+    pub(crate) const fn is_clipboard_project_edit(&self) -> bool {
+        matches!(self, Self::CutSelectedClips | Self::PasteClips)
+    }
 }
 
 /// Cross-domain effects requested by an arrangement update.
@@ -156,6 +211,8 @@ pub struct ArrangementAction {
     /// All plugin GUI windows and raw pointers of this track must go
     /// (the track's devices are being destroyed).
     pub close_track_guis: Option<TrackId>,
+    /// Remove this shared identity from every Section timeline too.
+    pub remove_track_from_sections: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
     /// Selecting a clip focuses the detail panel's Clip tab.
@@ -164,8 +221,6 @@ pub struct ArrangementAction {
     pub loop_from_selection: Option<(f64, f64)>,
     /// A drag moved a clip near the view edge; auto-scroll to it.
     pub scroll_to_beat: Option<f64>,
-    /// Dismiss the arrangement context menu.
-    pub close_context_menu: bool,
     /// The project content changed outside the undo-snapshot path.
     pub mark_dirty: bool,
 }

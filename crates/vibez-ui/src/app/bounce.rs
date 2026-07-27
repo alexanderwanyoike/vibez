@@ -100,8 +100,8 @@ impl App {
             tracks: project.tracks,
             master: project.master,
             buses: project.buses,
-            audio_clips: project.clips,
-            note_clips: project.note_clips,
+            audio_clips: project.arrange.clips,
+            note_clips: project.arrange.note_clips,
             clip_audio: assets.clips,
             sampler_audio: assets.samplers,
             drum_pad_audio: assets.pads,
@@ -109,6 +109,7 @@ impl App {
             range_samples,
             bpm,
             sample_rate,
+            swing: project.swing,
         };
 
         self.state.status_text = format!("Bouncing {clip_name}...");
@@ -190,7 +191,6 @@ impl App {
         clip_id: ClipId,
         is_note_clip: bool,
     ) -> Task<Message> {
-        self.state.view.context_menu = None;
         let (range, insert_pos, name) = if is_note_clip {
             let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
             let nc = self

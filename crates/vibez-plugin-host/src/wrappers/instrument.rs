@@ -82,6 +82,10 @@ impl Instrument for PluginInstrumentWrapper {
         self.inner.reset();
     }
 
+    fn finish_offline_processing(&mut self) {
+        self.inner.stop_processing();
+    }
+
     fn load_sample(&mut self, _sample: Arc<DecodedAudio>, _name: String) {
         // Not applicable for external plugins
     }

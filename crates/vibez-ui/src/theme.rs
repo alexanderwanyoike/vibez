@@ -385,6 +385,47 @@ pub fn ruler_text() -> Color {
     text_dim()
 }
 
+/// Mix two theme colors without escaping the active palette. Perform uses
+/// this for instrument-like depth that still follows light, dark, and custom
+/// `.vzt` themes.
+pub fn blend(from: Color, to: Color, amount: f32) -> Color {
+    let amount = amount.clamp(0.0, 1.0);
+    let keep = 1.0 - amount;
+    Color {
+        r: from.r * keep + to.r * amount,
+        g: from.g * keep + to.g * amount,
+        b: from.b * keep + to.b * amount,
+        a: from.a * keep + to.a * amount,
+    }
+}
+
+/// Raised face and recessed edge roles for the Perform workspace. These are
+/// derived roles rather than serialized palette fields, so every existing and
+/// user-authored theme remains compatible.
+pub fn perform_active_surface() -> Color {
+    blend(bg_surface(), accent(), 0.1)
+}
+
+pub fn perform_pad_highlight() -> Color {
+    blend(bg_elevated(), text(), 0.045)
+}
+
+pub fn perform_pad_lowlight() -> Color {
+    blend(bg_elevated(), bg_dark(), 0.42)
+}
+
+pub fn perform_inset() -> Color {
+    blend(bg_dark(), border(), 0.16)
+}
+
+pub fn perform_shadow() -> Color {
+    with_alpha(darken(bg_dark(), 0.42), 0.72)
+}
+
+pub fn perform_grid_line() -> Color {
+    with_alpha(grid_beat(), 0.52)
+}
+
 /// Get a track color by index (wraps around).
 pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();

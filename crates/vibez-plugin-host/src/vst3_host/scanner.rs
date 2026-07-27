@@ -98,6 +98,30 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
         unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut PClassInfoRaw) -> i32;
     let get_class_info: GetClassInfoFn = unsafe { std::mem::transmute(*vtbl_ptr.add(5)) };
 
+    // PClassInfo2 carries the VST3 subcategory string that distinguishes
+    // instruments from effects. The base PClassInfo has no equivalent field.
+    type QueryInterfaceFn = unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u8,
+        *mut *mut std::ffi::c_void,
+    ) -> i32;
+    let query_interface: QueryInterfaceFn = unsafe { std::mem::transmute(*vtbl_ptr) };
+    let mut factory2: *mut std::ffi::c_void = std::ptr::null_mut();
+    let has_factory2 = unsafe {
+        query_interface(
+            factory_ptr,
+            vst3::Steinberg::IPluginFactory2_iid.as_ptr().cast(),
+            &mut factory2,
+        ) == 0
+            && !factory2.is_null()
+    };
+    type GetClassInfo2Fn =
+        unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut PClassInfo2Raw) -> i32;
+    let get_class_info2: Option<GetClassInfo2Fn> = has_factory2.then(|| unsafe {
+        let factory2_vtbl = *(factory2 as *const *const *const std::ffi::c_void);
+        std::mem::transmute(*factory2_vtbl.add(7))
+    });
+
     let mut results = Vec::new();
 
     for i in 0..count {
@@ -124,7 +148,17 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
             continue;
         }
 
-        let category = PluginCategory::Effect;
+        let (category, vendor) = get_class_info2
+            .and_then(|get_class_info2| {
+                let mut info2 = PClassInfo2Raw::zeroed();
+                (unsafe { get_class_info2(factory2, i as i32, &mut info2) } == 0).then(|| {
+                    (
+                        category_from_subcategories(&cstr_from_fixed(&info2.subcategories)),
+                        cstr_from_fixed(&info2.vendor),
+                    )
+                })
+            })
+            .unwrap_or((PluginCategory::Effect, String::new()));
 
         results.push(PluginInfo {
             id: PluginId {
@@ -132,15 +166,20 @@ fn scan_vst3_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
                 uid,
             },
             name: name.clone(),
-            vendor: String::new(),
+            vendor,
             category,
             format: PluginFormat::Vst3,
             path: path.to_path_buf(),
         });
     }
 
-    // Release factory
+    // Release the queried IPluginFactory2 reference, then the base factory.
     type ReleaseFn = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+    if has_factory2 {
+        let factory2_vtbl = unsafe { *(factory2 as *const *const *const std::ffi::c_void) };
+        let release_factory2: ReleaseFn = unsafe { std::mem::transmute(*factory2_vtbl.add(2)) };
+        unsafe { release_factory2(factory2) };
+    }
     let release: ReleaseFn = unsafe { std::mem::transmute(*vtbl_ptr.add(2)) };
     unsafe { release(factory_ptr) };
 
@@ -169,6 +208,27 @@ impl PClassInfoRaw {
             category: [0; 32],
             name: [0; 64],
         }
+    }
+}
+
+/// Raw PClassInfo2 matching the VST3 C layout. Its subcategories are the only
+/// portable way for a host to distinguish an instrument from an insert effect.
+#[repr(C)]
+struct PClassInfo2Raw {
+    cid: [u8; 16],
+    cardinality: i32,
+    category: [u8; 32],
+    name: [u8; 64],
+    class_flags: u32,
+    subcategories: [u8; 128],
+    vendor: [u8; 64],
+    version: [u8; 64],
+    sdk_version: [u8; 64],
+}
+
+impl PClassInfo2Raw {
+    fn zeroed() -> Self {
+        unsafe { std::mem::zeroed() }
     }
 }
 
@@ -224,4 +284,51 @@ pub(crate) fn find_vst3_module(bundle_path: &Path) -> Result<std::path::PathBuf,
 fn cstr_from_fixed(buf: &[u8]) -> String {
     let bytes: Vec<u8> = buf.iter().take_while(|&&b| b != 0).copied().collect();
     String::from_utf8_lossy(&bytes).to_string()
+}
+
+fn category_from_subcategories(subcategories: &str) -> PluginCategory {
+    let mut is_effect = false;
+    let mut is_instrument = false;
+    for category in subcategories.split('|') {
+        match category.trim() {
+            "Fx" => is_effect = true,
+            "Instrument" => is_instrument = true,
+            _ => {}
+        }
+    }
+    match (is_effect, is_instrument) {
+        (true, true) => PluginCategory::Both,
+        (_, true) => PluginCategory::Instrument,
+        _ => PluginCategory::Effect,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vst3_instrument_subcategories_select_the_track_instrument_slot() {
+        assert_eq!(
+            category_from_subcategories("Instrument|Synth"),
+            PluginCategory::Instrument
+        );
+        assert_eq!(
+            category_from_subcategories("Instrument|Sampler"),
+            PluginCategory::Instrument
+        );
+        assert_eq!(
+            category_from_subcategories("Fx|Instrument"),
+            PluginCategory::Both
+        );
+    }
+
+    #[test]
+    fn vst3_effect_subcategories_remain_effects() {
+        assert_eq!(
+            category_from_subcategories("Fx|Reverb"),
+            PluginCategory::Effect
+        );
+        assert_eq!(category_from_subcategories(""), PluginCategory::Effect);
+    }
 }

@@ -21,7 +21,7 @@ fn main() {
     let settings = PluginSettings {
         extra_scan_paths: vec![dir],
         scan_default_paths: false,
-        cache: Vec::new(),
+        ..PluginSettings::default()
     };
 
     if sandboxed {
@@ -49,7 +49,7 @@ fn main() {
         let single = PluginSettings {
             extra_scan_paths: vec![path.clone()],
             scan_default_paths: false,
-            cache: Vec::new(),
+            ..PluginSettings::default()
         };
         // scan_plugins only walks directories, so scan the parent dir
         // trick doesn't isolate; call the per-format scanners directly.

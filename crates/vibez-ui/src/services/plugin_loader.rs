@@ -73,6 +73,41 @@ pub(crate) fn plugin_device_ref(info: &PluginInfo) -> vibez_core::effect::Plugin
     }
 }
 
+pub(crate) fn plugin_info_from_device(
+    device: &PluginDeviceInfo,
+    category: vibez_plugin_host::PluginCategory,
+) -> Result<PluginInfo, String> {
+    let format = match device.format.as_str() {
+        "clap" => PluginFormat::Clap,
+        "vst3" => PluginFormat::Vst3,
+        other => return Err(format!("unsupported plugin format '{other}'")),
+    };
+    Ok(PluginInfo {
+        id: vibez_plugin_host::PluginId {
+            format,
+            uid: device.uid.clone(),
+        },
+        name: device.name.clone(),
+        vendor: String::new(),
+        category,
+        format,
+        path: device.path.clone(),
+    })
+}
+
+pub(crate) fn decode_plugin_state(device: &PluginDeviceInfo) -> Result<Option<Vec<u8>>, String> {
+    use base64::Engine;
+    device
+        .state_b64
+        .as_ref()
+        .map(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|error| format!("invalid saved state: {error}"))
+        })
+        .transpose()
+}
+
 /// Phase 1 of plugin loading (runs on background thread).
 /// For CLAP: only loads the DSO — NO CLAP API calls (not even create_plugin).
 /// For VST3: fully loads (VST3 doesn't have JUCE MessageManager issues).
@@ -257,6 +292,27 @@ pub(crate) fn finish_effect_init(
     )>,
     String,
 > {
+    finish_effect_init_inner(result, false)
+}
+
+#[allow(clippy::type_complexity)]
+pub(crate) fn finish_effect_init_for_export(
+    result: &mut PluginLoadResult,
+) -> Result<Option<Box<dyn vibez_dsp::effect::AudioEffect>>, String> {
+    finish_effect_init_inner(result, true).map(|finished| finished.map(|(effect, _)| effect))
+}
+
+#[allow(clippy::type_complexity)]
+fn finish_effect_init_inner(
+    result: &mut PluginLoadResult,
+    strict_state_restore: bool,
+) -> Result<
+    Option<(
+        Box<dyn vibez_dsp::effect::AudioEffect>,
+        Option<PluginRawPtr>,
+    )>,
+    String,
+> {
     let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
         let mut clap_inst =
@@ -269,6 +325,9 @@ pub(crate) fn finish_effect_init(
         if let Some(ref data) = result.pending_state {
             use vibez_plugin_host::PluginInstance;
             if !clap_inst.load_state(data) {
+                if strict_state_restore {
+                    return Err(format!("{plugin_name} rejected its saved state"));
+                }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }
@@ -292,6 +351,9 @@ pub(crate) fn finish_effect_init(
         if let Some(ref data) = result.pending_state {
             use vibez_plugin_host::PluginInstance;
             if !vst3_inst.load_state(data) {
+                if strict_state_restore {
+                    return Err(format!("{plugin_name} rejected its saved state"));
+                }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }
@@ -318,6 +380,21 @@ pub(crate) fn finish_effect_init(
 pub(crate) fn finish_instrument_init(
     result: &mut PluginInstrumentLoadResult,
 ) -> Result<Option<(Box<dyn vibez_instruments::Instrument>, Option<PluginRawPtr>)>, String> {
+    finish_instrument_init_inner(result, false)
+}
+
+pub(crate) fn finish_instrument_init_for_export(
+    result: &mut PluginInstrumentLoadResult,
+) -> Result<Option<Box<dyn vibez_instruments::Instrument>>, String> {
+    finish_instrument_init_inner(result, true)
+        .map(|finished| finished.map(|(instrument, _)| instrument))
+}
+
+#[allow(clippy::type_complexity)]
+fn finish_instrument_init_inner(
+    result: &mut PluginInstrumentLoadResult,
+    strict_state_restore: bool,
+) -> Result<Option<(Box<dyn vibez_instruments::Instrument>, Option<PluginRawPtr>)>, String> {
     let plugin_name = result.plugin_name.clone();
     if let Some(partial) = result.clap_partial.take() {
         let mut clap_inst =
@@ -330,6 +407,9 @@ pub(crate) fn finish_instrument_init(
         if let Some(ref data) = result.pending_state {
             use vibez_plugin_host::PluginInstance;
             if !clap_inst.load_state(data) {
+                if strict_state_restore {
+                    return Err(format!("{plugin_name} rejected its saved state"));
+                }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }
@@ -353,6 +433,9 @@ pub(crate) fn finish_instrument_init(
         if let Some(ref data) = result.pending_state {
             use vibez_plugin_host::PluginInstance;
             if !vst3_inst.load_state(data) {
+                if strict_state_restore {
+                    return Err(format!("{plugin_name} rejected its saved state"));
+                }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }

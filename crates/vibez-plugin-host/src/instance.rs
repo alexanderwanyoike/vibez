@@ -35,5 +35,8 @@ pub trait PluginInstance: Send {
     fn is_instrument(&self) -> bool;
     fn prepare(&mut self, sample_rate: f64, max_buffer_size: u32);
     fn activate(&mut self) -> bool;
+    /// Stop the realtime processing phase on the processing thread while
+    /// keeping the main-thread-owned instance alive for later teardown.
+    fn stop_processing(&mut self) {}
     fn deactivate(&mut self);
 }

@@ -1,13 +1,16 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod browser_results;
 mod browser_state;
+mod snapshot;
 mod ui_types;
+
+use crate::remote_provider::RemoteCatalogSnapshot;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
+pub use snapshot::*;
 pub use ui_types::*;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -16,8 +19,6 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
-
-use crate::remote_provider::RemoteCatalogSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuditionMode {
@@ -34,15 +35,14 @@ impl AuditionMode {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuditionImportInput {
     pub mode: AuditionMode,
     pub source_bpm: Option<f64>,
 }
-
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
-
+pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
+pub const DETAIL_PANEL_DEFAULT_HEIGHT: f32 = 280.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMediaDrag {
     pub source: MediaSourceRef,
@@ -69,13 +69,15 @@ pub enum BrowserDropTarget {
         pad_index: usize,
     },
 }
-
-/// View domain slice: everything about how the project is being
-/// looked at, none of it part of the project itself.
+/// View-domain state; none of it is part of the project itself.
 #[derive(Debug)]
 pub struct ViewState {
     pub workspace: Workspace,
     pub detail_panel_tab: DetailPanelTab,
+    pub detail_panel_height: f32,
+    pub detail_panel_resize_active: bool,
+    pub perform_surface_width: f32,
+    pub perform_surface_resize_active: bool,
     pub zoom_level: f32,
     pub scroll_offset_beats: f64,
     pub snap_grid: SnapGrid,
@@ -84,23 +86,23 @@ pub struct ViewState {
     pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
     pub edit_menu_open: bool,
-    /// Cursor tracking (for right-click positioning from mouse_area).
-    pub cursor_x: f32,
+    pub cursor_x: f32, // globally tracked for popup positioning and pane drags
     pub cursor_y: f32,
-    /// Last known window size, for clamping popup menus on-screen.
-    pub window_width: f32,
+    pub window_width: f32, // last known size for responsive view clamping
     pub window_height: f32,
-    // Inline renaming
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
 }
-
 impl Default for ViewState {
     fn default() -> Self {
         Self {
             workspace: Workspace::Arrange,
             detail_panel_tab: DetailPanelTab::Clip,
+            detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
+            detail_panel_resize_active: false,
+            perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
+            perform_surface_resize_active: false,
             zoom_level: 1.0,
             scroll_offset_beats: 0.0,
             snap_grid: SnapGrid::EIGHTH,
@@ -185,117 +187,8 @@ pub enum SettingsTab {
     Plugins,
     Dropbox,
     Warping,
+    Perform,
     Appearance,
-}
-
-/// A point-in-time snapshot of the editable project state, used to implement
-/// undo / redo. The two owned stores are independently shared so a timeline
-/// edit never clones Project Track instruments, effects, routing, or mixer
-/// state (and a mixer edit never clones Arrange clips).
-#[derive(Debug, Clone)]
-pub struct ProjectSnapshot {
-    pub project_tracks: Arc<ProjectTracksState>,
-    pub arrange_timeline: Arc<ArrangementTimeline>,
-    pub bpm: f64,
-    pub bpm_text: String,
-    pub loop_enabled: bool,
-    pub loop_start_beats: f64,
-    pub loop_end_beats: f64,
-    pub selected_track: Option<TrackId>,
-    pub selected_clips: HashSet<ArrangementSelection>,
-    pub selected_note_clip: Option<(TrackId, ClipId)>,
-}
-
-/// Runtime identity for one continuous pointer gesture. Every incremental
-/// project edit emitted while the pointer remains held carries the same id so
-/// undo history can retain the pre-gesture snapshot only once.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UndoGestureId(u64);
-
-impl UndoGestureId {
-    pub fn new() -> Self {
-        static NEXT_GESTURE_ID: AtomicU64 = AtomicU64::new(1);
-        Self(NEXT_GESTURE_ID.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-/// Project domain slice: file-menu visibility, the current file,
-/// the dirty flag, and the undo/redo history.
-#[derive(Debug, Default)]
-pub struct ProjectState {
-    pub file_menu_open: bool,
-    pub current_path: Option<PathBuf>,
-    pub dirty: bool,
-    pub history: UndoHistory,
-    /// Clips whose media could not be hydrated at load time. Invisible in
-    /// the arrangement, but serialized back into every save so unavailable
-    /// media stays relinkable instead of silently vanishing.
-    pub unresolved_clips: Vec<vibez_core::track::ClipInfo>,
-}
-
-#[derive(Debug, Default)]
-pub struct UndoHistory {
-    pub undo: VecDeque<ProjectSnapshot>,
-    pub redo: VecDeque<ProjectSnapshot>,
-    last_gesture: Option<UndoGestureId>,
-}
-
-impl UndoHistory {
-    pub const CAPACITY: usize = 100;
-
-    pub fn push_undo(&mut self, snapshot: ProjectSnapshot) {
-        self.last_gesture = None;
-        self.push_snapshot(snapshot);
-    }
-
-    fn push_snapshot(&mut self, snapshot: ProjectSnapshot) {
-        self.undo.push_back(snapshot);
-        if self.undo.len() > Self::CAPACITY {
-            self.undo.pop_front();
-        }
-        self.redo.clear();
-    }
-
-    pub fn push_edit(&mut self, snapshot: ProjectSnapshot, gesture: Option<UndoGestureId>) {
-        if gesture.is_some() && self.last_gesture == gesture {
-            return;
-        }
-        self.push_snapshot(snapshot);
-        self.last_gesture = gesture;
-    }
-
-    pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
-        self.last_gesture = None;
-        self.undo.pop_back()
-    }
-
-    pub fn push_redo(&mut self, snapshot: ProjectSnapshot) {
-        self.redo.push_back(snapshot);
-        if self.redo.len() > Self::CAPACITY {
-            self.redo.pop_front();
-        }
-    }
-
-    pub fn pop_redo(&mut self) -> Option<ProjectSnapshot> {
-        self.last_gesture = None;
-        self.redo.pop_back()
-    }
-
-    #[allow(dead_code)]
-    pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
-    #[allow(dead_code)]
-    pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
-    }
-
-    pub fn clear(&mut self) {
-        self.undo.clear();
-        self.redo.clear();
-        self.last_gesture = None;
-    }
 }
 
 #[cfg(test)]
@@ -406,11 +299,11 @@ impl ProjectTracksState {
 /// stable identity. Hash-map storage prevents track reordering from moving or
 /// cloning timeline content.
 #[derive(Debug, Clone, Default)]
-pub struct ArrangementTimeline {
+pub struct TimelineContent {
     pub by_track: HashMap<TrackId, TrackTimelineContent>,
 }
 
-impl ArrangementTimeline {
+impl TimelineContent {
     pub fn get(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.by_track.get(&track_id)
     }
@@ -428,14 +321,16 @@ impl ArrangementTimeline {
     }
 }
 
-/// Arrange-owned timeline content and editor interaction state.
+/// Backward-compatible name for the project's linear Arrange content.
+pub type ArrangementTimeline = TimelineContent;
+
+/// Editing state shared by every resolved musical timeline.
 #[derive(Debug)]
-pub struct ArrangementState {
-    pub timeline: Arc<ArrangementTimeline>,
+pub struct TimelineEditorState {
+    pub timeline: Arc<TimelineContent>,
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
-    pub clipboard: ClipClipboard,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -450,20 +345,83 @@ pub struct ArrangementState {
     pub clip_bpm_edit: HashMap<ClipId, String>,
 }
 
-impl Default for ArrangementState {
+impl Default for TimelineEditorState {
     fn default() -> Self {
         Self {
-            timeline: Arc::new(ArrangementTimeline::default()),
+            timeline: Arc::new(TimelineContent::default()),
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
-            clipboard: ClipClipboard::default(),
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
             time_selection_track: None,
             drag_resize_active: false,
             clip_bpm_edit: HashMap::new(),
+        }
+    }
+}
+
+impl std::ops::Deref for TimelineEditorState {
+    type Target = TimelineContent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.timeline
+    }
+}
+
+impl std::ops::DerefMut for TimelineEditorState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.timeline)
+    }
+}
+
+/// Arrange's thin adapter over the shared Timeline Editor state.
+#[derive(Debug, Default)]
+pub struct ArrangementState {
+    pub(crate) editor: TimelineEditorState,
+    pub pending_project_track_deletion: Option<TrackId>,
+}
+impl std::ops::Deref for ArrangementState {
+    type Target = TimelineEditorState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.editor
+    }
+}
+
+impl std::ops::DerefMut for ArrangementState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.editor
+    }
+}
+
+/// An adapter-resolved, read-only Timeline Editor target.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedTimeline<'a> {
+    pub editor: &'a TimelineEditorState,
+}
+
+/// An adapter-resolved, mutable Timeline Editor target.
+#[derive(Debug)]
+pub struct ResolvedTimelineMut<'a> {
+    pub editor: &'a mut TimelineEditorState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AudioStreamHealth {
+    #[default]
+    Running,
+    Rebuilding,
+    Error(String),
+}
+
+impl AudioStreamHealth {
+    pub fn description(&self) -> &str {
+        match self {
+            Self::Running => "Audio stream running",
+            Self::Rebuilding => "Rebuilding audio stream",
+            Self::Error(cause) => cause,
         }
     }
 }
@@ -479,18 +437,25 @@ pub struct AppState {
     /// the selected track); drawn behind the channel EQ curve.
     pub spectrum: crate::spectrum::SpectrumState,
 
-    // UI
     pub status_text: String,
-    // View domain slice (workspace, zoom, snap, menus, renames).
+    /// Active project-export completion percentage.
+    pub export_progress: Option<u8>,
+    pub audio_stream_health: AudioStreamHealth,
     pub view: ViewState,
 
     pub piano_roll: PianoRollState,
+
+    // Perform domain slice (runtime mode, bank, selection, and focus).
+    pub perform: crate::domains::perform::PerformState,
 
     // Project Track domain slice (shared channels and devices).
     pub project_tracks: Arc<ProjectTracksState>,
 
     // Arrange-owned timeline content and editor state.
     pub arrangement: ArrangementState,
+
+    // One runtime clipboard shared by Arrange and every Section editor.
+    pub clip_clipboard: ClipClipboard,
 
     /// In-progress manual BPM input text keyed by clip id. Only
     /// populated while the user is actively editing the field in the
@@ -501,7 +466,8 @@ pub struct AppState {
     pub settings_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
-    // Project domain slice (file menu, path, dirty flag, undo).
+    pub confirm_project_track_deletion: bool,
+    // Project domain slice: file menu, path, dirty flag, undo.
     pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
     /// import. Mirrored from `UiSettings::auto_warp_on_import`.
@@ -509,12 +475,10 @@ pub struct AppState {
     /// Minimum BPM-detect confidence required to auto-warp. Mirrored
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
-    // Automation domain slice (lane expansion, point selection).
     pub automation_ui: crate::domains::automation::AutomationState,
 
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
-
     // Appearance / themes
     pub current_theme_name: String,
     pub user_themes: Vec<crate::themes::UserTheme>,
@@ -538,17 +502,22 @@ impl Default for AppState {
             peak_r: 0.0,
             spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
+            export_progress: None,
+            audio_stream_health: AudioStreamHealth::default(),
             view: ViewState::default(),
             piano_roll: PianoRollState::default(),
+            perform: crate::domains::perform::PerformState::default(),
             project_tracks: Arc::new(ProjectTracksState {
                 next_track_number: 1,
                 ..ProjectTracksState::default()
             }),
             arrangement: ArrangementState::default(),
+            clip_clipboard: ClipClipboard::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
+            confirm_project_track_deletion: false,
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
@@ -569,6 +538,46 @@ pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
 }
 
 impl AppState {
+    /// Capture the complete canonical project state shared by Undo, Capture,
+    /// engine-event commits, and project replay.
+    pub fn project_snapshot(&self) -> ProjectSnapshot {
+        ProjectSnapshot {
+            project_tracks: Arc::clone(&self.project_tracks),
+            arrange_timeline: Arc::clone(&self.arrangement.timeline),
+            sections: Arc::clone(&self.perform.sections),
+            bpm: self.transport.bpm,
+            project_swing: self.perform.project_swing(),
+            loop_enabled: self.transport.loop_enabled,
+            loop_start_beats: self.transport.loop_start_beats,
+            loop_end_beats: self.transport.loop_end_beats,
+        }
+    }
+
+    pub fn apply_audio_stream_event(
+        &mut self,
+        event: vibez_audio_io::audio_stream::AudioStreamEvent,
+    ) {
+        use vibez_audio_io::audio_stream::AudioStreamEvent;
+
+        match event {
+            AudioStreamEvent::Running => {
+                self.audio_stream_health = AudioStreamHealth::Running;
+            }
+            AudioStreamEvent::Error(cause) => {
+                self.status_text = format!("Audio stream error: {cause}");
+                self.audio_stream_health = AudioStreamHealth::Error(cause);
+            }
+            AudioStreamEvent::Rebuilding => {
+                self.status_text = "Rebuilding audio stream…".into();
+                self.audio_stream_health = AudioStreamHealth::Rebuilding;
+            }
+            AudioStreamEvent::Recovered => {
+                self.status_text = "Audio stream recovered".into();
+                self.audio_stream_health = AudioStreamHealth::Running;
+            }
+        }
+    }
+
     pub fn position_seconds(&self) -> f64 {
         self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
@@ -605,25 +614,41 @@ impl AppState {
     /// Pixels per beat at the current zoom level.
     #[allow(dead_code)]
     pub fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.view.zoom_level
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .pixels_per_beat()
     }
 
     /// Number of beats visible in a canvas of the given width.
     #[allow(dead_code)]
     pub fn visible_beats(&self, canvas_width: f32) -> f64 {
-        canvas_width as f64 / self.pixels_per_beat() as f64
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .visible_beats(canvas_width)
     }
 
     /// Convert a beat value to a pixel x coordinate in the viewport.
     #[allow(dead_code)]
     pub fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.view.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .beat_to_x(beat)
     }
 
     /// Convert a pixel x coordinate in the viewport to a beat value.
     #[allow(dead_code)]
     pub fn x_to_beat(&self, x: f32) -> f64 {
-        x as f64 / self.pixels_per_beat() as f64 + self.view.scroll_offset_beats
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.view.zoom_level,
+            self.view.scroll_offset_beats,
+        )
+        .x_to_beat(x)
     }
 
     /// Total duration in beats across all tracks, with generous padding.
@@ -684,6 +709,22 @@ impl AppState {
         Arc::make_mut(&mut self.arrangement.timeline).ensure(id)
     }
 
+    /// The Timeline Editor currently visible to the producer.
+    ///
+    /// Workspace identity is resolved here at the application boundary; the
+    /// editor and its widgets only receive the resolved target.
+    pub fn active_timeline_editor(&self) -> &TimelineEditorState {
+        if self.view.workspace == Workspace::Perform && self.perform.selected_section.is_some() {
+            self.perform.section_editor.editor()
+        } else {
+            &self.arrangement.editor
+        }
+    }
+
+    pub fn active_timeline_content(&self, id: TrackId) -> Option<&TrackTimelineContent> {
+        self.active_timeline_editor().timeline.get(id)
+    }
+
     /// Total duration in samples across all tracks (max clip end position).
     pub fn total_duration_samples(&self) -> u64 {
         let audio_max = self
@@ -716,6 +757,41 @@ impl AppState {
         };
 
         audio_max.max(note_max)
+    }
+}
+
+#[cfg(test)]
+mod audio_stream_health_tests {
+    use super::{AppState, AudioStreamHealth};
+    use vibez_audio_io::audio_stream::AudioStreamEvent;
+
+    #[test]
+    fn stream_error_and_recovery_update_persistent_health_and_status() {
+        let mut state = AppState::default();
+
+        state.apply_audio_stream_event(AudioStreamEvent::Error(
+            "device disconnected mid-session".into(),
+        ));
+        assert_eq!(
+            state.audio_stream_health,
+            AudioStreamHealth::Error("device disconnected mid-session".into())
+        );
+        assert_eq!(
+            state.status_text,
+            "Audio stream error: device disconnected mid-session"
+        );
+
+        state.apply_audio_stream_event(AudioStreamEvent::Rebuilding);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Rebuilding);
+        assert_eq!(state.status_text, "Rebuilding audio stream…");
+
+        state.apply_audio_stream_event(AudioStreamEvent::Recovered);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
+        assert_eq!(state.status_text, "Audio stream recovered");
+
+        state.apply_audio_stream_event(AudioStreamEvent::Running);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
+        assert_eq!(state.status_text, "Audio stream recovered");
     }
 }
 
@@ -837,6 +913,7 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         if let Some(t) = Arc::make_mut(&mut state.arrangement.timeline).get_mut(tid) {
             if let Some(c) = t.note_clips.iter_mut().find(|c| c.id == cid) {

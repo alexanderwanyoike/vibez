@@ -5,11 +5,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     #[serde(default)]
+    pub perform_input_mapping: crate::domains::perform::PerformInputMapping,
+    #[serde(default = "default_fixed_computer_velocity")]
+    pub fixed_computer_velocity: u8,
+    #[serde(default)]
+    pub track_mute_quantization: vibez_core::perform::TrackMuteQuantization,
+    #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
     #[serde(default = "default_sample_browser_width")]
     pub sample_browser_width: f32,
+    #[serde(default = "default_perform_surface_width")]
+    pub perform_surface_width: f32,
+    #[serde(default = "default_detail_panel_height")]
+    pub detail_panel_height: f32,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -39,14 +49,23 @@ pub struct UiSettings {
     pub media_cache_budget_bytes: u64,
     #[serde(default = "default_media_cache_automatic_eviction")]
     pub media_cache_automatic_eviction: bool,
+    /// Ask before deleting a Project Track and all of its Arrange and
+    /// Section content. Off by default because deletion is undoable.
+    #[serde(default)]
+    pub confirm_project_track_deletion: bool,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
+            perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
+            fixed_computer_velocity: default_fixed_computer_velocity(),
+            track_mute_quantization: vibez_core::perform::TrackMuteQuantization::default(),
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
+            perform_surface_width: default_perform_surface_width(),
+            detail_panel_height: default_detail_panel_height(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             audition_loop: false,
@@ -56,6 +75,7 @@ impl Default for UiSettings {
             theme: None,
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
+            confirm_project_track_deletion: false,
         }
     }
 }
@@ -90,6 +110,10 @@ fn default_sample_browser_open() -> bool {
     true
 }
 
+const fn default_fixed_computer_velocity() -> u8 {
+    100
+}
+
 fn default_media_cache_budget_bytes() -> u64 {
     vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
 }
@@ -102,6 +126,14 @@ fn default_sample_browser_width() -> f32 {
     crate::state::BROWSER_DOCK_DEFAULT_WIDTH
 }
 
+fn default_perform_surface_width() -> f32 {
+    crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
+}
+
+fn default_detail_panel_height() -> f32 {
+    crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+}
+
 fn default_audition_enabled() -> bool {
     true
 }
@@ -112,6 +144,16 @@ fn default_audition_gain() -> f32 {
 
 fn default_warp_confidence_threshold() -> f32 {
     0.6
+}
+
+#[cfg(test)]
+impl UiSettings {
+    fn input_mapping_key(
+        &self,
+        position: crate::domains::perform::PadPosition,
+    ) -> crate::domains::perform::ComputerKey {
+        self.perform_input_mapping.key_for(position)
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +184,40 @@ mod tests {
     }
 
     #[test]
+    fn perform_surface_width_defaults_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.perform_surface_width,
+            crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
+        );
+
+        let settings = UiSettings {
+            perform_surface_width: 704.0,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.perform_surface_width, 704.0);
+    }
+
+    #[test]
+    fn detail_panel_height_defaults_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.detail_panel_height,
+            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+        );
+
+        let settings = UiSettings {
+            detail_panel_height: 412.0,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.detail_panel_height, 412.0);
+    }
+
+    #[test]
     fn old_settings_enable_audition_at_unity_by_default() {
         let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
         assert!(loaded.audition_enabled);
@@ -162,6 +238,20 @@ mod tests {
         assert!(!loaded.audition_enabled);
         assert_eq!(loaded.audition_gain, 0.42);
         assert!(loaded.audition_loop);
+    }
+
+    #[test]
+    fn project_track_deletion_confirmation_defaults_off_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+        assert!(!old.confirm_project_track_deletion);
+
+        let settings = UiSettings {
+            confirm_project_track_deletion: true,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(loaded.confirm_project_track_deletion);
     }
 
     #[test]
@@ -189,5 +279,95 @@ mod tests {
         let loaded: UiSettings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(loaded.sample_library_roots, roots);
+    }
+
+    #[test]
+    fn old_settings_receive_the_default_perform_input_mapping() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+
+        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
+
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[0]),
+            ComputerKey::Digit1
+        );
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[15]),
+            ComputerKey::V
+        );
+    }
+
+    #[test]
+    fn perform_input_mapping_roundtrips_in_global_settings() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+
+        let mut settings = UiSettings::default();
+        settings
+            .perform_input_mapping
+            .rebind(PadPosition::ALL[0], ComputerKey::Y);
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(
+            loaded.input_mapping_key(PadPosition::ALL[0]),
+            ComputerKey::Y
+        );
+    }
+
+    #[test]
+    fn fixed_computer_velocity_defaults_and_roundtrips_globally() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.fixed_computer_velocity, 100);
+
+        let settings = UiSettings {
+            fixed_computer_velocity: 73,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.fixed_computer_velocity, 73);
+    }
+
+    #[test]
+    fn track_mute_quantization_defaults_to_immediate_and_roundtrips_globally() {
+        use vibez_core::perform::TrackMuteQuantization;
+
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            old.track_mute_quantization,
+            TrackMuteQuantization::Immediate
+        );
+
+        let settings = UiSettings {
+            track_mute_quantization: TrackMuteQuantization::OneBar,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            loaded.track_mute_quantization,
+            TrackMuteQuantization::OneBar
+        );
+    }
+
+    #[test]
+    fn rebinding_global_input_does_not_change_project_bytes() {
+        use crate::domains::perform::{ComputerKey, PadPosition};
+        use vibez_core::perform::TrackMuteQuantization;
+
+        let project = vibez_project::Project::default();
+        let before = serde_json::to_vec(&project).unwrap();
+        let mut settings = UiSettings::default();
+        settings
+            .perform_input_mapping
+            .rebind(PadPosition::ALL[0], ComputerKey::Y);
+        settings.track_mute_quantization = TrackMuteQuantization::OneBar;
+        let after = serde_json::to_vec(&project).unwrap();
+
+        assert_eq!(before, after);
+        assert_ne!(
+            settings.perform_input_mapping,
+            crate::domains::perform::PerformInputMapping::default()
+        );
     }
 }

@@ -23,6 +23,7 @@ use crate::domains::automation::AutomationMsg;
 use crate::message::Message;
 use crate::state::GridConfig;
 use crate::theme as th;
+use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 
@@ -51,6 +52,8 @@ pub struct AutomationLaneWidget {
     pub min_label: String,
     pub max_label: String,
     pub ref_label: String,
+    /// Draw and edit instantaneous state steps; curve handles are disabled.
+    pub stepped: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -69,16 +72,20 @@ pub struct LaneInteraction {
 }
 
 impl AutomationLaneWidget {
+    fn geometry(&self) -> TimelineGeometry {
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+    }
+
     fn pixels_per_beat(&self) -> f32 {
-        20.0 * self.zoom_level
+        self.geometry().pixels_per_beat()
     }
 
     fn beat_to_x(&self, beat: f64) -> f32 {
-        ((beat - self.scroll_offset_beats) * self.pixels_per_beat() as f64) as f32
+        self.geometry().beat_to_x(beat)
     }
 
     fn x_to_beat(&self, x: f32) -> f64 {
-        (x as f64 / self.pixels_per_beat() as f64 + self.scroll_offset_beats).max(0.0)
+        self.geometry().x_to_beat(x).max(0.0)
     }
 
     /// Cursor x to beat, snapped to the grid unless shift is held.
@@ -121,7 +128,11 @@ impl AutomationLaneWidget {
                 continue;
             }
             let t = (pos.x - x0) / (x1 - x0);
-            let value = a.value + (b.value - a.value) * shape(t, a.curve);
+            let value = if self.stepped {
+                a.value
+            } else {
+                a.value + (b.value - a.value) * shape(t, a.curve)
+            };
             let y = self.value_to_y(value, height);
             if (y - pos.y).abs() <= SEGMENT_HIT {
                 return Some(i);
@@ -236,14 +247,21 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         if !pts.is_empty() {
             let mut path = canvas::path::Builder::new();
             let first_y = self.value_to_y(pts[0].value, h);
-            path.move_to(Point::new(0.0, first_y));
-            path.line_to(Point::new(self.beat_to_x(pts[0].beat), first_y));
+            if self.stepped {
+                path.move_to(Point::new(self.beat_to_x(pts[0].beat), first_y));
+            } else {
+                path.move_to(Point::new(0.0, first_y));
+                path.line_to(Point::new(self.beat_to_x(pts[0].beat), first_y));
+            }
             for i in 0..pts.len() - 1 {
                 let a = pts[i];
                 let b = pts[i + 1];
                 let x0 = self.beat_to_x(a.beat);
                 let x1 = self.beat_to_x(b.beat);
-                if a.curve == 0.0 {
+                if self.stepped {
+                    path.line_to(Point::new(x1, self.value_to_y(a.value, h)));
+                    path.line_to(Point::new(x1, self.value_to_y(b.value, h)));
+                } else if a.curve == 0.0 {
                     path.line_to(Point::new(x1, self.value_to_y(b.value, h)));
                 } else {
                     const STEPS: usize = 24;
@@ -382,7 +400,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                     return (canvas::event::Status::Captured, None);
                 }
                 // Alt: bend a segment (alt-double-click resets it).
-                if state.alt {
+                if state.alt && !self.stepped {
                     if let Some(index) = self.hit_segment(pos, h) {
                         if state.double_click.press(
                             Instant::now(),
@@ -510,7 +528,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             if state.ctrl {
                 return mouse::Interaction::Crosshair;
             }
-            if state.alt {
+            if state.alt && !self.stepped {
                 if self.hit_segment(pos, bounds.height).is_some() {
                     return mouse::Interaction::ResizingVertically;
                 }

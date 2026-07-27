@@ -2,20 +2,63 @@
 //! Split from views_shell.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input,
+    button, canvas, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
 };
 use iced::{Element, Length, Theme};
 
+use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::AppState;
+use crate::state::{AppState, AudioStreamHealth, Workspace};
 use crate::theme as th;
+use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
+
+fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
+    let (color, description) = match health {
+        AudioStreamHealth::Running => (th::success(), health.description().to_string()),
+        AudioStreamHealth::Rebuilding => (th::meter_yellow(), health.description().to_string()),
+        AudioStreamHealth::Error(cause) => (th::danger(), format!("Audio stream error: {cause}")),
+    };
+    let control = container(
+        row![
+            icons::icon(icons::CIRCLE_DOT).size(10).color(color),
+            text("AUDIO").size(9).color(color),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([4, 6])
+    .style(move |_theme: &Theme| container::Style {
+        background: Some(th::bg_elevated().into()),
+        border: iced::Border {
+            color,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    });
+    let hint = container(text(description).size(10).color(th::text()))
+        .padding([5, 7])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_elevated().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+    tooltip(control, hint, tooltip::Position::Bottom)
+        .gap(6)
+        .padding(0)
+        .into()
+}
 
 impl App {
     pub(super) fn view_transport(&self) -> Element<'_, Message> {
@@ -99,13 +142,9 @@ impl App {
         let transport_buttons = row![skip_back_btn, play_pause_btn, loop_btn].spacing(4);
 
         // Time display
-        let time_text = text(format!(
-            "{} / {}",
-            AppState::format_time(self.state.position_seconds()),
-            AppState::format_time(self.state.duration_seconds()),
-        ))
-        .size(14)
-        .color(th::text());
+        let time_text = text(transport_time_label(&self.state))
+            .size(14)
+            .color(th::text());
 
         // BPM
         let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
@@ -143,6 +182,63 @@ impl App {
         .spacing(1);
 
         let bpm_label = text("BPM").size(12).color(th::text_dim());
+
+        let project_swing = self.state.perform.project_swing();
+        let project_swing_locked = self.state.perform.capture.is_active();
+        let project_swing_submit = parse_swing_percent(self.state.perform.project_swing_input())
+            .map(|swing| Message::Perform(PerformMsg::SetProjectSwing(swing.get())))
+            .unwrap_or_else(|| {
+                Message::Perform(PerformMsg::ProjectSwingInput(format!(
+                    "{:.0}",
+                    project_swing.get() * 100.0
+                )))
+            });
+        let swing_input = text_input("%", self.state.perform.project_swing_input())
+            .width(Length::Fixed(42.0))
+            .padding([2, 4])
+            .size(11);
+        let swing_input = if project_swing_locked {
+            swing_input
+        } else {
+            swing_input
+                .on_input(|value| Message::Perform(PerformMsg::ProjectSwingInput(value)))
+                .on_submit(project_swing_submit)
+        };
+        let swing_knob: Element<'_, Message> = canvas(SwingKnobWidget::project_locked(
+            project_swing,
+            project_swing_locked,
+        ))
+        .width(Length::Fixed(30.0))
+        .height(Length::Fixed(30.0))
+        .into();
+        let swing_control = container(
+            row![
+                swing_knob,
+                column![
+                    text(if project_swing_locked {
+                        "PROJECT SWING · CAPTURE LOCK"
+                    } else {
+                        "PROJECT SWING"
+                    })
+                    .size(8)
+                    .color(th::text_muted()),
+                    swing_input,
+                ]
+                .spacing(1),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([2, 6])
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
 
         let grid_picker = pick_list(
             crate::state::SnapGrid::all(),
@@ -252,18 +348,21 @@ impl App {
             .into();
 
         let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::text_dim());
+        let stream_health = audio_stream_indicator(&self.state.audio_stream_health);
 
         let transport = row![
             transport_buttons,
             horizontal_space(),
             time_text,
             horizontal_space(),
+            stream_health,
             volume_icon,
             master_meter_canvas,
             row![bpm_input, bpm_spinner]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             bpm_label,
+            swing_control,
             grid_controls,
         ]
         .spacing(12)
@@ -282,5 +381,49 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+}
+
+fn transport_time_label(state: &AppState) -> String {
+    if state.view.workspace == Workspace::Perform {
+        let seconds = if state.transport.sample_rate == 0 {
+            0.0
+        } else {
+            state.perform.performance_position_samples as f64
+                / f64::from(state.transport.sample_rate)
+        };
+        format!("PERFORMANCE TIME · {}", AppState::format_time(seconds))
+    } else {
+        format!(
+            "{} / {}",
+            AppState::format_time(state.position_seconds()),
+            AppState::format_time(state.duration_seconds()),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transport_time_label;
+    use crate::state::{AppState, Workspace};
+
+    #[test]
+    fn perform_labels_its_independent_zero_based_clock() {
+        let mut state = AppState::default();
+        state.view.workspace = Workspace::Perform;
+        state.transport.sample_rate = 48_000;
+        state.transport.position_samples = 480_000;
+        state.perform.performance_position_samples = 72_000;
+
+        assert_eq!(transport_time_label(&state), "PERFORMANCE TIME · 00:01.50");
+    }
+
+    #[test]
+    fn arrange_keeps_the_canonical_cursor_and_duration_readout() {
+        let mut state = AppState::default();
+        state.transport.sample_rate = 48_000;
+        state.transport.position_samples = 72_000;
+
+        assert_eq!(transport_time_label(&state), "00:01.50 / 00:00.00");
     }
 }

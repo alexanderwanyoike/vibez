@@ -3,14 +3,43 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
-use vibez_core::id::{ClipId, EffectId, TrackId};
+use vibez_core::id::{ClipId, EffectId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::project_format_v1::SaveObservation;
-use vibez_project::Project;
+use vibez_project::{Project, TimelineLocation};
+
+/// Cloneable UI-message holder for one prepared, uniquely-owned Section.
+/// The router takes the box exactly once before sending it to the engine.
+#[derive(Clone)]
+pub struct ResidentSection(
+    Arc<
+        std::sync::Mutex<Option<Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>>>,
+    >,
+);
+
+impl ResidentSection {
+    pub fn new(
+        prepared: Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>,
+    ) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Some(prepared))))
+    }
+
+    pub fn take(
+        &self,
+    ) -> Option<Box<vibez_engine::playback_source::PreparedSectionPlaybackSource>> {
+        self.0.lock().ok()?.take()
+    }
+}
+
+impl std::fmt::Debug for ResidentSection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ResidentSection")
+    }
+}
 
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
@@ -27,6 +56,15 @@ pub enum DrumPadParam {
     FineTune,
 }
 
+/// Menus whose lifecycle is owned by their overlay rather than inferred from
+/// unrelated application messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuOverlay {
+    ArrangementContext,
+    File,
+    Edit,
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedClipData {
     pub info: ClipInfo,
@@ -36,6 +74,34 @@ pub struct LoadedClipData {
     /// Raw un-warped audio, retained when `info.warped` so later
     /// re-warps stretch from the original.
     pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedTimelineClip {
+    pub location: TimelineLocation,
+    pub clip: LoadedClipData,
+}
+
+impl std::ops::Deref for LoadedTimelineClip {
+    type Target = LoadedClipData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.clip
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnresolvedTimelineClip {
+    pub location: TimelineLocation,
+    pub info: ClipInfo,
+}
+
+impl std::ops::Deref for UnresolvedTimelineClip {
+    type Target = ClipInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.info
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +217,11 @@ pub enum BrowserImportTarget {
         track_id: TrackId,
         position_samples: u64,
     },
+    SectionClipAt {
+        section_id: SectionId,
+        track_id: TrackId,
+        position_samples: u64,
+    },
     ArrangementNewTrackAt {
         position_samples: u64,
     },
@@ -174,10 +245,10 @@ pub struct PreparedBrowserImport {
 pub struct ProjectLoadResult {
     pub path: PathBuf,
     pub project: Project,
-    pub clips: Vec<LoadedClipData>,
+    pub clips: Vec<LoadedTimelineClip>,
     /// Clips whose media could not be hydrated this session. They stay out
     /// of the arrangement but must survive the next save for relinking.
-    pub unresolved_clips: Vec<ClipInfo>,
+    pub unresolved_clips: Vec<UnresolvedTimelineClip>,
     pub sampler_samples: Vec<LoadedSamplerData>,
     pub drum_rack_pad_samples: Vec<LoadedDrumRackPadData>,
     pub warnings: Vec<String>,
@@ -192,6 +263,15 @@ pub struct ProjectSaveResult {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// A message emitted by one of the selected Section timeline canvases.
+    /// The router focuses that editor before dispatching the enclosed action.
+    SectionTimeline(Box<Message>),
+    /// A menu item was chosen. The router dispatches the action, then closes
+    /// only the overlay that produced it.
+    MenuItemSelected(MenuOverlay, Box<Message>),
+    /// Explicit dismissal from an overlay backdrop or another first-class
+    /// lifecycle input such as Escape.
+    DismissMenu(MenuOverlay),
     /// One incremental update within a continuous pointer edit. Messages from
     /// the same gesture share one pre-edit undo snapshot.
     UndoGesture {
@@ -208,6 +288,22 @@ pub enum Message {
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
     Automation(crate::domains::automation::AutomationMsg),
+    Perform(crate::domains::perform::PerformMsg),
+    SectionResidencyReady {
+        request_id: u64,
+        section_id: SectionId,
+        quantization: vibez_core::perform::SectionLaunchQuantization,
+        resident: ResidentSection,
+    },
+    SectionRecordResidencyReady {
+        request_id: u64,
+        request: crate::domains::perform::SectionRecordStartRequest,
+        resident: ResidentSection,
+    },
+    KeyboardInput {
+        event: iced::keyboard::Event,
+        occurred_at: std::time::Instant,
+    },
     View(crate::domains::view::ViewMsg),
 
     // Workspace
@@ -279,6 +375,8 @@ pub enum Message {
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
     SetWarpConfidenceThreshold(f32),
+    /// Settings: ask before deleting a Project Track everywhere.
+    ToggleProjectTrackDeleteConfirmation,
     /// Settings: re-warp every warped clip to the current project
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.
@@ -578,11 +676,19 @@ impl Message {
 }
 
 impl Message {
+    pub fn menu_item(overlay: MenuOverlay, action: Self) -> Self {
+        Self::MenuItemSelected(overlay, Box::new(action))
+    }
+
+    pub fn dismiss_menu(overlay: MenuOverlay) -> Self {
+        Self::DismissMenu(overlay)
+    }
+
     pub fn select_track(t: TrackId) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::SelectTrack(t))
     }
     pub fn remove_track(t: TrackId) -> Self {
-        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RemoveTrack(t))
+        Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RequestRemoveTrack(t))
     }
     pub fn rename_track(t: TrackId, n: String) -> Self {
         Self::Arrangement(crate::domains::arrangement::ArrangementMsg::RenameTrack(

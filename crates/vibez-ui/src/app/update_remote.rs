@@ -51,7 +51,7 @@ impl App {
         // Invalidate any in-flight refresh so pages fetched for this
         // (possibly different) account cannot reconcile after a
         // reconnect.
-        self.remote_catalog_generation = self.remote_catalog_generation.wrapping_add(1);
+        self.remote_catalog_request.cancel();
         self.remote_catalog_pending.clear();
         self.dropbox_settings.clear_tokens();
         let _ = self.dropbox_settings.save();
@@ -77,7 +77,7 @@ impl App {
             crate::remote_provider::RemoteProviderError,
         >,
     ) -> Task<Message> {
-        if generation != self.remote_catalog_generation {
+        if !self.remote_catalog_request.is_current(generation) {
             return Task::none();
         }
         match result {
@@ -192,7 +192,7 @@ impl App {
         next_checkpoint: Option<String>,
         result: Result<(), String>,
     ) -> Task<Message> {
-        if generation != self.remote_catalog_generation {
+        if !self.remote_catalog_request.is_current(generation) {
             return Task::none();
         }
         match result {
@@ -347,10 +347,9 @@ impl App {
         source: MediaSourceRef,
         result: Result<crate::message::RemoteMaterializedSample, String>,
     ) -> Task<Message> {
-        if request_id != self.remote_materialization_request_id {
+        if !self.remote_materialization_request.finish(request_id) {
             return Task::none();
         }
-        self.remote_materialization_abort = None;
         self.state.browser.remote.preview_in_progress = false;
         let path_lower = match &source {
             MediaSourceRef::DropboxFile { path_lower, .. } => path_lower.clone(),

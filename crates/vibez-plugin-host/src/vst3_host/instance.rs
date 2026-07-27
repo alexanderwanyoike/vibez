@@ -1,6 +1,9 @@
 use std::path::Path;
 
 use vibez_core::effect::ParamDescriptor;
+use vst3::Steinberg::Vst::{
+    Event as VstEvent, Event__type0 as VstEventData, NoteOffEvent, NoteOnEvent,
+};
 
 use crate::buffer::AudioBufferAdapter;
 use crate::instance::PluginInstance;
@@ -43,6 +46,7 @@ pub struct Vst3PluginInstance {
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     active: bool,
+    processing: bool,
 }
 
 unsafe impl Send for Vst3PluginInstance {}
@@ -344,7 +348,129 @@ struct NoteEvent {
     is_on: bool,
     pitch: u8,
     velocity: u8,
+    frame_offset: u32,
 }
+
+// ── Live IEventList (input) ──
+// Stack-allocated for each process() call. The VST3 processor reads this
+// COM object synchronously and must not retain it after process() returns.
+
+#[repr(C)]
+struct EventListVtbl {
+    query_interface: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const u8,
+        *mut *mut std::ffi::c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
+    get_event_count: unsafe extern "system" fn(*mut std::ffi::c_void) -> i32,
+    get_event: unsafe extern "system" fn(*mut std::ffi::c_void, i32, *mut VstEvent) -> i32,
+    add_event: unsafe extern "system" fn(*mut std::ffi::c_void, *mut VstEvent) -> i32,
+}
+
+#[repr(C)]
+struct LiveEventList<'a> {
+    vtbl: *const EventListVtbl,
+    events: &'a [NoteEvent],
+}
+
+impl<'a> LiveEventList<'a> {
+    fn new(events: &'a [NoteEvent]) -> Self {
+        Self {
+            vtbl: &LIVE_EVENT_LIST_VTBL,
+            events,
+        }
+    }
+
+    fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    fn event(&self, index: usize) -> Option<VstEvent> {
+        self.events.get(index).map(vst_event)
+    }
+
+    fn as_raw_mut(&mut self) -> *mut std::ffi::c_void {
+        self as *mut Self as *mut std::ffi::c_void
+    }
+}
+
+fn vst_event(event: &NoteEvent) -> VstEvent {
+    let sample_offset = event.frame_offset.min(i32::MAX as u32) as i32;
+    if event.is_on {
+        VstEvent {
+            busIndex: 0,
+            sampleOffset: sample_offset,
+            ppqPosition: 0.0,
+            flags: 0,
+            r#type: vst3::Steinberg::Vst::Event_::EventTypes_::kNoteOnEvent as u16,
+            __field0: VstEventData {
+                noteOn: NoteOnEvent {
+                    channel: 0,
+                    pitch: event.pitch as i16,
+                    tuning: 0.0,
+                    velocity: event.velocity as f32 / 127.0,
+                    length: 0,
+                    noteId: -1,
+                },
+            },
+        }
+    } else {
+        VstEvent {
+            busIndex: 0,
+            sampleOffset: sample_offset,
+            ppqPosition: 0.0,
+            flags: 0,
+            r#type: vst3::Steinberg::Vst::Event_::EventTypes_::kNoteOffEvent as u16,
+            __field0: VstEventData {
+                noteOff: NoteOffEvent {
+                    channel: 0,
+                    pitch: event.pitch as i16,
+                    velocity: event.velocity as f32 / 127.0,
+                    noteId: -1,
+                    tuning: 0.0,
+                },
+            },
+        }
+    }
+}
+
+unsafe extern "system" fn event_list_count(this: *mut std::ffi::c_void) -> i32 {
+    unsafe { (*(this as *const LiveEventList<'_>)).event_count() as i32 }
+}
+
+unsafe extern "system" fn event_list_get(
+    this: *mut std::ffi::c_void,
+    index: i32,
+    event: *mut VstEvent,
+) -> i32 {
+    if index < 0 || event.is_null() {
+        return 1;
+    }
+    let Some(value) = (unsafe { &*(this as *const LiveEventList<'_>) }).event(index as usize)
+    else {
+        return 1;
+    };
+    unsafe { *event = value };
+    0
+}
+
+unsafe extern "system" fn event_list_add(
+    _this: *mut std::ffi::c_void,
+    _event: *mut VstEvent,
+) -> i32 {
+    1
+}
+
+static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
+    query_interface: pc_query_interface,
+    add_ref: pc_add_ref,
+    release: pc_release,
+    get_event_count: event_list_count,
+    get_event: event_list_get,
+    add_event: event_list_add,
+};
 
 // VST3 IComponent IID: {E831FF31-F2D5-4301-928E-BBEE25697802}
 const ICOMPONENT_IID: [u8; 16] = crate::vst3_tuid([
@@ -700,6 +826,7 @@ impl Vst3PluginInstance {
             note_events: Vec::new(),
             sample_rate,
             active: false,
+            processing: false,
         };
 
         // Enumerate parameters from the edit controller (VST3 params
@@ -796,6 +923,17 @@ impl PluginInstance for Vst3PluginInstance {
         if !self.active || self.processor.is_null() {
             return;
         }
+        if !self.processing {
+            type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+            let proc_vtbl = unsafe { vtbl(self.processor) };
+            let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
+            let result = unsafe { set_processing(self.processor, 1) };
+            if result != 0 {
+                buffer.fill(0.0);
+                return;
+            }
+            self.processing = true;
+        }
 
         let frames = buffer.len() / channels.max(1);
         if frames == 0 {
@@ -877,6 +1015,12 @@ impl PluginInstance for Vst3PluginInstance {
             queues: live_queues.as_ptr(),
             len: live_queues.len(),
         };
+        // EngineTrack submits note-offs before note-ons to keep its active-note
+        // mask correct. VST3 requires chronological input; at one offset,
+        // release before retrigger. Unstable sorting allocates no scratch buffer.
+        self.note_events
+            .sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+        let mut live_events = LiveEventList::new(&self.note_events);
 
         let mut process_data = ProcessDataRaw {
             process_mode: 0,
@@ -892,7 +1036,7 @@ impl PluginInstance for Vst3PluginInstance {
                 &live_changes as *const LiveParamChanges as *mut std::ffi::c_void
             },
             output_parameter_changes: param_changes_stub(),
-            input_events: std::ptr::null_mut(),
+            input_events: live_events.as_raw_mut(),
             output_events: std::ptr::null_mut(),
             process_context: std::ptr::null_mut(),
         };
@@ -927,6 +1071,7 @@ impl PluginInstance for Vst3PluginInstance {
             is_on: true,
             pitch,
             velocity,
+            frame_offset: 0,
         });
     }
 
@@ -935,6 +1080,25 @@ impl PluginInstance for Vst3PluginInstance {
             is_on: false,
             pitch,
             velocity: 0,
+            frame_offset: 0,
+        });
+    }
+
+    fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
+        self.note_events.push(NoteEvent {
+            is_on: true,
+            pitch,
+            velocity,
+            frame_offset,
+        });
+    }
+
+    fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
+        self.note_events.push(NoteEvent {
+            is_on: false,
+            pitch,
+            velocity: 0,
+            frame_offset,
         });
     }
 
@@ -989,14 +1153,6 @@ impl PluginInstance for Vst3PluginInstance {
             eprintln!("vibez: {}: setActive(1) failed (hr={hr})", self.name);
         }
         if hr == 0 {
-            if !self.processor.is_null() {
-                // IAudioProcessor::setProcessing - vtable [8]
-                type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
-                let proc_vtbl = unsafe { vtbl(self.processor) };
-                let set_processing: SetProcessingFn =
-                    unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
-                unsafe { set_processing(self.processor, 1) };
-            }
             self.active = true;
             true
         } else {
@@ -1004,16 +1160,22 @@ impl PluginInstance for Vst3PluginInstance {
         }
     }
 
+    fn stop_processing(&mut self) {
+        if self.processor.is_null() || !self.processing {
+            return;
+        }
+        type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
+        let proc_vtbl = unsafe { vtbl(self.processor) };
+        let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
+        unsafe { set_processing(self.processor, 0) };
+        self.processing = false;
+    }
+
     fn deactivate(&mut self) {
         if !self.active {
             return;
         }
-        if !self.processor.is_null() {
-            type SetProcessingFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
-            let proc_vtbl = unsafe { vtbl(self.processor) };
-            let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
-            unsafe { set_processing(self.processor, 0) };
-        }
+        self.stop_processing();
         if !self.component.is_null() {
             type SetActiveFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
             let comp_vtbl = unsafe { vtbl(self.component) };
@@ -1112,6 +1274,8 @@ unsafe fn connect_component_and_controller(
 
 #[cfg(test)]
 mod tests {
+    use vst3::Steinberg::Vst::Event_::EventTypes_::{kNoteOffEvent, kNoteOnEvent};
+
     /// Hand-written IIDs must match the SDK-generated constants in the
     /// vst3 crate. A single wrong byte makes every plugin reject the
     /// queryInterface call (a 0x3F-for-0x3D typo in IAudioProcessor
@@ -1140,5 +1304,47 @@ mod tests {
             super::IAUDIOPROCESSOR_IID,
             vst3::Steinberg::Vst::IAudioProcessor_iid,
         );
+    }
+
+    #[test]
+    fn live_event_list_exposes_timed_clip_notes_to_vst3() {
+        let mut events = vec![
+            super::NoteEvent {
+                is_on: false,
+                pitch: 64,
+                velocity: 0,
+                frame_offset: 91,
+            },
+            super::NoteEvent {
+                is_on: true,
+                pitch: 64,
+                velocity: 96,
+                frame_offset: 17,
+            },
+        ];
+        events.sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+        let mut list = super::LiveEventList::new(&events);
+
+        assert_eq!(list.event_count(), 2);
+
+        let raw = list.as_raw_mut();
+        let vtbl = unsafe { (*raw.cast::<super::LiveEventList<'_>>()).vtbl };
+        assert_eq!(unsafe { ((*vtbl).get_event_count)(raw) }, 2);
+        let mut via_vtable = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { ((*vtbl).get_event)(raw, 0, &mut via_vtable) }, 0);
+        assert_eq!(via_vtable.sampleOffset, 17);
+
+        let note_on = list.event(0).expect("note-on event");
+        assert_eq!(note_on.r#type, kNoteOnEvent as u16);
+        assert_eq!(note_on.sampleOffset, 17);
+        let note_on = unsafe { note_on.__field0.noteOn };
+        assert_eq!(note_on.pitch, 64);
+        assert!((note_on.velocity - 96.0 / 127.0).abs() < f32::EPSILON);
+
+        let note_off = list.event(1).expect("note-off event");
+        assert_eq!(note_off.r#type, kNoteOffEvent as u16);
+        assert_eq!(note_off.sampleOffset, 91);
+        let note_off = unsafe { note_off.__field0.noteOff };
+        assert_eq!(note_off.pitch, 64);
     }
 }

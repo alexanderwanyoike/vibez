@@ -7,20 +7,24 @@
 //! [`PianoRollAction`] for app.rs to route.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
+use vibez_core::perform::GrooveGrid;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
 use crate::state::{
-    ArrangementTimeline, PianoRollState, SnapGrid, TrackTimelineContent, UiNoteClip,
+    PianoRollState, SnapGrid, TimelineContent, TimelineEditorState, TrackTimelineContent,
+    UiNoteClip,
 };
 
 /// Messages the piano roll domain handles.
 #[derive(Debug, Clone)]
 pub enum PianoRollMsg {
     ToggleNoteClipLoop(TrackId, ClipId),
+    SetNoteClipGrooveGrid(TrackId, ClipId, GrooveGrid),
     SetNoteClipLoopRegion {
         track_id: TrackId,
         clip_id: ClipId,
@@ -112,16 +116,14 @@ pub struct PianoRollAction {
     pub scroll_to_beat: Option<f64>,
     /// A resize drag is in flight (suppresses click-through selection).
     pub drag_resize_active: bool,
-    /// Dismiss the arrangement context menu.
-    pub close_context_menu: bool,
 }
 
-fn find_track(timeline: &ArrangementTimeline, track_id: TrackId) -> Option<&TrackTimelineContent> {
+fn find_track(timeline: &TimelineContent, track_id: TrackId) -> Option<&TrackTimelineContent> {
     timeline.get(track_id)
 }
 
 fn find_track_mut(
-    timeline: &mut ArrangementTimeline,
+    timeline: &mut TimelineContent,
     track_id: TrackId,
 ) -> Option<&mut TrackTimelineContent> {
     timeline.get_mut(track_id)
@@ -145,7 +147,7 @@ pub fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
 /// Snap every note start to the grid and sync changed notes to the
 /// engine.
 fn quantize_note_clip(
-    tracks: &mut ArrangementTimeline,
+    tracks: &mut TimelineContent,
     track_id: TrackId,
     clip_id: ClipId,
     grid: SnapGrid,
@@ -183,9 +185,10 @@ impl PianoRollState {
         &mut self,
         msg: PianoRollMsg,
         engine: &mut impl EngineHandle,
-        tracks: &mut ArrangementTimeline,
+        editor: &mut TimelineEditorState,
         ctx: PianoRollCtx,
     ) -> PianoRollAction {
+        let tracks = Arc::make_mut(&mut editor.timeline);
         let mut action = PianoRollAction::default();
         match msg {
             PianoRollMsg::ToggleNoteClipLoop(track_id, clip_id) => {
@@ -225,6 +228,23 @@ impl PianoRollState {
                     });
                 }
             }
+            PianoRollMsg::SetNoteClipGrooveGrid(track_id, clip_id, groove_grid) => {
+                if let Some(track) = find_track_mut(tracks, track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|clip| clip.id == clip_id)
+                    {
+                        clip.groove_grid = groove_grid;
+                    }
+                }
+                engine.send(EngineCommand::SetNoteClipGrooveGrid {
+                    track_id,
+                    clip_id,
+                    groove_grid,
+                });
+                action.status = Some(match groove_grid {
+                    GrooveGrid::Off => "Clip Swing disabled".to_string(),
+                    _ => format!("Clip Swing follows Track on {}", groove_grid.label()),
+                });
+            }
             PianoRollMsg::SetNoteClipLoopRegion {
                 track_id,
                 clip_id,
@@ -251,19 +271,19 @@ impl PianoRollState {
                 let clip_id = ClipId::new();
                 let position_beats = 0.0;
                 let duration_beats = 16.0;
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    track.note_clips.push(UiNoteClip {
-                        id: clip_id,
-                        name: format!("Pattern {}", track.note_clips.len() + 1),
-                        position_beats,
-                        duration_beats,
-                        notes: Vec::new(),
-                        selected_notes: HashSet::new(),
-                        loop_enabled: true,
-                        loop_start_beats: 0.0,
-                        loop_end_beats: duration_beats,
-                    });
-                }
+                let track = tracks.ensure(track_id);
+                track.note_clips.push(UiNoteClip {
+                    id: clip_id,
+                    name: format!("Pattern {}", track.note_clips.len() + 1),
+                    position_beats,
+                    duration_beats,
+                    notes: Vec::new(),
+                    selected_notes: HashSet::new(),
+                    loop_enabled: true,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: duration_beats,
+                    groove_grid: vibez_core::perform::GrooveGrid::Off,
+                });
                 engine.send(EngineCommand::AddNoteClip {
                     track_id,
                     clip_id,
@@ -272,6 +292,7 @@ impl PianoRollState {
                     loop_enabled: true,
                     loop_start_beats: 0.0,
                     loop_end_beats: duration_beats,
+                    groove_grid: vibez_core::perform::GrooveGrid::Off,
                 });
                 // Auto-select the new note clip for piano roll editing
                 action.select_note_clip = Some((track_id, clip_id));
@@ -552,12 +573,13 @@ impl PianoRollState {
                                 clip.position_beats,
                                 clip.duration_beats,
                                 clip.notes.clone(),
+                                clip.groove_grid,
                             ));
                         }
                     }
                 }
                 // Sync to engine outside the mutable borrow
-                if let Some((pos, dur, notes)) = sync_data {
+                if let Some((pos, dur, notes, groove_grid)) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
                         track_id,
@@ -567,6 +589,7 @@ impl PianoRollState {
                         loop_enabled: false,
                         loop_start_beats: 0.0,
                         loop_end_beats: 0.0,
+                        groove_grid,
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
@@ -623,12 +646,20 @@ impl PianoRollState {
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
+                            clip.groove_grid,
                         ));
                     }
                 }
                 // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
-                if let Some((pos, dur, notes, loop_enabled, loop_start_beats, loop_end_beats)) =
-                    sync_data
+                if let Some((
+                    pos,
+                    dur,
+                    notes,
+                    loop_enabled,
+                    loop_start_beats,
+                    loop_end_beats,
+                    groove_grid,
+                )) = sync_data
                 {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
@@ -639,6 +670,7 @@ impl PianoRollState {
                         loop_enabled,
                         loop_start_beats,
                         loop_end_beats,
+                        groove_grid,
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
@@ -680,7 +712,6 @@ impl PianoRollState {
                 action.status = Some(format!("Piano roll: {mode_name} mode"));
             }
             PianoRollMsg::QuantizeNoteClip { track_id, clip_id } => {
-                action.close_context_menu = true;
                 quantize_note_clip(
                     tracks,
                     track_id,
@@ -701,10 +732,10 @@ mod tests {
     use super::*;
     use crate::state::PianoRollEditMode;
 
-    fn midi_track_with_clip() -> (ArrangementTimeline, TrackId, ClipId) {
+    fn midi_track_with_clip() -> (TimelineEditorState, TrackId, ClipId) {
         let track_id = TrackId::new();
         let clip_id = ClipId::new();
-        let mut timeline = ArrangementTimeline::default();
+        let mut timeline = TimelineEditorState::default();
         let track = timeline.ensure(track_id);
         track.note_clips.push(UiNoteClip {
             id: clip_id,
@@ -729,6 +760,7 @@ mod tests {
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
+            groove_grid: GrooveGrid::Off,
         });
         (timeline, track_id, clip_id)
     }
@@ -752,6 +784,25 @@ mod tests {
         );
         assert_eq!(tracks.get(tid).unwrap().note_clips[0].notes.len(), 3);
         assert!(matches!(engine.0[0], EngineCommand::AddNote { .. }));
+    }
+
+    #[test]
+    fn add_note_clip_creates_missing_timeline_lane_for_a_shared_track() {
+        let track_id = TrackId::new();
+        let mut editor = TimelineEditorState::default();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        let action = piano_roll.update(
+            PianoRollMsg::AddNoteClipToTrack(track_id),
+            &mut engine,
+            &mut editor,
+            PianoRollCtx::default(),
+        );
+
+        assert_eq!(editor.timeline.get(track_id).unwrap().note_clips.len(), 1);
+        assert_eq!(action.select_note_clip.unwrap().0, track_id);
+        assert!(matches!(engine.0[0], EngineCommand::AddNoteClip { .. }));
     }
 
     #[test]
@@ -793,7 +844,6 @@ mod tests {
         let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert_eq!(clip.notes[0].start_beat, 0.0);
         assert_eq!(clip.notes[1].start_beat, 2.0);
-        assert!(action.close_context_menu);
         assert_eq!(action.status.as_deref(), Some("Quantized 2 note(s) to 1/4"));
     }
 
@@ -837,10 +887,41 @@ mod tests {
     }
 
     #[test]
+    fn groove_grid_updates_the_clip_and_live_engine_source() {
+        let (mut tracks, tid, cid) = midi_track_with_clip();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        let action = piano_roll.update(
+            PianoRollMsg::SetNoteClipGrooveGrid(tid, cid, GrooveGrid::Sixteenth),
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+
+        assert_eq!(
+            tracks.get(tid).unwrap().note_clips[0].groove_grid,
+            GrooveGrid::Sixteenth
+        );
+        assert!(matches!(
+            engine.0[0],
+            EngineCommand::SetNoteClipGrooveGrid {
+                track_id,
+                clip_id,
+                groove_grid: GrooveGrid::Sixteenth,
+            } if track_id == tid && clip_id == cid
+        ));
+        assert_eq!(
+            action.status.as_deref(),
+            Some("Clip Swing follows Track on 1/16")
+        );
+    }
+
+    #[test]
     fn toggle_edit_mode_flips_and_reports() {
         let mut pr = PianoRollState::default();
         let mut engine = RecordingEngine::default();
-        let mut tracks = ArrangementTimeline::default();
+        let mut tracks = TimelineEditorState::default();
         let action = pr.update(
             PianoRollMsg::ToggleEditMode,
             &mut engine,

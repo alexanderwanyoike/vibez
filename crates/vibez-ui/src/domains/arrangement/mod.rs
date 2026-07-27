@@ -13,14 +13,16 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
 use vibez_engine::commands::EngineCommand;
 
+use super::timeline_editor::TimelineEditorAdapter;
 use super::EngineHandle;
 use crate::state::{
-    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TrackTimelineContent,
-    UiNoteClip,
+    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TimelineEditorState,
+    TrackTimelineContent, UiNoteClip,
 };
 
 mod messages;
 pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+mod clipboard;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -78,7 +80,7 @@ impl ProjectTracksState {
     }
 }
 
-impl ArrangementState {
+impl TimelineEditorState {
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.timeline.get(track_id)
     }
@@ -86,7 +88,59 @@ impl ArrangementState {
     fn find_content_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
         Arc::make_mut(&mut self.timeline).get_mut(track_id)
     }
+}
 
+impl ArrangementState {
+    fn remove_project_track(
+        &mut self,
+        project_tracks: &mut ProjectTracksState,
+        track_id: TrackId,
+        engine: &mut impl EngineHandle,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        if track_id.is_master()
+            || !project_tracks
+                .tracks
+                .iter()
+                .any(|track| track.id == track_id)
+        {
+            return action;
+        }
+
+        self.pending_project_track_deletion = None;
+        let removed_name = project_tracks
+            .tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .map(|track| track.name.clone())
+            .unwrap_or_else(|| format!("{track_id}"));
+        engine.send(EngineCommand::RemoveTrack(track_id));
+        project_tracks.tracks.retain(|track| track.id != track_id);
+        Arc::make_mut(&mut self.timeline).remove(track_id);
+        if self.selected_track == Some(track_id) {
+            self.selected_track = project_tracks.tracks.first().map(|track| track.id);
+        }
+        if self
+            .selected_note_clip
+            .is_some_and(|(id, _)| id == track_id)
+        {
+            self.selected_note_clip = None;
+        }
+        self.selected_clips.retain(|selection| match selection {
+            ArrangementSelection::AudioClip { track_id: id, .. }
+            | ArrangementSelection::NoteClip { track_id: id, .. } => *id != track_id,
+        });
+        action.close_track_guis = Some(track_id);
+        action.remove_track_from_sections = Some(track_id);
+        action.status = Some(format!(
+            "Removed {removed_name}. {} track(s) remain.",
+            project_tracks.tracks.len()
+        ));
+        action
+    }
+
+    /// Arrange owns Project Track controls and resolves its local timeline
+    /// before forwarding editor messages to the shared boundary.
     pub fn update(
         &mut self,
         project_tracks: &mut ProjectTracksState,
@@ -94,7 +148,13 @@ impl ArrangementState {
         engine: &mut impl EngineHandle,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
-        let _ = ctx.samples_per_beat; // used by clip arms below
+        if msg.is_timeline_editor_message() {
+            return self
+                .resolve_timeline_mut()
+                .editor
+                .update(project_tracks, msg, engine, ctx);
+        }
+
         let mut action = ArrangementAction::default();
         match msg {
             ArrangementMsg::AddTrack => {
@@ -127,58 +187,32 @@ impl ArrangementState {
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
-            ArrangementMsg::RemoveTrack(track_id) => {
-                if track_id.is_master() {
-                    // The master bus cannot be deleted.
+            ArrangementMsg::RequestRemoveTrack(track_id) => {
+                if !track_id.is_master()
+                    && project_tracks
+                        .tracks
+                        .iter()
+                        .any(|track| track.id == track_id)
+                {
+                    self.pending_project_track_deletion = Some(track_id);
+                }
+            }
+            ArrangementMsg::CancelRemoveTrack => {
+                self.pending_project_track_deletion = None;
+            }
+            ArrangementMsg::ConfirmRemoveTrack(track_id) => {
+                if self.pending_project_track_deletion != Some(track_id) {
                     return action;
                 }
-                let removed_name = project_tracks
-                    .tracks
-                    .iter()
-                    .find(|t| t.id == track_id)
-                    .map(|t| t.name.clone())
-                    .unwrap_or_else(|| format!("{track_id}"));
-
-                engine.send(EngineCommand::RemoveTrack(track_id));
-                project_tracks.tracks.retain(|t| t.id != track_id);
-                Arc::make_mut(&mut self.timeline).remove(track_id);
-                if self.selected_track == Some(track_id) {
-                    self.selected_track = project_tracks.tracks.first().map(|t| t.id);
-                }
-                if let Some((tid, _)) = self.selected_note_clip {
-                    if tid == track_id {
-                        self.selected_note_clip = None;
-                    }
-                }
-                self.selected_clips.retain(|sel| {
-                    let sel_track = match sel {
-                        ArrangementSelection::AudioClip { track_id: t, .. } => *t,
-                        ArrangementSelection::NoteClip { track_id: t, .. } => *t,
-                    };
-                    sel_track != track_id
-                });
-                action.close_track_guis = Some(track_id);
-                action.status = Some(format!(
-                    "Removed {removed_name}. {} track(s) remain.",
-                    project_tracks.tracks.len()
-                ));
+                return self.remove_project_track(project_tracks, track_id, engine);
             }
-            ArrangementMsg::SelectTrack(track_id) => {
-                self.selected_track = Some(track_id);
+            ArrangementMsg::RemoveTrack(track_id) => {
+                return self.remove_project_track(project_tracks, track_id, engine);
             }
+            ArrangementMsg::SelectTrack(track_id) => self.selected_track = Some(track_id),
             ArrangementMsg::RenameTrack(track_id, new_name) => {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.name = new_name;
-                }
-            }
-            ArrangementMsg::RenameClip(track_id, clip_id, new_name) => {
-                if let Some(track) = self.find_content_mut(track_id) {
-                    if let Some(c) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        c.name = new_name.clone();
-                    }
-                    if let Some(c) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        c.name = new_name;
-                    }
                 }
             }
             ArrangementMsg::MoveTrackUp(track_id) => {
@@ -188,13 +222,13 @@ impl ArrangementState {
                 project_tracks.move_track(track_id, false, engine)
             }
             ArrangementMsg::MoveSelectedTrackUp => {
-                if let Some(tid) = self.selected_track {
-                    project_tracks.move_track(tid, true, engine);
+                if let Some(track_id) = self.selected_track {
+                    project_tracks.move_track(track_id, true, engine);
                 }
             }
             ArrangementMsg::MoveSelectedTrackDown => {
-                if let Some(tid) = self.selected_track {
-                    project_tracks.move_track(tid, false, engine);
+                if let Some(track_id) = self.selected_track {
+                    project_tracks.move_track(track_id, false, engine);
                 }
             }
             ArrangementMsg::SetTrackGain(track_id, gain) => {
@@ -214,15 +248,13 @@ impl ArrangementState {
             ArrangementMsg::SetTrackMute(track_id) => {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.mute = !track.mute;
-                    let mute = track.mute;
-                    engine.send(EngineCommand::SetTrackMute(track_id, mute));
+                    engine.send(EngineCommand::SetTrackMute(track_id, track.mute));
                 }
             }
             ArrangementMsg::SetTrackSolo(track_id) => {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.solo = !track.solo;
-                    let solo = track.solo;
-                    engine.send(EngineCommand::SetTrackSolo(track_id, solo));
+                    engine.send(EngineCommand::SetTrackSolo(track_id, track.solo));
                 }
             }
             ArrangementMsg::AddBus => {
@@ -230,8 +262,6 @@ impl ArrangementState {
                 let id = TrackId::new();
                 let name = format!("{letter} Return");
                 engine.send(EngineCommand::AddBus(id, name.clone()));
-                // Offset into the palette so the first buses don't
-                // mirror the first tracks' colors.
                 let color_index = ((project_tracks.buses.len() + 4) % 8) as u8;
                 let mut bus = ProjectTrack::new(id, name.clone(), color_index);
                 attach_channel_eq(engine, &mut bus);
@@ -242,10 +272,10 @@ impl ArrangementState {
             }
             ArrangementMsg::RemoveBus(bus_id) => {
                 engine.send(EngineCommand::RemoveBus(bus_id));
-                project_tracks.buses.retain(|b| b.id != bus_id);
+                project_tracks.buses.retain(|bus| bus.id != bus_id);
                 Arc::make_mut(&mut self.timeline).remove(bus_id);
                 for track in &mut project_tracks.tracks {
-                    track.sends.retain(|(b, _)| *b != bus_id);
+                    track.sends.retain(|(id, _)| *id != bus_id);
                 }
                 for content in Arc::make_mut(&mut self.timeline).by_track.values_mut() {
                     content.automation.retain(|lane| {
@@ -253,10 +283,10 @@ impl ArrangementState {
                     });
                 }
                 if self.selected_track == Some(bus_id) {
-                    self.selected_track = project_tracks.tracks.first().map(|t| t.id);
+                    self.selected_track = project_tracks.tracks.first().map(|track| track.id);
                 }
-                // Plugin GUIs on the bus die with its devices.
                 action.close_track_guis = Some(bus_id);
+                action.remove_track_from_sections = Some(bus_id);
                 action.status = Some("Removed bus".to_string());
             }
             ArrangementMsg::SetSend {
@@ -266,7 +296,7 @@ impl ArrangementState {
             } => {
                 let amount = amount.clamp(0.0, 1.0);
                 if let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == track_id) {
-                    match track.sends.iter_mut().find(|(b, _)| *b == bus_id) {
+                    match track.sends.iter_mut().find(|(id, _)| *id == bus_id) {
                         Some(send) => send.1 = amount,
                         None => track.sends.push((bus_id, amount)),
                     }
@@ -285,6 +315,35 @@ impl ArrangementState {
                 if let Some(track) = project_tracks.find_mut(track_id) {
                     track.peak_l = peak_l.max(track.peak_l * 0.85);
                     track.peak_r = peak_r.max(track.peak_r * 0.85);
+                }
+            }
+            _ => unreachable!("editor messages are delegated before Arrange track handling"),
+        }
+        action
+    }
+}
+
+impl TimelineEditorState {
+    pub fn update(
+        &mut self,
+        project_tracks: &mut ProjectTracksState,
+        msg: ArrangementMsg,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+    ) -> ArrangementAction {
+        debug_assert!(msg.is_timeline_editor_message());
+        let _ = ctx.samples_per_beat; // used by clip arms below
+        let mut action = ArrangementAction::default();
+        match msg {
+            ArrangementMsg::RenameClip(track_id, clip_id, new_name) => {
+                if let Some(track) = self.find_content_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                        clip.name = new_name.clone();
+                    }
+                    if let Some(clip) = track.note_clips.iter_mut().find(|clip| clip.id == clip_id)
+                    {
+                        clip.name = new_name;
+                    }
                 }
             }
             ArrangementMsg::RemoveClip(track_id, clip_id) => {
@@ -407,64 +466,7 @@ impl ArrangementState {
                 clip_id,
                 new_duration,
             } => {
-                // Update UI state — auto-enable loop when extending past source length
-                let spb = ctx.samples_per_beat;
-                let mut sync_data = None;
-                let mut clip_end_beat = None;
-                if let Some(track) = self.find_content_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
-                        if new_duration > source_len {
-                            // Extending past source: enable loop over full source region
-                            clip.duration = new_duration;
-                            if !clip.loop_enabled {
-                                clip.loop_enabled = true;
-                                clip.loop_start = clip.source_offset;
-                                clip.loop_end = clip.source_offset + source_len;
-                            }
-                        } else {
-                            clip.duration = new_duration;
-                        }
-                        clip_end_beat = Some((clip.position + clip.duration) as f64 / spb);
-                        sync_data = Some((
-                            Arc::clone(&clip.audio),
-                            clip.position,
-                            clip.source_offset,
-                            clip.duration,
-                            clip.loop_enabled,
-                            clip.loop_start,
-                            clip.loop_end,
-                        ));
-                    }
-                }
-                // Sync to engine via Remove+Add (loop state included atomically)
-                if let Some((
-                    audio,
-                    position,
-                    source_offset,
-                    duration,
-                    loop_enabled,
-                    loop_start,
-                    loop_end,
-                )) = sync_data
-                {
-                    engine.send(EngineCommand::RemoveClip(track_id, clip_id));
-                    engine.send(EngineCommand::AddClip {
-                        track_id,
-                        clip_id,
-                        audio,
-                        position,
-                        source_offset,
-                        duration,
-                        loop_enabled,
-                        loop_start,
-                        loop_end,
-                    });
-                }
-                if let Some(end_beat) = clip_end_beat {
-                    action.scroll_to_beat = Some(end_beat);
-                }
-                self.drag_resize_active = true;
+                return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
             ArrangementMsg::MoveClipToTrack {
                 source_track,
@@ -492,6 +494,7 @@ impl ArrangementState {
                             loop_enabled: clip.loop_enabled,
                             loop_start_beats: clip.loop_start_beats,
                             loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
                         });
                         for note in &clip.notes {
                             engine.send(EngineCommand::AddNote {
@@ -653,6 +656,7 @@ impl ArrangementState {
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start_beats: duplicate.loop_start_beats,
                                         loop_end_beats: duplicate.loop_end_beats,
+                                        groove_grid: duplicate.groove_grid,
                                     });
                                     for note in &duplicate.notes {
                                         engine.send(EngineCommand::AddNote {
@@ -684,32 +688,10 @@ impl ArrangementState {
                 }
             }
             ArrangementMsg::CopySelectedClips => {
-                return self.op_copy_selected_clips(ctx);
+                unreachable!("clipboard messages are resolved at the application boundary")
             }
-            ArrangementMsg::CutSelectedClips => {
-                let start = self.selection_start_beats;
-                let end = self.selection_end_beats;
-                let track_id = self.time_selection_track;
-                let ranged = self.time_selection_active && end > start;
-                let copy = self.op_copy_selected_clips(ctx);
-                if copy.status.as_deref() == Some("Nothing to copy") {
-                    return copy;
-                }
-                let mut result = if ranged {
-                    self.op_delete_clips_in_region(engine, ctx, start, end, track_id)
-                } else {
-                    self.update(
-                        project_tracks,
-                        ArrangementMsg::DeleteSelectedClip,
-                        engine,
-                        ctx,
-                    )
-                };
-                result.status = Some("Cut to clipboard".to_string());
-                return result;
-            }
-            ArrangementMsg::PasteClipsAtPlayhead => {
-                return self.op_paste_clips_at_playhead(engine, ctx);
+            ArrangementMsg::CutSelectedClips | ArrangementMsg::PasteClips => {
+                unreachable!("clipboard messages are resolved at the application boundary")
             }
             ArrangementMsg::ToggleSelectedClipLoop => {
                 return self.op_toggle_selected_clip_loop(engine);
@@ -772,6 +754,7 @@ impl ArrangementState {
                                 loop_enabled: clip.loop_enabled,
                                 loop_start_beats: clip.loop_start_beats,
                                 loop_end_beats: clip.loop_end_beats,
+                                groove_grid: clip.groove_grid,
                             },
                             new_pos,
                             clip.duration_beats,
@@ -779,12 +762,21 @@ impl ArrangementState {
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
+                            clip.groove_grid,
                         ));
                     }
                 }
 
-                if let Some((new_clip, pos, dur, notes, loop_enabled, loop_start, loop_end)) =
-                    new_clip_data
+                if let Some((
+                    new_clip,
+                    pos,
+                    dur,
+                    notes,
+                    loop_enabled,
+                    loop_start,
+                    loop_end,
+                    groove_grid,
+                )) = new_clip_data
                 {
                     if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
@@ -797,6 +789,7 @@ impl ArrangementState {
                         loop_enabled,
                         loop_start_beats: loop_start,
                         loop_end_beats: loop_end,
+                        groove_grid,
                     });
                     for note in &notes {
                         engine.send(EngineCommand::AddNote {
@@ -948,6 +941,7 @@ impl ArrangementState {
             ArrangementMsg::ClearClipWarp { track_id, clip_id } => {
                 return self.apply_clear_clip_warp(engine, track_id, clip_id);
             }
+            _ => unreachable!("Project Track messages never enter the Timeline Editor"),
         }
         action
     }
@@ -956,6 +950,8 @@ impl ArrangementState {
 mod media_ops;
 mod ops;
 
+#[cfg(test)]
+mod clipboard_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

@@ -1,33 +1,101 @@
 # vibez
 
-A small open-source DAW for electronic music, written in Rust.
+An open-source DAW for electronic music, written in Rust.
 
-![vibez playing the demo project](docs/screenshot.png)
+vibez is three workspaces and a track moves through them in order. You
+**Perform** it from a pad grid, you **Arrange** what you played on a linear
+timeline, and you **Mix** it on a real console. Capture is the hinge: it turns
+a live performance into editable arrangement.
 
-## Features
+![Perform: launching Sections from the pad grid](docs/perform-sections.png)
 
-- **Multi-track arrangement** with audio and MIDI tracks, clip drag/resize/split/join,
-  time selection, looping, and an overview minimap
+## Perform
+
+Perform is built around **Sections**: reusable multitrack loops that share your
+project's tracks, instruments, effects and mixer. You author a Section with the
+same editor you use in Arrange, then launch it from a pad grid.
+
+- **Sections mode** launches Sections on a musical boundary (immediate, 1 beat,
+  1 bar, or end of section), so a Section triggered slightly late still lands
+  where you meant it
+- **Instrument mode** turns the same 16 pads into a playable instrument for the
+  selected track, with Full Level, 16 Levels, and Note Repeat
+- **Track Mutes mode** mutes and unmutes tracks on that same grid, through an
+  anti-click ramp so tails gate cleanly instead of clicking
+- **Swing** modelled on the MPC2000XL, set per project, per track, or per clip
+- **Section Record** with count-in, overdub and replace, timed against the audio
+  engine's sample clock rather than the UI frame rate
+
+Pads are computer keys today. Multiple MIDI input ports and generic `.vdc`
+controller mapping are the next milestone.
+
+## Arrange
+
+Arrange is the linear timeline, and it is where a performance lands. **Capture**
+records an entire performance, Section launches, live playing, mutes and
+automation gestures, and writes it here as ordinary clips and automation lanes
+you can edit afterwards. Captured material keeps no reference back to its
+Sections, so editing a Section later never rewrites a take you already
+recorded.
+
+![A captured performance written into the Arrangement](docs/arrange-capture.png)
+
+Everything Capture writes is material you could have drawn by hand, so the rest
+of Arrange applies to it unchanged:
+
+- **Multi-track editing** for audio and MIDI, with clip
+  drag/resize/split/join, time selection, looping, and an overview minimap
 - **Warping**: automatic BPM detection and high-quality time-stretching
   (Signalsmith Stretch), Ableton-style tempo follow: change the project BPM and
   warped clips stay in sync
 - **Piano roll** with draw and select modes, multi-note editing, velocity,
   quantize, and adaptive snap grids
+- **Automation** for track, device and plugin parameters, on tracks, buses,
+  sends and master
+
+## Mix
+
+Mix is a real console rather than a row of faders. Every channel has its own
+EQ, the master is an actual channel, and the device rack below follows the
+selected one.
+
+![Mix: channel strips with EQ, the master channel, and the device rack](docs/mix.png)
+
+- **Channel strips** with a four-band EQ, pan, fader, metering, mute and solo
+- **Buses, returns and sends**, and a real master channel rather than a
+  summing shortcut
 - **Built-in instruments**: subtractive synth, sampler, and a 16-pad drum rack
 - **Built-in effects**: filter, delay, reverb, drive, bitcrush, compressor,
   auto-pan, gate, phaser, and gain
 - **Plugin hosting**: VST3 and CLAP instruments and effects with native GUIs,
   sandboxed plugin scanning, and state persisted in your project
-- **Sample browser** with local library indexing and Dropbox integration
+
+## Everything else
+
+- **Sample browser** with local library indexing, audition, and Dropbox
 - **Project save/load, undo/redo, and WAV export** from the master bus
-- **MIDI input** for playing instruments live
-- Real-time safe audio engine: lock-free and allocation-free in the audio callback
+- Real-time safe audio engine: lock-free and allocation-free in the audio
+  callback
+
+### No MIDI hardware support yet
+
+Worth being blunt about, because a DAW README saying "MIDI" implies far more
+than is here. There is one narrow path: a single input port at a time, notes
+only, played into whichever instrument track is selected.
+
+There is no MIDI recording, no MIDI output, no `.mid` file import, no
+controller mapping, and no way to use more than one device at once. Perform's
+pads are computer keys for the same reason. Multiple input ports, `.vdc`
+controller profiles, and MIDI settings are the next milestone, and they are
+what will make Perform playable on hardware.
 
 ## Status
 
-Early alpha, moving fast. Linux is the primary development platform; macOS and
-Windows build and pass CI but get less testing. Expect rough edges and breaking
-project-format changes before v0.1.
+v0.1.0, and still early. Linux is the primary development platform; macOS and
+Windows build and pass CI on every change but get less hands-on testing.
+Projects save to a self-contained versioned `.vzp` container, but breaking
+format changes are still possible: treat this as a working alpha rather than a
+stability promise.
 
 ## Building
 
@@ -54,28 +122,32 @@ vibez is a Cargo workspace:
 
 | Crate | Purpose |
 |-------|---------|
-| `vibez-core` | Shared types: tracks, clips, MIDI, IDs |
+| `vibez-core` | Shared types: tracks, clips, MIDI, IDs, Perform primitives |
 | `vibez-engine` | Real-time audio engine (lock-free, allocation-free callback) |
 | `vibez-audio-io` | Device I/O via cpal, realtime thread priority |
 | `vibez-dsp` | Effects and time-stretching |
 | `vibez-instruments` | Built-in synth, sampler, drum rack |
 | `vibez-plugin-host` | VST3 and CLAP hosting, sandboxed scanning |
-| `vibez-project` | Project file format (JSON) |
+| `vibez-project` | Project file format: self-contained `.vzp`, legacy JSON |
 | `vibez-dropbox` | Dropbox sample browser backend |
 | `vibez-ui` | The app: iced GUI, domain modules, message router |
 
-The UI is organized into domain modules (transport, arrangement, piano roll,
-devices, browser, project, view), each owning its own state and messages and
-unit-tested without the GUI. The UI thread and audio thread communicate over
-lock-free ring buffers.
+The UI is organized into domain modules (transport, arrangement, perform, piano
+roll, devices, browser, project, view), each owning its own state and messages
+and unit-tested without the GUI. The UI thread and audio thread communicate
+over lock-free ring buffers, and the engine owns two clock domains so a live
+performance and the Arrangement cursor stay independent.
 
-For the full tour, threading model, message flow, and how plugins, projects,
-and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For the full tour, threading model, message flow, and how Perform, plugins,
+projects, and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Contributing
 
 Issues and pull requests are welcome. CI must stay green on Linux, macOS, and
-Windows (`cargo test --workspace` and `cargo clippy --workspace -- -D warnings`).
+Windows: `cargo test --workspace`, and Clippy with `-D warnings` over
+`--all-targets`, so lints apply to test code too. `vibez-plugin-host` is
+deliberately excluded from `--all-targets`; its tests drive the VST3 vtable ABI
+where a redundant-looking cast can be load-bearing on another target.
 
 ## License
 

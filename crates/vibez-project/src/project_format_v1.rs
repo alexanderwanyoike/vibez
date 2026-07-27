@@ -579,12 +579,15 @@ pub fn save_project_v1(
     })
 }
 
-/// Visits every media source reference in a project: audio clips, sampler
-/// sources, and drum rack pads across tracks, master, and buses.
+/// Visits every media source reference in a project: audio clips across
+/// Arrange and Sections, plus sampler and drum rack sources across tracks,
+/// master, and buses.
 fn visit_sources_mut(project: &mut Project, visit: &mut dyn FnMut(&mut MediaSourceRef)) {
-    for clip in &mut project.clips {
-        if let Some(source) = &mut clip.source {
-            visit(source);
+    for (_, timeline) in project.timelines_mut() {
+        for clip in &mut timeline.clips {
+            if let Some(source) = &mut clip.source {
+                visit(source);
+            }
         }
     }
     let tracks = project
@@ -658,10 +661,12 @@ fn prepare_project_media(
     project: &mut Project,
     staged_media: &mut Vec<StagedMedia>,
 ) -> Result<(), ProjectFormatError> {
-    for clip in &mut project.clips {
-        if let Some(source) = &mut clip.source {
-            prepare_source(source, staged_media)?;
-            clip.file_path = None;
+    for (_, timeline) in project.timelines_mut() {
+        for clip in &mut timeline.clips {
+            if let Some(source) = &mut clip.source {
+                prepare_source(source, staged_media)?;
+                clip.file_path = None;
+            }
         }
     }
     for track in &mut project.tracks {
@@ -947,35 +952,41 @@ pub fn representative_document() -> ProjectDocumentV1 {
     let project = Project {
         name: "Project Format V1 proof".into(),
         bpm: 126.0,
+        groove_profile: vibez_core::perform::GrooveProfile::default(),
+        swing: vibez_core::perform::SwingAmount::default(),
         sample_rate: 48_000,
         tracks: vec![track],
-        clips: Vec::new(),
-        note_clips: vec![NoteClipInfo {
-            id: ClipId::new(),
-            track_id,
-            name: "Proof pattern".into(),
-            position_beats: 0.0,
-            duration_beats: 4.0,
-            notes: vec![
-                MidiNote {
-                    pitch: 36,
-                    velocity: 112,
-                    start_beat: 0.0,
-                    duration_beats: 0.25,
-                },
-                MidiNote {
-                    pitch: 42,
-                    velocity: 96,
-                    start_beat: 0.5,
-                    duration_beats: 0.125,
-                },
-            ],
-            loop_enabled: true,
-            loop_start_beats: 0.0,
-            loop_end_beats: 4.0,
-        }],
+        arrange: crate::TimelineInfo {
+            note_clips: vec![NoteClipInfo {
+                id: ClipId::new(),
+                track_id,
+                name: "Proof pattern".into(),
+                position_beats: 0.0,
+                duration_beats: 4.0,
+                notes: vec![
+                    MidiNote {
+                        pitch: 36,
+                        velocity: 112,
+                        start_beat: 0.0,
+                        duration_beats: 0.25,
+                    },
+                    MidiNote {
+                        pitch: 42,
+                        velocity: 96,
+                        start_beat: 0.5,
+                        duration_beats: 0.125,
+                    },
+                ],
+                loop_enabled: true,
+                loop_start_beats: 0.0,
+                loop_end_beats: 4.0,
+                groove_grid: vibez_core::perform::GrooveGrid::Off,
+            }],
+            ..crate::TimelineInfo::default()
+        },
         master: Some(TrackInfo::new("Master")),
         buses: vec![TrackInfo::new("Return A")],
+        sections: Vec::new(),
     };
     ProjectDocumentV1::new(project)
 }

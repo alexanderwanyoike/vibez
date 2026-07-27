@@ -3,9 +3,15 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::perform::SectionLaunchQuantization;
+use vibez_core::perform::{
+    GrooveGrid, NoteRepeatRate, SwingAmount, SwingOffset, TrackMuteQuantization,
+};
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
+
+use crate::playback_source::PreparedSectionPlaybackSource;
 
 /// Quantization policy for the next Browser Audition start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +36,35 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
+    /// Set Project Swing for generated events and opted-in MIDI clips.
+    SetProjectSwing(SwingAmount),
+    /// Immediately activate a complete resident Section playback source.
+    LaunchSection(Box<PreparedSectionPlaybackSource>),
+    /// Queue a complete resident Section for an engine-owned musical boundary.
+    QueueSection {
+        prepared: Box<PreparedSectionPlaybackSource>,
+        quantization: SectionLaunchQuantization,
+    },
+    /// Replace the currently active Section's resident source in place.
+    /// The engine preserves its local playhead and returns ownership of the
+    /// displaced source through `SectionSourceRefreshed`.
+    RefreshSection(Box<PreparedSectionPlaybackSource>),
+    /// Arm recording into a fixed Section/Project Track target. A prepared
+    /// source is supplied only when recording starts from stopped transport;
+    /// an already-playing Section remains resident and is never restarted.
+    ArmSectionRecord {
+        section_id: vibez_core::id::SectionId,
+        track_id: TrackId,
+        prepared: Option<Box<PreparedSectionPlaybackSource>>,
+        count_in_bars: u8,
+        replace_existing: bool,
+    },
+    /// Stop the current armed or active Section recording session.
+    StopSectionRecord,
+    /// Mark the exact engine boundary where Capture into Arrange begins.
+    StartPerformanceCapture,
+    /// Mark the exact engine boundary where Capture into Arrange stops.
+    StopPerformanceCapture,
     /// Load decoded audio into the engine for playback (legacy single-file).
     LoadAudio(Arc<DecodedAudio>),
     /// Remove any loaded audio from the engine (legacy single-file).
@@ -93,8 +128,36 @@ pub enum EngineCommand {
     SetTrackPan(TrackId, f32),
     /// Set the mute state for a track.
     SetTrackMute(TrackId, bool),
+    /// Queue a live Track Mute for an engine-owned musical boundary.
+    QueueTrackMute {
+        track_id: TrackId,
+        muted: bool,
+        quantization: TrackMuteQuantization,
+    },
+    /// Enable or clear a manual override for one automated parameter.
+    SetAutomationOverride {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+        overridden: bool,
+    },
+    /// Mark the first or a subsequent effective value in one live pointer
+    /// gesture. The ordinary parameter command follows in the same drain.
+    UpdateAutomationGesture {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+        normalized_value: f32,
+        begin: bool,
+    },
+    /// Yield a live pointer gesture back to its active automation lane.
+    EndAutomationGesture {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+    },
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
+    /// Set the optional Project Track Swing adjustment used by generated
+    /// events and opted-in MIDI clips on this channel.
+    SetTrackSwingOffset(TrackId, Option<SwingOffset>),
 
     // -- Busses (return channels) --
     /// Add a bus: a mixer-only channel fed by per-track sends.
@@ -154,6 +217,11 @@ pub enum EngineCommand {
         clip_id: ClipId,
         duration_beats: f64,
     },
+    SetNoteClipGrooveGrid {
+        track_id: TrackId,
+        clip_id: ClipId,
+        groove_grid: GrooveGrid,
+    },
     AddNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -162,6 +230,7 @@ pub enum EngineCommand {
         loop_enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
+        groove_grid: GrooveGrid,
     },
     RemoveNoteClip(TrackId, ClipId),
     /// Move a note clip to a new beat position on the timeline.
@@ -264,6 +333,26 @@ pub enum EngineCommand {
     ExternalNoteOff {
         track_id: TrackId,
         pitch: u8,
+    },
+    /// Begin engine-scheduled repeats after the already-played source note.
+    StartNoteRepeat {
+        id: u8,
+        track_id: TrackId,
+        pitch: u8,
+        velocity: u8,
+        rate: NoteRepeatRate,
+    },
+    /// Retime future repeats without firing a new source note.
+    UpdateNoteRepeatRate {
+        id: u8,
+        track_id: TrackId,
+        rate: NoteRepeatRate,
+    },
+    /// Stop scheduling one held pad. Its paired note-off remains a separate
+    /// live-input command so release ownership stays explicit.
+    StopNoteRepeat {
+        id: u8,
+        track_id: TrackId,
     },
 
     // -- External plugins --

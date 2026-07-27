@@ -4,7 +4,7 @@
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, NoteClipInfo, TrackKind};
 use vibez_core::track::TrackInfo;
-use vibez_project::Project;
+use vibez_project::{Project, TimelineInfo};
 
 fn note(pitch: u8, velocity: u8, start_beat: f64, duration_beats: f64) -> MidiNote {
     MidiNote {
@@ -23,6 +23,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         pan: 0.5,
         mute: false,
         solo: false,
+        swing_offset: None,
         effects: Vec::new(),
         kind: TrackKind::Midi,
         color_index,
@@ -51,6 +52,7 @@ fn clip(
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
     }
 }
 
@@ -156,10 +158,15 @@ fn main() {
         buses: Vec::new(),
         name: "Neon Skyline".to_string(),
         bpm: 124.0,
+        groove_profile: vibez_core::perform::GrooveProfile::default(),
+        swing: vibez_core::perform::SwingAmount::default(),
         sample_rate: 48_000,
         tracks: vec![drums, bass, chords, lead],
-        clips: Vec::new(),
-        note_clips,
+        arrange: TimelineInfo {
+            note_clips,
+            ..TimelineInfo::default()
+        },
+        sections: Vec::new(),
     };
     let path = std::path::Path::new("assets/demo.vibez");
     project.save_to_file(path).expect("save demo project");

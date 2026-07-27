@@ -33,7 +33,8 @@ impl PianoRollWidget {
         let h = bounds.height;
         let grid_width = w - KEY_WIDTH;
         let total = self.total_beats.max(1.0);
-        let grid_ppb = grid_width / total as f32;
+        let geometry = self.geometry(&bounds);
+        let grid_ppb = geometry.pixels_per_beat();
 
         // Full background
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::bg_dark());
@@ -212,7 +213,7 @@ impl PianoRollWidget {
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
             // Snap to half-pixel for crisp 1px rendering (avoids blurry subpixel splits)
-            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
+            let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;
             }
@@ -312,7 +313,7 @@ impl PianoRollWidget {
 
                 let x = self.beat_to_x(note.start_beat, &bounds);
                 let y = self.pitch_to_y(note.pitch);
-                let note_w = ((note.duration_beats / total) as f32 * grid_width).max(4.0);
+                let note_w = geometry.width_for_beats(note.duration_beats).max(4.0);
                 let note_h = KEY_HEIGHT - 1.0;
 
                 // Skip off-screen notes
@@ -415,7 +416,7 @@ impl PianoRollWidget {
 
                         let gx = self.beat_to_x(ghost_beat, &bounds);
                         let gy = self.pitch_to_y(note.pitch);
-                        let gw = ((note.duration_beats / total) as f32 * grid_width).max(4.0);
+                        let gw = geometry.width_for_beats(note.duration_beats).max(4.0);
                         let gh = KEY_HEIGHT - 1.0;
 
                         if gy + gh < RULER_HEIGHT || gy > h {
@@ -481,7 +482,7 @@ impl PianoRollWidget {
         // Ruler tick marks and labels
         for step in 0..=num_steps {
             let beat = step as f64 * grid_step;
-            let x = (KEY_WIDTH + (beat / total) as f32 * grid_width).floor() + 0.5;
+            let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;
             }

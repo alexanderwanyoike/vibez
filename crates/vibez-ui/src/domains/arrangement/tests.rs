@@ -16,14 +16,22 @@ fn add_track_selects_it_and_names_uniquely() {
 }
 
 #[test]
-fn remove_track_clears_its_selections_and_requests_gui_teardown() {
+fn track_removal_requires_confirmation_then_clears_its_state() {
     let mut a = arrangement_with_tracks(2);
     let victim = a.tracks[1].id;
     let survivor = a.tracks[0].id;
     a.selected_note_clip = Some((victim, ClipId::new()));
     let mut engine = RecordingEngine::default();
+    let request = a.update(
+        ArrangementMsg::RequestRemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(a.tracks.len(), 2);
+    assert_eq!(a.pending_project_track_deletion, Some(victim));
+    assert_eq!(request.close_track_guis, None);
     let action = a.update(
-        ArrangementMsg::RemoveTrack(victim),
+        ArrangementMsg::ConfirmRemoveTrack(victim),
         &mut engine,
         ArrangementCtx::default(),
     );
@@ -32,6 +40,48 @@ fn remove_track_clears_its_selections_and_requests_gui_teardown() {
     assert_eq!(a.selected_note_clip, None);
     assert_eq!(action.close_track_guis, Some(victim));
     assert!(a.arrangement.timeline.get(victim).is_none());
+}
+
+#[test]
+fn cancelling_track_removal_preserves_the_project_track() {
+    let mut a = arrangement_with_tracks(1);
+    let victim = a.tracks[0].id;
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::RequestRemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.update(
+        ArrangementMsg::CancelRemoveTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(a.tracks.len(), 1);
+    assert_eq!(a.pending_project_track_deletion, None);
+    assert!(engine.0.is_empty());
+    assert!(!ArrangementMsg::RequestRemoveTrack(victim).marks_dirty());
+    assert!(!ArrangementMsg::CancelRemoveTrack.marks_dirty());
+    assert!(ArrangementMsg::ConfirmRemoveTrack(victim).marks_dirty());
+}
+
+#[test]
+fn immediate_track_removal_reuses_the_confirmed_deletion_operation() {
+    let mut a = arrangement_with_tracks(2);
+    let victim = a.tracks[1].id;
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::RemoveTrack(victim),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(a.tracks.len(), 1);
+    assert!(a.arrangement.timeline.get(victim).is_none());
+    assert_eq!(action.close_track_guis, Some(victim));
+    assert_eq!(action.remove_track_from_sections, Some(victim));
+    assert!(ArrangementMsg::RemoveTrack(victim).marks_dirty());
 }
 
 #[test]
@@ -456,7 +506,7 @@ fn submit_clip_bpm_parses_and_rejects_garbage() {
 }
 
 #[test]
-fn copy_and_paste_multiple_clips_at_playhead_preserves_layout_and_loops() {
+fn copy_and_paste_multiple_clips_anchors_at_playhead_and_preserves_offsets_and_loops() {
     let mut a = arrangement_with_tracks(1);
     let (tid, first) = add_audio_clip(&mut a, 0, 0, 100);
     let (_, second) = add_audio_clip(&mut a, 0, 200, 100);
@@ -476,7 +526,7 @@ fn copy_and_paste_multiple_clips_at_playhead_preserves_layout_and_loops() {
     };
 
     a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
-    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
+    a.update(ArrangementMsg::PasteClips, &mut engine, ctx);
 
     assert_eq!(a.tracks[0].clips.len(), 4);
     let mut pasted: Vec<_> = a.tracks[0].clips[2..].iter().collect();
@@ -515,6 +565,7 @@ fn partial_time_selection_copies_audio_and_trimmed_midi() {
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     a.time_selection_active = true;
     a.selection_start_beats = 2.0;
@@ -527,7 +578,8 @@ fn partial_time_selection_copies_audio_and_trimmed_midi() {
     };
 
     a.update(ArrangementMsg::CopySelectedClips, &mut engine, ctx);
-    a.update(ArrangementMsg::PasteClipsAtPlayhead, &mut engine, ctx);
+    a.selected_track = Some(audio_tid);
+    a.update(ArrangementMsg::PasteClips, &mut engine, ctx);
 
     let audio = a.find_track(audio_tid).unwrap().clips.last().unwrap();
     assert_eq!(audio.position, 1_000);
@@ -633,6 +685,7 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
     });
     a.selected_clips.insert(ArrangementSelection::AudioClip {
         track_id: audio_tid,
@@ -723,6 +776,7 @@ fn midi_duplicate_keeps_the_source_clip_name_readable() {
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     a.selected_clips
         .insert(ArrangementSelection::NoteClip { track_id, clip_id });
@@ -792,6 +846,7 @@ fn split_looped_midi_materializes_both_looped_halves() {
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
     });
 
     a.update(
@@ -872,6 +927,7 @@ fn join_looped_midi_expands_repetitions_and_remains_looped() {
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
         });
         a.selected_clips
             .insert(ArrangementSelection::NoteClip { track_id, clip_id });

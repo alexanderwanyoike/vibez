@@ -7,6 +7,7 @@ use iced::{Color, Rectangle, Renderer, Theme};
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::theme;
+use crate::timeline_geometry::TimelineGeometry;
 
 /// Per-track data for the minimap overview.
 pub struct MinimapTrack {
@@ -30,8 +31,8 @@ pub struct ArrangementMinimap {
 
 impl ArrangementMinimap {
     fn visible_beats(&self, canvas_width: f32) -> f64 {
-        let ppb = 20.0 * self.zoom_level;
-        canvas_width as f64 / ppb as f64
+        TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
+            .visible_beats(canvas_width)
     }
 }
 
@@ -75,7 +76,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
             return vec![frame.into_geometry()];
         }
 
-        let ppb_mini = w as f64 / self.total_beats;
+        let overview = TimelineGeometry::fitted(self.total_beats, w, 0.0);
         let num_tracks = self.tracks.len();
         let track_h = (h / num_tracks as f32).max(2.0);
 
@@ -84,8 +85,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
             let y = i as f32 * track_h;
             let clip_color = theme::with_alpha(track.color, 0.6);
             for &(start, dur) in &track.clips {
-                let cx = (start * ppb_mini) as f32;
-                let cw = (dur * ppb_mini).max(1.0) as f32;
+                let cx = overview.beat_to_x(start);
+                let cw = overview.width_for_beats(dur).max(1.0);
                 if cx + cw < 0.0 || cx > w {
                     continue;
                 }
@@ -99,8 +100,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
 
         // Loop region overlay
         if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
-            let lx1 = (self.loop_start_beats * ppb_mini) as f32;
-            let lx2 = (self.loop_end_beats * ppb_mini) as f32;
+            let lx1 = overview.beat_to_x(self.loop_start_beats);
+            let lx2 = overview.beat_to_x(self.loop_end_beats);
             let fill_x = lx1.max(0.0);
             let fill_w = lx2.min(w) - fill_x;
             if fill_w > 0.0 {
@@ -114,8 +115,8 @@ impl canvas::Program<Message> for ArrangementMinimap {
 
         // Viewport rectangle
         let visible = self.visible_beats(w);
-        let vx_start = (self.scroll_offset_beats * ppb_mini) as f32;
-        let vx_end = ((self.scroll_offset_beats + visible) * ppb_mini) as f32;
+        let vx_start = overview.beat_to_x(self.scroll_offset_beats);
+        let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
         let vx = vx_start.max(0.0);
         let vw = vx_end.min(w) - vx;
         if vw > 0.0 {
@@ -145,7 +146,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         // Playhead line
-        let ph_x = (self.playhead_beats * ppb_mini) as f32;
+        let ph_x = overview.beat_to_x(self.playhead_beats);
         if ph_x >= 0.0 && ph_x <= w {
             let playhead =
                 canvas::Path::line(iced::Point::new(ph_x, 0.0), iced::Point::new(ph_x, h));
@@ -181,17 +182,17 @@ impl canvas::Program<Message> for ArrangementMinimap {
             return (canvas::event::Status::Ignored, None);
         }
 
-        let ppb_mini = bounds.width as f64 / self.total_beats;
+        let overview = TimelineGeometry::fitted(self.total_beats, bounds.width, 0.0);
         let visible = self.visible_beats(bounds.width);
 
         match event {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    let click_beat = pos.x as f64 / ppb_mini;
+                    let click_beat = overview.x_to_beat(pos.x);
 
                     // Check if click is inside the viewport rectangle
-                    let vx_start = (self.scroll_offset_beats * ppb_mini) as f32;
-                    let vx_end = ((self.scroll_offset_beats + visible) * ppb_mini) as f32;
+                    let vx_start = overview.beat_to_x(self.scroll_offset_beats);
+                    let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
 
                     if pos.x >= vx_start && pos.x <= vx_end {
                         // Start panning the viewport
@@ -222,7 +223,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                 start_scroll,
                             } => {
                                 let dx = local_x - start_x;
-                                let delta_beats = dx as f64 / ppb_mini;
+                                let delta_beats = overview.beats_for_width(dx);
                                 let target = (start_scroll + delta_beats).max(0.0);
                                 let delta = target - self.scroll_offset_beats;
                                 return (
@@ -231,7 +232,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
                                 );
                             }
                             MinimapDragAction::Seeking => {
-                                let click_beat = local_x as f64 / ppb_mini;
+                                let click_beat = overview.x_to_beat(local_x);
                                 let target = (click_beat - visible / 2.0).max(0.0);
                                 let delta = target - self.scroll_offset_beats;
                                 return (
@@ -273,10 +274,10 @@ impl canvas::Program<Message> for ArrangementMinimap {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
-            let ppb_mini = bounds.width as f64 / self.total_beats;
+            let overview = TimelineGeometry::fitted(self.total_beats, bounds.width, 0.0);
             let visible = self.visible_beats(bounds.width);
-            let vx_start = (self.scroll_offset_beats * ppb_mini) as f32;
-            let vx_end = ((self.scroll_offset_beats + visible) * ppb_mini) as f32;
+            let vx_start = overview.beat_to_x(self.scroll_offset_beats);
+            let vx_end = overview.beat_to_x(self.scroll_offset_beats + visible);
 
             if pos.x >= vx_start && pos.x <= vx_end {
                 return mouse::Interaction::Grab;

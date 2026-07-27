@@ -4,8 +4,9 @@ use std::sync::Arc;
 use iced::{Subscription, Task, Theme};
 
 use crate::domains::browser::BrowserMsg;
+use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
-use rtrb::{Consumer, Producer};
+use rtrb::Consumer;
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
@@ -27,13 +28,14 @@ use crate::message::{
     ProjectSaveResult, SampleLibraryScanResult,
 };
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
-use crate::state::AppState;
+use crate::state::{AppState, AudioStreamHealth};
 use crate::theme as th;
 use crate::ui_settings::UiSettings;
 
 struct App {
     state: AppState,
-    cmd_tx: Option<Producer<EngineCommand>>,
+    edge_shortcuts: EdgeShortcutState,
+    cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
     /// Post-effects mono samples from the engine's spectrum tap,
     /// feeding the EQ analyser.
@@ -53,27 +55,29 @@ struct App {
     /// Raw pointers for live state capture at save time, keyed like
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
+    /// Plugin preflight and render progress for the one active project export.
+    export_job: Option<project_io::ExportJob>,
+    export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
+    export_plugin_return_rx:
+        Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
 
     // Dropbox
     dropbox_settings: DropboxSettings,
     dropbox_cache: DropboxCache,
     dropbox_client: Option<Arc<DropboxClient>>,
-    remote_materialization_abort: Option<iced::task::Handle>,
-    remote_import_abort: Option<iced::task::Handle>,
-    remote_import_request_id: u64,
-    remote_materialization_request_id: u64,
+    remote_materialization_request: tracked_request::TrackedRequest,
+    remote_import_request: tracked_request::TrackedRequest,
     remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
-    /// Request id of the active Remote import, if any. Completions for any
-    /// other generation must not clear it or release the queued audition.
-    remote_import_in_flight: Option<u64>,
     pending_remote_audition: Option<DropboxEntry>,
     /// Generation for the whole Browser import pipeline (local and
     /// remote). Bumped on cancellation and project reset so an
     /// in-flight WARP preparation cannot land a clip afterwards.
-    browser_import_generation: u64,
+    browser_import_request: tracked_request::TrackedRequest,
     /// Bumped on every refresh start and on disconnect, so catalog pages
     /// fetched for a previous connection are dropped instead of reconciled.
-    remote_catalog_generation: u64,
+    remote_catalog_request: tracked_request::TrackedRequest,
+    /// Cancellable preparation for the next resident Section launch.
+    section_residency_request: tracked_request::TrackedRequest,
     /// Catalog changes accumulated since the last reconcile flush; applied in
     /// batches so each page does not re-sort the whole catalog in update().
     remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
@@ -120,6 +124,10 @@ pub fn run() -> iced::Result {
         })
         .window_size((1400.0, 900.0))
         .font(icons::ICON_FONT_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
+        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
+        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
         .run_with(App::new)
 }
 
@@ -127,8 +135,12 @@ mod actions;
 mod async_helpers;
 mod audio_tasks;
 mod bounce;
+mod capture;
+mod engine_events;
 mod keyboard;
 mod local_watcher;
+mod menu_lifecycle;
+mod tracked_request;
 
 use async_helpers::*;
 pub(crate) use audio_tasks::*;
@@ -139,20 +151,35 @@ mod media_import;
 mod plugins;
 mod project_io;
 mod project_replay;
+mod project_sections;
+mod section_record;
 mod update;
 mod update_media;
+mod update_policy;
+mod update_project;
 mod update_remote;
+mod update_timeline;
+mod update_view;
 mod views_arrangement;
+mod views_automation;
 mod views_browser;
 mod views_browser_audition;
 mod views_browser_places;
 mod views_browser_remote;
 mod views_browser_style;
+mod views_clip_swing;
 mod views_detail;
 mod views_devices;
 mod views_mixer;
 mod views_overlays;
+mod views_perform;
+mod views_perform_instrument;
+mod views_perform_pads;
+mod views_perform_playhead;
+mod views_perform_record;
+mod views_perform_sections;
 mod views_settings;
+mod views_settings_perform;
 mod views_shell;
 mod views_transport;
 
@@ -165,19 +192,25 @@ impl App {
         let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
 
-        let (stream, sample_rate) = match AudioOutputStream::open(engine, Some(512)) {
-            Ok(s) => {
-                let sr = s.sample_rate();
-                if let Err(e) = s.play() {
-                    eprintln!("vibez: failed to start audio stream: {e}");
+        let (stream, sample_rate, audio_stream_health) =
+            match AudioOutputStream::open(engine, Some(512)) {
+                Ok(s) => {
+                    let sr = s.sample_rate();
+                    let health = match s.play() {
+                        Ok(()) => AudioStreamHealth::Running,
+                        Err(e) => {
+                            eprintln!("vibez: failed to start audio stream: {e}");
+                            AudioStreamHealth::Error(e.to_string())
+                        }
+                    };
+                    (Some(s), sr, health)
                 }
-                (Some(s), sr)
-            }
-            Err(e) => {
-                eprintln!("vibez: failed to open audio stream: {e}");
-                (None, 44_100)
-            }
-        };
+                Err(e) => {
+                    eprintln!("vibez: failed to open audio stream: {e}");
+                    let cause = e.to_string();
+                    (None, 44_100, AudioStreamHealth::Error(cause))
+                }
+            };
 
         let dropbox_settings = DropboxSettings::load();
         let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
@@ -231,8 +264,15 @@ impl App {
                 sample_rate,
                 ..Default::default()
             },
+            audio_stream_health,
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
+            confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
+            view: crate::state::ViewState {
+                perform_surface_width: ui_settings.perform_surface_width,
+                detail_panel_height: ui_settings.detail_panel_height,
+                ..Default::default()
+            },
             browser: crate::state::BrowserState {
                 open: ui_settings.sample_browser_open,
                 dock_width: ui_settings.sample_browser_width.clamp(
@@ -248,6 +288,16 @@ impl App {
             },
             ..Default::default()
         };
+        if let AudioStreamHealth::Error(cause) = &state.audio_stream_health {
+            state.status_text = format!("Audio stream error: {cause}");
+        }
+        state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
+        state
+            .perform
+            .set_fixed_computer_velocity(ui_settings.fixed_computer_velocity);
+        state
+            .perform
+            .set_track_mute_quantization(ui_settings.track_mute_quantization);
 
         // Themes: scan the user's .vzt collection, then restore the
         // saved selection (built-in name or user theme name).
@@ -287,7 +337,8 @@ impl App {
 
         let mut app = Self {
             state,
-            cmd_tx: Some(cmd_tx),
+            edge_shortcuts: EdgeShortcutState::default(),
+            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
             event_rx: Some(event_rx),
             spectrum_rx,
             spectrum_tap: None,
@@ -299,18 +350,19 @@ impl App {
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
             plugin_state_ptrs: std::collections::HashMap::new(),
+            export_job: None,
+            export_render_progress: None,
+            export_plugin_return_rx: None,
             dropbox_settings,
             dropbox_cache,
             dropbox_client,
-            remote_materialization_abort: None,
-            remote_import_abort: None,
-            remote_import_request_id: 0,
-            remote_materialization_request_id: 0,
+            remote_materialization_request: Default::default(),
+            remote_import_request: Default::default(),
             remote_audition_cache_lease: None,
-            remote_import_in_flight: None,
             pending_remote_audition: None,
-            browser_import_generation: 0,
-            remote_catalog_generation: 0,
+            browser_import_request: Default::default(),
+            remote_catalog_request: Default::default(),
+            section_residency_request: Default::default(),
             remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),
@@ -345,6 +397,11 @@ impl App {
         } else {
             Task::none()
         };
+        let plugin_catalog_startup_task = if app.state.plugin_settings.cache_needs_refresh() {
+            Task::done(Message::ScanPlugins)
+        } else {
+            Task::none()
+        };
 
         // Staged Project Media copies are content-addressed and shared, so
         // saves and aborted imports never delete them eagerly; this sweep
@@ -368,7 +425,12 @@ impl App {
 
         (
             app,
-            Task::batch([local_startup_task, remote_startup_task, open_task]),
+            Task::batch([
+                local_startup_task,
+                remote_startup_task,
+                plugin_catalog_startup_task,
+                open_task,
+            ]),
         )
     }
 
@@ -385,9 +447,7 @@ impl App {
     }
 
     fn send_command(&mut self, cmd: EngineCommand) {
-        if let Some(ref mut tx) = self.cmd_tx {
-            let _ = tx.push(cmd);
-        }
+        crate::domains::EngineHandle::send(&mut self.cmd_tx, cmd);
     }
 
     fn mark_project_dirty(&mut self) {
@@ -395,18 +455,43 @@ impl App {
     }
 
     pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
-        if let Some((track_id, clip_id)) = self.state.arrangement.selected_note_clip {
-            if let Some(duration) = self.state.arrange_content(track_id).and_then(|content| {
-                content
-                    .note_clips
-                    .iter()
-                    .find(|clip| clip.id == clip_id)
-                    .map(|clip| clip.duration_beats)
-            }) {
-                return (self.state.view.window_width - 52.0).max(1.0) / duration.max(1.0) as f32;
+        let editor = self.state.active_timeline_editor();
+        if let Some((track_id, clip_id)) = editor.selected_note_clip {
+            if let Some(duration) =
+                self.state
+                    .active_timeline_content(track_id)
+                    .and_then(|content| {
+                        content
+                            .note_clips
+                            .iter()
+                            .find(|clip| clip.id == clip_id)
+                            .map(|clip| clip.duration_beats)
+                    })
+            {
+                return crate::timeline_geometry::TimelineGeometry::fitted(
+                    duration,
+                    self.state.view.window_width,
+                    52.0,
+                )
+                .pixels_per_beat();
             }
         }
-        20.0 * self.state.view.zoom_level
+        if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.selected_section.is_some()
+        {
+            return self
+                .state
+                .perform
+                .section_editor
+                .viewport()
+                .geometry()
+                .pixels_per_beat();
+        }
+        crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.state.view.zoom_level,
+            self.state.view.scroll_offset_beats,
+        )
+        .pixels_per_beat()
     }
 
     /// Walk `next_track_number` forward past any names already in use so
@@ -433,10 +518,13 @@ impl App {
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
     /// Called from resize/move handlers so the view follows the drag.
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
-        let ppb = 20.0 * self.state.view.zoom_level as f64;
         // Conservative estimate of canvas width (window minus track headers)
-        let canvas_width = 1400.0_f64;
-        let visible_beats = canvas_width / ppb;
+        let canvas_width = 1400.0_f32;
+        let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(
+            self.state.view.zoom_level,
+            self.state.view.scroll_offset_beats,
+        );
+        let visible_beats = geometry.visible_beats(canvas_width);
         let visible_end = self.state.view.scroll_offset_beats + visible_beats;
         let margin = 2.0_f64;
 
@@ -464,8 +552,8 @@ impl App {
         Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(UI_TICK_MS)).map(|_| Message::Tick),
             local_watcher::subscription(self.state.browser.roots.clone()),
-            iced::keyboard::on_key_press(global_key_handler),
             iced::event::listen_with(|event, _status, _id| match event {
+                iced::Event::Keyboard(event) => keyboard_input_message(event, _status),
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                     Some(Message::View(ViewMsg::CursorMoved(position.x, position.y)))
                 }
@@ -475,6 +563,9 @@ impl App {
                 iced::Event::Window(iced::window::Event::Resized(size)) => Some(Message::View(
                     ViewMsg::WindowResized(size.width, size.height),
                 )),
+                iced::Event::Window(iced::window::Event::Unfocused) => {
+                    Some(Message::Perform(PerformMsg::WindowUnfocused))
+                }
                 _ => None,
             }),
         ])

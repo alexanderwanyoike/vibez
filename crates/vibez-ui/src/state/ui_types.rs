@@ -168,18 +168,21 @@ pub struct UiNoteClip {
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
+    pub groove_grid: vibez_core::perform::GrooveGrid,
 }
 
 #[derive(Debug, Clone)]
 pub enum ClipboardClip {
     Audio {
         track_id: TrackId,
-        offset_beats: f64,
+        track_offset: usize,
+        position_beats: f64,
         clip: UiClip,
     },
     Note {
         track_id: TrackId,
-        offset_beats: f64,
+        track_offset: usize,
+        position_beats: f64,
         clip: UiNoteClip,
     },
 }
@@ -202,6 +205,7 @@ pub struct ProjectTrack {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    pub swing_offset: Option<vibez_core::perform::SwingOffset>,
     pub peak_l: f32,
     pub peak_r: f32,
     pub effects: Vec<UiEffect>,
@@ -235,6 +239,10 @@ pub struct ProjectTrack {
 pub type UiTrack = ProjectTrack;
 
 impl ProjectTrack {
+    pub fn is_playable_midi_target(&self) -> bool {
+        self.kind.is_midi() && self.has_instrument
+    }
+
     pub fn new(id: TrackId, name: String, color_index: u8) -> Self {
         Self {
             id,
@@ -243,6 +251,7 @@ impl ProjectTrack {
             pan: 0.5,
             mute: false,
             solo: false,
+            swing_offset: None,
             peak_l: 0.0,
             peak_r: 0.0,
             effects: Vec::new(),
@@ -276,6 +285,7 @@ impl ProjectTrack {
             pan: 0.5,
             mute: false,
             solo: false,
+            swing_offset: None,
             peak_l: 0.0,
             peak_r: 0.0,
             effects: Vec::new(),
@@ -319,6 +329,7 @@ pub enum ArrangementSelection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Arrange,
+    Perform,
     Mix,
 }
 

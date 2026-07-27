@@ -11,7 +11,7 @@ use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, ArrangementState, UiClip, UiNoteClip};
+use crate::state::{ArrangementSelection, TimelineEditorState, UiClip, UiNoteClip};
 
 use super::*;
 
@@ -61,7 +61,67 @@ fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<Mid
     visible
 }
 
-impl ArrangementState {
+impl TimelineEditorState {
+    pub(super) fn op_resize_audio_clip(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+        track_id: TrackId,
+        clip_id: ClipId,
+        new_duration: u64,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        let mut sync_data = None;
+        let mut clip_end_beat = None;
+        if let Some(track) = self.find_content_mut(track_id) {
+            if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
+                clip.duration = new_duration;
+                if new_duration > source_len && !clip.loop_enabled {
+                    clip.loop_enabled = true;
+                    clip.loop_start = clip.source_offset;
+                    clip.loop_end = clip.source_offset + source_len;
+                }
+                clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
+                sync_data = Some((
+                    Arc::clone(&clip.audio),
+                    clip.position,
+                    clip.source_offset,
+                    clip.duration,
+                    clip.loop_enabled,
+                    clip.loop_start,
+                    clip.loop_end,
+                ));
+            }
+        }
+        if let Some((
+            audio,
+            position,
+            source_offset,
+            duration,
+            loop_enabled,
+            loop_start,
+            loop_end,
+        )) = sync_data
+        {
+            engine.send(EngineCommand::RemoveClip(track_id, clip_id));
+            engine.send(EngineCommand::AddClip {
+                track_id,
+                clip_id,
+                audio,
+                position,
+                source_offset,
+                duration,
+                loop_enabled,
+                loop_start,
+                loop_end,
+            });
+        }
+        action.scroll_to_beat = clip_end_beat;
+        self.drag_resize_active = true;
+        action
+    }
+
     /// A background warp finished: swap in the stretched audio and
     /// record the warp geometry on the clip.
     pub fn apply_clip_warp_success(
@@ -479,6 +539,7 @@ impl ArrangementState {
             loop_enabled: joined_loop_enabled,
             loop_start_beats: 0.0,
             loop_end_beats: total_duration,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         for note in &merged_notes {
             engine.send(EngineCommand::AddNote {
@@ -498,6 +559,7 @@ impl ArrangementState {
                 loop_enabled: joined_loop_enabled,
                 loop_start_beats: 0.0,
                 loop_end_beats: total_duration,
+                groove_grid: vibez_core::perform::GrooveGrid::Off,
             });
         }
 
@@ -634,6 +696,7 @@ impl ArrangementState {
                     loop_enabled: clip.loop_enabled,
                     loop_start_beats: clip.loop_start_beats,
                     loop_end_beats: clip.loop_end_beats,
+                    groove_grid: clip.groove_grid,
                 });
                 for note in &clip.notes {
                     engine.send(EngineCommand::AddNote {

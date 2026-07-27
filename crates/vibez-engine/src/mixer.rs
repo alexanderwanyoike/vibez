@@ -1,84 +1,126 @@
-use std::sync::Arc;
-
-use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
-use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::MidiNote;
+use vibez_core::id::TrackId;
+use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::time::TempoMap;
-use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
-/// Map a raw timeline frame through the active arrangement loop.
-/// Anything at or past `loop_end` is wrapped to `loop_start +
-/// overshoot mod loop_len`, so mid-block wraps stay seamless.
-#[inline]
-fn apply_loop_wrap(global_frame: u64, loop_region: Option<(u64, u64)>) -> u64 {
-    match loop_region {
-        Some((start, end)) if end > start && global_frame >= end => {
-            let loop_len = end - start;
-            let overshoot = global_frame - end;
-            start + (overshoot % loop_len)
+use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
+use crate::playback_source::PreparedPlaybackSource;
+pub use crate::playback_source::{EngineClip, EngineNoteClip};
+mod channel_strip;
+mod effect_slot;
+mod groove;
+mod note_repeat;
+mod pan;
+mod render_context;
+pub use effect_slot::EffectSlot;
+use groove::collect_timed_note_events;
+pub use pan::{any_solo, balance_pan, equal_power_pan};
+use render_context::InstrumentRenderBlock;
+pub(crate) use render_context::InstrumentRenderContext;
+
+const MUTE_RAMP_FRAMES: u32 = 64;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct QueuedTrackMute {
+    pub muted: bool,
+    pub effective_at_samples: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MuteRamp {
+    gain: f32,
+    target: f32,
+    remaining: u32,
+}
+
+impl Default for MuteRamp {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            target: 1.0,
+            remaining: 0,
         }
-        _ => global_frame,
     }
 }
 
-/// A clip as it exists at runtime in the engine (on the audio thread).
-pub struct EngineClip {
-    pub id: ClipId,
-    pub audio: Arc<DecodedAudio>,
-    /// Position on the timeline in samples.
-    pub position: u64,
-    /// Offset into the source audio in samples.
-    pub source_offset: u64,
-    /// Duration in samples.
-    pub duration: u64,
-    // Looping
-    pub loop_enabled: bool,
-    pub loop_start: u64,
-    pub loop_end: u64,
-}
-
-impl EngineClip {
-    /// The end position of this clip on the timeline.
-    pub fn end_position(&self) -> u64 {
-        self.position.saturating_add(self.duration)
+impl MuteRamp {
+    fn set_muted(&mut self, muted: bool, immediate: bool) {
+        let target = if muted { 0.0 } else { 1.0 };
+        if immediate {
+            self.gain = target;
+            self.target = target;
+            self.remaining = 0;
+        } else if self.target != target {
+            self.target = target;
+            self.remaining = MUTE_RAMP_FRAMES;
+        }
     }
 
-    /// Whether this clip is active (has audio to contribute) at the given
-    /// global position for the given number of frames.
-    pub fn is_active(&self, pos: u64, frames: u64) -> bool {
-        let end = pos.saturating_add(frames);
-        // Clip overlaps the [pos, pos+frames) range
-        self.position < end && self.end_position() > pos
+    fn next_gain(&mut self) -> f32 {
+        if self.remaining == 0 {
+            return self.gain;
+        }
+        self.gain += (self.target - self.gain) / self.remaining as f32;
+        self.remaining -= 1;
+        if self.remaining == 0 {
+            self.gain = self.target;
+        }
+        self.gain
     }
 }
 
-pub struct EffectSlot {
-    pub id: EffectId,
-    pub effect: Box<dyn AudioEffect>,
-    pub bypass: bool,
+/// Runtime manual-overrides for automated parameters. The fixed-capacity
+/// storage keeps gesture changes allocation-free on the audio thread.
+#[derive(Debug, Default)]
+struct AutomationOverrides {
+    targets: [Option<vibez_core::automation::AutomationTarget>; 16],
 }
 
-pub struct EngineNoteClip {
-    pub id: ClipId,
-    pub position_beats: f64,
-    pub duration_beats: f64,
-    pub notes: Vec<MidiNote>,
-    // Looping
-    pub loop_enabled: bool,
-    pub loop_start_beats: f64,
-    pub loop_end_beats: f64,
+impl AutomationOverrides {
+    fn contains(&self, target: vibez_core::automation::AutomationTarget) -> bool {
+        self.targets.contains(&Some(target))
+    }
+
+    fn set(&mut self, target: vibez_core::automation::AutomationTarget, overridden: bool) -> bool {
+        let existing = self.targets.iter().position(|entry| *entry == Some(target));
+        match (existing, overridden) {
+            (Some(_), true) | (None, false) => false,
+            (Some(index), false) => {
+                self.targets[index] = None;
+                true
+            }
+            (None, true) => {
+                let Some(slot) = self.targets.iter_mut().find(|entry| entry.is_none()) else {
+                    return false;
+                };
+                *slot = Some(target);
+                true
+            }
+        }
+    }
 }
 
 /// A track as it exists at runtime in the engine.
 pub struct EngineTrack {
     pub id: TrackId,
-    pub clips: Vec<EngineClip>,
+    /// Time-based content feeding this shared channel strip. It is prepared
+    /// outside the callback before any future source switch.
+    pub playback_source: Box<PreparedPlaybackSource>,
+    /// Resident Perform source. The engine swaps this pointer with
+    /// `playback_source` only around Section rendering, preserving Arrange as
+    /// the editable source while sharing the exact same renderer.
+    pub section_playback_source: Box<PreparedPlaybackSource>,
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,
+    pub(crate) queued_mute: Option<QueuedTrackMute>,
+    automation_mute: Option<bool>,
+    automation_overrides: AutomationOverrides,
+    mute_ramp: MuteRamp,
     pub solo: bool,
+    pub swing_offset: Option<SwingOffset>,
+    /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
+    automation_swing_offset: Option<SwingOffset>,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
@@ -86,264 +128,35 @@ pub struct EngineTrack {
     /// Only regular tracks send; buses and the master never do, so
     /// the routing graph stays acyclic by construction.
     pub sends: Vec<(TrackId, f32)>,
-    pub note_clips: Vec<EngineNoteClip>,
-    /// Automation lanes, evaluated once per render segment.
-    pub automation: Vec<vibez_core::automation::AutomationLane>,
     pub instrument: Option<Box<dyn Instrument>>,
-    /// Scratch storage for batch rendering: (frame_offset, pitch, velocity)
+    /// Reused block-scheduler scratch: (frame_offset, pitch, velocity).
     timed_note_ons: Vec<(u32, u8, u8)>,
-    /// Scratch storage for batch rendering: (frame_offset, pitch)
+    /// Reused block-scheduler scratch: (frame_offset, pitch).
     timed_note_offs: Vec<(u32, u8)>,
-    /// Bitmask of MIDI pitches currently sounding on the instrument,
-    /// maintained by the note schedulers. Lets the engine kill
+    note_repeats: TrackNoteRepeats,
+    /// Clip pitches sounding on the instrument. Lets the engine kill
     /// hanging notes when the playhead jumps discontinuously
     /// (arrangement-loop wrap, seek, stop): the schedulers only see
     /// adjacent sample positions, so a jump would otherwise strand
     /// every sounding note in the "held down" state forever.
     active_notes: u128,
+    pub(crate) suppress_source_notes: bool,
 }
 
 impl EngineTrack {
-    pub fn new(id: TrackId) -> Self {
-        Self {
-            id,
-            clips: Vec::new(),
-            gain: DEFAULT_TRACK_GAIN,
-            pan: DEFAULT_TRACK_PAN,
-            mute: false,
-            solo: false,
-            mix_buffer: Vec::new(),
-            effects: Vec::new(),
-            sends: Vec::new(),
-            note_clips: Vec::new(),
-            automation: Vec::new(),
-            instrument: None,
-            timed_note_ons: Vec::new(),
-            timed_note_offs: Vec::new(),
-            active_notes: 0,
-        }
-    }
-
-    /// Evaluate every automation lane at `beat` (block-rate): effect
-    /// and instrument parameters are applied in place; gain and pan
-    /// come back as overrides for the mix stage. Plugin parameter
-    /// lanes are handled by the plugin event path, not here.
-    pub fn apply_automation(&mut self, beat: f64) -> (Option<f32>, Option<f32>) {
-        use vibez_core::automation::AutomationTarget;
-        let mut gain = None;
-        let mut pan = None;
-        for lane_idx in 0..self.automation.len() {
-            let lane = &self.automation[lane_idx];
-            let Some(value) = lane.value_at(beat) else {
-                continue;
-            };
-            match lane.target {
-                // Lanes are normalized 0..1; gain's native range is
-                // 0..2 (unity at lane 0.5), pan is already 0..1.
-                AutomationTarget::TrackGain => gain = Some(value * 2.0),
-                AutomationTarget::TrackPan => pan = Some(value),
-                AutomationTarget::EffectParam {
-                    effect_id,
-                    param_index,
-                } => {
-                    if let Some(slot) = self.effects.iter_mut().find(|e| e.id == effect_id) {
-                        // Lanes are normalized 0..1; parameters live in
-                        // their native descriptor range.
-                        let native = match slot.effect.param_descriptors().get(param_index) {
-                            Some(d) => d.min + value * (d.max - d.min),
-                            None => value,
-                        };
-                        slot.effect.set_param(param_index, native);
-                    }
-                }
-                AutomationTarget::InstrumentParam { param_index } => {
-                    if let Some(instrument) = self.instrument.as_mut() {
-                        let native = match instrument.param_descriptors().get(param_index) {
-                            Some(d) => d.min + value * (d.max - d.min),
-                            None => value,
-                        };
-                        instrument.set_param(param_index, native);
-                    }
-                }
-                AutomationTarget::PluginParam { .. } => {}
-                AutomationTarget::Send { bus_id } => {
-                    // Send range is native 0..1, so the normalized
-                    // lane value applies directly. Written in place
-                    // like effect params.
-                    match self.sends.iter_mut().find(|(b, _)| *b == bus_id) {
-                        Some(send) => send.1 = value,
-                        None => self.sends.push((bus_id, value)),
-                    }
-                }
-            }
-        }
-        (gain, pan)
-    }
-
-    /// Zero the mix buffer: an idle block for a track with no source
-    /// signal, so the effect chain can still run (tails, queued
-    /// plugin param changes).
-    pub fn clear_buffer(&mut self, frames: usize, channels: usize) {
-        let buf_size = frames * channels;
-        self.ensure_buffer(buf_size);
-        for s in self.mix_buffer[..buf_size].iter_mut() {
-            *s = 0.0;
-        }
-    }
-
-    /// Render the instrument with no clip events (transport stopped):
-    /// lets auditioned/held notes sound and plugin event queues drain.
-    /// Returns true when the buffer has signal.
-    pub fn render_instrument_idle(&mut self, frames: usize, channels: usize) -> bool {
-        if self.instrument.is_none() {
-            return false;
-        }
-        let buf_size = frames * channels;
-        self.ensure_buffer(buf_size);
-        for s in self.mix_buffer[..buf_size].iter_mut() {
-            *s = 0.0;
-        }
-        let instrument = self.instrument.as_mut().unwrap();
-        instrument.render(&mut self.mix_buffer[..buf_size], channels);
-        self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0)
-    }
-
-    /// Send note-offs for every sounding note. Call whenever the
-    /// playhead moves discontinuously; the offs reach the instrument
-    /// immediately (built-ins) or on its next render (plugins).
-    pub fn flush_notes(&mut self) {
-        if self.active_notes == 0 {
-            return;
-        }
-        if let Some(instrument) = self.instrument.as_mut() {
-            for pitch in 0..128u8 {
-                if self.active_notes & (1u128 << pitch) != 0 {
-                    instrument.note_off(pitch);
-                }
-            }
-        }
-        self.active_notes = 0;
-    }
-
-    /// Ensure the mix buffer has at least `size` elements.
-    pub fn ensure_buffer(&mut self, size: usize) {
-        if self.mix_buffer.len() < size {
-            self.mix_buffer.resize(size, 0.0);
-        }
-    }
-
-    /// Render all active clips into the mix_buffer for the given position.
-    /// Returns `true` if any audio was rendered.
-    ///
-    /// `loop_region` is the active arrangement loop (if any). When
-    /// provided, any frame within this block whose global position
-    /// would land past `loop_end` is wrapped back to `loop_start +
-    /// overshoot` before clip content is looked up. Without this, a
-    /// block that straddles the loop boundary would play clip audio
-    /// past the loop end before the transport wraps on the next
-    /// block — which surfaces as a "double beat" when the clip
-    /// extends slightly past the looped region (common with warped
-    /// samples that aren't exactly one bar).
-    pub fn render(
+    pub(crate) fn render_instrument(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        loop_region: Option<(u64, u64)>,
+        context: InstrumentRenderContext<'_>,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
-        let buf_size = frames * channels;
-        self.ensure_buffer(buf_size);
-
-        for s in self.mix_buffer[..buf_size].iter_mut() {
-            *s = 0.0;
-        }
-
-        let mut rendered_any = false;
-
-        // When the arrangement loop is crossed mid-block, `is_active`
-        // as computed against raw `pos..pos+frames` may not cover the
-        // clip that plays *after* the wrap. Fall back to iterating
-        // every clip on boundary-straddling blocks.
-        let block_crosses_loop = matches!(
-            loop_region,
-            Some((start, end)) if end > start
-                && pos < end
-                && pos.saturating_add(frames as u64) > end
-        );
-
-        for clip in &self.clips {
-            if !block_crosses_loop && !clip.is_active(pos, frames as u64) {
-                continue;
-            }
-
-            let audio_channels = clip.audio.num_channels();
-            let mut clip_rendered = false;
-
-            for frame in 0..frames {
-                let raw_global = pos + frame as u64;
-                let global_frame = apply_loop_wrap(raw_global, loop_region);
-
-                if global_frame < clip.position {
-                    continue;
-                }
-                if global_frame >= clip.end_position() {
-                    continue;
-                }
-
-                let clip_frame = (global_frame - clip.position) as usize;
-                let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
-                    let raw = clip.source_offset as usize + clip_frame;
-                    let loop_len = (clip.loop_end - clip.loop_start) as usize;
-                    if raw >= clip.loop_end as usize {
-                        clip.loop_start as usize + (raw - clip.loop_start as usize) % loop_len
-                    } else {
-                        raw
-                    }
-                } else {
-                    clip.source_offset as usize + clip_frame
-                };
-
-                for ch in 0..channels {
-                    let sample = if ch < audio_channels {
-                        clip.audio.sample(ch, source_frame)
-                    } else if audio_channels > 0 {
-                        clip.audio.sample(audio_channels - 1, source_frame)
-                    } else {
-                        0.0
-                    };
-                    self.mix_buffer[frame * channels + ch] += sample;
-                }
-                clip_rendered = true;
-            }
-
-            if clip_rendered {
-                rendered_any = true;
-            }
-        }
-
-        rendered_any
-    }
-
-    pub fn process_effects(&mut self, frames: usize, channels: usize) {
-        let buf_size = frames * channels;
-        if buf_size == 0 {
-            return;
-        }
-        for slot in &mut self.effects {
-            if !slot.bypass {
-                slot.effect
-                    .process(&mut self.mix_buffer[..buf_size], channels);
-            }
-        }
-    }
-
-    pub fn render_instrument(
-        &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        tempo_map: &TempoMap,
-    ) -> bool {
+        let InstrumentRenderContext {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            tempo_map,
+            project_swing,
+        } = context;
         if self.instrument.is_none() {
             return false;
         }
@@ -360,11 +173,22 @@ impl EngineTrack {
         }
 
         let batch = self.instrument.as_ref().unwrap().supports_batch_render();
+        let swing = self.effective_swing(project_swing);
+        let block = InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm: tempo_map.bpm,
+            sample_rate: tempo_map.sample_rate,
+            swing,
+        };
 
         if batch {
-            self.render_instrument_batch(pos, frames, channels, spb)
+            self.render_instrument_batch(block, on_repeat)
         } else {
-            self.render_instrument_per_frame(pos, frames, channels, spb)
+            self.render_instrument_per_frame(block, on_repeat)
         }
     }
 
@@ -374,96 +198,49 @@ impl EngineTrack {
     /// larger blocks.
     fn render_instrument_batch(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        spb: f64,
+        block: InstrumentRenderBlock,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
+        let InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm,
+            sample_rate,
+            swing,
+        } = block;
         let buf_size = frames * channels;
-        let beat_step = 1.0 / spb;
         let mut rendered = false;
 
-        // Pre-scan: collect all events with frame offsets
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
+        if !self.suppress_source_notes {
+            collect_timed_note_events(
+                &self.playback_source.note_clips,
+                pos,
+                frames,
+                spb,
+                swing,
+                &mut self.timed_note_ons,
+                &mut self.timed_note_offs,
+            );
+        }
+
+        // Note Repeat is generated from live held notes rather than resident
+        // clip events, so retain its frame walk while the clip scheduler is
+        // block-indexed.
         for frame in 0..frames {
-            let sample_pos = pos + frame as u64;
-            let current_beat = sample_pos as f64 / spb;
-            let prev_beat = if sample_pos > 0 {
-                (sample_pos - 1) as f64 / spb
-            } else {
-                -1.0
-            };
-
-            for clip in &self.note_clips {
-                let clip_start_beat = clip.position_beats;
-                let clip_end_beat = clip.position_beats + clip.duration_beats;
-
-                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
-                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
-
-                if was_in_clip && !in_clip {
-                    for note in &clip.notes {
-                        self.timed_note_offs.push((frame as u32, note.pitch));
-                    }
-                    continue;
-                }
-
-                if !in_clip {
-                    continue;
-                }
-
-                let local_beat = current_beat - clip_start_beat;
-                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-                let loop_len = if looping {
-                    clip.loop_end_beats - clip.loop_start_beats
-                } else {
-                    0.0
-                };
-
-                let effective_local = if looping && local_beat >= clip.loop_end_beats {
-                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
-                } else {
-                    local_beat
-                };
-
-                let prev_effective_local = if !was_in_clip {
-                    -1.0
-                } else {
-                    let prev_local = prev_beat - clip_start_beat;
-                    if looping && prev_local >= clip.loop_end_beats {
-                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
-                    } else {
-                        prev_local
-                    }
-                };
-
-                let wrapped = looping
-                    && was_in_clip
-                    && prev_effective_local > effective_local + beat_step * 0.5;
-
-                if wrapped {
-                    for note in &clip.notes {
-                        self.timed_note_offs.push((frame as u32, note.pitch));
-                    }
-                    for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
-                            self.timed_note_ons
-                                .push((frame as u32, note.pitch, note.velocity));
-                        }
-                    }
-                } else {
-                    for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
-                            self.timed_note_ons
-                                .push((frame as u32, note.pitch, note.velocity));
-                        }
-                        let end_diff = effective_local - note.end_beat();
-                        if end_diff >= 0.0 && end_diff < beat_step {
-                            self.timed_note_offs.push((frame as u32, note.pitch));
-                        }
-                    }
-                }
+            let (triggers, count) =
+                self.note_repeats
+                    .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
+            for trigger in triggers.into_iter().take(count).flatten() {
+                let instrument = self.instrument.as_mut().unwrap();
+                instrument.note_off_at(trigger.pitch, frame as u32);
+                instrument.note_on_at(trigger.pitch, trigger.velocity, frame as u32);
+                on_repeat(trigger);
+                rendered = true;
             }
         }
 
@@ -510,108 +287,64 @@ impl EngineTrack {
     /// which handle per-frame rendering efficiently.
     fn render_instrument_per_frame(
         &mut self,
-        pos: u64,
-        frames: usize,
-        channels: usize,
-        spb: f64,
+        block: InstrumentRenderBlock,
+        on_repeat: &mut dyn FnMut(NoteRepeatTrigger),
     ) -> bool {
+        let InstrumentRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            samples_per_beat: spb,
+            bpm,
+            sample_rate,
+            swing,
+        } = block;
         let buf_size = frames * channels;
         let mut rendered = false;
-        let mut note_ons: Vec<(u8, u8)> = Vec::new();
-        let mut note_offs: Vec<u8> = Vec::new();
-        let beat_step = 1.0 / spb;
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
+        if !self.suppress_source_notes {
+            collect_timed_note_events(
+                &self.playback_source.note_clips,
+                pos,
+                frames,
+                spb,
+                swing,
+                &mut self.timed_note_ons,
+                &mut self.timed_note_offs,
+            );
+        }
+        let mut note_on_index = 0;
+        let mut note_off_index = 0;
 
         for frame in 0..frames {
-            let sample_pos = pos + frame as u64;
-            let current_beat = sample_pos as f64 / spb;
-            let prev_beat = if sample_pos > 0 {
-                (sample_pos - 1) as f64 / spb
-            } else {
-                -1.0
-            };
-
-            note_ons.clear();
-            note_offs.clear();
-
-            for clip in &self.note_clips {
-                let clip_start_beat = clip.position_beats;
-                let clip_end_beat = clip.position_beats + clip.duration_beats;
-
-                let in_clip = current_beat >= clip_start_beat && current_beat < clip_end_beat;
-                let was_in_clip = prev_beat >= clip_start_beat && prev_beat < clip_end_beat;
-
-                if was_in_clip && !in_clip {
-                    for note in &clip.notes {
-                        note_offs.push(note.pitch);
-                    }
-                    continue;
-                }
-
-                if !in_clip {
-                    continue;
-                }
-
-                let local_beat = current_beat - clip_start_beat;
-                let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-                let loop_len = if looping {
-                    clip.loop_end_beats - clip.loop_start_beats
-                } else {
-                    0.0
-                };
-
-                let effective_local = if looping && local_beat >= clip.loop_end_beats {
-                    clip.loop_start_beats + (local_beat - clip.loop_start_beats) % loop_len
-                } else {
-                    local_beat
-                };
-
-                let prev_effective_local = if !was_in_clip {
-                    -1.0
-                } else {
-                    let prev_local = prev_beat - clip_start_beat;
-                    if looping && prev_local >= clip.loop_end_beats {
-                        clip.loop_start_beats + (prev_local - clip.loop_start_beats) % loop_len
-                    } else {
-                        prev_local
-                    }
-                };
-
-                let wrapped = looping
-                    && was_in_clip
-                    && prev_effective_local > effective_local + beat_step * 0.5;
-
-                if wrapped {
-                    for note in &clip.notes {
-                        note_offs.push(note.pitch);
-                    }
-                    for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
-                            note_ons.push((note.pitch, note.velocity));
-                        }
-                    }
-                } else {
-                    for note in &clip.notes {
-                        let diff = effective_local - note.start_beat;
-                        if diff >= 0.0 && diff < beat_step {
-                            note_ons.push((note.pitch, note.velocity));
-                        }
-                        let end_diff = effective_local - note.end_beat();
-                        if end_diff >= 0.0 && end_diff < beat_step {
-                            note_offs.push(note.pitch);
-                        }
-                    }
-                }
-            }
+            let (repeat_triggers, repeat_count) =
+                self.note_repeats
+                    .triggers_at(repeat_pos + frame as u64, bpm, sample_rate, swing);
 
             let instrument = self.instrument.as_mut().unwrap();
-            for pitch in &note_offs {
-                instrument.note_off(*pitch);
-                self.active_notes &= !(1u128 << *pitch);
+            while note_off_index < self.timed_note_offs.len()
+                && self.timed_note_offs[note_off_index].0 == frame as u32
+            {
+                let pitch = self.timed_note_offs[note_off_index].1;
+                instrument.note_off(pitch);
+                self.active_notes &= !(1u128 << pitch);
+                note_off_index += 1;
             }
-            for (pitch, vel) in &note_ons {
-                instrument.note_on(*pitch, *vel);
-                self.active_notes |= 1u128 << *pitch;
+            while note_on_index < self.timed_note_ons.len()
+                && self.timed_note_ons[note_on_index].0 == frame as u32
+            {
+                let (_, pitch, velocity) = self.timed_note_ons[note_on_index];
+                instrument.note_on(pitch, velocity);
+                self.active_notes |= 1u128 << pitch;
+                rendered = true;
+                note_on_index += 1;
+            }
+            for trigger in repeat_triggers.into_iter().take(repeat_count).flatten() {
+                instrument.note_off(trigger.pitch);
+                instrument.note_on(trigger.pitch, trigger.velocity);
+                on_repeat(trigger);
                 rendered = true;
             }
 
@@ -619,6 +352,9 @@ impl EngineTrack {
             let end = start + channels;
             instrument.render(&mut self.mix_buffer[start..end], channels);
         }
+
+        self.timed_note_ons.clear();
+        self.timed_note_offs.clear();
 
         if !rendered {
             rendered = self.mix_buffer[..buf_size].iter().any(|&s| s != 0.0);
@@ -628,54 +364,12 @@ impl EngineTrack {
     }
 }
 
-/// Equal-power pan law.
-/// `pan` ranges from 0.0 (hard left) to 1.0 (hard right).
-/// Returns `(left_gain, right_gain)`.
-/// At center (0.5): both channels get ~0.707 (-3dB).
-pub fn equal_power_pan(pan: f32) -> (f32, f32) {
-    let pan = pan.clamp(0.0, 1.0);
-    let angle = pan * std::f32::consts::FRAC_PI_2;
-    (angle.cos(), angle.sin())
-}
-
-/// Stereo balance law for channels that carry already-panned
-/// material (buses): center passes both channels at unity, off-
-/// center attenuates the far side. Equal-power panning here would
-/// tax every centered return 3 dB.
-pub fn balance_pan(pan: f32) -> (f32, f32) {
-    let pan = pan.clamp(0.0, 1.0);
-    (((1.0 - pan) * 2.0).min(1.0), (pan * 2.0).min(1.0))
-}
-
-/// Returns `true` if any track in the slice has solo enabled.
-pub fn any_solo(tracks: &[EngineTrack]) -> bool {
-    tracks.iter().any(|t| t.solo)
-}
-
-/// Calculate the total arrangement length across audio and note clips.
-pub fn calculate_total_length(tracks: &[EngineTrack], samples_per_beat: f64) -> u64 {
-    let audio_end = tracks
-        .iter()
-        .flat_map(|t| t.clips.iter())
-        .map(|c| c.end_position())
-        .max()
-        .unwrap_or(0);
-    let note_end = if samples_per_beat.is_finite() && samples_per_beat > 0.0 {
-        tracks
-            .iter()
-            .flat_map(|t| t.note_clips.iter())
-            .map(|c| ((c.position_beats + c.duration_beats) * samples_per_beat).round() as u64)
-            .max()
-            .unwrap_or(0)
-    } else {
-        0
-    };
-    audio_end.max(note_end)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use vibez_core::audio_buffer::DecodedAudio;
+    use vibez_core::id::ClipId;
 
     fn make_test_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
         Arc::new(DecodedAudio {
@@ -731,7 +425,7 @@ mod tests {
     fn single_clip_render() {
         let audio = make_test_audio(64, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -762,7 +456,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -786,46 +480,6 @@ mod tests {
         let mut track = EngineTrack::new(TrackId::new());
         let rendered = track.render(0, 8, 2, None);
         assert!(!rendered);
-    }
-
-    #[test]
-    fn total_length_calculation() {
-        let audio = make_test_audio(100, 0.5);
-        let mut tracks = vec![EngineTrack::new(TrackId::new())];
-        tracks[0].clips.push(EngineClip {
-            id: ClipId::new(),
-            audio: audio.clone(),
-            position: 50,
-            source_offset: 0,
-            duration: 100,
-            loop_enabled: false,
-            loop_start: 0,
-            loop_end: 0,
-        });
-
-        assert_eq!(calculate_total_length(&tracks, 22_050.0), 150);
-    }
-
-    #[test]
-    fn total_length_empty_tracks() {
-        let tracks: Vec<EngineTrack> = vec![];
-        assert_eq!(calculate_total_length(&tracks, 22_050.0), 0);
-    }
-
-    #[test]
-    fn total_length_includes_note_clips() {
-        let mut tracks = vec![EngineTrack::new(TrackId::new())];
-        tracks[0].note_clips.push(EngineNoteClip {
-            id: ClipId::new(),
-            position_beats: 2.0,
-            duration_beats: 4.0,
-            notes: Vec::new(),
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-        });
-
-        assert_eq!(calculate_total_length(&tracks, 22_050.0), 132_300);
     }
 
     #[test]
@@ -878,7 +532,7 @@ mod tests {
     fn clip_loop_renders_audio_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -915,7 +569,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -959,7 +613,7 @@ mod tests {
         });
 
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -997,7 +651,7 @@ mod tests {
     fn clip_no_loop_silence_past_source() {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,
@@ -1039,7 +693,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -1093,7 +747,7 @@ mod tests {
             sample_rate: 44_100,
         });
         let mut track = EngineTrack::new(TrackId::new());
-        track.clips.push(EngineClip {
+        track.playback_source.clips.push(EngineClip {
             id: ClipId::new(),
             audio,
             position: 0,

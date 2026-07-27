@@ -47,7 +47,7 @@ impl App {
             };
             button(text(label).size(13).color(color))
                 .on_press(Message::SelectSettingsTab(tab))
-                .padding([6, 16])
+                .padding([6, 10])
                 .style(move |_theme: &Theme, status| {
                     let bg = if is_active {
                         None
@@ -95,6 +95,11 @@ impl App {
                 active == SettingsTab::Warping
             ),
             make_tab_btn(
+                "Perform",
+                SettingsTab::Perform,
+                active == SettingsTab::Perform
+            ),
+            make_tab_btn(
                 "Appearance",
                 SettingsTab::Appearance,
                 active == SettingsTab::Appearance
@@ -108,6 +113,7 @@ impl App {
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
             SettingsTab::Dropbox => self.view_settings_dropbox_tab(),
             SettingsTab::Warping => self.view_settings_warping_tab(),
+            SettingsTab::Perform => self.view_settings_perform_tab(),
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
         };
 
