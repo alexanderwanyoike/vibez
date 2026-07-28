@@ -345,7 +345,7 @@ fn remote_import_becomes_self_contained_project_media_with_safe_provenance() {
         vibez_core::track::MediaProvenance::Remote {
             provider: "dropbox".into(),
             connection_id: "dropbox-primary".into(),
-            connection_name: Some("Alex's Dropbox".into()),
+            connection_name: Some("Dropbox".into()),
             source_id: "id:megalodon-kick".into(),
             source_path: "/Megalodon/Kick.wav".into(),
             revision: Some("rev-7".into()),
