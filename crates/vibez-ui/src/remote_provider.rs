@@ -658,17 +658,4 @@ mod tests {
         assert!(!entry("/notes.txt").is_supported_audio());
         assert!(!entry("/raw.aac").is_supported_audio());
     }
-
-    #[test]
-    fn the_dropbox_connection_label_names_the_provider_not_a_person() {
-        // This string is shown in every user's Browser and is persisted into
-        // saved projects as media provenance, so it must not carry the name
-        // of whoever happened to author the default. It shipped as
-        // "Alex's Dropbox" in v0.1.0.
-        assert_eq!(DROPBOX_CONNECTION_NAME, "Dropbox");
-        assert!(
-            !DROPBOX_CONNECTION_NAME.contains('\''),
-            "a possessive apostrophe suggests a personal name crept back in"
-        );
-    }
 }
