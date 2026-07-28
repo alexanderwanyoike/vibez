@@ -375,8 +375,10 @@ pub(crate) fn global_key_handler(
     }
 
     // Delete/Backspace: context-resolved in update() (selected notes
-    // first, then selected clips) and ignored while renaming.
-    if !modifiers.control()
+    // first, then selected clips) and ignored while renaming. Guarded on the
+    // command modifier, not literal Ctrl, so "no command held" means the same
+    // thing here as it does for the shortcuts below.
+    if !command_held(modifiers, ON_MACOS)
         && matches!(
             key,
             iced::keyboard::Key::Named(Named::Delete)
@@ -387,7 +389,7 @@ pub(crate) fn global_key_handler(
     }
 
     // B: toggle piano roll draw mode (no modifiers)
-    if !modifiers.control()
+    if !command_held(modifiers, ON_MACOS)
         && !modifiers.shift()
         && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
     {
@@ -541,6 +543,26 @@ mod tests {
     }
 
     #[test]
+    fn bare_key_shortcuts_are_blocked_by_the_command_modifier_not_literal_control() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        // B and Delete are bare-key shortcuts, so holding the command
+        // modifier must suppress them. Guarding on literal Ctrl meant that on
+        // macOS Cmd+B toggled draw mode while Ctrl+B was the blocked one.
+        assert!(matches!(
+            global_key_handler(Key::Character("b".into()), Modifiers::empty()),
+            Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
+        ));
+        assert!(global_key_handler(Key::Character("b".into()), command_modifier()).is_none());
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Delete), Modifiers::empty()),
+            Some(Message::DeleteKeyPressed)
+        ));
+        assert!(global_key_handler(Key::Named(Named::Delete), command_modifier()).is_none());
+    }
+
+    #[test]
     fn the_super_key_never_stands_in_for_the_command_modifier_off_macos() {
         use iced::keyboard::{Key, Modifiers};
 
@@ -561,12 +583,9 @@ mod tests {
 
     #[test]
     fn command_number_shortcuts_control_the_shared_grid() {
-        use iced::keyboard::{Key, Modifiers};
+        use iced::keyboard::Key;
 
-        #[cfg(target_os = "macos")]
-        let command = Modifiers::LOGO;
-        #[cfg(not(target_os = "macos"))]
-        let command = Modifiers::CTRL;
+        let command = command_modifier();
 
         let expected = [
             ViewMsg::NarrowGrid,
