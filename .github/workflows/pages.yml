@@ -1,7 +1,12 @@
 name: Deploy site to GitHub Pages
 
-# The landing page is plain HTML in site/, so there is nothing to build:
-# the job uploads that directory and Pages serves it.
+# The landing page is plain HTML in site/. There is no build step and no
+# dependencies: the only processing is substituting the current release
+# version into the page, so the download links never have to be edited by
+# hand when a release goes out.
+#
+# site/index.html carries __VERSION__ and __RELEASE_DATE__ placeholders,
+# the same convention packaging/macos/Info.plist already uses.
 
 on:
   push:
@@ -9,6 +14,10 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
+  # Redeploy when a release is published so the page follows the newest
+  # version without a commit.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -33,9 +42,47 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      - name: Stage the site with the current release version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # The newest published, non-draft release. Release assets are named
+          # from the tag, so this is what the download links must point at.
+          release=$(gh release view --repo "$GITHUB_REPOSITORY" \
+            --json tagName,publishedAt,assets)
+
+          tag=$(jq -r '.tagName' <<<"$release")
+          published=$(jq -r '.publishedAt' <<<"$release")
+          assets=$(jq -r '.assets | length' <<<"$release")
+
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "::error::No published release found; refusing to deploy a page with placeholder links."
+            exit 1
+          fi
+          if [ "$assets" -eq 0 ]; then
+            echo "::error::Release $tag has no assets; every download link would 404."
+            exit 1
+          fi
+
+          date_human=$(date -u -d "$published" '+%-d %B %Y')
+          echo "Publishing site for $tag ($date_human, $assets assets)"
+
+          mkdir -p _site
+          cp -R site/. _site/
+          sed -i "s|__VERSION__|${tag}|g; s|__RELEASE_DATE__|${date_human}|g" _site/index.html
+
+          # A surviving placeholder means a rename broke the substitution and
+          # would ship literal __VERSION__ text to users.
+          if grep -q '__VERSION__\|__RELEASE_DATE__' _site/index.html; then
+            echo "::error::Placeholder left unsubstituted in _site/index.html"
+            exit 1
+          fi
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@v4
