@@ -103,7 +103,7 @@ impl App {
                     .current_path
                     .rsplit('/')
                     .find(|part| !part.is_empty())
-                    .unwrap_or("Alex's Dropbox");
+                    .unwrap_or(crate::remote_provider::DROPBOX_CONNECTION_NAME);
                 row![
                     button(
                         row![
