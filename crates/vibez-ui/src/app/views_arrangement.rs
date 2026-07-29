@@ -19,7 +19,9 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
-use crate::widgets::timeline::{ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas};
+use crate::widgets::timeline::{
+    ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas, TRACK_ROW_HEIGHT,
+};
 use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
 
 use super::*;
@@ -211,6 +213,33 @@ impl App {
         });
 
         // Track rows: header widgets + clip canvas
+        // Real vertical layout of the column, so a rubber-band drag can map
+        // a y offset back to a track even with automation lanes expanded.
+        let row_spans: Vec<crate::widgets::timeline::TrackRowSpan> = {
+            let mut top = 0.0;
+            self.state
+                .project_tracks
+                .tracks
+                .iter()
+                .map(|track| {
+                    let height = TRACK_ROW_HEIGHT
+                        + if self.state.automation_ui.expanded.contains(&track.id) {
+                            self.automation_rows_height(timeline, track.id)
+                        } else {
+                            0.0
+                        };
+                    let span = crate::widgets::timeline::TrackRowSpan {
+                        track_id: track.id,
+                        top,
+                        height,
+                        lane_height: TRACK_ROW_HEIGHT,
+                    };
+                    top += height;
+                    span
+                })
+                .collect()
+        };
+
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
@@ -282,7 +311,8 @@ impl App {
                 browser_drag_active,
                 browser_drag_duration,
                 browser_drag_detail.clone(),
-            );
+            )
+            .with_marquee(row_spans.clone(), timeline.marquee.clone());
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
             let grid = self.state.view.grid_config();
@@ -290,7 +320,7 @@ impl App {
             let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
-                    .height(Length::Fixed(70.0)),
+                    .height(Length::Fixed(TRACK_ROW_HEIGHT)),
             );
             if browser_drag_active {
                 clip_canvas_area = clip_canvas_area
@@ -309,7 +339,7 @@ impl App {
             }
             let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
 
-            let track_row = row![header, clip_canvas].height(Length::Fixed(70.0));
+            let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
 
             track_rows = track_rows.push(track_row);
 

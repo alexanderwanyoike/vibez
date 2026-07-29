@@ -13,9 +13,10 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent,
-    UndoGestureId,
+    ArrangementMarquee, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
+    TrackTimelineContent, UndoGestureId,
 };
+use crate::widgets::timeline::marquee;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
@@ -44,15 +45,26 @@ pub enum ClipDragAction {
     PendingSeek {
         beat: f64,
         start_x: f32,
+        /// Press point in column coordinates, so a drag that leaves this
+        /// lane is still resolvable against the whole arrangement.
+        anchor_column_y: f32,
     },
     RegionSelect {
         anchor_beat: f64,
+        anchor_column_y: f32,
     },
     PanViewport {
         start_local_x: f32,
         start_scroll_beats: f64,
     },
 }
+
+/// Pointer travel before a press becomes a rubber-band rather than a seek.
+const MARQUEE_MIN_PX: f32 = 4.0;
+
+/// Vertical travel before a clip drag may change lane. Without it a
+/// horizontal drag near a row boundary would flicker between tracks.
+const CROSS_TRACK_MIN_PX: f32 = 20.0;
 
 /// Interaction state for clip canvas.
 #[derive(Debug, Default)]
@@ -68,6 +80,13 @@ pub struct TrackClipCanvas {
     pub total_tracks: usize,
     pub track_ids: Vec<TrackId>,
     pub track_kinds: Vec<bool>, // is_instrument flags
+    /// True vertical layout of every row in this column, so a rubber-band
+    /// spans lanes correctly even with automation lanes expanded. Empty
+    /// when the surface has not opted into box selection.
+    pub row_spans: Vec<TrackRowSpan>,
+    /// Live rubber-band, shared by every lane so each draws its own slice
+    /// of one continuous box.
+    pub marquee: Option<ArrangementMarquee>,
     pub selected_clips: HashSet<ClipId>,
     pub clips: Vec<TimelineClip>,
     pub note_clips: Vec<TimelineNoteClip>,
@@ -205,6 +224,8 @@ impl TrackClipCanvas {
             total_tracks,
             track_ids,
             track_kinds,
+            row_spans: Vec::new(),
+            marquee: None,
             selected_clips,
             clips,
             note_clips,
@@ -232,6 +253,19 @@ impl TrackClipCanvas {
             sample_drop_detail,
             track_name: track.name.clone(),
         }
+    }
+
+    /// Opt this lane into box selection by handing it the column layout
+    /// and the live rubber-band. Surfaces that lay their lanes out in one
+    /// vertical column (Arrange, Section construction) can both use it.
+    pub fn with_marquee(
+        mut self,
+        row_spans: Vec<TrackRowSpan>,
+        marquee: Option<ArrangementMarquee>,
+    ) -> Self {
+        self.row_spans = row_spans;
+        self.marquee = marquee;
+        self
     }
 
     pub fn with_recording_preview(mut self, preview: TimelineNoteClip) -> Self {
@@ -262,6 +296,62 @@ impl TrackClipCanvas {
 
     pub(super) fn snapped_beat(&self, beat: f64) -> f64 {
         self.grid.snap_beat(beat, self.pixels_per_beat())
+    }
+
+    /// Offset of this lane's row from the top of the column, converting
+    /// between lane-local and column coordinates.
+    pub(super) fn row_top(&self) -> f32 {
+        self.row_spans
+            .iter()
+            .find(|row| row.track_id == self.track_id)
+            .map(|row| row.top)
+            .unwrap_or(0.0)
+    }
+
+    /// Index of the lane sitting at a column-space y.
+    ///
+    /// Falls back to uniform row stepping relative to this lane when the
+    /// surface supplied no layout, preserving the old behaviour for
+    /// canvases that have not opted into box selection.
+    pub(super) fn resolve_lane_at(&self, column_y: f32) -> Option<usize> {
+        if self.row_spans.is_empty() {
+            let offset = ((column_y - self.row_top()) / TRACK_ROW_HEIGHT).floor() as i32;
+            let last = self.total_tracks as i32 - 1;
+            return (last >= 0)
+                .then(|| (self.track_index as i32 + offset).clamp(0, last) as usize);
+        }
+        self.row_spans
+            .iter()
+            .position(|row| column_y >= row.top && column_y < row.bottom())
+    }
+
+    /// Build the marquee message for a drag from `anchor` to the pointer,
+    /// both already in column coordinates.
+    fn marquee_message(
+        &self,
+        anchor_beat: f64,
+        anchor_column_y: f32,
+        current_x: f32,
+        current_column_y: f32,
+        additive: bool,
+    ) -> Message {
+        let current_beat = self.snapped_beat(self.geometry().x_to_beat(current_x));
+        let span = marquee::resolve(
+            anchor_beat,
+            current_beat,
+            anchor_column_y,
+            current_column_y,
+            &self.row_spans,
+        );
+        Message::Arrangement(ArrangementMsg::MarqueeSelect {
+            anchor_track: self.track_id,
+            start_beats: span.start_beats,
+            end_beats: span.end_beats,
+            top_y: span.top_y,
+            bottom_y: span.bottom_y,
+            track_ids: span.track_ids,
+            additive,
+        })
     }
 
     /// Samples per beat.
@@ -432,6 +522,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             state.drag = Some(ClipDragAction::PendingSeek {
                                 beat,
                                 start_x: pos.x,
+                                anchor_column_y: self.row_top() + pos.y,
                             });
                         }
 
@@ -462,6 +553,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         state.drag = Some(ClipDragAction::PendingSeek {
                             beat,
                             start_x: pos.x,
+                            anchor_column_y: self.row_top() + pos.y,
                         });
                         return (
                             canvas::event::Status::Captured,
@@ -537,50 +629,47 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ClipDragAction::PendingSeek {
                                 beat: anchor,
                                 start_x,
+                                anchor_column_y,
                             } => {
+                                let column_y = self.row_top() + local.y;
                                 let dx = (local_x - start_x).abs();
-                                if dx > 4.0 {
+                                let dy = (column_y - *anchor_column_y).abs();
+                                // Vertical travel promotes too: a drag
+                                // straight down the lanes is a valid box.
+                                if dx > MARQUEE_MIN_PX || dy > MARQUEE_MIN_PX {
                                     let anchor_snapped = self.snapped_beat(*anchor);
-                                    let beat = geometry.x_to_beat(local_x);
-                                    let current = self.snapped_beat(beat);
-                                    let start = anchor_snapped.min(current);
-                                    let end = anchor_snapped.max(current);
+                                    let anchor_y = *anchor_column_y;
                                     state.drag = Some(ClipDragAction::RegionSelect {
                                         anchor_beat: anchor_snapped,
+                                        anchor_column_y: anchor_y,
                                     });
-                                    if end > start {
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(Message::Arrangement(
-                                                ArrangementMsg::SetTimeSelection {
-                                                    start_beats: start,
-                                                    end_beats: end,
-                                                    track_id: Some(track_id),
-                                                },
-                                            )),
-                                        );
-                                    }
-                                }
-                                return (canvas::event::Status::Captured, None);
-                            }
-                            ClipDragAction::RegionSelect { anchor_beat } => {
-                                let beat = geometry.x_to_beat(local_x);
-                                let current = self.snapped_beat(beat);
-                                let start = anchor_beat.min(current);
-                                let end = anchor_beat.max(current);
-                                if end > start {
                                     return (
                                         canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::SetTimeSelection {
-                                                start_beats: start,
-                                                end_beats: end,
-                                                track_id: Some(track_id),
-                                            },
+                                        Some(self.marquee_message(
+                                            anchor_snapped,
+                                            anchor_y,
+                                            local_x,
+                                            column_y,
+                                            state.shift_held,
                                         )),
                                     );
                                 }
                                 return (canvas::event::Status::Captured, None);
+                            }
+                            ClipDragAction::RegionSelect {
+                                anchor_beat,
+                                anchor_column_y,
+                            } => {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(self.marquee_message(
+                                        *anchor_beat,
+                                        *anchor_column_y,
+                                        local_x,
+                                        self.row_top() + local.y,
+                                        state.shift_held,
+                                    )),
+                                );
                             }
                             ClipDragAction::MoveClip {
                                 undo_gesture,
@@ -606,14 +695,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 // Check for cross-track drag
                                 let local_y = local.y;
                                 let dy = local_y - start_y;
-                                let track_height = 70.0_f32;
 
-                                if dy.abs() > track_height * 0.6 {
-                                    let track_offset = (dy / track_height).round() as i32;
-                                    let target_idx = (self.track_index as i32 + track_offset)
-                                        .clamp(0, self.total_tracks as i32 - 1)
-                                        as usize;
+                                // Resolve against real row geometry when the
+                                // surface supplied it; stepping by a fixed
+                                // row height mis-targets as soon as a track
+                                // above has its automation lanes expanded.
+                                let target_idx = self
+                                    .resolve_lane_at(self.row_top() + local_y)
+                                    .filter(|_| dy.abs() > CROSS_TRACK_MIN_PX);
 
+                                if let Some(target_idx) = target_idx {
                                     if target_idx != self.track_index
                                         && target_idx < self.track_ids.len()
                                     {
@@ -768,7 +859,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
                         }
                         ClipDragAction::RegionSelect { .. } => {
-                            Some(Message::set_time_selection_active(true))
+                            // Drops the box; the clip selection it produced
+                            // and the time range it set both stay.
+                            Some(Message::Arrangement(ArrangementMsg::EndMarqueeSelect))
                         }
                         _ => None,
                     };

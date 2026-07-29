@@ -171,6 +171,44 @@ impl PianoRollWidget {
         }
         None
     }
+
+    /// Musical extent of a rubber-band rectangle, clipped to the grid.
+    /// `None` when the box misses the note grid entirely.
+    fn marquee_region(
+        &self,
+        anchor: Point,
+        current: Point,
+        bounds: &Rectangle,
+    ) -> Option<MarqueeRegion> {
+        let x0 = anchor.x.min(current.x).max(KEY_WIDTH);
+        let x1 = anchor.x.max(current.x);
+        let y0 = anchor.y.min(current.y).max(RULER_HEIGHT);
+        let y1 = anchor.y.max(current.y);
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+
+        // Screen y grows downward while pitch grows upward, so the top
+        // edge of the box yields the high pitch.
+        let high_pitch = self.y_to_pitch(y0);
+        let low_pitch = self.y_to_pitch(y1);
+
+        Some(MarqueeRegion {
+            start_beat: self.x_to_beat(x0, bounds).max(0.0),
+            end_beat: self.x_to_beat(x1, bounds).max(0.0),
+            low_pitch: low_pitch.min(high_pitch),
+            high_pitch: low_pitch.max(high_pitch),
+        })
+    }
+}
+
+/// Beat span and pitch range covered by a rubber-band rectangle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MarqueeRegion {
+    start_beat: f64,
+    end_beat: f64,
+    low_pitch: u8,
+    high_pitch: u8,
 }
 
 /// Default scroll_y to center on C3–C5 (musically useful range).
@@ -224,7 +262,17 @@ enum DragAction {
         start_beat: f64,
         start_x: f32,
     },
+    /// Rubber-band select dragged out from empty grid space.
+    MarqueeNotes {
+        anchor: Point,
+        current: Point,
+        additive: bool,
+    },
 }
+
+/// Drag distance before an empty-space press counts as a rubber-band
+/// rather than a plain deselecting click.
+const MARQUEE_MIN_PX: f32 = 4.0;
 
 /// Max time between clicks to count as double-click (ms).
 const DOUBLE_CLICK_MS: u64 = 400;
@@ -272,6 +320,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                 DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
+                DragAction::MarqueeNotes { .. } => mouse::Interaction::Crosshair,
             };
         }
 
@@ -518,7 +567,20 @@ impl canvas::Program<Message> for PianoRollWidget {
                             );
                         }
 
-                        // Single-click: deselect all
+                        // Single-click: begin a rubber-band. A press that
+                        // never travels stays a plain deselect.
+                        state.drag = Some(DragAction::MarqueeNotes {
+                            anchor: pos,
+                            current: pos,
+                            additive: state.shift_held,
+                        });
+
+                        if state.shift_held {
+                            // Shift extends the existing selection, so the
+                            // press must not clear it up front.
+                            return (canvas::event::Status::Captured, None);
+                        }
+
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::PianoRoll(PianoRollMsg::SelectNote(
@@ -535,6 +597,13 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                     state.last_cursor = Some(local);
+
+                    // The rubber-band only grows its rectangle; the
+                    // selection is resolved once, on release.
+                    if let Some(DragAction::MarqueeNotes { current, .. }) = state.drag.as_mut() {
+                        *current = local;
+                        return (canvas::event::Status::Captured, None);
+                    }
 
                     if let Some(ref drag) = state.drag {
                         if let Some(ref clip_data) = self.clip {
@@ -658,6 +727,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         );
                                     }
                                 }
+                                // Handled above, before this borrow.
+                                DragAction::MarqueeNotes { .. } => {}
                             }
                         }
                     }
@@ -674,6 +745,33 @@ impl canvas::Program<Message> for PianoRollWidget {
                     );
                 }
                 if let Some(drag) = state.drag.take() {
+                    if let DragAction::MarqueeNotes {
+                        anchor,
+                        current,
+                        additive,
+                    } = drag
+                    {
+                        let travelled = (current.x - anchor.x).abs() >= MARQUEE_MIN_PX
+                            || (current.y - anchor.y).abs() >= MARQUEE_MIN_PX;
+                        if let (true, Some(clip_data)) = (travelled, self.clip.as_ref()) {
+                            if let Some(region) = self.marquee_region(anchor, current, &bounds) {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    Some(Message::PianoRoll(PianoRollMsg::SelectNotesInRegion {
+                                        track_id: self.track_id,
+                                        clip_id: clip_data.clip_id,
+                                        start_beat: region.start_beat,
+                                        end_beat: region.end_beat,
+                                        low_pitch: region.low_pitch,
+                                        high_pitch: region.high_pitch,
+                                        additive,
+                                    })),
+                                );
+                            }
+                        }
+                        return (canvas::event::Status::Captured, None);
+                    }
+
                     // On release of a multi-note drag, move all non-anchor notes
                     if let DragAction::MoveNote {
                         note_index,

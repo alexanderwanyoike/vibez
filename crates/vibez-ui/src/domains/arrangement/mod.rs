@@ -730,6 +730,29 @@ impl TimelineEditorState {
                         Some((self.selection_start_beats, self.selection_end_beats));
                 }
             }
+            ArrangementMsg::MarqueeSelect {
+                anchor_track,
+                start_beats,
+                end_beats,
+                top_y,
+                bottom_y,
+                track_ids,
+                additive,
+            } => {
+                return self.op_marquee_select(
+                    ctx,
+                    anchor_track,
+                    start_beats,
+                    end_beats,
+                    top_y,
+                    bottom_y,
+                    &track_ids,
+                    additive,
+                );
+            }
+            ArrangementMsg::EndMarqueeSelect => {
+                self.marquee = None;
+            }
             ArrangementMsg::SetTimeSelectionActive(active) => {
                 self.time_selection_active = active;
                 if !active {

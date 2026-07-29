@@ -403,6 +403,29 @@ impl App {
         choices
     }
 
+    /// Height the expanded automation area adds beneath a track's clip
+    /// lane. Kept next to the constants it sums so the rubber-band's row
+    /// geometry cannot drift away from the actual layout.
+    pub(super) fn automation_rows_height(
+        &self,
+        timeline: &crate::state::TimelineEditorState,
+        track_id: vibez_core::id::TrackId,
+    ) -> f32 {
+        let lanes = timeline
+            .timeline
+            .get(track_id)
+            .map(|content| content.automation.len())
+            .unwrap_or(0);
+        let picker_open =
+            matches!(&self.state.automation_ui.picker, Some((id, _)) if *id == track_id);
+        lanes as f32 * LANE_HEIGHT
+            + if picker_open {
+                PICKER_OPEN_HEIGHT
+            } else {
+                PICKER_CLOSED_HEIGHT
+            }
+    }
+
     pub(super) fn push_automation_lanes<'a>(
         &'a self,
         mut rows: iced::widget::Column<'a, Message>,

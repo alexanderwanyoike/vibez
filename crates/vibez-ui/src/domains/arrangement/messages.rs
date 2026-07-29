@@ -81,6 +81,20 @@ pub enum ArrangementMsg {
         track_id: Option<TrackId>,
     },
     SetTimeSelectionActive(bool),
+    /// Live rubber-band update. `track_ids` are the lanes the box spans,
+    /// resolved by the widget from real row geometry. Carries the time
+    /// selection too, so one drag event stays one message.
+    MarqueeSelect {
+        anchor_track: TrackId,
+        start_beats: f64,
+        end_beats: f64,
+        top_y: f32,
+        bottom_y: f32,
+        track_ids: Vec<TrackId>,
+        additive: bool,
+    },
+    /// Rubber-band drag finished: drop the box, keep the selection.
+    EndMarqueeSelect,
     SetSelectionAsLoop,
     DeleteSelectedClip,
     DuplicateSelectedClip,
@@ -152,6 +166,8 @@ impl ArrangementMsg {
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetTimeSelection { .. }
                 | Self::SetTimeSelectionActive(_)
+                | Self::MarqueeSelect { .. }
+                | Self::EndMarqueeSelect
                 | Self::SetSelectionAsLoop
                 | Self::DeleteSelectedClip
                 | Self::DuplicateSelectedClip
@@ -187,6 +203,8 @@ impl ArrangementMsg {
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }
                 | ArrangementMsg::SetTimeSelectionActive(_)
+                | ArrangementMsg::MarqueeSelect { .. }
+                | ArrangementMsg::EndMarqueeSelect
                 | ArrangementMsg::SetSelectionAsLoop
                 | ArrangementMsg::CopySelectedClips
                 | ArrangementMsg::ClipBpmInputChanged { .. }
