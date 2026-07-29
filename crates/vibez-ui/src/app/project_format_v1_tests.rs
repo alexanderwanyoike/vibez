@@ -631,7 +631,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     };
     assert_eq!(provider, "dropbox");
     assert_eq!(connection_id, "dropbox-primary");
-    assert_eq!(connection_name.as_deref(), Some("Alex's Dropbox"));
+    assert_eq!(connection_name.as_deref(), Some("Dropbox"));
     assert_eq!(source_path, "/Megalodon/Remote Loop.wav");
     assert_eq!(revision.as_deref(), Some("rev-9"));
     let serialized = serde_json::to_string(

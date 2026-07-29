@@ -831,7 +831,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 modifiers,
                 ..
             }) => {
-                if modifiers.control() {
+                if crate::app::command_held(modifiers, crate::app::ON_MACOS) {
                     match c.as_str() {
                         "d" if !self.selected_clips.is_empty() => {
                             return (

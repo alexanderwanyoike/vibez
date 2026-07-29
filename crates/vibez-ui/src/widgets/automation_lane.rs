@@ -6,7 +6,8 @@
 //!   dragging, commit on release); right-click or Delete removes
 //! - alt-drag a segment bends its curve (alt-double-click resets it
 //!   straight); the cursor switches to a vertical-resize arrow
-//! - ctrl-drag sweeps a beat range and erases every point inside
+//! - command-drag (Cmd on macOS, Ctrl elsewhere) sweeps a beat range and
+//!   erases every point inside
 //!   (crosshair cursor)
 //!
 //! The dotted line is the parameter's current (un-automated) value;
@@ -62,12 +63,14 @@ pub struct LaneInteraction {
     drag: Option<(usize, f64, f32)>,
     /// (segment index, original curve, press y, ghost curve).
     curve_drag: Option<(usize, f32, f32, f32)>,
-    /// (start beat, current beat) of a ctrl-drag erase sweep.
+    /// (start beat, current beat) of a command-drag erase sweep.
     erase_drag: Option<(f64, f64)>,
     /// Last left press, for double-click detection.
     double_click: DoubleClick,
     alt: bool,
-    ctrl: bool,
+    /// Command modifier held: Cmd on macOS, Ctrl elsewhere. Literal Ctrl
+    /// would collide with the macOS right-click gesture.
+    command: bool,
     shift: bool,
 }
 
@@ -331,7 +334,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         // Modifier tracking works regardless of cursor position.
         if let canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(m)) = event {
             state.alt = m.alt();
-            state.ctrl = m.control();
+            state.command = crate::app::command_held(m, crate::app::ON_MACOS);
             state.shift = m.shift();
             return (canvas::event::Status::Ignored, None);
         }
@@ -393,7 +396,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         match event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 // Ctrl: sweep-erase.
-                if state.ctrl {
+                if state.command {
                     let beat = self.x_to_snapped_beat(pos.x, state);
                     state.erase_drag = Some((beat, beat));
                     state.double_click.clear();
@@ -525,7 +528,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             return mouse::Interaction::Crosshair;
         }
         if let Some(pos) = cursor.position_in(bounds) {
-            if state.ctrl {
+            if state.command {
                 return mouse::Interaction::Crosshair;
             }
             if state.alt && !self.stepped {

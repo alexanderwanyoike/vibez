@@ -16,7 +16,9 @@ use vibez_dropbox::{DerivedMetadata, DropboxClient, DropboxError, DropboxListIte
 
 pub const DROPBOX_PROVIDER_ID: &str = "dropbox";
 pub const DROPBOX_CONNECTION_ID: &str = "dropbox-primary";
-pub const DROPBOX_CONNECTION_NAME: &str = "Alex's Dropbox";
+/// Display label for the Dropbox connection. This ships to every user and
+/// is written into saved projects, so it names the provider, never a person.
+pub const DROPBOX_CONNECTION_NAME: &str = "Dropbox";
 const REMOTE_CATALOG_PAGE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
