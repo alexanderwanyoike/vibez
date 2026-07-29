@@ -825,7 +825,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                 key: iced::keyboard::Key::Character(ref ch),
                 modifiers,
                 ..
-            }) if ch.as_str() == "a" && modifiers.command() => {
+            }) if ch.as_str() == "a"
+                && crate::app::command_held(modifiers, crate::app::ON_MACOS) =>
+            {
                 if let Some(ref clip_data) = self.clip {
                     return (
                         canvas::event::Status::Captured,
