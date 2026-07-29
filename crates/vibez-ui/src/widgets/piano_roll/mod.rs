@@ -928,24 +928,10 @@ impl canvas::Program<Message> for PianoRollWidget {
                 }
             }
 
-            // ── Keyboard: Ctrl+A → select all notes ──
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Character(ref ch),
-                modifiers,
-                ..
-            }) if ch.as_str() == "a"
-                && crate::app::command_held(modifiers, crate::app::ON_MACOS) =>
-            {
-                if let Some(ref clip_data) = self.clip {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::PianoRoll(PianoRollMsg::SelectAllNotes(
-                            self.track_id,
-                            clip_data.clip_id,
-                        ))),
-                    );
-                }
-            }
+            // Command+A is handled centrally by the global
+            // SelectAllPressed shortcut, for the same reason Delete is:
+            // every canvas receives keyboard events, so two canvases
+            // binding one key race each other.
 
             _ => {}
         }

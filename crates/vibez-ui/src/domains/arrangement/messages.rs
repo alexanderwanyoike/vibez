@@ -80,6 +80,8 @@ pub enum ArrangementMsg {
         end_beats: f64,
         track_id: Option<TrackId>,
     },
+    /// Select every clip on every track of this timeline.
+    SelectAllClips,
     SetTimeSelectionActive(bool),
     /// Live rubber-band update. `track_ids` are the lanes the box spans,
     /// resolved by the widget from real row geometry. Carries the time
@@ -165,6 +167,7 @@ impl ArrangementMsg {
                 | Self::ToggleClipLoop(..)
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetTimeSelection { .. }
+                | Self::SelectAllClips
                 | Self::SetTimeSelectionActive(_)
                 | Self::MarqueeSelect { .. }
                 | Self::EndMarqueeSelect
@@ -202,6 +205,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::EngineTrackMeter { .. }
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }
+                | ArrangementMsg::SelectAllClips
                 | ArrangementMsg::SetTimeSelectionActive(_)
                 | ArrangementMsg::MarqueeSelect { .. }
                 | ArrangementMsg::EndMarqueeSelect

@@ -1099,3 +1099,47 @@ fn ending_the_drag_drops_the_box_but_keeps_the_selection() {
         clip_id,
     }));
 }
+
+#[test]
+fn select_all_clips_takes_every_clip_on_every_track() {
+    let mut a = arrangement_with_tracks(2);
+    let (t0, first) = add_audio_clip(&mut a, 0, 0, 100);
+    let (_, second) = add_audio_clip(&mut a, 0, 400, 100);
+    let (t1, third) = add_audio_clip(&mut a, 1, 200, 100);
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::SelectAllClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(a.selected_clips.len(), 3);
+    for (track_id, clip_id) in [(t0, first), (t0, second), (t1, third)] {
+        assert!(a
+            .selected_clips
+            .contains(&ArrangementSelection::AudioClip { track_id, clip_id }));
+    }
+}
+
+#[test]
+fn select_all_clips_on_an_empty_timeline_selects_nothing() {
+    let mut a = arrangement_with_tracks(2);
+    let stale_track = a.tracks[0].id;
+    a.selected_clips.insert(ArrangementSelection::AudioClip {
+        track_id: stale_track,
+        clip_id: ClipId::new(),
+    });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::SelectAllClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    // The stale selection is replaced, not extended, and an empty result
+    // must not pull focus to a clip tab with nothing to show.
+    assert!(a.selected_clips.is_empty());
+    assert!(!action.focus_clip_tab);
+}

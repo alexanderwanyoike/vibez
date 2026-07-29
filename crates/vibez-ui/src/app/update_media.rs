@@ -59,6 +59,48 @@ impl App {
         Task::none()
     }
 
+    /// Command+A, resolved against whatever the user is actually editing.
+    ///
+    /// Mirrors [`Self::on_delete_key_pressed`]: the piano roll wins while
+    /// it is the visible editor, otherwise the active timeline's clips do.
+    /// Unlike Delete this cannot key off an existing selection, since the
+    /// point of the shortcut is to create one, so it asks whether the
+    /// piano roll is on screen instead.
+    pub(super) fn on_select_all_pressed(&mut self) -> Task<Message> {
+        // A text field owns Command+A for its own contents.
+        if self.state.view.editing_track_name.is_some()
+            || self.state.view.editing_clip_name.is_some()
+            || self.state.perform.editing_section_name.is_some()
+        {
+            return Task::none();
+        }
+
+        if let Some((track_id, clip_id)) = self.open_piano_roll_clip() {
+            return self.update(Message::PianoRoll(PianoRollMsg::SelectAllNotes(
+                track_id, clip_id,
+            )));
+        }
+
+        self.update(Message::Arrangement(ArrangementMsg::SelectAllClips))
+    }
+
+    /// The note clip the piano roll is currently editing, if it is the
+    /// visible detail-panel editor. Mirrors the condition `views_detail`
+    /// uses to decide whether to draw the piano roll at all.
+    fn open_piano_roll_clip(&self) -> Option<(TrackId, ClipId)> {
+        if self.state.view.detail_panel_tab != crate::state::DetailPanelTab::Clip {
+            return None;
+        }
+        let editor = self.state.active_timeline_editor();
+        let (track_id, clip_id) = editor.selected_note_clip?;
+        (editor.selected_track == Some(track_id)
+            && self
+                .state
+                .find_track(track_id)
+                .is_some_and(|track| track.kind.is_midi()))
+        .then_some((track_id, clip_id))
+    }
+
     pub(super) fn on_load_sampler_sample(&mut self, track_id: TrackId) -> Task<Message> {
         Task::perform(
             async {
