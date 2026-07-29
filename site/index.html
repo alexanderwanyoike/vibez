@@ -128,6 +128,10 @@ h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 1
 /* ---------- pad hero ---------- */
 .padhero { padding: 44px 0 76px; }
 .padhero-in { display: grid; gap: 30px; align-items: start; }
+/* Grid items default to min-width:auto and so refuse to shrink below their
+   content. On a phone that widened the whole document instead of letting
+   the pad labels wrap. */
+.padhero-in > * { min-width: 0; }
 @media (min-width: 1000px) { .padhero-in { grid-template-columns: minmax(0,1fr) minmax(0,1.02fr); gap: 40px; } }
 
 .hint {
@@ -138,7 +142,7 @@ h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 1
 .hint i { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); flex: none; }
 .padgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
 .pad {
-  position: relative; aspect-ratio: 1.34 / 1;
+  position: relative; aspect-ratio: 1.34 / 1; min-width: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
   cursor: pointer; text-align: left; padding: 10px 11px;
   display: flex; flex-direction: column; justify-content: space-between;
@@ -147,7 +151,8 @@ h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 1
 .pad:hover { border-color: var(--line-2); background: var(--panel-2); }
 .pad.lit { transform: translateY(1px); }
 .pad .k { font-family: var(--mono); font-size: 11px; color: var(--dimmer); letter-spacing: .06em; }
-.pad .n { font-size: 13px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; }
+.pad .n { font-size: 13px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em;
+  overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .pad { transition: none; } }
 .padlegend { font-family: var(--mono); font-size: 11px; color: var(--dimmer); margin-top: 14px; letter-spacing: .04em; }
 
@@ -284,7 +289,9 @@ kbd {
 .dl { border-top: 1px solid var(--line); padding: 74px 0; }
 .dlgrid { display: grid; gap: 16px; margin-top: 30px; }
 @media (min-width: 840px) { .dlgrid { grid-template-columns: repeat(3, 1fr); } }
-.dlcard { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 22px; display: flex; flex-direction: column; }
+/* min-width:0 lets the card shrink so .cmdblock's own overflow-x:auto can
+   scroll the long xattr/chmod commands rather than widening the page. */
+.dlcard { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 22px; display: flex; flex-direction: column; min-width: 0; }
 .dlcard header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
 .dlcard svg { width: 26px; height: 26px; fill: var(--text); flex: none; }
 .dlcard h3 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
