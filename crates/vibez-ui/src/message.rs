@@ -398,6 +398,17 @@ pub enum Message {
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),
+    /// Settings: opt in or out of the startup release check. Takes
+    /// effect at the next launch; it never triggers a check itself.
+    ToggleCheckForUpdates,
+    /// The startup release check finished. `Some` carries the newest
+    /// upstream tag; `None` means the request failed and is reported
+    /// only by advancing the throttle.
+    UpdateCheckCompleted(Option<String>),
+    /// Hide the update notice for the rest of this session.
+    DismissUpdateNotice,
+    /// Open the releases page in the system browser.
+    OpenReleasesPage,
     /// Settings: re-warp every warped clip to the current project
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.

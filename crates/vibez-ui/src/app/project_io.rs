@@ -274,6 +274,8 @@ impl App {
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
             interface_scale: self.interface_scale,
+            check_for_updates: self.state.update_check.enabled,
+            last_update_check_unix: self.state.update_check.last_check_unix,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");

@@ -101,6 +101,11 @@ impl App {
                 SettingsTab::Appearance,
                 active == SettingsTab::Appearance
             ),
+            make_tab_btn(
+                "Updates",
+                SettingsTab::Updates,
+                active == SettingsTab::Updates
+            ),
         ]
         .spacing(0);
 
@@ -112,6 +117,7 @@ impl App {
             SettingsTab::Warping => self.view_settings_warping_tab(),
             SettingsTab::Perform => self.view_settings_perform_tab(),
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
+            SettingsTab::Updates => self.view_settings_updates_tab(),
         };
 
         let content = column![

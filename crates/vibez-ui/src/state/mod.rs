@@ -189,6 +189,7 @@ pub enum SettingsTab {
     Warping,
     Perform,
     Appearance,
+    Updates,
 }
 
 #[cfg(test)]
@@ -472,6 +473,8 @@ pub struct AppState {
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
     pub confirm_project_track_deletion: bool,
+    /// Startup release check: preference, throttle, and pending notice.
+    pub update_check: crate::update_check::UpdateCheckState,
     // Project domain slice: file menu, path, dirty flag, undo.
     pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
@@ -524,6 +527,7 @@ impl Default for AppState {
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
             confirm_project_track_deletion: false,
+            update_check: crate::update_check::UpdateCheckState::default(),
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
