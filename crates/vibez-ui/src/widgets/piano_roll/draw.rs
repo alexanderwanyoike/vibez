@@ -444,6 +444,28 @@ impl PianoRollWidget {
             }
         }
 
+        // ── Rubber-band selection rectangle ──
+        if let Some(DragAction::MarqueeNotes {
+            anchor, current, ..
+        }) = &state.drag
+        {
+            let x0 = anchor.x.min(current.x).max(KEY_WIDTH);
+            let x1 = anchor.x.max(current.x).min(w);
+            let y0 = anchor.y.min(current.y).max(RULER_HEIGHT);
+            let y1 = anchor.y.max(current.y).min(h);
+            if x1 > x0 && y1 > y0 {
+                let origin = iced::Point::new(x0, y0);
+                let size = iced::Size::new(x1 - x0, y1 - y0);
+                frame.fill_rectangle(origin, size, theme::with_alpha(theme::accent(), 0.12));
+                frame.stroke(
+                    &canvas::Path::rectangle(origin, size),
+                    canvas::Stroke::default()
+                        .with_color(theme::accent())
+                        .with_width(1.0),
+                );
+            }
+        }
+
         // ── Playhead ──
         let playhead_x = self.beat_to_x(self.playhead_beats, &bounds);
         if playhead_x >= KEY_WIDTH {

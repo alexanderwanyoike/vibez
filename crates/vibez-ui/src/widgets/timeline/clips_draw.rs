@@ -555,6 +555,28 @@ impl TrackClipCanvas {
             }
         }
 
+        // Rubber-band slice. Every lane draws its own portion of the same
+        // column-space box, so the pieces line up into one rectangle.
+        if let Some(marquee) = self.marquee {
+            if let Some((top, bottom)) =
+                super::marquee::slice_for_lane(marquee.top_y, marquee.bottom_y, self.row_top(), h)
+            {
+                let x0 = self.beat_to_x(marquee.start_beats).max(0.0);
+                let x1 = self.beat_to_x(marquee.end_beats).min(w);
+                if x1 > x0 {
+                    let origin = iced::Point::new(x0, top);
+                    let size = iced::Size::new(x1 - x0, bottom - top);
+                    frame.fill_rectangle(origin, size, theme::with_alpha(theme::accent(), 0.10));
+                    frame.stroke(
+                        &canvas::Path::rectangle(origin, size),
+                        canvas::Stroke::default()
+                            .with_color(theme::accent())
+                            .with_width(1.0),
+                    );
+                }
+            }
+        }
+
         // A playing Section has an engine-owned playback marker in addition
         // to its runtime edit cursor. Draw it first and in the accent colour
         // so overlapping markers remain recognisable.

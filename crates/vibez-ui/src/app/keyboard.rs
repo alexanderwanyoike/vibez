@@ -438,6 +438,7 @@ pub(crate) fn global_key_handler(
             Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
         }
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
+            "a" | "A" => Some(Message::SelectAllPressed),
             "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
             "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
             "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClips)),
@@ -490,6 +491,25 @@ mod tests {
         {
             iced::keyboard::Modifiers::CTRL
         }
+    }
+
+    #[test]
+    fn command_a_routes_centrally_instead_of_binding_a_canvas() {
+        use iced::keyboard::{Key, Modifiers};
+
+        // Context resolution happens in update(); the shortcut itself is
+        // surface-agnostic so the piano roll and the timeline canvases
+        // cannot race each other for it.
+        assert!(matches!(
+            global_key_handler(Key::Character("a".into()), command_modifier()),
+            Some(Message::SelectAllPressed)
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("A".into()), command_modifier()),
+            Some(Message::SelectAllPressed)
+        ));
+        // Bare "a" is a Perform pad key, not select-all.
+        assert!(global_key_handler(Key::Character("a".into()), Modifiers::empty()).is_none());
     }
 
     #[test]

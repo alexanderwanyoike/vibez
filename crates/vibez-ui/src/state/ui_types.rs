@@ -326,6 +326,29 @@ pub enum ArrangementSelection {
     NoteClip { track_id: TrackId, clip_id: ClipId },
 }
 
+/// Drawable geometry for a rubber-band being dragged across a timeline.
+///
+/// `top_y` / `bottom_y` are measured from the top of the first track row,
+/// so every lane can draw its own slice of the same box regardless of
+/// where it sits in the column.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrangementMarqueeRect {
+    pub start_beats: f64,
+    pub end_beats: f64,
+    pub top_y: f32,
+    pub bottom_y: f32,
+}
+
+/// Domain state for an in-flight additive selection gesture.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrangementMarquee {
+    pub rect: ArrangementMarqueeRect,
+    /// Clip selection as it stood when the gesture began. A shift-drag
+    /// unions the covered clips onto this rather than replacing it, so
+    /// shrinking the box gives back what it never covered.
+    pub base: std::collections::HashSet<ArrangementSelection>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
     Arrange,
@@ -510,6 +533,16 @@ impl SnapGrid {
         let size = self.beat_size();
         (beat / size).round() * size
     }
+
+    /// Snap a beat value down to the start of the grid cell containing it.
+    ///
+    /// Creation gestures must land in the cell the pointer is actually
+    /// over. `snap_beat` rounds to the nearest line, so a click in the
+    /// right half of a cell would create the note one cell too far right.
+    pub fn snap_beat_floor(self, beat: f64) -> f64 {
+        let size = self.beat_size();
+        (beat / size).floor() * size
+    }
 }
 
 impl std::fmt::Display for SnapGrid {
@@ -557,6 +590,16 @@ impl GridConfig {
     pub fn snap_beat(self, beat: f64, pixels_per_beat: f32) -> f64 {
         if self.snap_enabled {
             self.effective_grid(pixels_per_beat).snap_beat(beat)
+        } else {
+            beat
+        }
+    }
+
+    /// Cell-containing snap for creation gestures. See
+    /// [`SnapGrid::snap_beat_floor`].
+    pub fn snap_beat_floor(self, beat: f64, pixels_per_beat: f32) -> f64 {
+        if self.snap_enabled {
+            self.effective_grid(pixels_per_beat).snap_beat_floor(beat)
         } else {
             beat
         }

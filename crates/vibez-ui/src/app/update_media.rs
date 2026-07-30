@@ -19,13 +19,16 @@ use crate::message::{BrowserImportTarget, Message};
 use super::*;
 
 impl App {
+    fn text_field_editing(&self) -> bool {
+        self.state.view.editing_track_name.is_some()
+            || self.state.view.editing_clip_name.is_some()
+            || self.state.perform.editing_section_name.is_some()
+    }
+
     pub(super) fn on_delete_key_pressed(&mut self) -> Task<Message> {
         // Never delete anything while a text field is being
         // edited; backspace belongs to the text there.
-        if self.state.view.editing_track_name.is_some()
-            || self.state.view.editing_clip_name.is_some()
-            || self.state.perform.editing_section_name.is_some()
-        {
+        if self.text_field_editing() {
             return Task::none();
         }
         // Priority 1: a selected automation point.
@@ -57,6 +60,28 @@ impl App {
             return self.update(Message::Arrangement(ArrangementMsg::DeleteSelectedClip));
         }
         Task::none()
+    }
+
+    /// Command+A, resolved against whatever the user is actually editing.
+    ///
+    /// Mirrors [`Self::on_delete_key_pressed`]: the piano roll wins while
+    /// it is the visible editor, otherwise the active timeline's clips do.
+    /// Unlike Delete this cannot key off an existing selection, since the
+    /// point of the shortcut is to create one, so it asks whether the
+    /// piano roll is on screen instead.
+    pub(super) fn on_select_all_pressed(&mut self) -> Task<Message> {
+        // A text field owns Command+A for its own contents.
+        if self.text_field_editing() {
+            return Task::none();
+        }
+
+        if let Some((track_id, clip_id)) = self.focused_piano_roll_clip() {
+            return self.update(Message::PianoRoll(PianoRollMsg::SelectAllNotes(
+                track_id, clip_id,
+            )));
+        }
+
+        self.update(Message::Arrangement(ArrangementMsg::SelectAllClips))
     }
 
     pub(super) fn on_load_sampler_sample(&mut self, track_id: TrackId) -> Task<Message> {

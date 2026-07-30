@@ -15,7 +15,7 @@ use vibez_core::perform::GrooveGrid;
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, DetailPanelTab, UiClip};
+use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState, UiClip};
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
 use crate::widgets::piano_roll::PianoRollWidget;
@@ -46,11 +46,69 @@ fn effective_detail_panel_height(preferred_height: f32, window_height: f32) -> f
     preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
 }
 
+fn visible_note_clip_for_track(editor: &TimelineEditorState, track_id: TrackId) -> Option<ClipId> {
+    editor
+        .selected_note_clip
+        .filter(|(selected_track, _)| *selected_track == track_id)
+        .map(|(_, clip_id)| clip_id)
+        .or_else(|| {
+            editor.selected_clips.iter().find_map(|selection| {
+                if let ArrangementSelection::NoteClip {
+                    track_id: selected_track,
+                    clip_id,
+                } = selection
+                {
+                    (*selected_track == track_id).then_some(*clip_id)
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+fn focused_note_clip_for_track(editor: &TimelineEditorState, track_id: TrackId) -> Option<ClipId> {
+    editor
+        .selected_note_clip
+        .filter(|(selected_track, _)| *selected_track == track_id)
+        .map(|(_, clip_id)| clip_id)
+}
+
 impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
-    pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
+    /// The selected MIDI track that can host the piano-roll detail view.
+    ///
+    /// Visibility and keyboard focus intentionally share this structural
+    /// gate, then resolve their clip from different selection state.
+    fn piano_roll_track(&self) -> Option<TrackId> {
+        if self.state.view.detail_panel_tab != DetailPanelTab::Clip {
+            return None;
+        }
+
         let editor = self.state.active_timeline_editor();
+        let track_id = editor.selected_track?;
+        self.state
+            .find_track(track_id)
+            .is_some_and(|track| track.kind.is_midi())
+            .then_some(track_id)
+    }
+
+    /// A note clip the piano roll can render. Arrangement selection may
+    /// supply the clip without transferring keyboard focus into the editor.
+    pub(super) fn visible_piano_roll_clip(&self) -> Option<(TrackId, ClipId)> {
+        let track_id = self.piano_roll_track()?;
+        let clip_id = visible_note_clip_for_track(self.state.active_timeline_editor(), track_id)?;
+        Some((track_id, clip_id))
+    }
+
+    /// The explicitly opened note clip that owns editor shortcuts.
+    pub(super) fn focused_piano_roll_clip(&self) -> Option<(TrackId, ClipId)> {
+        let track_id = self.piano_roll_track()?;
+        let clip_id = focused_note_clip_for_track(self.state.active_timeline_editor(), track_id)?;
+        Some((track_id, clip_id))
+    }
+
+    pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
             .active_timeline_editor()
@@ -121,17 +179,8 @@ impl App {
             let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
                 DetailPanelTab::Clip => {
                     let is_midi = track.kind.is_midi();
-                    // Check for note clip selection on this MIDI track
-                    let has_note_clip = is_midi
-                        && (editor.selected_clips.iter().any(|s| {
-                            matches!(s, ArrangementSelection::NoteClip { track_id: tid, .. } if *tid == track_id)
-                        }) || self
-                            .state
-                            .active_timeline_editor()
-                            .selected_note_clip
-                            .is_some_and(|(tid, _)| tid == track_id));
 
-                    if has_note_clip {
+                    if self.visible_piano_roll_clip().is_some() {
                         self.view_piano_roll_panel(track_id, track_color)
                     } else if is_midi {
                         self.view_midi_track_clip_placeholder(track_id, track_color)
@@ -236,29 +285,25 @@ impl App {
         .unwrap_or(-1.0);
 
         // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
-        let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> =
-            if let Some((tid, cid)) = self.state.active_timeline_editor().selected_note_clip {
-                if tid == track_id {
-                    self.state
-                        .active_timeline_content(track_id)
-                        .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
-                        .map(|c| {
-                            (
-                                c.name.clone(),
-                                c.position_beats,
-                                c.duration_beats,
-                                c.loop_enabled,
-                                c.groove_grid,
-                                tid,
-                                cid,
-                            )
-                        })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+        let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> = self
+            .visible_piano_roll_clip()
+            .filter(|(open_track_id, _)| *open_track_id == track_id)
+            .and_then(|(tid, cid)| {
+                self.state
+                    .active_timeline_content(track_id)
+                    .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
+                    .map(|c| {
+                        (
+                            c.name.clone(),
+                            c.position_beats,
+                            c.duration_beats,
+                            c.loop_enabled,
+                            c.groove_grid,
+                            tid,
+                            cid,
+                        )
+                    })
+            });
 
         let piano_widget = if let Some(ref cd) = clip_data {
             if let Some(content) = self.state.active_timeline_content(track_id) {
@@ -727,8 +772,12 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_detail_panel_height, resolved_detail_playhead_samples};
-    use vibez_core::id::SectionId;
+    use super::{
+        effective_detail_panel_height, focused_note_clip_for_track,
+        resolved_detail_playhead_samples, visible_note_clip_for_track,
+    };
+    use crate::state::{ArrangementSelection, TimelineEditorState};
+    use vibez_core::id::{ClipId, SectionId, TrackId};
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
@@ -754,6 +803,57 @@ mod tests {
         assert_eq!(
             resolved_detail_playhead_samples(true, Some(other), Some(playing), 96_000, 12_000,),
             None
+        );
+    }
+
+    #[test]
+    fn marquee_selected_note_clip_is_the_visible_piano_roll_clip() {
+        let track_id = TrackId::new();
+        let other_track = TrackId::new();
+        let marquee_clip = ClipId::new();
+        let explicit_clip = ClipId::new();
+        let mut editor = TimelineEditorState::default();
+        editor
+            .selected_clips
+            .insert(ArrangementSelection::NoteClip {
+                track_id,
+                clip_id: marquee_clip,
+            });
+
+        assert_eq!(
+            visible_note_clip_for_track(&editor, track_id),
+            Some(marquee_clip)
+        );
+        assert_eq!(visible_note_clip_for_track(&editor, other_track), None);
+
+        editor.selected_note_clip = Some((track_id, explicit_clip));
+        assert_eq!(
+            visible_note_clip_for_track(&editor, track_id),
+            Some(explicit_clip)
+        );
+    }
+
+    #[test]
+    fn arrangement_selection_does_not_focus_the_piano_roll_for_select_all() {
+        let track_id = TrackId::new();
+        let selected_clip = ClipId::new();
+        let explicitly_open_clip = ClipId::new();
+        let mut editor = TimelineEditorState::default();
+        editor
+            .selected_clips
+            .insert(ArrangementSelection::NoteClip {
+                track_id,
+                clip_id: selected_clip,
+            });
+
+        // This is the state after the first arrangement Command+A. A
+        // second press must remain arrangement select-all.
+        assert_eq!(focused_note_clip_for_track(&editor, track_id), None);
+
+        editor.selected_note_clip = Some((track_id, explicitly_open_clip));
+        assert_eq!(
+            focused_note_clip_for_track(&editor, track_id),
+            Some(explicitly_open_clip)
         );
     }
 }
