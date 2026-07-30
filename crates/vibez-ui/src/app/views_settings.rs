@@ -1,7 +1,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, slider, text, text_input,
+    button, center, column, container, horizontal_space, mouse_area, row, slider, text,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -42,35 +42,43 @@ impl App {
             } else {
                 th::text_dim()
             };
-            button(text(label).size(13).color(color))
-                .on_press(Message::SelectSettingsTab(tab))
-                .padding([6, 10])
-                .style(move |_theme: &Theme, status| {
-                    let bg = if is_active {
-                        None
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
+            // A tab label must never wrap: when the bar runs out of room,
+            // wrapping turns the last tab into a one-letter-per-line
+            // column. Clipping is the survivable failure.
+            button(
+                text(label)
+                    .size(13)
+                    .color(color)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::SelectSettingsTab(tab))
+            .padding([6, 10])
+            .style(move |_theme: &Theme, status| {
+                let bg = if is_active {
+                    None
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::bg_hover().into())
                         }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: color,
-                        border: iced::Border {
-                            color: if is_active {
-                                th::accent()
-                            } else {
-                                Color::TRANSPARENT
-                            },
-                            width: if is_active { 2.0 } else { 0.0 },
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
+                        _ => None,
                     }
-                })
+                };
+                button::Style {
+                    background: bg,
+                    text_color: color,
+                    border: iced::Border {
+                        color: if is_active {
+                            th::accent()
+                        } else {
+                            Color::TRANSPARENT
+                        },
+                        width: if is_active { 2.0 } else { 0.0 },
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
         };
 
         let active = self.state.settings_tab;
@@ -139,7 +147,10 @@ impl App {
         ]
         .spacing(8)
         .padding(20)
-        .width(Length::Fixed(480.0));
+        // Wide enough for all seven tab labels on one line with ~30px to
+        // spare; still comfortably inside the 900px minimum window. Grow
+        // this before adding an eighth tab.
+        .width(Length::Fixed(560.0));
 
         let dialog = container(content).style(|_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
