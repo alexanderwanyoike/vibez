@@ -19,13 +19,16 @@ use crate::message::{BrowserImportTarget, Message};
 use super::*;
 
 impl App {
+    fn text_field_editing(&self) -> bool {
+        self.state.view.editing_track_name.is_some()
+            || self.state.view.editing_clip_name.is_some()
+            || self.state.perform.editing_section_name.is_some()
+    }
+
     pub(super) fn on_delete_key_pressed(&mut self) -> Task<Message> {
         // Never delete anything while a text field is being
         // edited; backspace belongs to the text there.
-        if self.state.view.editing_track_name.is_some()
-            || self.state.view.editing_clip_name.is_some()
-            || self.state.perform.editing_section_name.is_some()
-        {
+        if self.text_field_editing() {
             return Task::none();
         }
         // Priority 1: a selected automation point.
@@ -68,10 +71,7 @@ impl App {
     /// piano roll is on screen instead.
     pub(super) fn on_select_all_pressed(&mut self) -> Task<Message> {
         // A text field owns Command+A for its own contents.
-        if self.state.view.editing_track_name.is_some()
-            || self.state.view.editing_clip_name.is_some()
-            || self.state.perform.editing_section_name.is_some()
-        {
+        if self.text_field_editing() {
             return Task::none();
         }
 
@@ -83,24 +83,6 @@ impl App {
 
         self.update(Message::Arrangement(ArrangementMsg::SelectAllClips))
     }
-
-    /// The note clip the piano roll is currently editing, if it is the
-    /// visible detail-panel editor. Mirrors the condition `views_detail`
-    /// uses to decide whether to draw the piano roll at all.
-    fn open_piano_roll_clip(&self) -> Option<(TrackId, ClipId)> {
-        if self.state.view.detail_panel_tab != crate::state::DetailPanelTab::Clip {
-            return None;
-        }
-        let editor = self.state.active_timeline_editor();
-        let (track_id, clip_id) = editor.selected_note_clip?;
-        (editor.selected_track == Some(track_id)
-            && self
-                .state
-                .find_track(track_id)
-                .is_some_and(|track| track.kind.is_midi()))
-        .then_some((track_id, clip_id))
-    }
-
     pub(super) fn on_load_sampler_sample(&mut self, track_id: TrackId) -> Task<Message> {
         Task::perform(
             async {

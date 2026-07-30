@@ -932,7 +932,6 @@ impl canvas::Program<Message> for PianoRollWidget {
             // SelectAllPressed shortcut, for the same reason Delete is:
             // every canvas receives keyboard events, so two canvases
             // binding one key race each other.
-
             _ => {}
         }
 
