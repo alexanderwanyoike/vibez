@@ -468,6 +468,7 @@ pub struct AppState {
 
     // File menu / Settings
     pub settings_open: bool,
+    pub about_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
     pub confirm_project_track_deletion: bool,
@@ -519,6 +520,7 @@ impl Default for AppState {
             clip_clipboard: ClipClipboard::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
+            about_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
             confirm_project_track_deletion: false,
