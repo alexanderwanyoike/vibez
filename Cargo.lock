@@ -5196,6 +5196,7 @@ dependencies = [
  "dirs 5.0.1",
  "iced",
  "notify",
+ "reqwest",
  "rfd",
  "rtrb",
  "serde",

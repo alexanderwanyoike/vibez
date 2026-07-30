@@ -62,6 +62,15 @@ pub struct UiSettings {
     /// the app.
     #[serde(default = "default_interface_scale")]
     pub interface_scale: f32,
+    /// Ask GitHub at startup whether a newer release exists. On by
+    /// default: the check is one request a day and the result is a
+    /// dismissible chip, never a dialog. Off means no network call.
+    #[serde(default = "default_check_for_updates")]
+    pub check_for_updates: bool,
+    /// Unix seconds of the last release check, so the once-a-day
+    /// throttle survives a restart. `None` until the first attempt.
+    #[serde(default)]
+    pub last_update_check_unix: Option<u64>,
 }
 
 /// Smallest supported interface scale. Below this, hit targets in the
@@ -113,6 +122,8 @@ impl Default for UiSettings {
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
             confirm_project_track_deletion: false,
             interface_scale: default_interface_scale(),
+            check_for_updates: default_check_for_updates(),
+            last_update_check_unix: None,
         }
     }
 }
@@ -190,6 +201,10 @@ fn default_warp_confidence_threshold() -> f32 {
 
 fn default_interface_scale() -> f32 {
     INTERFACE_SCALE_DEFAULT
+}
+
+const fn default_check_for_updates() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -349,6 +364,26 @@ mod tests {
             vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
         );
         assert!(loaded.media_cache_automatic_eviction);
+    }
+
+    #[test]
+    fn settings_predating_the_release_check_opt_into_it_with_no_history() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert!(old.check_for_updates);
+        assert_eq!(old.last_update_check_unix, None);
+    }
+
+    #[test]
+    fn release_check_preference_and_timestamp_roundtrip() {
+        let settings = UiSettings {
+            check_for_updates: false,
+            last_update_check_unix: Some(1_772_000_000),
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!loaded.check_for_updates);
+        assert_eq!(loaded.last_update_check_unix, Some(1_772_000_000));
     }
 
     #[test]

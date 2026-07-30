@@ -409,6 +409,62 @@ impl App {
             .into()
     }
 
+    /// The release notice: a chip in the status bar rather than a
+    /// dialog, so learning about a new version never steals focus from
+    /// the arrangement or interrupts playback. Both halves are
+    /// one-click terminal: open the page, or dismiss.
+    fn view_update_notice(&self, version: &str) -> Element<'_, Message> {
+        let open = button(
+            row![
+                icons::icon(icons::CIRCLE_DOT).size(9).color(th::accent()),
+                text(format!("Version {version} available"))
+                    .size(11)
+                    .color(th::accent()),
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::OpenReleasesPage)
+        .padding([1, 8])
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+                _ => None,
+            };
+            button::Style {
+                background: bg,
+                text_color: th::accent(),
+                border: iced::Border {
+                    color: th::accent_dim(),
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
+        let dismiss = button(icons::icon(icons::X).size(10).color(th::text_dim()))
+            .on_press(Message::DismissUpdateNotice)
+            .padding([1, 4])
+            .style(|_theme: &Theme, status| {
+                let text_color = match status {
+                    button::Status::Hovered | button::Status::Pressed => th::text(),
+                    _ => th::text_dim(),
+                };
+                button::Style {
+                    background: None,
+                    text_color,
+                    border: iced::Border::default(),
+                    ..Default::default()
+                }
+            });
+
+        row![open, dismiss]
+            .spacing(2)
+            .align_y(iced::Alignment::Center)
+            .into()
+    }
+
     pub(super) fn view_status(&self) -> Element<'_, Message> {
         let status = text(&self.state.status_text).size(11).color(th::text_dim());
         let content: Element<'_, Message> = match self.state.export_progress {
@@ -423,7 +479,15 @@ impl App {
             .spacing(8)
             .align_y(iced::Alignment::Center)
             .into(),
-            None => status.into(),
+            // An export in flight owns the right-hand side of the bar;
+            // a release notice can wait for the next frame that has room.
+            None => match self.state.update_check.notice() {
+                Some(version) => row![status, horizontal_space(), self.view_update_notice(version)]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                None => status.into(),
+            },
         };
 
         container(content)

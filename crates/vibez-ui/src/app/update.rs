@@ -688,6 +688,28 @@ impl App {
                     !self.state.confirm_project_track_deletion;
                 self.persist_ui_settings();
             }
+            Message::ToggleCheckForUpdates => {
+                self.state.update_check.enabled = !self.state.update_check.enabled;
+                self.persist_ui_settings();
+            }
+            Message::UpdateCheckCompleted(tag) => {
+                self.state
+                    .update_check
+                    .record_result(tag, crate::update_check::now_unix());
+                // Persist so the throttle survives a restart, which is
+                // the whole point of recording failures too.
+                self.persist_ui_settings();
+            }
+            Message::DismissUpdateNotice => {
+                self.state.update_check.dismissed = true;
+            }
+            Message::OpenReleasesPage => {
+                // Retiring the notice once the URL has been handed off
+                // keeps a single mechanism for hiding it.
+                return Task::perform(crate::update_check::open_releases_page(), |()| {
+                    Message::DismissUpdateNotice
+                });
+            }
             Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
             Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
             Message::CloseMidiInput => {

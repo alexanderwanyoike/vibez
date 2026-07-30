@@ -20,6 +20,9 @@ base64 = { workspace = true }
 serde_json = { workspace = true }
 notify = { workspace = true }
 rfd = "0.15"
+# Same client and TLS backend the Dropbox integration already links, so
+# the release check adds no new transitive stack.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 x11rb = "0.13"
 dirs = "5"

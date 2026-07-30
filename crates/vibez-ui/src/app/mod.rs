@@ -192,7 +192,9 @@ mod views_perform_record;
 mod views_perform_sections;
 mod views_settings;
 mod views_settings_appearance;
+mod views_settings_dropbox;
 mod views_settings_perform;
+mod views_settings_updates;
 mod views_shell;
 mod views_transport;
 mod window_policy;
@@ -286,6 +288,11 @@ impl App {
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
+            update_check: crate::update_check::UpdateCheckState {
+                enabled: ui_settings.check_for_updates,
+                last_check_unix: ui_settings.last_update_check_unix,
+                ..Default::default()
+            },
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
                 detail_panel_height: ui_settings.detail_panel_height,
@@ -435,6 +442,22 @@ impl App {
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
         // us). Legacy `.vibez` files load the same way.
+        // Release check. Off the UI thread via Task::perform, at most
+        // once a day, and skipped entirely when the user opted out so
+        // that "off" means no traffic rather than a discarded result.
+        let update_check_task = if crate::update_check::should_check(
+            app.state.update_check.enabled,
+            app.state.update_check.last_check_unix,
+            crate::update_check::now_unix(),
+        ) {
+            Task::perform(
+                crate::update_check::fetch_latest_tag(),
+                Message::UpdateCheckCompleted,
+            )
+        } else {
+            Task::none()
+        };
+
         let open_task = std::env::args()
             .nth(1)
             .map(std::path::PathBuf::from)
@@ -448,6 +471,7 @@ impl App {
                 local_startup_task,
                 remote_startup_task,
                 plugin_catalog_startup_task,
+                update_check_task,
                 open_task,
             ]),
         )
