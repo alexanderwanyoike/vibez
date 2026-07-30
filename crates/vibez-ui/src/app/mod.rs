@@ -192,6 +192,7 @@ mod views_perform_record;
 mod views_perform_sections;
 mod views_settings;
 mod views_settings_appearance;
+mod views_settings_dropbox;
 mod views_settings_perform;
 mod views_shell;
 mod views_transport;
