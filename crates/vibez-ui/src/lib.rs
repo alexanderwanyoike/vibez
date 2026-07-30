@@ -1,3 +1,4 @@
+mod about;
 mod app;
 mod domains;
 pub mod icons;

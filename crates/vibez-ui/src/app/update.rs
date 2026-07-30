@@ -274,6 +274,19 @@ impl App {
                 return self.route_project_saved(*result);
             }
 
+            // -- About --
+            Message::OpenAbout => {
+                self.state.about_open = true;
+            }
+            Message::OpenUrl(url) => {
+                return Task::perform(open_url_async(url), Message::UrlOpened);
+            }
+            Message::UrlOpened(result) => {
+                if let Err(error) = result {
+                    self.state.status_text = format!("Could not open link: {error}");
+                }
+            }
+
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;

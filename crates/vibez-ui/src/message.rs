@@ -56,13 +56,16 @@ pub enum DrumPadParam {
     FineTune,
 }
 
-/// Menus whose lifecycle is owned by their overlay rather than inferred from
-/// unrelated application messages.
+/// Menus and dialogs whose lifecycle is owned by their overlay rather than
+/// inferred from unrelated application messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuOverlay {
     ArrangementContext,
     File,
     Edit,
+    /// The About dialog joins the menus rather than the Settings modal so
+    /// that Escape and a backdrop press close it, which Settings predates.
+    About,
 }
 
 #[derive(Debug, Clone)]
@@ -460,6 +463,13 @@ pub enum Message {
         payload: PreparedBrowserImport,
     },
     BrowserSampleDecodeError(String),
+
+    // About
+    OpenAbout,
+    /// Hand a link to the system browser. Every URL reaching this variant is
+    /// a compile-time constant, so there is nothing here to validate.
+    OpenUrl(&'static str),
+    UrlOpened(Result<(), String>),
 
     // Settings
     OpenSettings,

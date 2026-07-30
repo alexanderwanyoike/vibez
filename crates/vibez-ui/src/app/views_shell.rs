@@ -167,6 +167,8 @@ impl App {
             stack![base_layout, self.view_track_deletion_overlay()].into()
         } else if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
+        } else if self.state.about_open {
+            stack![base_layout, self.view_about_modal()].into()
         } else if self.state.project.file_menu_open {
             stack![base_layout, self.view_file_menu_overlay()].into()
         } else if self.state.view.edit_menu_open {

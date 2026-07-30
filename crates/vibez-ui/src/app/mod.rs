@@ -160,6 +160,7 @@ mod update_project;
 mod update_remote;
 mod update_timeline;
 mod update_view;
+mod views_about;
 mod views_arrangement;
 mod views_automation;
 mod views_browser;
