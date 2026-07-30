@@ -158,7 +158,11 @@ impl App {
             base_layout
         };
 
-        if self
+        // Quitting outranks every other overlay: whatever menu was open, the
+        // answer to "are you about to lose work" has to be the visible one.
+        if self.state.project.close_confirm_open {
+            stack![base_layout, self.view_close_confirm_overlay()].into()
+        } else if self
             .state
             .arrangement
             .pending_project_track_deletion

@@ -371,14 +371,9 @@ impl App {
             .collect();
 
         Project {
-            name: self
-                .state
-                .project
-                .current_path
-                .as_ref()
-                .and_then(|path| path.file_stem())
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Untitled".to_string()),
+            name: super::window_policy::project_display_name(
+                self.state.project.current_path.as_deref(),
+            ),
             bpm: self.state.transport.bpm,
             groove_profile: vibez_core::perform::GrooveProfile::default(),
             swing: self.state.perform.project_swing(),

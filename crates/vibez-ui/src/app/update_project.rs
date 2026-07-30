@@ -2,7 +2,15 @@
 
 use crate::domains::project::{ProjectCtx, ProjectMsg};
 
+use super::window_policy::{close_request_decision, CloseRequest};
 use super::*;
+
+/// Quits the application. iced 0.13 has no "quit" task; the run loop ends when
+/// the last window closes, and the window has to be looked up because the
+/// close request carries no id through our message type.
+fn exit_application() -> Task<Message> {
+    iced::window::get_latest().and_then(iced::window::close)
+}
 
 impl App {
     pub(super) fn route_project_message(&mut self, msg: ProjectMsg) -> Task<Message> {
@@ -101,6 +109,8 @@ impl App {
                 |result| Message::ProjectSaved(Box::new(result)),
             );
         }
+        // Backing out of save-as also backs out of the quit that asked for it.
+        self.state.project.exit_after_save = false;
         Task::none()
     }
 
@@ -129,11 +139,44 @@ impl App {
                 self.state.project.current_path = Some(saved.path.clone());
                 self.state.project.dirty = false;
                 self.state.status_text = format!("Saved {}", saved.path.display());
+                if std::mem::take(&mut self.state.project.exit_after_save) {
+                    return exit_application();
+                }
             }
             Err(err) => {
                 self.state.status_text = format!("Project save error: {err}");
+                // A failed write must not take the project down with it; the
+                // error stays on screen with the edits intact.
+                self.state.project.exit_after_save = false;
             }
         }
+        Task::none()
+    }
+
+    pub(super) fn route_window_close_requested(&mut self) -> Task<Message> {
+        match close_request_decision(self.state.project.dirty) {
+            CloseRequest::Exit => exit_application(),
+            CloseRequest::Confirm => {
+                self.state.project.close_confirm_open = true;
+                Task::none()
+            }
+        }
+    }
+
+    pub(super) fn route_close_confirm_save(&mut self) -> Task<Message> {
+        self.state.project.close_confirm_open = false;
+        self.state.project.exit_after_save = true;
+        self.update(Message::SaveProject)
+    }
+
+    pub(super) fn route_close_confirm_discard(&mut self) -> Task<Message> {
+        self.state.project.close_confirm_open = false;
+        exit_application()
+    }
+
+    pub(super) fn route_close_confirm_cancel(&mut self) -> Task<Message> {
+        self.state.project.close_confirm_open = false;
+        self.state.project.exit_after_save = false;
         Task::none()
     }
 }

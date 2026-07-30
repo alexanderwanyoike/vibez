@@ -377,6 +377,18 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
     ProjectSaved(Box<Result<ProjectSaveResult, String>>),
+
+    // Window close protection. The window is configured not to exit on its
+    // own close request, so every one of these arrives here first.
+    /// The user asked to close the window (title bar button, Alt+F4, ...).
+    WindowCloseRequested,
+    /// Close dialog: save first, then quit. Falls through save-as when the
+    /// project has no path yet.
+    CloseConfirmSave,
+    /// Close dialog: quit and lose the unsaved edits.
+    CloseConfirmDiscard,
+    /// Close dialog: stay in the project.
+    CloseConfirmCancel,
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
