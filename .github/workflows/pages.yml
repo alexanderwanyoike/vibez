@@ -18,6 +18,12 @@ on:
   # version without a commit.
   release:
     types: [published]
+  # Releases created with GITHUB_TOKEN cannot trigger another workflow from
+  # their release event. Wait for the complete release workflow instead so
+  # every platform asset exists before the download page is deployed.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +39,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
