@@ -25,6 +25,24 @@ pub(super) fn section_timeline_claims_focus(workspace: Workspace, selected_secti
     workspace == Workspace::Perform && selected_section
 }
 
+/// Whether a shortcut that edits a timeline without naming one has a focused
+/// timeline to act on.
+///
+/// Perform keeps the pad surface and the Section lanes on screen together, so
+/// unlike Arrange it cannot answer "which timeline" from visibility alone.
+/// While the pads own focus the producer is performing, not editing, and
+/// Arrange is off screen, so these shortcuts are dropped rather than aimed at
+/// a timeline nobody is looking at. Delete and Command+A deliberately share
+/// this gate with the clipboard, so one keystroke cannot destroy a Section
+/// selection that Copy would have left alone.
+fn editor_shortcuts_reach_a_focused_timeline(
+    workspace: Workspace,
+    selected_section: bool,
+    focus: PerformEditorFocus,
+) -> bool {
+    workspace != Workspace::Perform || clipboard_targets_section(workspace, selected_section, focus)
+}
+
 fn focused_timeline_playhead_beats(
     workspace: Workspace,
     selected_section: bool,
@@ -54,6 +72,15 @@ fn focused_section_seek_beat(
 impl App {
     pub(super) fn focused_editor_is_section(&self) -> bool {
         clipboard_targets_section(
+            self.state.view.workspace,
+            self.state.perform.selected_section.is_some(),
+            self.state.perform.editor_focus,
+        )
+    }
+
+    /// Gate for Delete and Command+A, which name no timeline of their own.
+    pub(super) fn editor_shortcuts_have_focus(&self) -> bool {
+        editor_shortcuts_reach_a_focused_timeline(
             self.state.view.workspace,
             self.state.perform.selected_section.is_some(),
             self.state.perform.editor_focus,
@@ -391,5 +418,84 @@ mod clipboard_focus_tests {
         assert!(section_timeline_claims_focus(Workspace::Perform, true));
         assert!(!section_timeline_claims_focus(Workspace::Arrange, true));
         assert!(!section_timeline_claims_focus(Workspace::Perform, false));
+    }
+}
+
+#[cfg(test)]
+mod editor_shortcut_focus_tests {
+    use super::*;
+
+    #[test]
+    fn select_all_and_delete_leave_the_section_lanes_alone_while_the_pads_own_focus() {
+        // The lanes stay on screen beside the pad surface, so a producer
+        // playing pads would otherwise lose their clip selection, or the
+        // clips themselves, to a key they never aimed at an editor.
+        assert!(!editor_shortcuts_reach_a_focused_timeline(
+            Workspace::Perform,
+            true,
+            PerformEditorFocus::PadSurface,
+        ));
+        assert!(editor_shortcuts_reach_a_focused_timeline(
+            Workspace::Perform,
+            true,
+            PerformEditorFocus::SectionConstruction,
+        ));
+    }
+
+    #[test]
+    fn perform_shortcuts_never_reach_the_off_screen_arrange_timeline() {
+        // Without a selected Section the lanes have nothing to edit. Arrange
+        // is not the fallback: it is not on screen, so Delete there would
+        // destroy clips the producer cannot see.
+        for focus in [
+            PerformEditorFocus::PadSurface,
+            PerformEditorFocus::SectionConstruction,
+        ] {
+            assert!(!editor_shortcuts_reach_a_focused_timeline(
+                Workspace::Perform,
+                false,
+                focus,
+            ));
+        }
+    }
+
+    #[test]
+    fn arrange_shortcuts_ignore_whatever_perform_focus_was_left_behind() {
+        // Perform focus is runtime state that outlives leaving the workspace,
+        // and Arrange owns the only timeline once it is the visible one.
+        for selected_section in [false, true] {
+            for focus in [
+                PerformEditorFocus::PadSurface,
+                PerformEditorFocus::SectionConstruction,
+            ] {
+                assert!(editor_shortcuts_reach_a_focused_timeline(
+                    Workspace::Arrange,
+                    selected_section,
+                    focus,
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn select_all_and_delete_target_exactly_what_the_clipboard_targets_in_perform() {
+        // One focus answer for every unnamed-target shortcut. Command+A also
+        // reads no selection state, so a second press cannot escalate to a
+        // wider target than the first press had.
+        for selected_section in [false, true] {
+            for focus in [
+                PerformEditorFocus::PadSurface,
+                PerformEditorFocus::SectionConstruction,
+            ] {
+                assert_eq!(
+                    editor_shortcuts_reach_a_focused_timeline(
+                        Workspace::Perform,
+                        selected_section,
+                        focus
+                    ),
+                    clipboard_targets_section(Workspace::Perform, selected_section, focus),
+                );
+            }
+        }
     }
 }
