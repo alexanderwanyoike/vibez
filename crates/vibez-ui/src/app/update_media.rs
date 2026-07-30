@@ -75,7 +75,7 @@ impl App {
             return Task::none();
         }
 
-        if let Some((track_id, clip_id)) = self.open_piano_roll_clip() {
+        if let Some((track_id, clip_id)) = self.focused_piano_roll_clip() {
             return self.update(Message::PianoRoll(PianoRollMsg::SelectAllNotes(
                 track_id, clip_id,
             )));
@@ -83,6 +83,7 @@ impl App {
 
         self.update(Message::Arrangement(ArrangementMsg::SelectAllClips))
     }
+
     pub(super) fn on_load_sampler_sample(&mut self, track_id: TrackId) -> Task<Message> {
         Task::perform(
             async {
