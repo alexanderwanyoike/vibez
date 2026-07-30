@@ -13,12 +13,12 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarquee, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
+    ArrangementMarqueeRect, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
     TrackTimelineContent, UndoGestureId,
 };
-use crate::widgets::timeline::marquee;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::local_drag::LocalDrag;
+use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
 use super::*;
@@ -86,7 +86,7 @@ pub struct TrackClipCanvas {
     pub row_spans: Vec<TrackRowSpan>,
     /// Live rubber-band, shared by every lane so each draws its own slice
     /// of one continuous box.
-    pub marquee: Option<ArrangementMarquee>,
+    pub marquee: Option<ArrangementMarqueeRect>,
     pub selected_clips: HashSet<ClipId>,
     pub clips: Vec<TimelineClip>,
     pub note_clips: Vec<TimelineNoteClip>,
@@ -261,7 +261,7 @@ impl TrackClipCanvas {
     pub fn with_marquee(
         mut self,
         row_spans: Vec<TrackRowSpan>,
-        marquee: Option<ArrangementMarquee>,
+        marquee: Option<ArrangementMarqueeRect>,
     ) -> Self {
         self.row_spans = row_spans;
         self.marquee = marquee;
@@ -317,8 +317,7 @@ impl TrackClipCanvas {
         if self.row_spans.is_empty() {
             let offset = ((column_y - self.row_top()) / TRACK_ROW_HEIGHT).floor() as i32;
             let last = self.total_tracks as i32 - 1;
-            return (last >= 0)
-                .then(|| (self.track_index as i32 + offset).clamp(0, last) as usize);
+            return (last >= 0).then(|| (self.track_index as i32 + offset).clamp(0, last) as usize);
         }
         self.row_spans
             .iter()
@@ -960,6 +959,5 @@ impl canvas::Program<Message> for TrackClipCanvas {
         (canvas::event::Status::Ignored, None)
     }
 }
-
 
 // ── Arrangement Minimap ──

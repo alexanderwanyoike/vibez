@@ -557,7 +557,7 @@ impl TrackClipCanvas {
 
         // Rubber-band slice. Every lane draws its own portion of the same
         // column-space box, so the pieces line up into one rectangle.
-        if let Some(ref marquee) = self.marquee {
+        if let Some(marquee) = self.marquee {
             if let Some((top, bottom)) =
                 super::marquee::slice_for_lane(marquee.top_y, marquee.bottom_y, self.row_top(), h)
             {

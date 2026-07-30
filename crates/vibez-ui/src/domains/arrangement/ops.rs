@@ -8,7 +8,8 @@ use vibez_engine::commands::EngineCommand;
 
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
-    ArrangementMarquee, ArrangementSelection, ProjectTracksState, TimelineEditorState, UiNoteClip,
+    ArrangementMarquee, ArrangementMarqueeRect, ArrangementSelection, ProjectTracksState,
+    TimelineEditorState, UiNoteClip,
 };
 
 impl TimelineEditorState {
@@ -71,10 +72,12 @@ impl TimelineEditorState {
 
         self.selected_clips = selected;
         self.marquee = Some(ArrangementMarquee {
-            start_beats,
-            end_beats,
-            top_y,
-            bottom_y,
+            rect: ArrangementMarqueeRect {
+                start_beats,
+                end_beats,
+                top_y,
+                bottom_y,
+            },
             base,
         });
 

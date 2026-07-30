@@ -20,7 +20,8 @@ use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::timeline::{
-    ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas, TRACK_ROW_HEIGHT,
+    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas,
+    TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
 
@@ -215,30 +216,17 @@ impl App {
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
         // a y offset back to a track even with automation lanes expanded.
-        let row_spans: Vec<crate::widgets::timeline::TrackRowSpan> = {
-            let mut top = 0.0;
-            self.state
-                .project_tracks
-                .tracks
-                .iter()
-                .map(|track| {
-                    let height = TRACK_ROW_HEIGHT
-                        + if self.state.automation_ui.expanded.contains(&track.id) {
-                            self.automation_rows_height(timeline, track.id)
-                        } else {
-                            0.0
-                        };
-                    let span = crate::widgets::timeline::TrackRowSpan {
-                        track_id: track.id,
-                        top,
-                        height,
-                        lane_height: TRACK_ROW_HEIGHT,
-                    };
-                    top += height;
-                    span
-                })
-                .collect()
-        };
+        let row_spans = build_row_spans(
+            TRACK_ROW_HEIGHT,
+            self.state.project_tracks.tracks.iter().map(|track| {
+                let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+                    self.automation_rows_height(timeline, track.id)
+                } else {
+                    0.0
+                };
+                (track.id, extra_height)
+            }),
+        );
 
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
@@ -312,7 +300,10 @@ impl App {
                 browser_drag_duration,
                 browser_drag_detail.clone(),
             )
-            .with_marquee(row_spans.clone(), timeline.marquee.clone());
+            .with_marquee(
+                row_spans.clone(),
+                timeline.marquee.as_ref().map(|marquee| marquee.rect),
+            );
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
             let grid = self.state.view.grid_config();

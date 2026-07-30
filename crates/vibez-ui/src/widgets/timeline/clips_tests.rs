@@ -227,16 +227,15 @@ fn middle_drag_pans_continuously_without_seeking_or_selecting() {
             if (delta + 1.0).abs() < f64::EPSILON
     ));
 
-    let (release_status, release_message) =
-        <TrackClipCanvas as canvas::Program<Message>>::update(
-            &canvas,
-            &mut state,
-            canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                iced::mouse::Button::Middle,
-            )),
-            bounds,
-            mouse::Cursor::Available(Point::new(420.0, 20.0)),
-        );
+    let (release_status, release_message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Middle,
+        )),
+        bounds,
+        mouse::Cursor::Available(Point::new(420.0, 20.0)),
+    );
     assert_eq!(release_status, canvas::event::Status::Captured);
     assert!(release_message.is_none());
     assert!(state.drag.is_none());

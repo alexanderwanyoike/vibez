@@ -181,7 +181,7 @@ mod minimap;
 mod ruler;
 
 pub use clips::*;
-pub use marquee::{TrackRowSpan, TRACK_ROW_HEIGHT};
+pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;
 pub use ruler::*;
 

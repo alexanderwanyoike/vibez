@@ -1052,10 +1052,12 @@ fn shrinking_a_shift_drag_gives_back_clips_it_no_longer_covers() {
         .into_iter()
         .collect()
     );
-    assert!(!a.selected_clips.contains(&ArrangementSelection::AudioClip {
-        track_id: tid,
-        clip_id: early,
-    }));
+    assert!(
+        !a.selected_clips.contains(&ArrangementSelection::AudioClip {
+            track_id: tid,
+            clip_id: early,
+        })
+    );
 }
 
 #[test]

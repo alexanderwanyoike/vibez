@@ -31,6 +31,31 @@ impl TrackRowSpan {
     }
 }
 
+/// Build the vertical layout shared by every timeline surface.
+///
+/// Callers supply each track and the height of any expanded rows beneath
+/// its clip lane. Keeping the accumulation here ensures Arrange and Perform
+/// resolve the same column geometry.
+pub fn build_row_spans(
+    lane_height: f32,
+    rows: impl IntoIterator<Item = (TrackId, f32)>,
+) -> Vec<TrackRowSpan> {
+    let mut top = 0.0;
+    rows.into_iter()
+        .map(|(track_id, extra_height)| {
+            let height = lane_height + extra_height;
+            let span = TrackRowSpan {
+                track_id,
+                top,
+                height,
+                lane_height,
+            };
+            top += height;
+            span
+        })
+        .collect()
+}
+
 /// A rubber-band rectangle resolved against the column layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MarqueeSpan {
@@ -60,7 +85,7 @@ pub fn resolve(
 
     let track_ids = rows
         .iter()
-        .filter(|row| row.top <= bottom_y && row.bottom() >= top_y)
+        .filter(|row| row.top <= bottom_y && row.top + row.lane_height >= top_y)
         .map(|row| row.track_id)
         .collect();
 
@@ -152,6 +177,44 @@ mod tests {
         let span = resolve(0.0, 8.0, 200.0, 240.0, &rows);
 
         assert_eq!(span.track_ids, vec![rows[2].track_id]);
+    }
+
+    #[test]
+    fn a_box_over_only_automation_does_not_select_the_track() {
+        let rows = rows();
+        let span = resolve(0.0, 8.0, 150.0, 190.0, &rows);
+
+        assert!(span.track_ids.is_empty());
+    }
+
+    #[test]
+    fn row_spans_accumulate_extra_height_between_clip_lanes() {
+        let ids: Vec<TrackId> = (0..3).map(|_| TrackId::new()).collect();
+        let spans = build_row_spans(70.0, [(ids[0], 0.0), (ids[1], 56.0), (ids[2], 0.0)]);
+
+        assert_eq!(
+            spans,
+            vec![
+                TrackRowSpan {
+                    track_id: ids[0],
+                    top: 0.0,
+                    height: 70.0,
+                    lane_height: 70.0,
+                },
+                TrackRowSpan {
+                    track_id: ids[1],
+                    top: 70.0,
+                    height: 126.0,
+                    lane_height: 70.0,
+                },
+                TrackRowSpan {
+                    track_id: ids[2],
+                    top: 196.0,
+                    height: 70.0,
+                    lane_height: 70.0,
+                },
+            ]
+        );
     }
 
     #[test]

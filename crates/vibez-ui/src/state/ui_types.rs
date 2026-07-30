@@ -326,17 +326,23 @@ pub enum ArrangementSelection {
     NoteClip { track_id: TrackId, clip_id: ClipId },
 }
 
-/// A rubber-band rectangle being dragged across a timeline surface.
+/// Drawable geometry for a rubber-band being dragged across a timeline.
 ///
 /// `top_y` / `bottom_y` are measured from the top of the first track row,
 /// so every lane can draw its own slice of the same box regardless of
 /// where it sits in the column.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArrangementMarquee {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrangementMarqueeRect {
     pub start_beats: f64,
     pub end_beats: f64,
     pub top_y: f32,
     pub bottom_y: f32,
+}
+
+/// Domain state for an in-flight additive selection gesture.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrangementMarquee {
+    pub rect: ArrangementMarqueeRect,
     /// Clip selection as it stood when the gesture began. A shift-drag
     /// unions the covered clips onto this rather than replacing it, so
     /// shrinking the box gives back what it never covered.
