@@ -89,6 +89,12 @@ struct App {
     /// Populated when the user opens the MIDI picker; used so the UI
     /// can show a dropdown without re-scanning on every frame.
     midi_input_ports: Vec<String>,
+
+    /// Multiplier iced applies to the whole logical coordinate space.
+    /// It lives on the shell rather than in `AppState` because it
+    /// describes the window the project is viewed through, not the
+    /// project or the view layout, and nothing about it is undoable.
+    interface_scale: f32,
     // Undo / redo
 }
 
@@ -104,6 +110,7 @@ pub fn run() -> iced::Result {
     .ok();
     iced::application(App::title, App::update, App::view)
         .theme(App::theme)
+        .scale_factor(App::scale_factor)
         .antialiasing(true)
         .subscription(App::subscription)
         // Unsaved edits get a confirmation instead of a silent exit, so the
@@ -184,6 +191,7 @@ mod views_perform_playhead;
 mod views_perform_record;
 mod views_perform_sections;
 mod views_settings;
+mod views_settings_appearance;
 mod views_settings_perform;
 mod views_shell;
 mod views_transport;
@@ -197,6 +205,10 @@ impl App {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
         let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
+        // Read before the settings are picked apart below, and clamped
+        // here rather than at the render site so a hand-edited ui.json
+        // cannot open the window at an unusable size.
+        let interface_scale = ui_settings.clamped_interface_scale();
 
         let (stream, sample_rate, audio_stream_health) =
             match AudioOutputStream::open(engine, Some(512)) {
@@ -372,6 +384,7 @@ impl App {
             remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),
+            interface_scale,
         };
 
         // Inform the engine of the actual sample rate
@@ -561,6 +574,15 @@ impl App {
 
     fn theme(&self) -> Theme {
         th::vibez_theme()
+    }
+
+    /// Scale of the logical coordinate space the whole interface is
+    /// laid out in. iced re-lays-out on change, and widgets keep
+    /// working in logical units, so canvases (timeline, piano roll,
+    /// meters) receive already-descaled cursor positions and need no
+    /// per-widget adjustment.
+    fn scale_factor(&self) -> f64 {
+        self.interface_scale as f64
     }
 
     fn subscription(&self) -> Subscription<Message> {
