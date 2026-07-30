@@ -604,6 +604,7 @@ impl App {
 
             // -- Multi-track messages --
             Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
+            Message::SelectAllPressed => return self.on_select_all_pressed(),
             Message::AddClipToTrack(track_id) => {
                 return self.handle_add_clip_to_track(track_id);
             }

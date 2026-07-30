@@ -361,6 +361,9 @@ pub enum Message {
 
     // Cursor tracking
     DeleteKeyPressed,
+    /// Command+A. Context-resolved in `update`, like [`Self::DeleteKeyPressed`]:
+    /// the open piano roll's notes first, then the active timeline's clips.
+    SelectAllPressed,
 
     // File menu
     NewProject,

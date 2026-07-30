@@ -250,6 +250,19 @@ impl App {
                 .collect();
             let total_tracks = track_ids.len();
             let empty_content = TrackTimelineContent::default();
+            // Real vertical layout of the section column, so a rubber-band
+            // maps a y offset back to a track the same way Arrange does.
+            let row_spans = crate::widgets::timeline::build_row_spans(
+                row_height,
+                self.state.project_tracks.tracks.iter().map(|track| {
+                    let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+                        self.automation_rows_height(editor, track.id)
+                    } else {
+                        0.0
+                    };
+                    (track.id, extra_height)
+                }),
+            );
             let mut track_rows = column![].width(Length::Fill);
 
             for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
@@ -480,6 +493,10 @@ impl App {
                     self.state.browser.drag_source.is_some(),
                     browser_drag_duration,
                     browser_drag_detail.clone(),
+                )
+                .with_marquee(
+                    row_spans.clone(),
+                    editor.marquee.as_ref().map(|marquee| marquee.rect),
                 );
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.section_id == section_id && preview.track_id == track.id

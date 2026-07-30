@@ -730,6 +730,54 @@ impl TimelineEditorState {
                         Some((self.selection_start_beats, self.selection_end_beats));
                 }
             }
+            ArrangementMsg::MarqueeSelect {
+                anchor_track,
+                start_beats,
+                end_beats,
+                top_y,
+                bottom_y,
+                track_ids,
+                additive,
+            } => {
+                return self.op_marquee_select(
+                    ctx,
+                    anchor_track,
+                    start_beats,
+                    end_beats,
+                    top_y,
+                    bottom_y,
+                    &track_ids,
+                    additive,
+                );
+            }
+            ArrangementMsg::EndMarqueeSelect => {
+                self.marquee = None;
+            }
+            ArrangementMsg::SelectAllClips => {
+                self.selected_clips =
+                    self.timeline
+                        .by_track
+                        .iter()
+                        .flat_map(|(track_id, content)| {
+                            let audio =
+                                content
+                                    .clips
+                                    .iter()
+                                    .map(|clip| ArrangementSelection::AudioClip {
+                                        track_id: *track_id,
+                                        clip_id: clip.id,
+                                    });
+                            let notes = content.note_clips.iter().map(|clip| {
+                                ArrangementSelection::NoteClip {
+                                    track_id: *track_id,
+                                    clip_id: clip.id,
+                                }
+                            });
+                            audio.chain(notes)
+                        })
+                        .collect();
+                action.focus_clip_tab = !self.selected_clips.is_empty();
+            }
             ArrangementMsg::SetTimeSelectionActive(active) => {
                 self.time_selection_active = active;
                 if !active {

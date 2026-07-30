@@ -336,6 +336,9 @@ pub struct TimelineEditorState {
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
     pub time_selection_track: Option<TrackId>,
+    /// Live rubber-band, present only while a box drag is in flight.
+    /// Every lane draws its own slice of it.
+    pub marquee: Option<ArrangementMarquee>,
     /// An arrangement drag (move/resize) is active; drives edge
     /// auto-scroll on ticks.
     pub drag_resize_active: bool,
@@ -356,6 +359,7 @@ impl Default for TimelineEditorState {
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,
             time_selection_track: None,
+            marquee: None,
             drag_resize_active: false,
             clip_bpm_edit: HashMap::new(),
         }

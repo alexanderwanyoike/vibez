@@ -7,9 +7,94 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
-use crate::state::{ArrangementSelection, ProjectTracksState, TimelineEditorState, UiNoteClip};
+use crate::state::{
+    ArrangementMarquee, ArrangementMarqueeRect, ArrangementSelection, ProjectTracksState,
+    TimelineEditorState, UiNoteClip,
+};
 
 impl TimelineEditorState {
+    /// Resolve a rubber-band rectangle into a clip selection.
+    ///
+    /// A clip counts as caught when its span *overlaps* the box, matching
+    /// how a marquee reads on screen. Range operations like
+    /// [`Self::op_delete_clips_in_region`] deliberately demand full
+    /// containment instead, because deleting a clip you only clipped the
+    /// edge of would destroy material outside the selection.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn op_marquee_select(
+        &mut self,
+        ctx: ArrangementCtx,
+        anchor_track: TrackId,
+        start_beats: f64,
+        end_beats: f64,
+        top_y: f32,
+        bottom_y: f32,
+        track_ids: &[TrackId],
+        additive: bool,
+    ) -> ArrangementAction {
+        // The first update of a gesture captures the selection it started
+        // from, so shrinking an additive box hands back the clips it no
+        // longer covers instead of accumulating them forever.
+        let base = match self.marquee.take() {
+            Some(marquee) => marquee.base,
+            None if additive => self.selected_clips.clone(),
+            None => HashSet::new(),
+        };
+
+        let mut selected = base.clone();
+        let spb = ctx.samples_per_beat;
+        for track_id in track_ids {
+            let Some(content) = self.timeline.get(*track_id) else {
+                continue;
+            };
+            if spb > 0.0 {
+                for clip in &content.clips {
+                    let clip_start = clip.position as f64 / spb;
+                    let clip_end = (clip.position + clip.duration) as f64 / spb;
+                    if clip_start < end_beats && clip_end > start_beats {
+                        selected.insert(ArrangementSelection::AudioClip {
+                            track_id: *track_id,
+                            clip_id: clip.id,
+                        });
+                    }
+                }
+            }
+            for clip in &content.note_clips {
+                let clip_end = clip.position_beats + clip.duration_beats;
+                if clip.position_beats < end_beats && clip_end > start_beats {
+                    selected.insert(ArrangementSelection::NoteClip {
+                        track_id: *track_id,
+                        clip_id: clip.id,
+                    });
+                }
+            }
+        }
+
+        self.selected_clips = selected;
+        self.marquee = Some(ArrangementMarquee {
+            rect: ArrangementMarqueeRect {
+                start_beats,
+                end_beats,
+                top_y,
+                bottom_y,
+            },
+            base,
+        });
+
+        // A box with horizontal extent also carries the time selection,
+        // exactly as the single-lane region drag it replaces did. A purely
+        // vertical drag has no range, so it leaves the old one alone.
+        if end_beats > start_beats {
+            self.selection_start_beats = start_beats;
+            self.selection_end_beats = end_beats;
+            self.time_selection_active = true;
+            self.time_selection_track = Some(anchor_track);
+        }
+        self.selected_track = Some(anchor_track);
+
+        ArrangementAction::default()
+    }
+
     pub(super) fn op_delete_clips_in_region(
         &mut self,
         engine: &mut impl EngineHandle,

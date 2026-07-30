@@ -174,10 +174,14 @@ pub(super) const CLIP_Y: f32 = 4.0;
 
 mod clips;
 mod clips_draw;
+#[cfg(test)]
+mod clips_tests;
+pub mod marquee;
 mod minimap;
 mod ruler;
 
 pub use clips::*;
+pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;
 pub use ruler::*;
 
