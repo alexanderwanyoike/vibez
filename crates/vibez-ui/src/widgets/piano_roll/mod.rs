@@ -132,7 +132,8 @@ impl PianoRollWidget {
     /// pointer is over. Nearest-line snapping would drop a click in the
     /// right half of a cell into the following one.
     fn snapped_beat_floor(&self, beat: f64, bounds: &Rectangle) -> f64 {
-        self.grid.snap_beat_floor(beat, self.pixels_per_beat(bounds))
+        self.grid
+            .snap_beat_floor(beat, self.pixels_per_beat(bounds))
     }
 
     fn pitch_to_y(&self, pitch: u8) -> f32 {
