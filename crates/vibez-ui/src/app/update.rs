@@ -287,6 +287,20 @@ impl App {
                 }
             }
 
+            // -- Window close protection --
+            Message::WindowCloseRequested => {
+                return self.route_window_close_requested();
+            }
+            Message::CloseConfirmSave => {
+                return self.route_close_confirm_save();
+            }
+            Message::CloseConfirmDiscard => {
+                return self.route_close_confirm_discard();
+            }
+            Message::CloseConfirmCancel => {
+                return self.route_close_confirm_cancel();
+            }
+
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;

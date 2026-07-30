@@ -102,10 +102,13 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    iced::application("vibez", App::update, App::view)
+    iced::application(App::title, App::update, App::view)
         .theme(App::theme)
         .antialiasing(true)
         .subscription(App::subscription)
+        // Unsaved edits get a confirmation instead of a silent exit, so the
+        // close request has to reach `update` rather than the window itself.
+        .exit_on_close_request(false)
         .window({
             #[allow(unused_mut)]
             let mut settings = iced::window::Settings {
@@ -169,6 +172,7 @@ mod views_browser_places;
 mod views_browser_remote;
 mod views_browser_style;
 mod views_clip_swing;
+mod views_close_confirm;
 mod views_detail;
 mod views_devices;
 mod views_mixer;
@@ -183,6 +187,7 @@ mod views_settings;
 mod views_settings_perform;
 mod views_shell;
 mod views_transport;
+mod window_policy;
 
 #[cfg(test)]
 mod project_format_v1_tests;
@@ -545,6 +550,15 @@ impl App {
         }
     }
 
+    /// Re-evaluated by iced after every update, so the title tracks the open
+    /// project and its dirty flag without anything having to push it.
+    fn title(&self) -> String {
+        window_policy::window_title(
+            self.state.project.current_path.as_deref(),
+            self.state.project.dirty,
+        )
+    }
+
     fn theme(&self) -> Theme {
         th::vibez_theme()
     }
@@ -566,6 +580,9 @@ impl App {
                 )),
                 iced::Event::Window(iced::window::Event::Unfocused) => {
                     Some(Message::Perform(PerformMsg::WindowUnfocused))
+                }
+                iced::Event::Window(iced::window::Event::CloseRequested) => {
+                    Some(Message::WindowCloseRequested)
                 }
                 _ => None,
             }),

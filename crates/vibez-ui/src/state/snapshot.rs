@@ -57,6 +57,14 @@ pub struct ProjectState {
     /// the arrangement, but serialized back into every save so unavailable
     /// media stays relinkable instead of silently vanishing.
     pub unresolved_clips: Vec<crate::message::UnresolvedTimelineClip>,
+    /// Whether the save/discard/cancel dialog raised by a close request with
+    /// unsaved edits is up.
+    pub close_confirm_open: bool,
+    /// Whether the in-flight save was started by that dialog's Save button.
+    /// A save has to complete asynchronously (and may still open a save-as
+    /// dialog first), so the intent to quit has to outlive the message that
+    /// expressed it.
+    pub exit_after_save: bool,
 }
 
 #[derive(Debug, Default)]
