@@ -53,6 +53,42 @@ pub struct UiSettings {
     /// Section content. Off by default because deletion is undoable.
     #[serde(default)]
     pub confirm_project_track_deletion: bool,
+    /// Multiplier applied to the whole logical coordinate space, so
+    /// every panel, control and font grows or shrinks together. This is
+    /// not timeline zoom: it changes how big the interface is drawn,
+    /// never how much musical time a lane shows. Always read through
+    /// [`UiSettings::clamped_interface_scale`], since the value comes
+    /// off disk and an out-of-range one is unrecoverable from inside
+    /// the app.
+    #[serde(default = "default_interface_scale")]
+    pub interface_scale: f32,
+}
+
+/// Smallest supported interface scale. Below this, hit targets in the
+/// mixer and timeline shrink past the point where they can be aimed at.
+pub const INTERFACE_SCALE_MIN: f32 = 0.75;
+
+/// Largest supported interface scale. Above this, the arrangement and
+/// mixer stop fitting inside the 900x600 minimum window, which would
+/// hide controls with no way to reach them.
+pub const INTERFACE_SCALE_MAX: f32 = 1.5;
+
+/// Unscaled interface: what every existing installation gets, and the
+/// fallback for a value that cannot be interpreted.
+pub const INTERFACE_SCALE_DEFAULT: f32 = 1.0;
+
+/// Force a scale from disk or from the slider into the supported range.
+///
+/// NaN is handled separately because `f32::clamp` returns NaN unchanged,
+/// and handing iced a NaN scale factor collapses the layout into a
+/// window the user cannot click their way out of. Since the settings
+/// file is plain JSON that people do hand-edit, an uninterpretable
+/// value falls back to unscaled rather than propagating.
+pub fn clamp_interface_scale(scale: f32) -> f32 {
+    if scale.is_nan() {
+        return INTERFACE_SCALE_DEFAULT;
+    }
+    scale.clamp(INTERFACE_SCALE_MIN, INTERFACE_SCALE_MAX)
 }
 
 impl Default for UiSettings {
@@ -76,6 +112,7 @@ impl Default for UiSettings {
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
             confirm_project_track_deletion: false,
+            interface_scale: default_interface_scale(),
         }
     }
 }
@@ -94,6 +131,11 @@ impl UiSettings {
             Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
             Err(_) => Self::default(),
         }
+    }
+
+    /// The persisted interface scale, made safe to render with.
+    pub fn clamped_interface_scale(&self) -> f32 {
+        clamp_interface_scale(self.interface_scale)
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
@@ -144,6 +186,10 @@ fn default_audition_gain() -> f32 {
 
 fn default_warp_confidence_threshold() -> f32 {
     0.6
+}
+
+fn default_interface_scale() -> f32 {
+    INTERFACE_SCALE_DEFAULT
 }
 
 #[cfg(test)]
@@ -252,6 +298,47 @@ mod tests {
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert!(loaded.confirm_project_track_deletion);
+    }
+
+    #[test]
+    fn settings_written_before_interface_scale_render_unscaled() {
+        let loaded: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.interface_scale, INTERFACE_SCALE_DEFAULT);
+        assert_eq!(loaded.clamped_interface_scale(), 1.0);
+    }
+
+    #[test]
+    fn interface_scale_roundtrips() {
+        let settings = UiSettings {
+            interface_scale: 1.25,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.interface_scale, 1.25);
+        assert_eq!(loaded.clamped_interface_scale(), 1.25);
+    }
+
+    #[test]
+    fn a_hand_edited_interface_scale_is_pulled_back_into_the_usable_range() {
+        let tiny: UiSettings = serde_json::from_str(r#"{"interface_scale":0.05}"#).unwrap();
+        assert_eq!(tiny.clamped_interface_scale(), INTERFACE_SCALE_MIN);
+
+        let huge: UiSettings = serde_json::from_str(r#"{"interface_scale":40.0}"#).unwrap();
+        assert_eq!(huge.clamped_interface_scale(), INTERFACE_SCALE_MAX);
+
+        let negative: UiSettings = serde_json::from_str(r#"{"interface_scale":-2.0}"#).unwrap();
+        assert_eq!(negative.clamped_interface_scale(), INTERFACE_SCALE_MIN);
+    }
+
+    #[test]
+    fn an_uninterpretable_interface_scale_falls_back_to_unscaled() {
+        assert_eq!(clamp_interface_scale(f32::NAN), INTERFACE_SCALE_DEFAULT);
+        assert_eq!(clamp_interface_scale(f32::INFINITY), INTERFACE_SCALE_MAX);
+        assert_eq!(
+            clamp_interface_scale(f32::NEG_INFINITY),
+            INTERFACE_SCALE_MIN
+        );
     }
 
     #[test]

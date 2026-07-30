@@ -380,6 +380,9 @@ pub enum Message {
     SetWarpConfidenceThreshold(f32),
     /// Settings: ask before deleting a Project Track everywhere.
     ToggleProjectTrackDeleteConfirmation,
+    /// Settings: resize the whole interface. Distinct from timeline
+    /// zoom, which changes visible musical time instead.
+    SetInterfaceScale(f32),
     /// Settings: re-warp every warped clip to the current project
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.

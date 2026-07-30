@@ -652,6 +652,10 @@ impl App {
                 self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
                 self.persist_ui_settings();
             }
+            Message::SetInterfaceScale(scale) => {
+                self.interface_scale = crate::ui_settings::clamp_interface_scale(scale);
+                self.persist_ui_settings();
+            }
             Message::ToggleProjectTrackDeleteConfirmation => {
                 self.state.confirm_project_track_deletion =
                     !self.state.confirm_project_track_deletion;

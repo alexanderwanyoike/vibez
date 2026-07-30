@@ -3,12 +3,13 @@
 //! Split out of `views_settings.rs`, which had reached the 1,000-line
 //! ceiling this repository enforces.
 
-use iced::widget::{button, column, container, horizontal_space, row, text, text_input};
+use iced::widget::{button, column, container, horizontal_space, row, slider, text, text_input};
 use iced::{Element, Length, Theme};
 
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
+use crate::ui_settings::{INTERFACE_SCALE_MAX, INTERFACE_SCALE_MIN};
 
 use super::*;
 
@@ -201,8 +202,44 @@ impl App {
         let list = scrollable(column![builtin_col, divider(), user_header, user_col,].spacing(8))
             .height(Length::Fixed(300.0));
 
-        column![title, hint, list, divider(), save_row]
-            .spacing(10)
-            .into()
+        // Interface scale. The readout is a percentage because that is
+        // how the setting is named and reasoned about; the slider works
+        // in the multiplier iced actually consumes.
+        let scale = self.interface_scale;
+        let scale_header = row![
+            text("Interface scale").size(13).color(th::text()),
+            horizontal_space(),
+            text(format!("{}%", (scale * 100.0).round() as i32))
+                .size(12)
+                .color(th::accent()),
+        ]
+        .align_y(iced::Alignment::Center);
+        let scale_hint = text(
+            "Resizes every panel, control and font together, for high-density \
+             displays or for reading from across the room. Timeline zoom is \
+             separate and keeps its own setting.",
+        )
+        .size(11)
+        .color(th::text_dim());
+        let scale_slider = slider(
+            INTERFACE_SCALE_MIN..=INTERFACE_SCALE_MAX,
+            scale,
+            Message::SetInterfaceScale,
+        )
+        .step(0.05_f32);
+
+        column![
+            title,
+            hint,
+            list,
+            divider(),
+            save_row,
+            divider(),
+            scale_header,
+            scale_hint,
+            scale_slider,
+        ]
+        .spacing(10)
+        .into()
     }
 }

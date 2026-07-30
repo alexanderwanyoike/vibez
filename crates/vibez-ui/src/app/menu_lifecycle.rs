@@ -77,6 +77,7 @@ mod tests {
             remote_catalog_pending: Vec::new(),
             midi_input: None,
             midi_input_ports: Vec::new(),
+            interface_scale: crate::ui_settings::INTERFACE_SCALE_DEFAULT,
         }
     }
 
