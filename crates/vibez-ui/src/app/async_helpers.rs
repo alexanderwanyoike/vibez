@@ -283,6 +283,21 @@ pub(super) async fn connect_dropbox_async(
     Ok((info, tokens))
 }
 
+/// Hand a URL to the system browser on a blocking thread.
+///
+/// Reuses the opener vibez-dropbox already owns for its OAuth flow rather
+/// than taking a second browser dependency. `BrowserOpener::open` waits for
+/// the platform launcher to return, which must never happen on the update
+/// loop: on a cold browser start that stall would freeze the whole UI.
+pub(super) async fn open_url_async(url: &'static str) -> Result<(), String> {
+    let opener: Arc<dyn vibez_dropbox::BrowserOpener> =
+        Arc::new(vibez_dropbox::SystemBrowserOpener);
+    tokio::task::spawn_blocking(move || opener.open(url))
+        .await
+        .map_err(|error| format!("Browser task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 /// Commit downloaded bytes to the Media Cache on a blocking thread; the
 /// write can be multi-MB and must not stall the async executor.
 pub(super) async fn write_cache_blocking(

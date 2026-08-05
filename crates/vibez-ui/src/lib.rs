@@ -1,3 +1,4 @@
+mod about;
 mod app;
 mod domains;
 pub mod icons;
@@ -12,6 +13,7 @@ mod themes;
 mod timeline_geometry;
 mod typography;
 mod ui_settings;
+mod update_check;
 mod warp;
 pub mod widgets;
 

@@ -12,8 +12,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Create the release, with its generated notes, exactly once. The build
+  # matrix must only attach assets: when a matrix leg passes
+  # generate_release_notes for an already-existing release, GitHub appends a
+  # fresh copy of the notes to the body, so four legs produced four copies.
+  create-release:
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+
   build:
     name: Build (${{ matrix.label }})
+    needs: [create-release]
+    # workflow_dispatch builds packages with no release to attach to, so
+    # create-release is skipped; needs would then skip this job too unless
+    # the gate readmits it explicitly.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.create-release.result == 'success') }}
     strategy:
       fail-fast: false
       matrix:
@@ -156,6 +175,8 @@ jobs:
             vibez-*-setup.exe
           if-no-files-found: error
 
+      # Assets only. Notes are generated once by create-release; repeating
+      # generate_release_notes here is what duplicated the body per platform.
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -167,5 +188,3 @@ jobs:
             vibez-*.dmg
             vibez-*.zip
             vibez-*-setup.exe
-          draft: false
-          generate_release_notes: true

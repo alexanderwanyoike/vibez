@@ -1,18 +1,15 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, slider, text, text_input,
+    button, center, column, container, horizontal_space, mouse_area, row, slider, text,
 };
 use iced::{Color, Element, Length, Theme};
-
-use crate::domains::browser::BrowserMsg;
 
 use crate::icons;
 use crate::message::Message;
 use crate::state::SettingsTab;
 use crate::theme as th;
 
-use super::views_browser_style::browser_utility_action_style;
 use super::*;
 
 impl App {
@@ -45,35 +42,43 @@ impl App {
             } else {
                 th::text_dim()
             };
-            button(text(label).size(13).color(color))
-                .on_press(Message::SelectSettingsTab(tab))
-                .padding([6, 10])
-                .style(move |_theme: &Theme, status| {
-                    let bg = if is_active {
-                        None
-                    } else {
-                        match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                Some(th::bg_hover().into())
-                            }
-                            _ => None,
+            // A tab label must never wrap: when the bar runs out of room,
+            // wrapping turns the last tab into a one-letter-per-line
+            // column. Clipping is the survivable failure.
+            button(
+                text(label)
+                    .size(13)
+                    .color(color)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::SelectSettingsTab(tab))
+            .padding([6, 10])
+            .style(move |_theme: &Theme, status| {
+                let bg = if is_active {
+                    None
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::bg_hover().into())
                         }
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: color,
-                        border: iced::Border {
-                            color: if is_active {
-                                th::accent()
-                            } else {
-                                Color::TRANSPARENT
-                            },
-                            width: if is_active { 2.0 } else { 0.0 },
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
+                        _ => None,
                     }
-                })
+                };
+                button::Style {
+                    background: bg,
+                    text_color: color,
+                    border: iced::Border {
+                        color: if is_active {
+                            th::accent()
+                        } else {
+                            Color::TRANSPARENT
+                        },
+                        width: if is_active { 2.0 } else { 0.0 },
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
         };
 
         let active = self.state.settings_tab;
@@ -104,6 +109,11 @@ impl App {
                 SettingsTab::Appearance,
                 active == SettingsTab::Appearance
             ),
+            make_tab_btn(
+                "Updates",
+                SettingsTab::Updates,
+                active == SettingsTab::Updates
+            ),
         ]
         .spacing(0);
 
@@ -115,6 +125,7 @@ impl App {
             SettingsTab::Warping => self.view_settings_warping_tab(),
             SettingsTab::Perform => self.view_settings_perform_tab(),
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
+            SettingsTab::Updates => self.view_settings_updates_tab(),
         };
 
         let content = column![
@@ -136,7 +147,10 @@ impl App {
         ]
         .spacing(8)
         .padding(20)
-        .width(Length::Fixed(480.0));
+        // Wide enough for all seven tab labels on one line with ~30px to
+        // spare; still comfortably inside the 900px minimum window. Grow
+        // this before adding an eighth tab.
+        .width(Length::Fixed(560.0));
 
         let dialog = container(content).style(|_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),
@@ -498,201 +512,6 @@ impl App {
         .into()
     }
 
-    pub(super) fn view_settings_dropbox_tab(&self) -> Element<'_, Message> {
-        let title = text("Dropbox").size(14).color(th::text());
-        let hint = text(
-            "Register an app at https://www.dropbox.com/developers/apps \
-            (Scoped access, Full Dropbox). Paste the App key below.",
-        )
-        .size(11)
-        .color(th::text_dim());
-
-        let app_key_input = text_input("App key", &self.state.browser.remote.app_key_input)
-            .on_input(|s| Message::Browser(BrowserMsg::SetDropboxAppKey(s)))
-            .on_submit(Message::SaveDropboxAppKey)
-            .size(13)
-            .width(Length::Fill);
-        let save_key_btn = button(text("Save").size(12).color(th::text()))
-            .on_press(Message::SaveDropboxAppKey)
-            .padding([6, 12])
-            .style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: th::accent_dim(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
-
-        let key_row = row![app_key_input, save_key_btn]
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-
-        let account_line: Element<'_, Message> = if self.state.browser.remote.connected {
-            let email = self
-                .state
-                .browser
-                .remote
-                .account_email
-                .clone()
-                .unwrap_or_else(|| "connected".into());
-            text(format!("Connected: {email}"))
-                .size(12)
-                .color(th::accent())
-                .into()
-        } else if self.state.browser.remote.auth_in_progress {
-            text("Waiting for browser authorisation...")
-                .size(12)
-                .color(th::text_dim())
-                .into()
-        } else {
-            text("Not connected").size(12).color(th::text_dim()).into()
-        };
-
-        let can_connect =
-            self.state.browser.remote.has_app_key && !self.state.browser.remote.auth_in_progress;
-        let connect_label = if self.state.browser.remote.auth_in_progress {
-            "Connecting..."
-        } else if self.state.browser.remote.connected {
-            "Reconnect"
-        } else {
-            "Connect"
-        };
-        let connect_btn = {
-            let mut btn = button(text(connect_label).size(12).color(th::accent()));
-            if can_connect {
-                btn = btn.on_press(Message::ConnectDropbox);
-            }
-            btn.padding([6, 12]).style(|_theme: &Theme, status| {
-                let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
-                    }
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::accent(),
-                    border: iced::Border {
-                        color: th::accent_dim(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-        };
-
-        let disconnect_btn: Element<'_, Message> = if self.state.browser.remote.connected {
-            button(text("Disconnect").size(12).color(th::text_dim()))
-                .on_press(Message::DisconnectDropbox)
-                .padding([6, 12])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text_dim(),
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                })
-                .into()
-        } else {
-            horizontal_space().width(Length::Shrink).into()
-        };
-
-        let error_line: Element<'_, Message> =
-            if let Some(err) = self.state.browser.remote.last_error.clone() {
-                text(err).size(11).color(th::danger()).into()
-            } else {
-                horizontal_space().width(Length::Shrink).into()
-            };
-
-        let budget_gib =
-            self.state.browser.remote.cache_budget_bytes as f32 / (1024.0 * 1024.0 * 1024.0);
-        let cache_usage = text(format!(
-            "{} across {} item(s)",
-            format_settings_bytes(self.state.browser.remote.cache_usage_bytes),
-            self.state.browser.remote.cache_entries
-        ))
-        .size(11)
-        .color(th::text_dim());
-        let budget = slider(1.0..=500.0, budget_gib, Message::SetMediaCacheBudgetGiB)
-            .step(1.0_f32)
-            .width(Length::Fill);
-        let eviction_enabled = self.state.browser.remote.cache_automatic_eviction;
-        let eviction = button(
-            text(if eviction_enabled {
-                "LRU EVICTION ON"
-            } else {
-                "LRU EVICTION OFF"
-            })
-            .size(10)
-            .color(if eviction_enabled {
-                th::accent()
-            } else {
-                th::text_dim()
-            }),
-        )
-        .on_press(Message::ToggleMediaCacheAutomaticEviction)
-        .padding([5, 8])
-        .style(browser_utility_action_style);
-        let clear = button(text("CLEAR CACHE").size(10).color(th::text_dim()))
-            .on_press(Message::ClearMediaCache)
-            .padding([5, 8])
-            .style(browser_utility_action_style);
-        let cache_error: Element<'_, Message> = self
-            .state
-            .browser
-            .remote
-            .cache_error
-            .as_ref()
-            .map(|error| text(error).size(10).color(th::danger()).into())
-            .unwrap_or_else(|| horizontal_space().width(Length::Shrink).into());
-
-        column![
-            title,
-            hint,
-            key_row,
-            account_line,
-            row![connect_btn, disconnect_btn]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            error_line,
-            text("MEDIA CACHE").size(10).color(th::text_muted()),
-            row![
-                cache_usage,
-                horizontal_space(),
-                text(format!("{budget_gib:.0} GiB budget"))
-                    .size(11)
-                    .color(th::text_dim())
-            ]
-            .align_y(iced::Alignment::Center),
-            budget,
-            row![eviction, clear]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            cache_error,
-        ]
-        .spacing(10)
-        .into()
-    }
-
     pub(super) fn view_settings_warping_tab(&self) -> Element<'_, Message> {
         let title = text("Sample Warping").size(14).color(th::text());
         let hint = text(
@@ -791,202 +610,11 @@ impl App {
         .spacing(10)
         .into()
     }
-
-    pub(super) fn view_settings_appearance_tab(&self) -> Element<'_, Message> {
-        use iced::widget::scrollable;
-
-        let title = text("Appearance").size(14).color(th::text());
-        let hint = text(
-            "Themes recolor the whole interface, track palette included. \
-             Drop .vzt files in the themes folder and rescan to add your own.",
-        )
-        .size(11)
-        .color(th::text_dim());
-
-        // One selectable row per theme: swatch strip + name.
-        let theme_row = |palette: &th::ThemePalette| -> Element<'_, Message> {
-            let name = palette.name.clone();
-            let selected = self.state.current_theme_name == name;
-            let mut swatches = row![].spacing(2);
-            for color in [
-                palette.bg_dark,
-                palette.bg_elevated,
-                palette.accent,
-                palette.track_colors[0],
-                palette.track_colors[3],
-                palette.track_colors[5],
-            ] {
-                swatches = swatches.push(
-                    container(
-                        column![]
-                            .width(Length::Fixed(14.0))
-                            .height(Length::Fixed(14.0)),
-                    )
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(color.into()),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-                );
-            }
-            let label =
-                text(name.clone())
-                    .size(12)
-                    .color(if selected { th::accent() } else { th::text() });
-            let marker: Element<'_, Message> = if selected {
-                icons::icon(icons::CIRCLE_DOT)
-                    .size(11)
-                    .color(th::accent())
-                    .into()
-            } else {
-                icons::icon(icons::CIRCLE)
-                    .size(11)
-                    .color(th::text_muted())
-                    .into()
-            };
-            button(
-                row![marker, swatches, label]
-                    .spacing(10)
-                    .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::SelectTheme(name))
-            .padding([5, 8])
-            .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                let bg = if selected {
-                    Some(th::bg_elevated().into())
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: if selected {
-                            th::accent_dim()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
-        };
-
-        let mut builtin_col = column![].spacing(2);
-        for palette in crate::themes::builtins() {
-            builtin_col = builtin_col.push(theme_row(&palette));
-        }
-
-        // User theme section: scanned .vzt files + rescan, like the
-        // plugin library.
-        let user_header = row![
-            text("Your Themes").size(13).color(th::text()),
-            horizontal_space(),
-            text(crate::themes::themes_dir().display().to_string())
-                .size(10)
-                .color(th::text_muted()),
-            button(text("Rescan").size(11).color(th::accent()))
-                .on_press(Message::RescanThemes)
-                .padding([3, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::accent(),
-                        border: iced::Border {
-                            color: th::accent_dim(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-        let mut user_col = column![].spacing(2);
-        if self.state.user_themes.is_empty() {
-            user_col = user_col.push(
-                text("No .vzt themes found — save one below or drop files in the folder.")
-                    .size(11)
-                    .color(th::text_muted()),
-            );
-        } else {
-            for user in &self.state.user_themes {
-                user_col = user_col.push(theme_row(&user.palette));
-            }
-        }
-
-        // Save the active palette under a new name.
-        let save_row = row![
-            text_input("Theme name...", &self.state.theme_save_name)
-                .on_input(Message::ThemeSaveNameChanged)
-                .on_submit(Message::SaveCurrentTheme)
-                .size(12)
-                .padding([5, 8]),
-            button(text("Save Current").size(11).color(th::text()))
-                .on_press(Message::SaveCurrentTheme)
-                .padding([6, 12])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text(),
-                        border: iced::Border {
-                            color: th::accent_dim(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-        let divider = || {
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                },
-            )
-        };
-
-        let list = scrollable(column![builtin_col, divider(), user_header, user_col,].spacing(8))
-            .height(Length::Fixed(300.0));
-
-        column![title, hint, list, divider(), save_row]
-            .spacing(10)
-            .into()
-    }
 }
 
-fn format_settings_bytes(bytes: u64) -> String {
+/// Shared with the Dropbox tab, which reports Media Cache usage in the
+/// same units.
+pub(super) fn format_settings_bytes(bytes: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
     const MIB: f64 = 1024.0 * 1024.0;
     const KIB: f64 = 1024.0;

@@ -613,6 +613,8 @@ impl App {
             }
         });
 
+        let about_btn = make_menu_btn("About vibez", icons::CIRCLE_DOT, Message::OpenAbout);
+
         let menu_content = column![new_btn]
             .spacing(2)
             .push(open_btn)
@@ -620,6 +622,7 @@ impl App {
             .push(save_as_btn)
             .push(export_btn)
             .push(settings_btn)
+            .push(about_btn)
             .padding(4)
             .width(Length::Fixed(220.0));
 

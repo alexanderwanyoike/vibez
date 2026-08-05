@@ -11,12 +11,14 @@ pub(super) fn dismiss(state: &mut AppState, overlay: MenuOverlay) -> bool {
         MenuOverlay::ArrangementContext => state.view.context_menu.is_some(),
         MenuOverlay::File => state.project.file_menu_open,
         MenuOverlay::Edit => state.view.edit_menu_open,
+        MenuOverlay::About => state.about_open,
     };
 
     match overlay {
         MenuOverlay::ArrangementContext => state.view.context_menu = None,
         MenuOverlay::File => state.project.file_menu_open = false,
         MenuOverlay::Edit => state.view.edit_menu_open = false,
+        MenuOverlay::About => state.about_open = false,
     }
 
     was_open
@@ -24,7 +26,9 @@ pub(super) fn dismiss(state: &mut AppState, overlay: MenuOverlay) -> bool {
 
 /// Return the topmost menu Escape should dismiss, matching shell overlay order.
 pub(super) fn visible(state: &AppState) -> Option<MenuOverlay> {
-    if state.project.file_menu_open {
+    if state.about_open {
+        Some(MenuOverlay::About)
+    } else if state.project.file_menu_open {
         Some(MenuOverlay::File)
     } else if state.view.edit_menu_open {
         Some(MenuOverlay::Edit)
@@ -77,6 +81,7 @@ mod tests {
             remote_catalog_pending: Vec::new(),
             midi_input: None,
             midi_input_ports: Vec::new(),
+            interface_scale: crate::ui_settings::INTERFACE_SCALE_DEFAULT,
         }
     }
 
@@ -140,6 +145,38 @@ mod tests {
 
         assert!(app.state.settings_open);
         assert!(!app.state.project.file_menu_open);
+    }
+
+    #[test]
+    fn the_about_dialog_outranks_the_menu_it_was_opened_from() {
+        let mut state = AppState::default();
+        state.project.file_menu_open = true;
+        state.about_open = true;
+
+        assert_eq!(visible(&state), Some(MenuOverlay::About));
+        dismiss(&mut state, MenuOverlay::About);
+        assert_eq!(visible(&state), Some(MenuOverlay::File));
+    }
+
+    #[test]
+    fn the_about_item_opens_the_dialog_and_closes_the_file_menu() {
+        let mut app = test_app();
+        app.state.project.file_menu_open = true;
+
+        let _ = app.update(Message::menu_item(MenuOverlay::File, Message::OpenAbout));
+
+        assert!(app.state.about_open);
+        assert!(!app.state.project.file_menu_open);
+    }
+
+    #[test]
+    fn escape_closes_the_about_dialog() {
+        let mut app = test_app();
+        app.state.about_open = true;
+
+        let _ = app.update(Message::EscapePressed);
+
+        assert!(!app.state.about_open);
     }
 
     #[test]

@@ -89,6 +89,12 @@ struct App {
     /// Populated when the user opens the MIDI picker; used so the UI
     /// can show a dropdown without re-scanning on every frame.
     midi_input_ports: Vec<String>,
+
+    /// Multiplier iced applies to the whole logical coordinate space.
+    /// It lives on the shell rather than in `AppState` because it
+    /// describes the window the project is viewed through, not the
+    /// project or the view layout, and nothing about it is undoable.
+    interface_scale: f32,
     // Undo / redo
 }
 
@@ -102,10 +108,14 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    iced::application("vibez", App::update, App::view)
+    iced::application(App::title, App::update, App::view)
         .theme(App::theme)
+        .scale_factor(App::scale_factor)
         .antialiasing(true)
         .subscription(App::subscription)
+        // Unsaved edits get a confirmation instead of a silent exit, so the
+        // close request has to reach `update` rather than the window itself.
+        .exit_on_close_request(false)
         .window({
             #[allow(unused_mut)]
             let mut settings = iced::window::Settings {
@@ -160,6 +170,7 @@ mod update_project;
 mod update_remote;
 mod update_timeline;
 mod update_view;
+mod views_about;
 mod views_arrangement;
 mod views_automation;
 mod views_browser;
@@ -168,6 +179,7 @@ mod views_browser_places;
 mod views_browser_remote;
 mod views_browser_style;
 mod views_clip_swing;
+mod views_close_confirm;
 mod views_detail;
 mod views_devices;
 mod views_mixer;
@@ -179,9 +191,13 @@ mod views_perform_playhead;
 mod views_perform_record;
 mod views_perform_sections;
 mod views_settings;
+mod views_settings_appearance;
+mod views_settings_dropbox;
 mod views_settings_perform;
+mod views_settings_updates;
 mod views_shell;
 mod views_transport;
+mod window_policy;
 
 #[cfg(test)]
 mod project_format_v1_tests;
@@ -191,6 +207,10 @@ impl App {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
         let spectrum_rx = engine.take_spectrum_consumer();
         let ui_settings = UiSettings::load();
+        // Read before the settings are picked apart below, and clamped
+        // here rather than at the render site so a hand-edited ui.json
+        // cannot open the window at an unusable size.
+        let interface_scale = ui_settings.clamped_interface_scale();
 
         let (stream, sample_rate, audio_stream_health) =
             match AudioOutputStream::open(engine, Some(512)) {
@@ -268,6 +288,11 @@ impl App {
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
+            update_check: crate::update_check::UpdateCheckState {
+                enabled: ui_settings.check_for_updates,
+                last_check_unix: ui_settings.last_update_check_unix,
+                ..Default::default()
+            },
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
                 detail_panel_height: ui_settings.detail_panel_height,
@@ -366,6 +391,7 @@ impl App {
             remote_catalog_pending: Vec::new(),
             midi_input,
             midi_input_ports: Vec::new(),
+            interface_scale,
         };
 
         // Inform the engine of the actual sample rate
@@ -416,6 +442,22 @@ impl App {
         // `vibez <project.vzp>` opens a project straight from the
         // command line (also how file-manager associations launch
         // us). Legacy `.vibez` files load the same way.
+        // Release check. Off the UI thread via Task::perform, at most
+        // once a day, and skipped entirely when the user opted out so
+        // that "off" means no traffic rather than a discarded result.
+        let update_check_task = if crate::update_check::should_check(
+            app.state.update_check.enabled,
+            app.state.update_check.last_check_unix,
+            crate::update_check::now_unix(),
+        ) {
+            Task::perform(
+                crate::update_check::fetch_latest_tag(),
+                Message::UpdateCheckCompleted,
+            )
+        } else {
+            Task::none()
+        };
+
         let open_task = std::env::args()
             .nth(1)
             .map(std::path::PathBuf::from)
@@ -429,6 +471,7 @@ impl App {
                 local_startup_task,
                 remote_startup_task,
                 plugin_catalog_startup_task,
+                update_check_task,
                 open_task,
             ]),
         )
@@ -544,8 +587,26 @@ impl App {
         }
     }
 
+    /// Re-evaluated by iced after every update, so the title tracks the open
+    /// project and its dirty flag without anything having to push it.
+    fn title(&self) -> String {
+        window_policy::window_title(
+            self.state.project.current_path.as_deref(),
+            self.state.project.dirty,
+        )
+    }
+
     fn theme(&self) -> Theme {
         th::vibez_theme()
+    }
+
+    /// Scale of the logical coordinate space the whole interface is
+    /// laid out in. iced re-lays-out on change, and widgets keep
+    /// working in logical units, so canvases (timeline, piano roll,
+    /// meters) receive already-descaled cursor positions and need no
+    /// per-widget adjustment.
+    fn scale_factor(&self) -> f64 {
+        self.interface_scale as f64
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -565,6 +626,9 @@ impl App {
                 )),
                 iced::Event::Window(iced::window::Event::Unfocused) => {
                     Some(Message::Perform(PerformMsg::WindowUnfocused))
+                }
+                iced::Event::Window(iced::window::Event::CloseRequested) => {
+                    Some(Message::WindowCloseRequested)
                 }
                 _ => None,
             }),

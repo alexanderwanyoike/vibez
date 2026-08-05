@@ -25,10 +25,20 @@ impl App {
             || self.state.perform.editing_section_name.is_some()
     }
 
+    /// Delete/Backspace, resolved against whatever the user is actually
+    /// editing.
+    ///
+    /// The priority ladder below reads the focused timeline, so the focus gate
+    /// has to come first: in Perform the Section lanes stay on screen next to
+    /// the pad surface, and a producer hitting Delete over the pads is not
+    /// asking to destroy the clips they can see beside them.
     pub(super) fn on_delete_key_pressed(&mut self) -> Task<Message> {
         // Never delete anything while a text field is being
         // edited; backspace belongs to the text there.
         if self.text_field_editing() {
+            return Task::none();
+        }
+        if !self.editor_shortcuts_have_focus() {
             return Task::none();
         }
         // Priority 1: a selected automation point.
@@ -64,14 +74,18 @@ impl App {
 
     /// Command+A, resolved against whatever the user is actually editing.
     ///
-    /// Mirrors [`Self::on_delete_key_pressed`]: the piano roll wins while
-    /// it is the visible editor, otherwise the active timeline's clips do.
-    /// Unlike Delete this cannot key off an existing selection, since the
-    /// point of the shortcut is to create one, so it asks whether the
-    /// piano roll is on screen instead.
+    /// Mirrors [`Self::on_delete_key_pressed`]: the focus gate first, then the
+    /// explicitly opened piano roll, then the focused timeline's clips. Unlike
+    /// Delete this cannot key off an existing selection, since the point of
+    /// the shortcut is to create one, so it asks which editor was last opened
+    /// rather than which one holds a selection. Selecting everything must not
+    /// escalate the target on a second press.
     pub(super) fn on_select_all_pressed(&mut self) -> Task<Message> {
         // A text field owns Command+A for its own contents.
         if self.text_field_editing() {
+            return Task::none();
+        }
+        if !self.editor_shortcuts_have_focus() {
             return Task::none();
         }
 

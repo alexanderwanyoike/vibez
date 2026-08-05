@@ -97,7 +97,7 @@ pub struct ViewState {
 impl Default for ViewState {
     fn default() -> Self {
         Self {
-            workspace: Workspace::Arrange,
+            workspace: Workspace::Perform,
             detail_panel_tab: DetailPanelTab::Clip,
             detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
             detail_panel_resize_active: false,
@@ -189,6 +189,7 @@ pub enum SettingsTab {
     Warping,
     Perform,
     Appearance,
+    Updates,
 }
 
 #[cfg(test)]
@@ -468,9 +469,12 @@ pub struct AppState {
 
     // File menu / Settings
     pub settings_open: bool,
+    pub about_open: bool,
     pub settings_tab: SettingsTab,
     pub settings_buffer_size: u32,
     pub confirm_project_track_deletion: bool,
+    /// Startup release check: preference, throttle, and pending notice.
+    pub update_check: crate::update_check::UpdateCheckState,
     // Project domain slice: file menu, path, dirty flag, undo.
     pub project: ProjectState,
     /// Automatically detect sample BPM and warp to project tempo on
@@ -519,9 +523,11 @@ impl Default for AppState {
             clip_clipboard: ClipClipboard::default(),
             devices: crate::domains::devices::DevicesState::default(),
             settings_open: false,
+            about_open: false,
             settings_tab: SettingsTab::default(),
             settings_buffer_size: 512,
             confirm_project_track_deletion: false,
+            update_check: crate::update_check::UpdateCheckState::default(),
             project: ProjectState::default(),
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
@@ -974,6 +980,12 @@ mod tests {
     fn app_state_default_settings_tab() {
         let state = AppState::default();
         assert_eq!(state.settings_tab, SettingsTab::Audio);
+    }
+
+    #[test]
+    fn app_state_opens_in_perform_workspace() {
+        let state = AppState::default();
+        assert_eq!(state.view.workspace, Workspace::Perform);
     }
 
     #[test]

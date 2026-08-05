@@ -56,13 +56,16 @@ pub enum DrumPadParam {
     FineTune,
 }
 
-/// Menus whose lifecycle is owned by their overlay rather than inferred from
-/// unrelated application messages.
+/// Menus and dialogs whose lifecycle is owned by their overlay rather than
+/// inferred from unrelated application messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuOverlay {
     ArrangementContext,
     File,
     Edit,
+    /// The About dialog joins the menus rather than the Settings modal so
+    /// that Escape and a backdrop press close it, which Settings predates.
+    About,
 }
 
 #[derive(Debug, Clone)]
@@ -374,12 +377,38 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
     ProjectSaved(Box<Result<ProjectSaveResult, String>>),
+
+    // Window close protection. The window is configured not to exit on its
+    // own close request, so every one of these arrives here first.
+    /// The user asked to close the window (title bar button, Alt+F4, ...).
+    WindowCloseRequested,
+    /// Close dialog: save first, then quit. Falls through save-as when the
+    /// project has no path yet.
+    CloseConfirmSave,
+    /// Close dialog: quit and lose the unsaved edits.
+    CloseConfirmDiscard,
+    /// Close dialog: stay in the project.
+    CloseConfirmCancel,
     /// Settings: toggle auto-warp-on-import.
     ToggleAutoWarpOnImport,
     /// Settings: set warp detection confidence threshold.
     SetWarpConfidenceThreshold(f32),
     /// Settings: ask before deleting a Project Track everywhere.
     ToggleProjectTrackDeleteConfirmation,
+    /// Settings: resize the whole interface. Distinct from timeline
+    /// zoom, which changes visible musical time instead.
+    SetInterfaceScale(f32),
+    /// Settings: opt in or out of the startup release check. Takes
+    /// effect at the next launch; it never triggers a check itself.
+    ToggleCheckForUpdates,
+    /// The startup release check finished. `Some` carries the newest
+    /// upstream tag; `None` means the request failed and is reported
+    /// only by advancing the throttle.
+    UpdateCheckCompleted(Option<String>),
+    /// Hide the update notice for the rest of this session.
+    DismissUpdateNotice,
+    /// Open the releases page in the system browser.
+    OpenReleasesPage,
     /// Settings: re-warp every warped clip to the current project
     /// tempo. Uses each clip's retained `original_audio` when
     /// available.
@@ -460,6 +489,13 @@ pub enum Message {
         payload: PreparedBrowserImport,
     },
     BrowserSampleDecodeError(String),
+
+    // About
+    OpenAbout,
+    /// Hand a link to the system browser. Every URL reaching this variant is
+    /// a compile-time constant, so there is nothing here to validate.
+    OpenUrl(&'static str),
+    UrlOpened(Result<(), String>),
 
     // Settings
     OpenSettings,

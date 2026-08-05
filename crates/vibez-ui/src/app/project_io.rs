@@ -273,6 +273,9 @@ impl App {
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
+            interface_scale: self.interface_scale,
+            check_for_updates: self.state.update_check.enabled,
+            last_update_check_unix: self.state.update_check.last_check_unix,
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
@@ -371,14 +374,9 @@ impl App {
             .collect();
 
         Project {
-            name: self
-                .state
-                .project
-                .current_path
-                .as_ref()
-                .and_then(|path| path.file_stem())
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Untitled".to_string()),
+            name: super::window_policy::project_display_name(
+                self.state.project.current_path.as_deref(),
+            ),
             bpm: self.state.transport.bpm,
             groove_profile: vibez_core::perform::GrooveProfile::default(),
             swing: self.state.perform.project_swing(),

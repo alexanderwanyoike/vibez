@@ -274,6 +274,33 @@ impl App {
                 return self.route_project_saved(*result);
             }
 
+            // -- About --
+            Message::OpenAbout => {
+                self.state.about_open = true;
+            }
+            Message::OpenUrl(url) => {
+                return Task::perform(open_url_async(url), Message::UrlOpened);
+            }
+            Message::UrlOpened(result) => {
+                if let Err(error) = result {
+                    self.state.status_text = format!("Could not open link: {error}");
+                }
+            }
+
+            // -- Window close protection --
+            Message::WindowCloseRequested => {
+                return self.route_window_close_requested();
+            }
+            Message::CloseConfirmSave => {
+                return self.route_close_confirm_save();
+            }
+            Message::CloseConfirmDiscard => {
+                return self.route_close_confirm_discard();
+            }
+            Message::CloseConfirmCancel => {
+                return self.route_close_confirm_cancel();
+            }
+
             // -- Settings --
             Message::OpenSettings => {
                 self.state.settings_open = true;
@@ -652,10 +679,36 @@ impl App {
                 self.state.warp_confidence_threshold = v.clamp(0.0, 1.0);
                 self.persist_ui_settings();
             }
+            Message::SetInterfaceScale(scale) => {
+                self.interface_scale = crate::ui_settings::clamp_interface_scale(scale);
+                self.persist_ui_settings();
+            }
             Message::ToggleProjectTrackDeleteConfirmation => {
                 self.state.confirm_project_track_deletion =
                     !self.state.confirm_project_track_deletion;
                 self.persist_ui_settings();
+            }
+            Message::ToggleCheckForUpdates => {
+                self.state.update_check.enabled = !self.state.update_check.enabled;
+                self.persist_ui_settings();
+            }
+            Message::UpdateCheckCompleted(tag) => {
+                self.state
+                    .update_check
+                    .record_result(tag, crate::update_check::now_unix());
+                // Persist so the throttle survives a restart, which is
+                // the whole point of recording failures too.
+                self.persist_ui_settings();
+            }
+            Message::DismissUpdateNotice => {
+                self.state.update_check.dismissed = true;
+            }
+            Message::OpenReleasesPage => {
+                // Retiring the notice once the URL has been handed off
+                // keeps a single mechanism for hiding it.
+                return Task::perform(crate::update_check::open_releases_page(), |()| {
+                    Message::DismissUpdateNotice
+                });
             }
             Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
             Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
