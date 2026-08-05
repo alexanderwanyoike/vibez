@@ -421,6 +421,7 @@ mod tests {
     #[test]
     fn arrange_keeps_the_canonical_cursor_and_duration_readout() {
         let mut state = AppState::default();
+        state.view.workspace = Workspace::Arrange;
         state.transport.sample_rate = 48_000;
         state.transport.position_samples = 72_000;
 
