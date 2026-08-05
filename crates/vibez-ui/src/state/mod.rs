@@ -97,7 +97,7 @@ pub struct ViewState {
 impl Default for ViewState {
     fn default() -> Self {
         Self {
-            workspace: Workspace::Arrange,
+            workspace: Workspace::Perform,
             detail_panel_tab: DetailPanelTab::Clip,
             detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
             detail_panel_resize_active: false,
@@ -980,6 +980,12 @@ mod tests {
     fn app_state_default_settings_tab() {
         let state = AppState::default();
         assert_eq!(state.settings_tab, SettingsTab::Audio);
+    }
+
+    #[test]
+    fn app_state_opens_in_perform_workspace() {
+        let state = AppState::default();
+        assert_eq!(state.view.workspace, Workspace::Perform);
     }
 
     #[test]
