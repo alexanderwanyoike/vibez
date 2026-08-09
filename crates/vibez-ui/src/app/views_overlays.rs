@@ -224,6 +224,12 @@ impl App {
                 "Ctrl+J",
                 Message::join_selected_clips(),
             ),
+            item(
+                icons::SCISSORS,
+                "Trim Track Mutes",
+                "",
+                Message::Arrangement(ArrangementMsg::TrimSelectedByTrackMutes),
+            ),
         ]
         .spacing(1)
         .padding(4)
@@ -758,6 +764,11 @@ impl App {
                     icons::COPY,
                     "Join Clips (Ctrl+J)".into(),
                     Message::join_selected_clips(),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Trim Track Mutes".into(),
+                    Message::Arrangement(ArrangementMsg::TrimSelectedByTrackMutes),
                 ));
 
                 // Rename clip

@@ -913,6 +913,9 @@ impl TimelineEditorState {
             ArrangementMsg::JoinSelectedClips => {
                 return self.op_join_selected_clips(engine, ctx);
             }
+            ArrangementMsg::TrimSelectedByTrackMutes => {
+                return self.op_trim_selected_by_track_mutes(engine, ctx);
+            }
             ArrangementMsg::DeleteClipsInRegion {
                 start_beats,
                 end_beats,

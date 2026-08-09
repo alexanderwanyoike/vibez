@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
 use std::sync::Arc;
 
+use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
@@ -61,7 +62,259 @@ fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<Mid
     visible
 }
 
+/// Unmuted portions of `[start, end)` in project beats. Track Mute is a
+/// stepped lane and deliberately imposes no state before its first point, so
+/// uncaptured material before the first event is retained.
+fn unmuted_beat_ranges(lane: &AutomationLane, start: f64, end: f64) -> Vec<(f64, f64)> {
+    if end <= start {
+        return Vec::new();
+    }
+
+    let mut boundaries = vec![start];
+    boundaries.extend(
+        lane.points
+            .iter()
+            .map(|point| point.beat)
+            .filter(|beat| *beat > start && *beat < end),
+    );
+    boundaries.push(end);
+
+    boundaries
+        .windows(2)
+        .filter_map(|window| {
+            let range_start = window[0];
+            let range_end = window[1];
+            let muted = lane.value_at(range_start).is_some_and(|value| value >= 0.5);
+            (!muted && range_end > range_start).then_some((range_start, range_end))
+        })
+        .collect()
+}
+
 impl TimelineEditorState {
+    pub(super) fn op_trim_selected_by_track_mutes(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        ctx: ArrangementCtx,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        if self.selected_clips.is_empty() || ctx.samples_per_beat <= 0.0 {
+            action.status = Some("Select clips to trim by Track Mutes".to_string());
+            return action;
+        }
+
+        enum Replacement {
+            Audio {
+                track_id: TrackId,
+                original_id: ClipId,
+                clips: Vec<UiClip>,
+            },
+            Notes {
+                track_id: TrackId,
+                original_id: ClipId,
+                clips: Vec<UiNoteClip>,
+            },
+        }
+
+        let mut replacements = Vec::new();
+        for selection in self.selected_clips.iter().copied() {
+            let (track_id, clip_id) = match selection {
+                ArrangementSelection::AudioClip { track_id, clip_id }
+                | ArrangementSelection::NoteClip { track_id, clip_id } => (track_id, clip_id),
+            };
+            let Some(content) = self.find_content(track_id) else {
+                continue;
+            };
+            let Some(mute_lane) = content
+                .automation
+                .iter()
+                .find(|lane| lane.target == AutomationTarget::TrackMute)
+            else {
+                continue;
+            };
+
+            match selection {
+                ArrangementSelection::AudioClip { .. } => {
+                    let Some(clip) = content.clips.iter().find(|clip| clip.id == clip_id) else {
+                        continue;
+                    };
+                    let clip_start_beat = clip.position as f64 / ctx.samples_per_beat;
+                    let clip_end_sample = clip.position.saturating_add(clip.duration);
+                    let clip_end_beat = clip_end_sample as f64 / ctx.samples_per_beat;
+                    let ranges = unmuted_beat_ranges(mute_lane, clip_start_beat, clip_end_beat);
+                    let covers_original = ranges.as_slice() == [(clip_start_beat, clip_end_beat)];
+                    if covers_original {
+                        continue;
+                    }
+                    let clips = ranges
+                        .into_iter()
+                        .filter_map(|(start, end)| {
+                            let start_sample = ((start * ctx.samples_per_beat).round() as u64)
+                                .clamp(clip.position, clip_end_sample);
+                            let end_sample = ((end * ctx.samples_per_beat).round() as u64)
+                                .clamp(start_sample, clip_end_sample);
+                            (end_sample > start_sample).then(|| {
+                                let local_start = start_sample - clip.position;
+                                let mut fragment = clip.clone();
+                                fragment.id = ClipId::new();
+                                fragment.position = start_sample;
+                                fragment.source_offset =
+                                    audio_source_frame(clip, local_start) as u64;
+                                fragment.duration = end_sample - start_sample;
+                                fragment
+                            })
+                        })
+                        .collect();
+                    replacements.push(Replacement::Audio {
+                        track_id,
+                        original_id: clip_id,
+                        clips,
+                    });
+                }
+                ArrangementSelection::NoteClip { .. } => {
+                    let Some(clip) = content.note_clips.iter().find(|clip| clip.id == clip_id)
+                    else {
+                        continue;
+                    };
+                    let clip_end = clip.position_beats + clip.duration_beats;
+                    let ranges = unmuted_beat_ranges(mute_lane, clip.position_beats, clip_end);
+                    let covers_original = ranges.as_slice() == [(clip.position_beats, clip_end)];
+                    if covers_original {
+                        continue;
+                    }
+                    let clips = ranges
+                        .into_iter()
+                        .map(|(start, end)| {
+                            let local_start = start - clip.position_beats;
+                            let local_end = end - clip.position_beats;
+                            let mut fragment = clip.clone();
+                            fragment.id = ClipId::new();
+                            fragment.position_beats = start;
+                            fragment.duration_beats = end - start;
+                            fragment.notes = visible_notes(clip, local_start, local_end);
+                            fragment.selected_notes.clear();
+                            if fragment.loop_enabled {
+                                fragment.loop_start_beats = 0.0;
+                                fragment.loop_end_beats = fragment.duration_beats;
+                            }
+                            fragment
+                        })
+                        .collect();
+                    replacements.push(Replacement::Notes {
+                        track_id,
+                        original_id: clip_id,
+                        clips,
+                    });
+                }
+            }
+        }
+
+        if replacements.is_empty() {
+            action.status = Some("No selected clip material overlaps Track Mutes".to_string());
+            return action;
+        }
+
+        let trimmed_count = replacements.len();
+        let mut fragment_count = 0;
+        let mut new_selection = self.selected_clips.clone();
+        for replacement in replacements {
+            match replacement {
+                Replacement::Audio {
+                    track_id,
+                    original_id,
+                    clips,
+                } => {
+                    new_selection.remove(&ArrangementSelection::AudioClip {
+                        track_id,
+                        clip_id: original_id,
+                    });
+                    engine.send(EngineCommand::RemoveClip(track_id, original_id));
+                    if let Some(content) = self.find_content_mut(track_id) {
+                        content.clips.retain(|clip| clip.id != original_id);
+                    }
+                    for clip in &clips {
+                        engine.send(EngineCommand::AddClip {
+                            track_id,
+                            clip_id: clip.id,
+                            audio: Arc::clone(&clip.audio),
+                            position: clip.position,
+                            source_offset: clip.source_offset,
+                            duration: clip.duration,
+                            loop_enabled: clip.loop_enabled,
+                            loop_start: clip.loop_start,
+                            loop_end: clip.loop_end,
+                        });
+                        new_selection.insert(ArrangementSelection::AudioClip {
+                            track_id,
+                            clip_id: clip.id,
+                        });
+                    }
+                    fragment_count += clips.len();
+                    if let Some(content) = self.find_content_mut(track_id) {
+                        content.clips.extend(clips);
+                    }
+                }
+                Replacement::Notes {
+                    track_id,
+                    original_id,
+                    clips,
+                } => {
+                    new_selection.remove(&ArrangementSelection::NoteClip {
+                        track_id,
+                        clip_id: original_id,
+                    });
+                    engine.send(EngineCommand::RemoveNoteClip(track_id, original_id));
+                    if let Some(content) = self.find_content_mut(track_id) {
+                        content.note_clips.retain(|clip| clip.id != original_id);
+                    }
+                    for clip in &clips {
+                        engine.send(EngineCommand::AddNoteClip {
+                            track_id,
+                            clip_id: clip.id,
+                            position_beats: clip.position_beats,
+                            duration_beats: clip.duration_beats,
+                            loop_enabled: clip.loop_enabled,
+                            loop_start_beats: clip.loop_start_beats,
+                            loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
+                        });
+                        for note in &clip.notes {
+                            engine.send(EngineCommand::AddNote {
+                                track_id,
+                                clip_id: clip.id,
+                                note: *note,
+                            });
+                        }
+                        new_selection.insert(ArrangementSelection::NoteClip {
+                            track_id,
+                            clip_id: clip.id,
+                        });
+                    }
+                    fragment_count += clips.len();
+                    if let Some(content) = self.find_content_mut(track_id) {
+                        content.note_clips.extend(clips);
+                    }
+                }
+            }
+        }
+
+        self.selected_clips = new_selection;
+        self.selected_note_clip =
+            self.selected_clips
+                .iter()
+                .find_map(|selection| match selection {
+                    ArrangementSelection::NoteClip { track_id, clip_id } => {
+                        Some((*track_id, *clip_id))
+                    }
+                    ArrangementSelection::AudioClip { .. } => None,
+                });
+        action.status = Some(format!(
+            "Trimmed {trimmed_count} clip{} by Track Mutes · kept {fragment_count} fragment{}",
+            if trimmed_count == 1 { "" } else { "s" },
+            if fragment_count == 1 { "" } else { "s" },
+        ));
+        action
+    }
+
     pub(super) fn op_resize_audio_clip(
         &mut self,
         engine: &mut impl EngineHandle,

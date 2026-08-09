@@ -121,6 +121,9 @@ pub enum ArrangementMsg {
     },
     SplitSelectedAtPlayhead,
     JoinSelectedClips,
+    /// Replace selected clips with the portions where their track's captured
+    /// Track Mute automation is off.
+    TrimSelectedByTrackMutes,
     DeleteClipsInRegion {
         start_beats: f64,
         end_beats: f64,
@@ -184,6 +187,7 @@ impl ArrangementMsg {
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
+                | Self::TrimSelectedByTrackMutes
                 | Self::DeleteClipsInRegion { .. }
                 | Self::SplitClipsAtRegion { .. }
                 | Self::CreateClipFromSelection
