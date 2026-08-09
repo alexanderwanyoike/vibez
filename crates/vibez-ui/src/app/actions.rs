@@ -688,9 +688,12 @@ impl App {
     pub(super) fn poll_audio_stream_events(&mut self) {
         let mut events = Vec::new();
         if let Some(stream) = self._stream.as_ref() {
+            self.state.audio_cpu_load_percent = stream.cpu_load_percent();
             while let Some(event) = stream.try_next_event() {
                 events.push(event);
             }
+        } else {
+            self.state.audio_cpu_load_percent = 0.0;
         }
         for event in events {
             self.state.apply_audio_stream_event(event);
