@@ -117,6 +117,7 @@ impl App {
         self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
+        self.state.project.recent_projects_open = false;
         self.state.project.unresolved_clips.clear();
         self.state.view.editing_track_name = None;
         self.state.view.editing_clip_name = None;
@@ -256,6 +257,7 @@ impl App {
 
     pub(super) fn persist_ui_settings(&mut self) {
         let settings = UiSettings {
+            recent_project_paths: self.state.project.recent_project_paths.clone(),
             perform_input_mapping: self.state.perform.input_mapping.clone(),
             fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
             track_mute_quantization: self.state.perform.track_mute_quantization(),
@@ -281,6 +283,17 @@ impl App {
         };
         if let Err(err) = settings.save() {
             self.state.status_text = format!("UI settings save error: {err}");
+        }
+    }
+
+    pub(super) fn remember_recent_project(&mut self, path: PathBuf) {
+        let before = self.state.project.recent_project_paths.clone();
+        crate::ui_settings::remember_recent_project(
+            &mut self.state.project.recent_project_paths,
+            path,
+        );
+        if self.state.project.recent_project_paths != before {
+            self.persist_ui_settings();
         }
     }
 

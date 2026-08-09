@@ -10,6 +10,7 @@ use iced::{Element, Length, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::project::ProjectMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::effect::EffectType;
 use vibez_core::midi::InstrumentKind;
@@ -580,6 +581,34 @@ impl App {
         );
 
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
+        let recent_btn = button(
+            row![
+                icons::icon(icons::MUSIC).size(12).color(th::text()),
+                text("Recent Projects").size(12).color(th::text()),
+                horizontal_space(),
+                text("›")
+                    .size(16)
+                    .color(if self.state.project.recent_projects_open {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    }),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::Project(ProjectMsg::ToggleRecentProjects))
+        .padding([8, 16])
+        .width(Length::Fill)
+        .style(|_theme: &Theme, status| button::Style {
+            background: match status {
+                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+                _ => None,
+            },
+            text_color: th::text(),
+            border: iced::Border::default(),
+            ..Default::default()
+        });
         let save_label = if self.state.project.dirty {
             "Save*"
         } else {
@@ -618,6 +647,7 @@ impl App {
         let menu_content = column![new_btn]
             .spacing(2)
             .push(open_btn)
+            .push(recent_btn)
             .push(save_btn)
             .push(save_as_btn)
             .push(export_btn)
@@ -636,10 +666,102 @@ impl App {
             ..Default::default()
         });
 
-        // Position below the header, near the File button
+        let recent_card = self.state.project.recent_projects_open.then(|| {
+            let mut items = column![text("RECENT PROJECTS").size(9).color(th::text_muted())]
+                .spacing(2)
+                .padding(4)
+                .width(Length::Fixed(320.0));
+            if self.state.project.recent_project_paths.is_empty() {
+                items = items.push(
+                    container(text("No recent projects").size(11).color(th::text_dim()))
+                        .padding([10, 12]),
+                );
+            } else {
+                for path in &self.state.project.recent_project_paths {
+                    let name = path
+                        .file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy()
+                        .into_owned();
+                    let parent = path
+                        .parent()
+                        .map(|parent| parent.display().to_string())
+                        .unwrap_or_default();
+                    let open_path = path.clone();
+                    items = items.push(
+                        button(
+                            column![
+                                text(name).size(11).color(th::text()),
+                                text(parent).size(9).color(th::text_muted()),
+                            ]
+                            .spacing(1),
+                        )
+                        .on_press(Message::menu_item(
+                            MenuOverlay::File,
+                            Message::ProjectOpenPathSelected(Some(open_path)),
+                        ))
+                        .padding([6, 10])
+                        .width(Length::Fill)
+                        .style(|_theme: &Theme, status| button::Style {
+                            background: match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Some(th::bg_hover().into())
+                                }
+                                _ => None,
+                            },
+                            text_color: th::text(),
+                            border: iced::Border::default(),
+                            ..Default::default()
+                        }),
+                    );
+                }
+                items = items.push(
+                    button(
+                        row![
+                            icons::icon(icons::TRASH_2).size(11).color(th::text_dim()),
+                            text("Clear Recent Projects").size(11).color(th::text_dim()),
+                        ]
+                        .spacing(6),
+                    )
+                    .on_press(Message::menu_item(
+                        MenuOverlay::File,
+                        Message::Project(ProjectMsg::ClearRecentProjects),
+                    ))
+                    .padding([8, 10])
+                    .width(Length::Fill)
+                    .style(|_theme: &Theme, status| button::Style {
+                        background: match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                Some(th::bg_hover().into())
+                            }
+                            _ => None,
+                        },
+                        text_color: th::text_dim(),
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }),
+                );
+            }
+            container(items).style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            })
+        });
+
+        // Position below the header, near the File button.
+        let menus = if let Some(recent_card) = recent_card {
+            row![menu_card, recent_card].spacing(4)
+        } else {
+            row![menu_card]
+        };
         let padded = column![
             vertical_space().height(Length::Fixed(42.0)),
-            row![horizontal_space().width(Length::Fixed(60.0)), menu_card,]
+            row![horizontal_space().width(Length::Fixed(60.0)), menus,]
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))

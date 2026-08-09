@@ -16,7 +16,10 @@ pub(super) fn dismiss(state: &mut AppState, overlay: MenuOverlay) -> bool {
 
     match overlay {
         MenuOverlay::ArrangementContext => state.view.context_menu = None,
-        MenuOverlay::File => state.project.file_menu_open = false,
+        MenuOverlay::File => {
+            state.project.file_menu_open = false;
+            state.project.recent_projects_open = false;
+        }
         MenuOverlay::Edit => state.view.edit_menu_open = false,
         MenuOverlay::About => state.about_open = false,
     }

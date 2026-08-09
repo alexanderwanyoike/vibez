@@ -215,6 +215,8 @@ impl App {
         // here rather than at the render site so a hand-edited ui.json
         // cannot open the window at an unusable size.
         let interface_scale = ui_settings.clamped_interface_scale();
+        let recent_project_paths =
+            crate::ui_settings::normalize_recent_projects(ui_settings.recent_project_paths.clone());
 
         let (stream, sample_rate, audio_stream_health) =
             match AudioOutputStream::open(engine, Some(512)) {
@@ -296,6 +298,10 @@ impl App {
             update_check: crate::update_check::UpdateCheckState {
                 enabled: ui_settings.check_for_updates,
                 last_check_unix: ui_settings.last_update_check_unix,
+                ..Default::default()
+            },
+            project: crate::state::ProjectState {
+                recent_project_paths,
                 ..Default::default()
             },
             view: crate::state::ViewState {

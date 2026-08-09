@@ -53,6 +53,9 @@ impl App {
             self.apply_snapshot(snapshot);
             self.mark_project_dirty();
         }
+        if action.persist_ui_settings {
+            self.persist_ui_settings();
+        }
         Task::none()
     }
 
@@ -161,7 +164,9 @@ impl App {
     ) -> Task<Message> {
         match result {
             Ok(loaded) => {
+                let path = loaded.path.clone();
                 self.rebuild_from_loaded_project(loaded);
+                self.remember_recent_project(path);
             }
             Err(err) => {
                 self.state.status_text = format!("Project load error: {err}");
@@ -182,6 +187,7 @@ impl App {
             Ok(saved) => {
                 self.apply_saved_project_sources(&saved.project);
                 self.state.project.current_path = Some(saved.path.clone());
+                self.remember_recent_project(saved.path.clone());
                 self.state.project.dirty = !completion_is_current;
                 if !completion_is_current {
                     // An Untitled project can receive another edit while its
