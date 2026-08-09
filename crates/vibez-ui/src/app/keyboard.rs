@@ -440,6 +440,7 @@ pub(crate) fn global_key_handler(
         iced::keyboard::Key::Character(ref c) => match c.as_str() {
             "a" | "A" => Some(Message::SelectAllPressed),
             "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
+            "s" | "S" => Some(Message::SaveProject),
             "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
             "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClips)),
             "t" | "T" => {
@@ -534,6 +535,19 @@ mod tests {
             global_key_handler(Key::Character("c".into()), command_modifier()),
             Some(Message::Arrangement(ArrangementMsg::CopySelectedClips))
         ));
+    }
+
+    #[test]
+    fn save_shortcut_answers_the_platform_command_modifier() {
+        use iced::keyboard::{Key, Modifiers};
+
+        for key in ["s", "S"] {
+            assert!(matches!(
+                global_key_handler(Key::Character(key.into()), command_modifier()),
+                Some(Message::SaveProject)
+            ));
+        }
+        assert!(global_key_handler(Key::Character("s".into()), Modifiers::empty()).is_none());
     }
 
     #[test]

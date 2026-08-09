@@ -264,6 +264,21 @@ pub struct ProjectSaveResult {
     pub observation: Option<SaveObservation>,
 }
 
+/// Identity of the document revision captured by an asynchronous save.
+/// The completion uses this to avoid marking newer edits as saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectSaveToken {
+    pub document_id: u64,
+    pub revision: u64,
+    pub automatic: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectSaveCompleted {
+    pub token: ProjectSaveToken,
+    pub result: Result<ProjectSaveResult, String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     /// A message emitted by one of the selected Section timeline canvases.
@@ -376,7 +391,7 @@ pub enum Message {
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
-    ProjectSaved(Box<Result<ProjectSaveResult, String>>),
+    ProjectSaved(Box<ProjectSaveCompleted>),
 
     // Window close protection. The window is configured not to exit on its
     // own close request, so every one of these arrives here first.
@@ -395,6 +410,8 @@ pub enum Message {
     SetWarpConfidenceThreshold(f32),
     /// Settings: ask before deleting a Project Track everywhere.
     ToggleProjectTrackDeleteConfirmation,
+    /// Settings: save named projects shortly after editing stops.
+    ToggleAutoSave,
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),

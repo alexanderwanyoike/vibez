@@ -106,7 +106,13 @@ impl App {
                             muted,
                             effective_at_samples,
                         );
-                        apply_track_mute_event(&mut self.state, track_id, muted);
+                        if apply_track_mute_event(&mut self.state, track_id, muted) {
+                            self.save_runtime.project_changed(
+                                self.state.auto_save_enabled,
+                                self.state.project.current_path.is_some(),
+                                std::time::Instant::now(),
+                            );
+                        }
                     }
                     EngineEvent::TrackMuteQueued {
                         track_id,
