@@ -688,6 +688,15 @@ impl App {
                     !self.state.confirm_project_track_deletion;
                 self.persist_ui_settings();
             }
+            Message::ToggleAutoSave => {
+                self.state.auto_save_enabled = !self.state.auto_save_enabled;
+                self.save_runtime.set_auto_save_enabled(
+                    self.state.auto_save_enabled,
+                    self.state.project.dirty && self.state.project.current_path.is_some(),
+                    std::time::Instant::now(),
+                );
+                self.persist_ui_settings();
+            }
             Message::ToggleCheckForUpdates => {
                 self.state.update_check.enabled = !self.state.update_check.enabled;
                 self.persist_ui_settings();

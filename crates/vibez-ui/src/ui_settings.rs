@@ -53,6 +53,10 @@ pub struct UiSettings {
     /// Section content. Off by default because deletion is undoable.
     #[serde(default)]
     pub confirm_project_track_deletion: bool,
+    /// Save named projects shortly after editing stops. Untitled projects
+    /// still wait for an explicit save so autosave never opens a file picker.
+    #[serde(default = "default_auto_save_enabled")]
+    pub auto_save_enabled: bool,
     /// Multiplier applied to the whole logical coordinate space, so
     /// every panel, control and font grows or shrinks together. This is
     /// not timeline zoom: it changes how big the interface is drawn,
@@ -121,6 +125,7 @@ impl Default for UiSettings {
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
             confirm_project_track_deletion: false,
+            auto_save_enabled: default_auto_save_enabled(),
             interface_scale: default_interface_scale(),
             check_for_updates: default_check_for_updates(),
             last_update_check_unix: None,
@@ -172,6 +177,10 @@ fn default_media_cache_budget_bytes() -> u64 {
 }
 
 fn default_media_cache_automatic_eviction() -> bool {
+    true
+}
+
+const fn default_auto_save_enabled() -> bool {
     true
 }
 
@@ -313,6 +322,20 @@ mod tests {
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert!(loaded.confirm_project_track_deletion);
+    }
+
+    #[test]
+    fn auto_save_defaults_on_and_roundtrips() {
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert!(old.auto_save_enabled);
+
+        let settings = UiSettings {
+            auto_save_enabled: false,
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!loaded.auto_save_enabled);
     }
 
     #[test]
