@@ -173,7 +173,7 @@ impl App {
                     Some(self.state.perform.track_mute_quantization()),
                     |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
                 )
-                .width(Length::Fixed(104.0))
+                .width(Length::Fixed(126.0))
                 .padding([4, 7])
                 .text_size(9);
                 row![
