@@ -95,6 +95,8 @@ struct App {
     /// describes the window the project is viewed through, not the
     /// project or the view layout, and nothing about it is undoable.
     interface_scale: f32,
+    /// Debounce, revision, and in-flight coordination for project saves.
+    save_runtime: save_runtime::SaveRuntime,
     // Undo / redo
 }
 
@@ -162,6 +164,7 @@ mod plugins;
 mod project_io;
 mod project_replay;
 mod project_sections;
+mod save_runtime;
 mod section_record;
 mod update;
 mod update_media;
@@ -194,6 +197,7 @@ mod views_settings;
 mod views_settings_appearance;
 mod views_settings_dropbox;
 mod views_settings_perform;
+mod views_settings_project;
 mod views_settings_updates;
 mod views_shell;
 mod views_transport;
@@ -288,6 +292,7 @@ impl App {
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
+            auto_save_enabled: ui_settings.auto_save_enabled,
             update_check: crate::update_check::UpdateCheckState {
                 enabled: ui_settings.check_for_updates,
                 last_check_unix: ui_settings.last_update_check_unix,
@@ -392,6 +397,7 @@ impl App {
             midi_input,
             midi_input_ports: Vec::new(),
             interface_scale,
+            save_runtime: save_runtime::SaveRuntime::default(),
         };
 
         // Inform the engine of the actual sample rate
@@ -495,6 +501,11 @@ impl App {
 
     fn mark_project_dirty(&mut self) {
         self.state.project.dirty = true;
+        self.save_runtime.project_changed(
+            self.state.auto_save_enabled,
+            self.state.project.current_path.is_some(),
+            std::time::Instant::now(),
+        );
     }
 
     pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {

@@ -52,7 +52,7 @@ impl App {
                     .wrapping(iced::widget::text::Wrapping::None),
             )
             .on_press(Message::SelectSettingsTab(tab))
-            .padding([6, 10])
+            .padding([6, 8])
             .style(move |_theme: &Theme, status| {
                 let bg = if is_active {
                     None
@@ -84,6 +84,11 @@ impl App {
         let active = self.state.settings_tab;
         let tab_bar = row![
             make_tab_btn("Audio", SettingsTab::Audio, active == SettingsTab::Audio),
+            make_tab_btn(
+                "Project",
+                SettingsTab::Project,
+                active == SettingsTab::Project
+            ),
             make_tab_btn(
                 "Plugins",
                 SettingsTab::Plugins,
@@ -120,6 +125,7 @@ impl App {
         // -- Tab body --
         let tab_body: Element<'_, Message> = match self.state.settings_tab {
             SettingsTab::Audio => self.view_settings_audio_tab(),
+            SettingsTab::Project => self.view_settings_project_tab(),
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
             SettingsTab::Dropbox => self.view_settings_dropbox_tab(),
             SettingsTab::Warping => self.view_settings_warping_tab(),
@@ -147,10 +153,10 @@ impl App {
         ]
         .spacing(8)
         .padding(20)
-        // Wide enough for all seven tab labels on one line with ~30px to
+        // Wide enough for all eight tab labels on one line with room to
         // spare; still comfortably inside the 900px minimum window. Grow
-        // this before adding an eighth tab.
-        .width(Length::Fixed(560.0));
+        // this before adding a ninth tab.
+        .width(Length::Fixed(600.0));
 
         let dialog = container(content).style(|_theme: &Theme| container::Style {
             background: Some(th::bg_surface().into()),

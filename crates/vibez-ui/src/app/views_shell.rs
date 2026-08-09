@@ -465,6 +465,40 @@ impl App {
             .into()
     }
 
+    /// Persistent project-save state at the far right of the bottom bar.
+    /// Unlike transient status text, this remains visible after another
+    /// operation reports its own result.
+    fn view_project_save_status(&self) -> Element<'_, Message> {
+        let (icon, label, color) = if self.save_runtime.is_saving() {
+            (icons::CIRCLE_DOT, "Saving...", th::accent())
+        } else if self.state.project.dirty {
+            (icons::CIRCLE, "Unsaved", th::text_dim())
+        } else if self.state.project.current_path.is_some() {
+            (icons::CIRCLE_DOT, "Saved", th::accent())
+        } else {
+            (icons::CIRCLE, "Not saved", th::text_dim())
+        };
+
+        container(
+            row![
+                icons::icon(icon).size(9).color(color),
+                text(label).size(11).color(color)
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([1, 7])
+        .style(move |_theme: &Theme| container::Style {
+            border: iced::Border {
+                color,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+    }
+
     pub(super) fn view_status(&self) -> Element<'_, Message> {
         let status = text(&self.state.status_text).size(11).color(th::text_dim());
         let content: Element<'_, Message> = match self.state.export_progress {
@@ -475,6 +509,7 @@ impl App {
                     .width(180)
                     .height(5),
                 text(format!("{percent}%")).size(11).color(th::text()),
+                self.view_project_save_status(),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
@@ -482,11 +517,19 @@ impl App {
             // An export in flight owns the right-hand side of the bar;
             // a release notice can wait for the next frame that has room.
             None => match self.state.update_check.notice() {
-                Some(version) => row![status, horizontal_space(), self.view_update_notice(version)]
+                Some(version) => row![
+                    status,
+                    horizontal_space(),
+                    self.view_update_notice(version),
+                    self.view_project_save_status()
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                None => row![status, horizontal_space(), self.view_project_save_status()]
                     .spacing(8)
                     .align_y(iced::Alignment::Center)
                     .into(),
-                None => status.into(),
             },
         };
 

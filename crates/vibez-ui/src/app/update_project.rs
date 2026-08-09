@@ -1,6 +1,7 @@
 //! Routes Project state and project-file messages.
 
 use crate::domains::project::{ProjectCtx, ProjectMsg};
+use crate::message::ProjectSaveCompleted;
 
 use super::window_policy::{close_request_decision, CloseRequest};
 use super::*;
@@ -13,6 +14,30 @@ fn exit_application() -> Task<Message> {
 }
 
 impl App {
+    fn start_project_save(
+        &mut self,
+        path: PathBuf,
+        source_path: Option<PathBuf>,
+        project: vibez_project::Project,
+        automatic: bool,
+    ) -> Task<Message> {
+        let Some(token) = self.save_runtime.begin_save(automatic) else {
+            if !automatic {
+                self.state.status_text = "Save queued behind the current save".into();
+            }
+            return Task::none();
+        };
+        self.state.status_text = if automatic {
+            "Auto-saving project...".into()
+        } else {
+            "Saving project...".into()
+        };
+        Task::perform(
+            save_project_async(path, source_path, project),
+            move |result| Message::ProjectSaved(Box::new(ProjectSaveCompleted { token, result })),
+        )
+    }
+
     pub(super) fn route_project_message(&mut self, msg: ProjectMsg) -> Task<Message> {
         if matches!(&msg, ProjectMsg::ToggleFileMenu) {
             self.state.view.edit_menu_open = false;
@@ -26,6 +51,7 @@ impl App {
         }
         if let Some(snapshot) = action.apply_snapshot {
             self.apply_snapshot(snapshot);
+            self.mark_project_dirty();
         }
         Task::none()
     }
@@ -52,15 +78,28 @@ impl App {
     pub(super) fn route_save_project(&mut self) -> Task<Message> {
         let project = self.project_for_save();
         if let Some(path) = self.state.project.current_path.clone() {
-            return Task::perform(
-                save_project_async(path.clone(), Some(path), project),
-                |result| Message::ProjectSaved(Box::new(result)),
-            );
+            return self.start_project_save(path.clone(), Some(path), project, false);
         }
         self.update(Message::SaveProjectAs)
     }
 
+    pub(super) fn route_auto_save_project(&mut self) -> Task<Message> {
+        if !self.state.auto_save_enabled || !self.state.project.dirty {
+            self.save_runtime.cancel_pending_auto_save();
+            return Task::none();
+        }
+        let Some(path) = self.state.project.current_path.clone() else {
+            return Task::none();
+        };
+        let project = self.project_for_save();
+        self.start_project_save(path.clone(), Some(path), project, true)
+    }
+
     pub(super) fn route_save_project_as(&mut self) -> Task<Message> {
+        if self.save_runtime.is_saving() {
+            self.state.status_text = "Wait for the current save before using Save As".into();
+            return Task::none();
+        }
         Task::perform(
             async {
                 let handle = rfd::AsyncFileDialog::new()
@@ -104,9 +143,11 @@ impl App {
                 path.set_extension("vzp");
             }
             let project = self.project_for_save();
-            return Task::perform(
-                save_project_async(path, self.state.project.current_path.clone(), project),
-                |result| Message::ProjectSaved(Box::new(result)),
+            return self.start_project_save(
+                path,
+                self.state.project.current_path.clone(),
+                project,
+                false,
             );
         }
         // Backing out of save-as also backs out of the quit that asked for it.
@@ -129,17 +170,48 @@ impl App {
         Task::none()
     }
 
-    pub(super) fn route_project_saved(
-        &mut self,
-        result: Result<ProjectSaveResult, String>,
-    ) -> Task<Message> {
+    pub(super) fn route_project_saved(&mut self, completed: ProjectSaveCompleted) -> Task<Message> {
+        let ProjectSaveCompleted { token, result } = completed;
+        if !self.save_runtime.finish_save(token) {
+            return Task::none();
+        }
+        let completion_is_current = self.save_runtime.completion_is_current(token);
+        let manual_save_queued = self.save_runtime.take_manual_save_queued();
+
         match result {
             Ok(saved) => {
                 self.apply_saved_project_sources(&saved.project);
                 self.state.project.current_path = Some(saved.path.clone());
-                self.state.project.dirty = false;
-                self.state.status_text = format!("Saved {}", saved.path.display());
-                if std::mem::take(&mut self.state.project.exit_after_save) {
+                self.state.project.dirty = !completion_is_current;
+                if !completion_is_current {
+                    // An Untitled project can receive another edit while its
+                    // first Save As is writing. It has a path now, so make
+                    // that newer revision eligible for the normal debounce.
+                    self.save_runtime.set_auto_save_enabled(
+                        self.state.auto_save_enabled,
+                        true,
+                        std::time::Instant::now(),
+                    );
+                }
+                let saved_status = if token.automatic {
+                    format!(
+                        "Auto-saved {}",
+                        saved
+                            .path
+                            .file_name()
+                            .unwrap_or(saved.path.as_os_str())
+                            .to_string_lossy()
+                    )
+                } else {
+                    format!("Saved {}", saved.path.display())
+                };
+                self.state.status_text = if completion_is_current {
+                    saved_status
+                } else {
+                    format!("{saved_status}; newer edits are still unsaved")
+                };
+                if completion_is_current && std::mem::take(&mut self.state.project.exit_after_save)
+                {
                     return exit_application();
                 }
             }
@@ -149,6 +221,10 @@ impl App {
                 // error stays on screen with the edits intact.
                 self.state.project.exit_after_save = false;
             }
+        }
+
+        if manual_save_queued {
+            return self.route_save_project();
         }
         Task::none()
     }

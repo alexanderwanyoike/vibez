@@ -229,6 +229,7 @@ impl App {
     }
 
     pub(super) fn reset_to_new_project(&mut self) {
+        self.save_runtime.reset_document();
         self.remote_import_request.cancel();
         self.remote_materialization_request.cancel();
         self.remote_audition_cache_lease = None;
@@ -273,6 +274,7 @@ impl App {
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
+            auto_save_enabled: self.state.auto_save_enabled,
             interface_scale: self.interface_scale,
             check_for_updates: self.state.update_check.enabled,
             last_update_check_unix: self.state.update_check.last_check_unix,
@@ -854,6 +856,7 @@ impl App {
             .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.project.current_path = Some(loaded.path.clone());
         self.state.project.dirty = false;
+        self.save_runtime.reset_document();
         let provenance_suffix = remote_provenance
             .map(|label| format!(" · Remote source {label}"))
             .unwrap_or_default();

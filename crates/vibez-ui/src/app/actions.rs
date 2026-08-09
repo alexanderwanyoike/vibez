@@ -254,7 +254,7 @@ impl App {
             self.state.status_text = status;
         }
         if action.mark_dirty {
-            self.state.project.dirty = true;
+            self.mark_project_dirty();
         }
         Task::none()
     }
@@ -769,7 +769,12 @@ impl App {
                 self.state.view.scroll_offset_beats = viewport.scroll_offset_beats;
             }
         }
-        export_task
+        let auto_save_task = if self.save_runtime.auto_save_due(std::time::Instant::now()) {
+            self.route_auto_save_project()
+        } else {
+            Task::none()
+        };
+        Task::batch([export_task, auto_save_task])
     }
 }
 
