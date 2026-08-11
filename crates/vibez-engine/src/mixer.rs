@@ -24,6 +24,7 @@ const MUTE_RAMP_FRAMES: u32 = 64;
 pub(crate) struct QueuedTrackMute {
     pub muted: bool,
     pub effective_at_samples: u64,
+    pub end_of_section: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

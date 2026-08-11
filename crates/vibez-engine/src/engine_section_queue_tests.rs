@@ -293,6 +293,39 @@ fn end_of_section_track_mute_uses_the_active_section_wrap() {
 }
 
 #[test]
+fn end_of_section_track_mute_follows_an_earlier_section_transition() {
+    let (mut engine, mut commands, mut events, track_id) = playing_engine(0.6, 2.0);
+    while events.pop().is_ok() {}
+    commands
+        .push(EngineCommand::QueueTrackMute {
+            track_id,
+            muted: true,
+            quantization: TrackMuteQuantization::EndOfSection,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::QueueSection {
+            prepared: source(SectionId::new(), track_id, 4.0, 0.8),
+            quantization: SectionLaunchQuantization::OneBeat,
+        })
+        .unwrap();
+
+    engine.process(&mut [0.0; 6], 1);
+
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::TrackMuteChanged {
+                track_id: event_track,
+                muted: true,
+                effective_at_samples: 4,
+            } if event_track == track_id
+        ))
+    );
+    assert!(engine.tracks()[0].mute);
+}
+
+#[test]
 fn requeue_returns_stale_residency_and_only_latest_section_transitions() {
     let (mut engine, mut commands, mut events, track_id) = playing_engine(0.1, 8.0);
     while events.pop().is_ok() {}

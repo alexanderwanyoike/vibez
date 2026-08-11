@@ -136,6 +136,7 @@ impl AudioEngine {
         track.queued_mute = Some(QueuedTrackMute {
             muted,
             effective_at_samples,
+            end_of_section: quantization == TrackMuteQuantization::EndOfSection,
         });
         let _ = self.event_tx.push(EngineEvent::TrackMuteQueued {
             track_id,
@@ -159,6 +160,17 @@ impl AudioEngine {
                 .map(|queued| (track.id, queued))
         }) {
             self.apply_track_mute_at(track_id, queued.muted, queued.effective_at_samples);
+        }
+    }
+
+    pub(super) fn apply_end_of_section_track_mutes(&mut self, at_samples: u64) {
+        while let Some((track_id, muted)) = self.tracks.iter().find_map(|track| {
+            track
+                .queued_mute
+                .filter(|queued| queued.end_of_section)
+                .map(|queued| (track.id, queued.muted))
+        }) {
+            self.apply_track_mute_at(track_id, muted, at_samples);
         }
     }
 
