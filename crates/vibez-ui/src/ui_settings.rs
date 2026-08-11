@@ -1,9 +1,12 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
+    /// Most recently opened or successfully saved projects, newest first.
+    #[serde(default)]
+    pub recent_project_paths: Vec<PathBuf>,
     #[serde(default)]
     pub perform_input_mapping: crate::domains::perform::PerformInputMapping,
     #[serde(default = "default_fixed_computer_velocity")]
@@ -107,6 +110,7 @@ pub fn clamp_interface_scale(scale: f32) -> f32 {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
+            recent_project_paths: Vec::new(),
             perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
             fixed_computer_velocity: default_fixed_computer_velocity(),
             track_mute_quantization: vibez_core::perform::TrackMuteQuantization::default(),
@@ -131,6 +135,33 @@ impl Default for UiSettings {
             last_update_check_unix: None,
         }
     }
+}
+
+pub const RECENT_PROJECT_LIMIT: usize = 6;
+
+pub fn normalize_recent_projects(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    let mut normalized = Vec::new();
+    for path in paths {
+        if !normalized.contains(&path) {
+            normalized.push(path);
+        }
+        if normalized.len() == RECENT_PROJECT_LIMIT {
+            break;
+        }
+    }
+    normalized
+}
+
+pub fn remember_recent_project(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    paths.retain(|existing| existing != &path);
+    paths.insert(0, path);
+    paths.truncate(RECENT_PROJECT_LIMIT);
+}
+
+pub fn forget_recent_project(paths: &mut Vec<PathBuf>, path: &Path) -> bool {
+    let previous_len = paths.len();
+    paths.retain(|existing| existing != path);
+    paths.len() != previous_len
 }
 
 impl UiSettings {
@@ -229,6 +260,64 @@ impl UiSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_projects_are_deduplicated_capped_and_promoted() {
+        let mut paths = normalize_recent_projects([
+            "/projects/a.vzp".into(),
+            "/projects/b.vzp".into(),
+            "/projects/a.vzp".into(),
+            "/projects/c.vzp".into(),
+            "/projects/d.vzp".into(),
+            "/projects/e.vzp".into(),
+            "/projects/f.vzp".into(),
+            "/projects/g.vzp".into(),
+        ]);
+        assert_eq!(paths.len(), RECENT_PROJECT_LIMIT);
+        assert_eq!(paths[0], PathBuf::from("/projects/a.vzp"));
+
+        remember_recent_project(&mut paths, "/projects/d.vzp".into());
+        assert_eq!(paths[0], PathBuf::from("/projects/d.vzp"));
+        assert_eq!(paths.len(), RECENT_PROJECT_LIMIT);
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.as_path() == std::path::Path::new("/projects/d.vzp"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_recent_project_is_pruned_without_touching_other_entries() {
+        let mut paths = vec![
+            PathBuf::from("/projects/a.vzp"),
+            PathBuf::from("/projects/missing.vzp"),
+            PathBuf::from("/projects/b.vzp"),
+        ];
+
+        assert!(forget_recent_project(
+            &mut paths,
+            Path::new("/projects/missing.vzp")
+        ));
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/projects/a.vzp"),
+                PathBuf::from("/projects/b.vzp")
+            ]
+        );
+        assert!(!forget_recent_project(
+            &mut paths,
+            Path::new("/projects/unknown.vzp")
+        ));
+    }
+
+    #[test]
+    fn old_settings_start_with_no_recent_projects() {
+        let loaded: UiSettings = serde_json::from_str("{}").unwrap();
+        assert!(loaded.recent_project_paths.is_empty());
+    }
 
     #[test]
     fn old_settings_receive_the_browser_width_default() {

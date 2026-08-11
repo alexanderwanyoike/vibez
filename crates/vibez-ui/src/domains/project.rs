@@ -17,6 +17,8 @@ use crate::state::{ProjectSnapshot, ProjectState};
 #[derive(Debug, Clone)]
 pub enum ProjectMsg {
     ToggleFileMenu,
+    ToggleRecentProjects,
+    ClearRecentProjects,
     Undo,
     Redo,
 }
@@ -37,6 +39,8 @@ pub struct ProjectAction {
     pub status: Option<String>,
     /// Restore this snapshot (tears down and replays the engine).
     pub apply_snapshot: Option<ProjectSnapshot>,
+    /// Global recent-project history changed and must be saved to UI settings.
+    pub persist_ui_settings: bool,
 }
 
 impl ProjectState {
@@ -50,6 +54,20 @@ impl ProjectState {
         match msg {
             ProjectMsg::ToggleFileMenu => {
                 self.file_menu_open = !self.file_menu_open;
+                if !self.file_menu_open {
+                    self.recent_projects_open = false;
+                }
+            }
+            ProjectMsg::ToggleRecentProjects => {
+                if self.file_menu_open {
+                    self.recent_projects_open = !self.recent_projects_open;
+                }
+            }
+            ProjectMsg::ClearRecentProjects => {
+                self.recent_project_paths.clear();
+                self.recent_projects_open = false;
+                action.persist_ui_settings = true;
+                action.status = Some("Cleared recent projects".to_string());
             }
             ProjectMsg::Undo => {
                 let Some(snapshot) = self.history.pop_undo() else {
@@ -233,6 +251,28 @@ mod tests {
         assert_eq!(action.status.as_deref(), Some("Undo"));
         assert_eq!(p.history.undo.len(), 0);
         assert_eq!(p.history.redo.len(), 1);
+    }
+
+    #[test]
+    fn recent_projects_submenu_follows_the_file_menu_and_can_be_cleared() {
+        let mut project = ProjectState {
+            recent_project_paths: vec!["/projects/a.vzp".into()],
+            ..Default::default()
+        };
+
+        project.update(ProjectMsg::ToggleFileMenu, ctx());
+        project.update(ProjectMsg::ToggleRecentProjects, ctx());
+        assert!(project.file_menu_open);
+        assert!(project.recent_projects_open);
+
+        let action = project.update(ProjectMsg::ClearRecentProjects, ctx());
+        assert!(project.recent_project_paths.is_empty());
+        assert!(!project.recent_projects_open);
+        assert!(action.persist_ui_settings);
+
+        project.update(ProjectMsg::ToggleFileMenu, ctx());
+        assert!(!project.file_menu_open);
+        assert!(!project.recent_projects_open);
     }
 
     #[test]

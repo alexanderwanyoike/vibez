@@ -50,6 +50,8 @@ impl UndoGestureId {
 #[derive(Debug, Default)]
 pub struct ProjectState {
     pub file_menu_open: bool,
+    pub recent_projects_open: bool,
+    pub recent_project_paths: Vec<PathBuf>,
     pub current_path: Option<PathBuf>,
     pub dirty: bool,
     pub history: UndoHistory,

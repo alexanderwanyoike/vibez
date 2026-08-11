@@ -267,8 +267,8 @@ impl App {
             Message::ProjectSavePathSelected(path) => {
                 return self.route_project_save_path_selected(path);
             }
-            Message::ProjectLoaded(result) => {
-                return self.route_project_loaded(*result);
+            Message::ProjectLoaded { path, result } => {
+                return self.route_project_loaded(path, *result);
             }
             Message::ProjectSaved(result) => {
                 return self.route_project_saved(*result);

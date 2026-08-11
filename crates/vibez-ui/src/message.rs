@@ -390,7 +390,10 @@ pub enum Message {
     SaveProjectAs,
     ProjectOpenPathSelected(Option<PathBuf>),
     ProjectSavePathSelected(Option<PathBuf>),
-    ProjectLoaded(Box<Result<ProjectLoadResult, String>>),
+    ProjectLoaded {
+        path: PathBuf,
+        result: Box<Result<ProjectLoadResult, String>>,
+    },
     ProjectSaved(Box<ProjectSaveCompleted>),
 
     // Window close protection. The window is configured not to exit on its
