@@ -687,14 +687,18 @@ impl App {
 
     pub(super) fn poll_audio_stream_events(&mut self) {
         let mut events = Vec::new();
-        if let Some(stream) = self._stream.as_ref() {
+        let measured_cpu_load = if let Some(stream) = self._stream.as_ref() {
             while let Some(event) = stream.try_next_event() {
                 events.push(event);
             }
-        }
+            Some(stream.cpu_load_percent())
+        } else {
+            None
+        };
         for event in events {
             self.state.apply_audio_stream_event(event);
         }
+        self.state.update_audio_cpu_load(measured_cpu_load);
     }
 
     /// One frame of the 60fps subscription: drain engine events and

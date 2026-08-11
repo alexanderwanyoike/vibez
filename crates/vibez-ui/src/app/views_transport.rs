@@ -60,6 +60,54 @@ fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
         .into()
 }
 
+fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
+    let color = if load_percent >= 85.0 {
+        th::danger()
+    } else if load_percent >= 60.0 {
+        th::meter_yellow()
+    } else {
+        th::success()
+    };
+    let displayed = load_percent.round().clamp(0.0, 999.0) as u32;
+    let control = container(
+        row![
+            text("CPU").size(9).color(th::text_dim()),
+            text(format!("{displayed}%")).size(10).color(color),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([4, 6])
+    .style(move |_theme: &Theme| container::Style {
+        background: Some(th::bg_elevated().into()),
+        border: iced::Border {
+            color,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    });
+    let hint = container(
+        text("Audio processing time used per buffer. Red means the audio deadline is at risk.")
+            .size(10)
+            .color(th::text()),
+    )
+    .padding([5, 7])
+    .style(|_theme: &Theme| container::Style {
+        background: Some(th::bg_elevated().into()),
+        border: iced::Border {
+            color: th::border_light(),
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    });
+    tooltip(control, hint, tooltip::Position::Bottom)
+        .gap(6)
+        .padding(0)
+        .into()
+}
+
 impl App {
     pub(super) fn view_transport(&self) -> Element<'_, Message> {
         // Skip back button
@@ -349,6 +397,7 @@ impl App {
 
         let volume_icon = icons::icon(icons::VOLUME_2).size(14).color(th::text_dim());
         let stream_health = audio_stream_indicator(&self.state.audio_stream_health);
+        let cpu_load = audio_cpu_indicator(self.state.audio_cpu_load_percent);
 
         let transport = row![
             transport_buttons,
@@ -358,6 +407,7 @@ impl App {
             stream_health,
             volume_icon,
             master_meter_canvas,
+            cpu_load,
             row![bpm_input, bpm_spinner]
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
