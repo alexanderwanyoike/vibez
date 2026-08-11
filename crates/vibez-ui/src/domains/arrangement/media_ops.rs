@@ -79,15 +79,23 @@ fn unmuted_beat_ranges(lane: &AutomationLane, start: f64, end: f64) -> Vec<(f64,
     );
     boundaries.push(end);
 
-    boundaries
-        .windows(2)
-        .filter_map(|window| {
-            let range_start = window[0];
-            let range_end = window[1];
-            let muted = lane.value_at(range_start).is_some_and(|value| value >= 0.5);
-            (!muted && range_end > range_start).then_some((range_start, range_end))
-        })
-        .collect()
+    let mut ranges: Vec<(f64, f64)> = Vec::new();
+    for window in boundaries.windows(2) {
+        let range_start = window[0];
+        let range_end = window[1];
+        let muted = lane.value_at(range_start).is_some_and(|value| value >= 0.5);
+        if muted || range_end <= range_start {
+            continue;
+        }
+        if let Some((_, previous_end)) = ranges.last_mut() {
+            if *previous_end == range_start {
+                *previous_end = range_end;
+                continue;
+            }
+        }
+        ranges.push((range_start, range_end));
+    }
+    ranges
 }
 
 impl TimelineEditorState {

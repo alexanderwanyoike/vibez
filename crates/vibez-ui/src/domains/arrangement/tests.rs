@@ -983,6 +983,41 @@ fn trim_track_mutes_leaves_selected_clip_without_mute_automation_untouched() {
 }
 
 #[test]
+fn trim_track_mutes_ignores_redundant_unmuted_automation_points() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 800);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    for beat in [2.5, 6.0] {
+        lane.insert_point(AutomationPoint {
+            beat,
+            value: 0.0,
+            curve: 0.0,
+        });
+    }
+    a.tracks[0].automation.push(lane);
+    a.selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::TrimSelectedByTrackMutes,
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(a.tracks[0].clips.len(), 1);
+    assert_eq!(a.tracks[0].clips[0].id, clip_id);
+    assert!(engine.0.is_empty());
+    assert_eq!(
+        action.status.as_deref(),
+        Some("No selected clip material overlaps Track Mutes")
+    );
+}
+
+#[test]
 fn split_looped_midi_materializes_both_looped_halves() {
     let mut a = arrangement_with_tracks(1);
     let mut engine = RecordingEngine::default();
