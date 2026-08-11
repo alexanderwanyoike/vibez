@@ -405,8 +405,48 @@ impl std::fmt::Display for SectionLaunchQuantization {
     }
 }
 
-/// Track Mutes accept every reusable grid boundary and no Section-only policy.
-pub type TrackMuteQuantization = MusicalBoundary;
+/// Musical boundary at which a queued Track Mute becomes effective.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackMuteQuantization {
+    #[default]
+    Immediate,
+    OneBeat,
+    OneBar,
+    EndOfSection,
+}
+
+impl TrackMuteQuantization {
+    pub const ALL: [Self; 4] = [
+        Self::Immediate,
+        Self::OneBeat,
+        Self::OneBar,
+        Self::EndOfSection,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        if let Some(boundary) = self.musical_boundary() {
+            boundary.label()
+        } else {
+            "End of Section"
+        }
+    }
+
+    pub const fn musical_boundary(self) -> Option<MusicalBoundary> {
+        match self {
+            Self::Immediate => Some(MusicalBoundary::Immediate),
+            Self::OneBeat => Some(MusicalBoundary::OneBeat),
+            Self::OneBar => Some(MusicalBoundary::OneBar),
+            Self::EndOfSection => None,
+        }
+    }
+}
+
+impl std::fmt::Display for TrackMuteQuantization {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.label())
+    }
+}
 
 #[cfg(test)]
 mod track_mute_quantization_tests {
@@ -431,11 +471,15 @@ mod track_mute_quantization_tests {
         );
         assert_eq!(
             TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
-            ["Immediate", "1 Beat", "1 Bar"]
+            ["Immediate", "1 Beat", "1 Bar", "End of Section"]
         );
         assert_eq!(
             serde_json::to_string(&TrackMuteQuantization::OneBar).unwrap(),
             "\"one_bar\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TrackMuteQuantization::EndOfSection).unwrap(),
+            "\"end_of_section\""
         );
     }
 }

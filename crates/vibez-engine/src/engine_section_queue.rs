@@ -9,6 +9,7 @@ impl AudioEngine {
         mut prepared: Box<PreparedSectionPlaybackSource>,
         effective_at_samples: u64,
     ) {
+        self.apply_end_of_section_track_mutes(effective_at_samples);
         self.begin_performance_clock();
         let section_id = prepared.section_id;
         let length_samples = self.section_length_samples(prepared.length_beats);
