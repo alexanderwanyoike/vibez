@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -158,6 +158,12 @@ pub fn remember_recent_project(paths: &mut Vec<PathBuf>, path: PathBuf) {
     paths.truncate(RECENT_PROJECT_LIMIT);
 }
 
+pub fn forget_recent_project(paths: &mut Vec<PathBuf>, path: &Path) -> bool {
+    let previous_len = paths.len();
+    paths.retain(|existing| existing != path);
+    paths.len() != previous_len
+}
+
 impl UiSettings {
     pub fn settings_path() -> PathBuf {
         dirs::config_dir()
@@ -280,6 +286,31 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn failed_recent_project_is_pruned_without_touching_other_entries() {
+        let mut paths = vec![
+            PathBuf::from("/projects/a.vzp"),
+            PathBuf::from("/projects/missing.vzp"),
+            PathBuf::from("/projects/b.vzp"),
+        ];
+
+        assert!(forget_recent_project(
+            &mut paths,
+            Path::new("/projects/missing.vzp")
+        ));
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/projects/a.vzp"),
+                PathBuf::from("/projects/b.vzp")
+            ]
+        );
+        assert!(!forget_recent_project(
+            &mut paths,
+            Path::new("/projects/unknown.vzp")
+        ));
     }
 
     #[test]

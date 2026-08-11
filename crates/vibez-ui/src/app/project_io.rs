@@ -1,7 +1,7 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vibez_core::effect::EffectType;
 
@@ -293,6 +293,15 @@ impl App {
             path,
         );
         if self.state.project.recent_project_paths != before {
+            self.persist_ui_settings();
+        }
+    }
+
+    pub(super) fn forget_recent_project(&mut self, path: &Path) {
+        if crate::ui_settings::forget_recent_project(
+            &mut self.state.project.recent_project_paths,
+            path,
+        ) {
             self.persist_ui_settings();
         }
     }

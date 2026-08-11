@@ -123,12 +123,16 @@ impl App {
     ) -> Task<Message> {
         if let Some(path) = path {
             self.state.status_text = format!("Opening {}...", path.display());
+            let completed_path = path.clone();
             let dropbox = self
                 .dropbox_client
                 .clone()
                 .map(|client| (client, self.dropbox_cache.clone()));
-            return Task::perform(load_project_async(path, dropbox), |result| {
-                Message::ProjectLoaded(Box::new(result))
+            return Task::perform(load_project_async(path, dropbox), move |result| {
+                Message::ProjectLoaded {
+                    path: completed_path.clone(),
+                    result: Box::new(result),
+                }
             });
         }
         Task::none()
@@ -160,6 +164,7 @@ impl App {
 
     pub(super) fn route_project_loaded(
         &mut self,
+        attempted_path: PathBuf,
         result: Result<ProjectLoadResult, String>,
     ) -> Task<Message> {
         match result {
@@ -169,6 +174,7 @@ impl App {
                 self.remember_recent_project(path);
             }
             Err(err) => {
+                self.forget_recent_project(&attempted_path);
                 self.state.status_text = format!("Project load error: {err}");
             }
         }
