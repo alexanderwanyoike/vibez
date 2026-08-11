@@ -125,6 +125,42 @@ h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 1
 .btn-2:hover { border-color: var(--line-2); background: var(--panel); }
 .plat { font-family: var(--mono); font-size: 12px; color: var(--dimmer); }
 
+/* ---------- promotional film ---------- */
+.showreel { padding: 34px 0 52px; }
+.showreel-head {
+  display: grid; gap: 10px; align-items: end; margin-bottom: 18px;
+}
+@media (min-width: 780px) {
+  .showreel-head { grid-template-columns: minmax(0, .78fr) minmax(320px, 1fr); gap: 36px; }
+}
+.showreel-head h2 { max-width: 14ch; }
+.showreel-head .lede { margin: 0; }
+.monitor {
+  border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden;
+  background: var(--panel); box-shadow: 0 24px 70px rgba(0,0,0,.28);
+}
+.monitor-bar {
+  min-height: 38px; padding: 8px 13px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 9px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--dimmer);
+}
+.monitor-light {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--blue); box-shadow: 0 0 10px rgba(61,130,216,.75);
+}
+.monitor-bar span:last-child { margin-left: auto; color: var(--dim); }
+.video-frame { position: relative; aspect-ratio: 16 / 9; background: #050608; }
+.video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.monitor-foot {
+  padding: 9px 13px; border-top: 1px solid var(--line);
+  display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--dimmer);
+}
+.monitor-foot a { color: var(--dim); text-underline-offset: 3px; }
+.monitor-foot a:hover { color: var(--text); }
+
 /* ---------- pad hero ---------- */
 .padhero { padding: 44px 0 76px; }
 .padhero-in { display: grid; gap: 30px; align-items: start; }
@@ -335,6 +371,7 @@ footer a:hover { color: var(--text); }
     <span class="wordmark">vibez</span>
     <span class="ver">__VERSION__</span>
     <nav>
+      <a href="#watch">Watch</a>
       <a href="#perform">Perform</a>
       <a href="#arrange">Arrange</a>
       <a href="#mix">Mix</a>
@@ -364,8 +401,43 @@ footer a:hover { color: var(--text); }
       </p>
       <div class="cta">
         <a class="btn" href="#download">Download __VERSION__</a>
+        <a class="btn-2" href="#watch">Watch the film</a>
         <a class="btn-2" href="https://github.com/alexanderwanyoike/vibez">Source on GitHub</a>
         <span class="plat">Linux &middot; macOS &middot; Windows &middot; GPL-3.0</span>
+      </div>
+    </section>
+
+    <section class="showreel" id="watch" aria-labelledby="showreel-title">
+      <div class="showreel-head">
+        <div>
+          <p class="hint"><i></i> Live techno workflow</p>
+          <h2 id="showreel-title">See the whole signal path in motion.</h2>
+        </div>
+        <p class="lede">
+          From launching Sections and shaping a live performance to Capture, Arrange and the final
+          mix: this is vibez used as one continuous instrument.
+        </p>
+      </div>
+      <div class="monitor">
+        <div class="monitor-bar">
+          <span class="monitor-light" aria-hidden="true"></span>
+          <span>Now playing</span>
+          <span>Perform &rarr; Arrange &rarr; Mix</span>
+        </div>
+        <div class="video-frame">
+          <iframe
+            src="https://www.youtube-nocookie.com/embed/pdNbG7v-OKk"
+            title="Vibez: Perform, Arrange, Mix | Live Techno Workflow"
+            loading="lazy"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen>
+          </iframe>
+        </div>
+        <div class="monitor-foot">
+          <a href="https://www.youtube.com/watch?v=pdNbG7v-OKk">A film by Osmosis &middot; Watch on YouTube &nearr;</a>
+          <span>Live performance &middot; capture &middot; arrangement &middot; mix</span>
+        </div>
       </div>
     </section>
 
