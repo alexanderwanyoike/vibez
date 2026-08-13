@@ -312,6 +312,35 @@ pub fn reconcile_remote_catalog(
     }
 }
 
+pub fn build_remote_catalog_children(
+    catalog: &RemoteCatalogSnapshot,
+) -> HashMap<String, Vec<usize>> {
+    let mut children: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, entry) in catalog.entries.iter().enumerate() {
+        children
+            .entry(entry.parent_path.clone())
+            .or_default()
+            .push(index);
+    }
+    for indexes in children.values_mut() {
+        indexes.sort_by(|left, right| {
+            let left = &catalog.entries[*left];
+            let right = &catalog.entries[*right];
+            (
+                !left.is_folder,
+                left.name.to_ascii_lowercase(),
+                &left.provider_item_id,
+            )
+                .cmp(&(
+                    !right.is_folder,
+                    right.name.to_ascii_lowercase(),
+                    &right.provider_item_id,
+                ))
+        });
+    }
+    children
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteCatalogStore {
     path: PathBuf,

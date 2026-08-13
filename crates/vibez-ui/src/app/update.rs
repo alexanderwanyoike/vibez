@@ -862,6 +862,9 @@ impl App {
                 self.state.status_text = format!("Dropbox connect failed: {err}");
             }
             Message::DisconnectDropbox => return self.on_disconnect_dropbox(),
+            Message::RemoteCatalogStartupLoaded(result) => {
+                return self.on_remote_catalog_startup_loaded(result)
+            }
             Message::RefreshRemoteConnection => {
                 return self.handle_remote_catalog_refresh();
             }

@@ -12,6 +12,57 @@ pub(super) const REMOTE_SELECTION_DEBOUNCE: std::time::Duration =
     std::time::Duration::from_millis(200);
 pub(super) const REMOTE_CATALOG_SAVE_PAGE_INTERVAL: usize = 10;
 
+async fn run_remote_startup_loader<T, F>(loader: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(loader)
+        .await
+        .map_err(|error| format!("Remote catalog startup task failed: {error}"))
+}
+
+pub(super) fn remote_catalog_startup_task(cache: DropboxCache) -> Task<Message> {
+    Task::perform(
+        run_remote_startup_loader(move || {
+            let store = crate::remote_provider::RemoteCatalogStore::for_dropbox();
+            let (catalog, load_error) = match store.load() {
+                Ok(catalog) => (catalog, None),
+                Err(error) => (
+                    crate::remote_provider::RemoteCatalogSnapshot::default(),
+                    Some(error),
+                ),
+            };
+            let catalog_children = crate::remote_provider::build_remote_catalog_children(&catalog);
+            let cached_identities: std::collections::HashMap<String, Option<String>> =
+                cache.cached_identities().into_iter().collect();
+            let cached_provider_item_ids = catalog
+                .entries
+                .iter()
+                .filter(|entry| {
+                    cached_identities
+                        .get(&entry.provider_item_id)
+                        .is_some_and(|revision| revision.as_deref() == entry.revision.as_deref())
+                })
+                .map(|entry| entry.provider_item_id.clone())
+                .collect();
+            let cache_usage = cache.usage().unwrap_or_default();
+            crate::message::RemoteCatalogStartupData {
+                catalog,
+                catalog_children,
+                cached_provider_item_ids,
+                cache_usage,
+                load_error,
+            }
+        }),
+        |result| {
+            Message::RemoteCatalogStartupLoaded(crate::message::RemoteCatalogStartupResult::new(
+                result,
+            ))
+        },
+    )
+}
+
 fn queue_latest_remote_audition(slot: &mut Option<DropboxEntry>, entry: DropboxEntry) {
     *slot = Some(entry);
 }
@@ -212,7 +263,11 @@ impl App {
     }
 
     pub(super) fn handle_remote_catalog_refresh(&mut self) -> Task<Message> {
-        if self.state.browser.remote.catalog_state == crate::state::RemoteCatalogState::Refreshing {
+        if matches!(
+            self.state.browser.remote.catalog_state,
+            crate::state::RemoteCatalogState::Loading
+                | crate::state::RemoteCatalogState::Refreshing
+        ) {
             return Task::none();
         }
         let Some(client) = self.dropbox_client.clone() else {
@@ -334,6 +389,28 @@ impl App {
             return Task::none();
         };
         self.start_remote_import(entry, target, treatment)
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use std::time::Duration;
+
+    use super::run_remote_startup_loader;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn remote_startup_loader_never_blocks_the_ui_executor() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let loader = tokio::spawn(run_remote_startup_loader(move || {
+            release_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("UI executor should release the background loader");
+            42
+        }));
+
+        tokio::task::yield_now().await;
+        assert!(release_tx.send(()).is_ok());
+        assert_eq!(loader.await.unwrap().unwrap(), 42);
     }
 }
 

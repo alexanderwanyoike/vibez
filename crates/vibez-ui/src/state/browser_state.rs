@@ -696,6 +696,7 @@ impl BrowserState {
 pub enum RemoteCatalogState {
     #[default]
     Ready,
+    Loading,
     Refreshing,
     Stale {
         error: String,
@@ -734,6 +735,7 @@ impl RemoteCatalogState {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Ready => "READY",
+            Self::Loading => "LOADING",
             Self::Refreshing => "REFRESHING",
             Self::Stale { .. } => "STALE",
             Self::Partial { .. } => "PARTIAL",
@@ -748,6 +750,7 @@ mod remote_catalog_state_tests {
 
     #[test]
     fn refresh_auth_stale_and_partial_states_have_distinct_labels() {
+        assert_eq!(RemoteCatalogState::Loading.label(), "LOADING");
         assert_eq!(RemoteCatalogState::Refreshing.label(), "REFRESHING");
         assert_eq!(
             RemoteCatalogState::AuthenticationRequired {
@@ -850,30 +853,8 @@ impl RemoteUiState {
     /// reconciled. UI redraws can then navigate one folder without rescanning
     /// the complete provider catalog.
     pub fn rebuild_catalog_children(&mut self) {
-        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
-        for (index, entry) in self.catalog.entries.iter().enumerate() {
-            children
-                .entry(entry.parent_path.clone())
-                .or_default()
-                .push(index);
-        }
-        for indexes in children.values_mut() {
-            indexes.sort_by(|left, right| {
-                let left = &self.catalog.entries[*left];
-                let right = &self.catalog.entries[*right];
-                (
-                    !left.is_folder,
-                    left.name.to_ascii_lowercase(),
-                    &left.provider_item_id,
-                )
-                    .cmp(&(
-                        !right.is_folder,
-                        right.name.to_ascii_lowercase(),
-                        &right.provider_item_id,
-                    ))
-            });
-        }
-        self.catalog_children = children;
+        self.catalog_children =
+            crate::remote_provider::build_remote_catalog_children(&self.catalog);
     }
 
     pub fn catalog_child_indices(&self, parent: &str) -> &[usize] {
