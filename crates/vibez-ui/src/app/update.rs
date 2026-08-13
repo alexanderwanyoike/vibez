@@ -701,6 +701,14 @@ impl App {
                 self.state.update_check.enabled = !self.state.update_check.enabled;
                 self.persist_ui_settings();
             }
+            Message::CheckForUpdatesNow => {
+                if self.state.update_check.begin_check() {
+                    return Task::perform(
+                        crate::update_check::fetch_latest_tag(),
+                        Message::UpdateCheckCompleted,
+                    );
+                }
+            }
             Message::UpdateCheckCompleted(tag) => {
                 self.state
                     .update_check
