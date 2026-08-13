@@ -44,23 +44,13 @@ pub(super) fn remote_catalog_startup_task(cache: DropboxCache) -> Task<Message> 
                 ),
             };
             let catalog_children = crate::remote_provider::build_remote_catalog_children(&catalog);
-            let cached_identities: std::collections::HashMap<String, Option<String>> =
-                cache.cached_identities().into_iter().collect();
-            let cached_provider_item_ids = catalog
-                .entries
-                .iter()
-                .filter(|entry| {
-                    cached_identities
-                        .get(&entry.provider_item_id)
-                        .is_some_and(|revision| revision.as_deref() == entry.revision.as_deref())
-                })
-                .map(|entry| entry.provider_item_id.clone())
-                .collect();
+            let availability =
+                refreshed_remote_availability(&cache, &catalog, std::collections::HashMap::new());
             let cache_usage = cache.usage().unwrap_or_default();
             crate::message::RemoteCatalogStartupData {
                 catalog,
                 catalog_children,
-                cached_provider_item_ids,
+                availability,
                 cache_usage,
                 load_error,
             }
@@ -104,12 +94,12 @@ pub(super) fn seed_remote_availability(
     cache: &DropboxCache,
     remote: &mut crate::state::RemoteUiState,
 ) {
-    remote.availability = refreshed_remote_availability(
+    let refreshed = refreshed_remote_availability(
         cache,
         &remote.catalog,
         std::mem::take(&mut remote.availability),
     );
-    remote.mark_catalog_runtime_changed();
+    remote.replace_availability(refreshed);
 }
 
 fn refreshed_remote_availability(
@@ -365,7 +355,7 @@ impl App {
         self.remote_audition_cache_lease = None;
         let maintenance = self.media_cache_maintenance_task();
         let request_id = self.remote_import_request.begin();
-        self.state.browser.remote.availability.insert(
+        self.state.browser.remote.set_availability(
             entry.path_lower.clone(),
             if self
                 .dropbox_cache
@@ -376,7 +366,6 @@ impl App {
                 crate::state::RemoteAvailability::Fetching
             },
         );
-        self.state.browser.remote.mark_catalog_runtime_changed();
         self.state.status_text = format!("Importing Remote media: {}", entry.name);
         let client = self.dropbox_client.clone();
         let cache = self.dropbox_cache.clone();
@@ -465,11 +454,10 @@ impl App {
             .is_cached(&entry.path_lower, entry.rev.as_deref());
         if !cached && self.dropbox_client.is_none() {
             self.state.browser.remote.preview_in_progress = false;
-            self.state.browser.remote.availability.insert(
+            self.state.browser.remote.set_availability(
                 entry.path_lower,
                 crate::state::RemoteAvailability::ReconnectRequired,
             );
-            self.state.browser.remote.mark_catalog_runtime_changed();
             self.state.status_text =
                 "Reconnect Required · this Remote item is not in Media Cache".into();
             self.state
@@ -486,7 +474,7 @@ impl App {
             self.state.browser.audition_generation
         };
         self.state.browser.remote.preview_in_progress = !cached;
-        self.state.browser.remote.availability.insert(
+        self.state.browser.remote.set_availability(
             entry.path_lower.clone(),
             if cached {
                 crate::state::RemoteAvailability::Cached
@@ -494,7 +482,6 @@ impl App {
                 crate::state::RemoteAvailability::Fetching
             },
         );
-        self.state.browser.remote.mark_catalog_runtime_changed();
         self.state.status_text = if cached {
             format!("Preparing cached Audition: {}", entry.name)
         } else {

@@ -810,10 +810,16 @@ pub struct RemoteUiState {
     pub selected_path: Option<String>,
     /// A preview fetch / playback is in flight.
     pub preview_in_progress: bool,
+    /// UI-owned availability per provider item. Mutate ONLY through
+    /// [`Self::set_availability`] / [`Self::replace_availability`] so the
+    /// runtime revision below stays in sync; direct inserts reintroduce the
+    /// refresh-clobber race those methods exist to prevent.
     pub availability: HashMap<String, RemoteAvailability>,
     /// Changes made by materialization/import flows while a catalog refresh
     /// snapshot is being prepared. Prepared snapshots use this to detect and
-    /// rebase over newer UI-owned metadata instead of replacing it.
+    /// rebase over newer UI-owned metadata instead of replacing it. Bumped
+    /// internally by the mutation methods on this type; never write it
+    /// directly.
     pub catalog_runtime_revision: u64,
     pub cache_usage_bytes: u64,
     pub cache_entries: usize,
@@ -854,8 +860,47 @@ impl Default for RemoteUiState {
 }
 
 impl RemoteUiState {
-    pub(crate) fn mark_catalog_runtime_changed(&mut self) {
+    fn mark_catalog_runtime_changed(&mut self) {
         self.catalog_runtime_revision = self.catalog_runtime_revision.wrapping_add(1);
+    }
+
+    /// Record a UI-owned availability change and bump the runtime revision so
+    /// an in-flight refresh preparation rebases over it instead of clobbering
+    /// it.
+    pub(crate) fn set_availability(
+        &mut self,
+        provider_item_id: String,
+        availability: RemoteAvailability,
+    ) {
+        self.availability.insert(provider_item_id, availability);
+        self.mark_catalog_runtime_changed();
+    }
+
+    /// Replace the whole availability map (startup load, cache reseed) and
+    /// bump the runtime revision.
+    pub(crate) fn replace_availability(
+        &mut self,
+        availability: HashMap<String, RemoteAvailability>,
+    ) {
+        self.availability = availability;
+        self.mark_catalog_runtime_changed();
+    }
+
+    /// Write derived metadata for one catalog entry (post-materialization)
+    /// and bump the runtime revision.
+    pub(crate) fn set_entry_derived_metadata(
+        &mut self,
+        provider_item_id: &str,
+        metadata: vibez_dropbox::DerivedMetadata,
+    ) {
+        if let Some(entry) = Arc::make_mut(&mut self.catalog)
+            .entries
+            .iter_mut()
+            .find(|entry| entry.provider_item_id == provider_item_id)
+        {
+            entry.derived_metadata = Some(metadata);
+        }
+        self.mark_catalog_runtime_changed();
     }
 
     /// Rebuild the parent/children lookup after the catalog is loaded or
