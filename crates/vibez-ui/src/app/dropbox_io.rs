@@ -22,6 +22,16 @@ where
         .map_err(|error| format!("Remote catalog startup task failed: {error}"))
 }
 
+async fn run_remote_refresh_preparer<T, F>(preparer: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(preparer)
+        .await
+        .map_err(|error| format!("Remote catalog refresh task failed: {error}"))
+}
+
 pub(super) fn remote_catalog_startup_task(cache: DropboxCache) -> Task<Message> {
     Task::perform(
         run_remote_startup_loader(move || {
@@ -94,32 +104,105 @@ pub(super) fn seed_remote_availability(
     cache: &DropboxCache,
     remote: &mut crate::state::RemoteUiState,
 ) {
+    remote.availability = refreshed_remote_availability(
+        cache,
+        &remote.catalog,
+        std::mem::take(&mut remote.availability),
+    );
+}
+
+fn refreshed_remote_availability(
+    cache: &DropboxCache,
+    catalog: &crate::remote_provider::RemoteCatalogSnapshot,
+    mut availability: std::collections::HashMap<String, crate::state::RemoteAvailability>,
+) -> std::collections::HashMap<String, crate::state::RemoteAvailability> {
     use crate::state::RemoteAvailability;
     let cached: std::collections::HashMap<String, Option<String>> =
         cache.cached_identities().into_iter().collect();
-    for entry in &remote.catalog.entries {
+    for entry in &catalog.entries {
         if entry.is_folder {
             continue;
         }
         let is_cached = cached
             .get(&entry.provider_item_id)
             .is_some_and(|revision| revision.as_deref() == entry.revision.as_deref());
-        match remote.availability.get(&entry.provider_item_id) {
+        match availability.get(&entry.provider_item_id) {
             Some(RemoteAvailability::Fetching) => {}
             Some(RemoteAvailability::Cached) if !is_cached => {
-                remote.availability.remove(&entry.provider_item_id);
+                availability.remove(&entry.provider_item_id);
             }
             _ if is_cached => {
-                remote
-                    .availability
-                    .insert(entry.provider_item_id.clone(), RemoteAvailability::Cached);
+                availability.insert(entry.provider_item_id.clone(), RemoteAvailability::Cached);
             }
             _ => {}
         }
     }
+    availability
 }
 
 impl App {
+    pub(super) fn prepare_remote_catalog_refresh(
+        &mut self,
+        pages: usize,
+        checkpoint: Option<String>,
+        continuation: crate::message::RemoteCatalogRefreshContinuation,
+    ) -> Task<Message> {
+        let generation = self.remote_catalog_request.current().unwrap_or(0);
+        let previous_catalog = Arc::clone(&self.state.browser.remote.catalog);
+        let previous_availability = self.state.browser.remote.availability.clone();
+        let changes = std::mem::take(&mut self.remote_catalog_pending);
+        let cache = self.dropbox_cache.clone();
+        Task::perform(
+            run_remote_refresh_preparer(move || {
+                if changes.is_empty() {
+                    let catalog = if previous_catalog.checkpoint == checkpoint {
+                        previous_catalog
+                    } else {
+                        let mut catalog = (*previous_catalog).clone();
+                        catalog.checkpoint = checkpoint;
+                        Arc::new(catalog)
+                    };
+                    return crate::message::RemoteCatalogRefreshData {
+                        generation,
+                        pages,
+                        catalog,
+                        catalog_children: None,
+                        availability: None,
+                        continuation,
+                    };
+                }
+
+                let mut catalog = (*previous_catalog).clone();
+                crate::remote_provider::reconcile_remote_catalog(
+                    &mut catalog,
+                    &crate::remote_provider::RemoteRefreshResult {
+                        pages: pages.max(1),
+                        changes,
+                        checkpoint,
+                        error: None,
+                    },
+                );
+                let catalog_children =
+                    crate::remote_provider::build_remote_catalog_children(&catalog);
+                let availability =
+                    refreshed_remote_availability(&cache, &catalog, previous_availability);
+                crate::message::RemoteCatalogRefreshData {
+                    generation,
+                    pages,
+                    catalog: Arc::new(catalog),
+                    catalog_children: Some(catalog_children),
+                    availability: Some(availability),
+                    continuation,
+                }
+            }),
+            |result| {
+                Message::RemoteCatalogRefreshPrepared(
+                    crate::message::RemoteCatalogRefreshResult::new(result),
+                )
+            },
+        )
+    }
+
     pub(super) fn remote_import_active(&self) -> bool {
         self.remote_import_request.is_active()
     }
@@ -175,32 +258,6 @@ impl App {
                 result,
             },
         )
-    }
-
-    /// Reconcile the pages accumulated since the last flush into the catalog
-    /// and rebuild the derived lookups. Returns whether anything changed.
-    pub(super) fn flush_remote_catalog_pages(
-        &mut self,
-        pages: usize,
-        checkpoint: Option<String>,
-    ) -> bool {
-        if self.remote_catalog_pending.is_empty() && checkpoint.is_none() {
-            return false;
-        }
-        let changes = std::mem::take(&mut self.remote_catalog_pending);
-        crate::remote_provider::reconcile_remote_catalog(
-            &mut self.state.browser.remote.catalog,
-            &crate::remote_provider::RemoteRefreshResult {
-                pages: pages.max(1),
-                changes,
-                checkpoint,
-                error: None,
-            },
-        );
-        self.state.browser.remote.rebuild_catalog_children();
-        self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
-        self.reseed_remote_availability();
-        true
     }
 
     pub(super) fn start_remote_import(
@@ -396,7 +453,7 @@ impl App {
 mod startup_tests {
     use std::time::Duration;
 
-    use super::run_remote_startup_loader;
+    use super::{run_remote_refresh_preparer, run_remote_startup_loader};
 
     #[tokio::test(flavor = "current_thread")]
     async fn remote_startup_loader_never_blocks_the_ui_executor() {
@@ -411,6 +468,21 @@ mod startup_tests {
         tokio::task::yield_now().await;
         assert!(release_tx.send(()).is_ok());
         assert_eq!(loader.await.unwrap().unwrap(), 42);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn remote_refresh_preparation_never_blocks_the_ui_executor() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let preparation = tokio::spawn(run_remote_refresh_preparer(move || {
+            release_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("UI executor should release Remote refresh preparation");
+            42
+        }));
+
+        tokio::task::yield_now().await;
+        assert!(release_tx.send(()).is_ok());
+        assert_eq!(preparation.await.unwrap().unwrap(), 42);
     }
 }
 
