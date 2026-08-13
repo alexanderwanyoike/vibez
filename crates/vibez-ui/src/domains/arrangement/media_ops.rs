@@ -235,31 +235,14 @@ impl TimelineEditorState {
                         track_id,
                         clip_id: original_id,
                     });
-                    engine.send(EngineCommand::RemoveClip(track_id, original_id));
-                    if let Some(content) = self.find_content_mut(track_id) {
-                        content.clips.retain(|clip| clip.id != original_id);
-                    }
                     for clip in &clips {
-                        engine.send(EngineCommand::AddClip {
-                            track_id,
-                            clip_id: clip.id,
-                            audio: Arc::clone(&clip.audio),
-                            position: clip.position,
-                            source_offset: clip.source_offset,
-                            duration: clip.duration,
-                            loop_enabled: clip.loop_enabled,
-                            loop_start: clip.loop_start,
-                            loop_end: clip.loop_end,
-                        });
                         new_selection.insert(ArrangementSelection::AudioClip {
                             track_id,
                             clip_id: clip.id,
                         });
                     }
                     fragment_count += clips.len();
-                    if let Some(content) = self.find_content_mut(track_id) {
-                        content.clips.extend(clips);
-                    }
+                    self.replace_audio_clip(engine, track_id, original_id, clips);
                 }
                 Replacement::Notes {
                     track_id,
@@ -270,37 +253,14 @@ impl TimelineEditorState {
                         track_id,
                         clip_id: original_id,
                     });
-                    engine.send(EngineCommand::RemoveNoteClip(track_id, original_id));
-                    if let Some(content) = self.find_content_mut(track_id) {
-                        content.note_clips.retain(|clip| clip.id != original_id);
-                    }
                     for clip in &clips {
-                        engine.send(EngineCommand::AddNoteClip {
-                            track_id,
-                            clip_id: clip.id,
-                            position_beats: clip.position_beats,
-                            duration_beats: clip.duration_beats,
-                            loop_enabled: clip.loop_enabled,
-                            loop_start_beats: clip.loop_start_beats,
-                            loop_end_beats: clip.loop_end_beats,
-                            groove_grid: clip.groove_grid,
-                        });
-                        for note in &clip.notes {
-                            engine.send(EngineCommand::AddNote {
-                                track_id,
-                                clip_id: clip.id,
-                                note: *note,
-                            });
-                        }
                         new_selection.insert(ArrangementSelection::NoteClip {
                             track_id,
                             clip_id: clip.id,
                         });
                     }
                     fragment_count += clips.len();
-                    if let Some(content) = self.find_content_mut(track_id) {
-                        content.note_clips.extend(clips);
-                    }
+                    self.replace_note_clip(engine, track_id, original_id, clips);
                 }
             }
         }
@@ -833,6 +793,75 @@ impl TimelineEditorState {
         Some("Joined note clips".to_string())
     }
 
+    /// Replace `original_id` on `track_id` with `fragments` in both the
+    /// engine and UI state. Every op that fragments a clip (split, trim) must
+    /// route through here so the engine command list stays in one place;
+    /// selection bookkeeping stays with the caller.
+    fn replace_audio_clip(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        original_id: ClipId,
+        fragments: Vec<UiClip>,
+    ) {
+        engine.send(EngineCommand::RemoveClip(track_id, original_id));
+        if let Some(content) = self.find_content_mut(track_id) {
+            content.clips.retain(|clip| clip.id != original_id);
+        }
+        for clip in &fragments {
+            engine.send(EngineCommand::AddClip {
+                track_id,
+                clip_id: clip.id,
+                audio: Arc::clone(&clip.audio),
+                position: clip.position,
+                source_offset: clip.source_offset,
+                duration: clip.duration,
+                loop_enabled: clip.loop_enabled,
+                loop_start: clip.loop_start,
+                loop_end: clip.loop_end,
+            });
+        }
+        if let Some(content) = self.find_content_mut(track_id) {
+            content.clips.extend(fragments);
+        }
+    }
+
+    /// Note-clip counterpart of [`Self::replace_audio_clip`].
+    fn replace_note_clip(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        original_id: ClipId,
+        fragments: Vec<UiNoteClip>,
+    ) {
+        engine.send(EngineCommand::RemoveNoteClip(track_id, original_id));
+        if let Some(content) = self.find_content_mut(track_id) {
+            content.note_clips.retain(|clip| clip.id != original_id);
+        }
+        for clip in &fragments {
+            engine.send(EngineCommand::AddNoteClip {
+                track_id,
+                clip_id: clip.id,
+                position_beats: clip.position_beats,
+                duration_beats: clip.duration_beats,
+                loop_enabled: clip.loop_enabled,
+                loop_start_beats: clip.loop_start_beats,
+                loop_end_beats: clip.loop_end_beats,
+                groove_grid: clip.groove_grid,
+            });
+            for note in &clip.notes {
+                engine.send(EngineCommand::AddNote {
+                    track_id,
+                    clip_id: clip.id,
+                    note: *note,
+                });
+            }
+        }
+        if let Some(content) = self.find_content_mut(track_id) {
+            content.note_clips.extend(fragments);
+        }
+    }
+
     pub(super) fn op_split_audio_clip(
         &mut self,
         engine: &mut impl EngineHandle,
@@ -866,28 +895,7 @@ impl TimelineEditorState {
             });
         if let Some((left, right)) = split {
             let left_id = left.id;
-
-            engine.send(EngineCommand::RemoveClip(track_id, clip_id));
-            if let Some(track) = self.find_content_mut(track_id) {
-                track.clips.retain(|c| c.id != clip_id);
-            }
-
-            for clip in [&left, &right] {
-                engine.send(EngineCommand::AddClip {
-                    track_id,
-                    clip_id: clip.id,
-                    audio: Arc::clone(&clip.audio),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    duration: clip.duration,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
-            }
-            if let Some(track) = self.find_content_mut(track_id) {
-                track.clips.extend([left, right]);
-            }
+            self.replace_audio_clip(engine, track_id, clip_id, vec![left, right]);
 
             self.selected_clips
                 .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
@@ -943,33 +951,7 @@ impl TimelineEditorState {
             });
         if let Some((left, right)) = split {
             let left_id = left.id;
-            engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-            if let Some(track) = self.find_content_mut(track_id) {
-                track.note_clips.retain(|c| c.id != clip_id);
-            }
-
-            for clip in [&left, &right] {
-                engine.send(EngineCommand::AddNoteClip {
-                    track_id,
-                    clip_id: clip.id,
-                    position_beats: clip.position_beats,
-                    duration_beats: clip.duration_beats,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start_beats: clip.loop_start_beats,
-                    loop_end_beats: clip.loop_end_beats,
-                    groove_grid: clip.groove_grid,
-                });
-                for note in &clip.notes {
-                    engine.send(EngineCommand::AddNote {
-                        track_id,
-                        clip_id: clip.id,
-                        note: *note,
-                    });
-                }
-            }
-            if let Some(track) = self.find_content_mut(track_id) {
-                track.note_clips.extend([left, right]);
-            }
+            self.replace_note_clip(engine, track_id, clip_id, vec![left, right]);
 
             self.selected_clips
                 .remove(&ArrangementSelection::NoteClip { track_id, clip_id });
