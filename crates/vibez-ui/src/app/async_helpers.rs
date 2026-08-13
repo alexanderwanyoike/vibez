@@ -571,34 +571,51 @@ pub(super) async fn finish_loaded_clip(
     }
 }
 
+/// Run CPU-bound work on the tokio blocking pool, labelling join failures.
+/// Every off-UI-thread hop in the app routes through here so the idiom (and
+/// its error shape) exists exactly once.
+pub(crate) async fn run_off_ui_thread<T, F>(label: &'static str, work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("{label} task failed: {error}"))
+}
+
+/// One rule for what counts as a missing project: only a confirmed
+/// `NotFound` io error prunes a Recent Projects entry; everything else is
+/// treated as transient.
+fn classify_load_error(
+    io_error: Option<&std::io::Error>,
+    message: String,
+) -> crate::message::ProjectLoadError {
+    if io_error.is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+        crate::message::ProjectLoadError::missing_project(message)
+    } else {
+        crate::message::ProjectLoadError::other(message)
+    }
+}
+
 fn classify_project_format_load_error(
     error: vibez_project::project_format_v1::ProjectFormatError,
 ) -> crate::message::ProjectLoadError {
-    let missing = matches!(
-        &error,
-        vibez_project::project_format_v1::ProjectFormatError::Io(io_error)
-            if io_error.kind() == std::io::ErrorKind::NotFound
-    );
-    if missing {
-        crate::message::ProjectLoadError::missing_project(error.to_string())
-    } else {
-        crate::message::ProjectLoadError::other(error.to_string())
-    }
+    let io_error = match &error {
+        vibez_project::project_format_v1::ProjectFormatError::Io(io_error) => Some(io_error),
+        _ => None,
+    };
+    classify_load_error(io_error, error.to_string())
 }
 
 fn classify_legacy_project_load_error(
     error: vibez_project::ProjectError,
 ) -> crate::message::ProjectLoadError {
-    let missing = matches!(
-        &error,
-        vibez_project::ProjectError::Io(io_error)
-            if io_error.kind() == std::io::ErrorKind::NotFound
-    );
-    if missing {
-        crate::message::ProjectLoadError::missing_project(error.to_string())
-    } else {
-        crate::message::ProjectLoadError::other(error.to_string())
-    }
+    let io_error = match &error {
+        vibez_project::ProjectError::Io(io_error) => Some(io_error),
+        _ => None,
+    };
+    classify_load_error(io_error, error.to_string())
 }
 
 pub(super) async fn load_project_async(
@@ -910,6 +927,28 @@ mod export_tests {
             0,
             "failed export must clean up every temporary file"
         );
+    }
+}
+
+#[cfg(test)]
+mod off_ui_thread_tests {
+    use std::time::Duration;
+
+    use super::run_off_ui_thread;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_work_never_blocks_the_ui_executor() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let work = tokio::spawn(run_off_ui_thread("Test", move || {
+            release_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("UI executor should release the blocking worker");
+            42
+        }));
+
+        tokio::task::yield_now().await;
+        assert!(release_tx.send(()).is_ok());
+        assert_eq!(work.await.unwrap().unwrap(), 42);
     }
 }
 
