@@ -529,6 +529,10 @@ pub enum Message {
     /// Settings: opt in or out of the startup release check. Takes
     /// effect at the next launch; it never triggers a check itself.
     ToggleCheckForUpdates,
+    /// User-initiated release check from Settings. Bypasses the once-a-day
+    /// startup throttle: an explicit click is consent for one request even
+    /// when the automatic startup check is switched off.
+    CheckForUpdatesNow,
     /// The startup release check finished. `Some` carries the newest
     /// upstream tag; `None` means the request failed and is reported
     /// only by advancing the throttle.
