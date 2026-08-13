@@ -338,6 +338,34 @@ pub struct ProjectLoadResult {
 }
 
 #[derive(Debug, Clone)]
+pub enum ProjectLoadError {
+    MissingProject(String),
+    Other(String),
+}
+
+impl ProjectLoadError {
+    pub fn missing_project(error: impl Into<String>) -> Self {
+        Self::MissingProject(error.into())
+    }
+
+    pub fn other(error: impl Into<String>) -> Self {
+        Self::Other(error.into())
+    }
+
+    pub fn is_missing_project(&self) -> bool {
+        matches!(self, Self::MissingProject(_))
+    }
+}
+
+impl std::fmt::Display for ProjectLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingProject(error) | Self::Other(error) => formatter.write_str(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ProjectSaveResult {
     pub path: PathBuf,
     pub project: Project,
@@ -472,7 +500,7 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded {
         path: PathBuf,
-        result: Box<Result<ProjectLoadResult, String>>,
+        result: Box<Result<ProjectLoadResult, ProjectLoadError>>,
     },
     ProjectSaved(Box<ProjectSaveCompleted>),
 
