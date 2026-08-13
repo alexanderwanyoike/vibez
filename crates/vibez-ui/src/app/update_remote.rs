@@ -26,15 +26,10 @@ impl App {
                 let item_count = data.catalog.entries.len();
                 self.state.browser.remote.catalog = Arc::new(data.catalog);
                 self.state.browser.remote.catalog_children = data.catalog_children;
-                self.state.browser.remote.availability.clear();
-                self.state.browser.remote.availability.extend(
-                    data.cached_provider_item_ids
-                        .into_iter()
-                        .map(|provider_item_id| {
-                            (provider_item_id, crate::state::RemoteAvailability::Cached)
-                        }),
-                );
-                self.state.browser.remote.mark_catalog_runtime_changed();
+                self.state
+                    .browser
+                    .remote
+                    .replace_availability(data.availability);
                 self.state.browser.remote.cache_usage_bytes = data.cache_usage.bytes;
                 self.state.browser.remote.cache_entries = data.cache_usage.entries;
                 self.state.browser.remote.refresh_items = item_count;
@@ -493,16 +488,11 @@ impl App {
                 self.state
                     .browser
                     .remote
-                    .availability
-                    .insert(path_lower.clone(), crate::state::RemoteAvailability::Cached);
-                if let Some(entry) = Arc::make_mut(&mut self.state.browser.remote.catalog)
-                    .entries
-                    .iter_mut()
-                    .find(|entry| entry.provider_item_id == path_lower)
-                {
-                    entry.derived_metadata = Some(materialized.metadata.clone());
-                }
-                self.state.browser.remote.mark_catalog_runtime_changed();
+                    .set_availability(path_lower.clone(), crate::state::RemoteAvailability::Cached);
+                self.state
+                    .browser
+                    .remote
+                    .set_entry_derived_metadata(&path_lower, materialized.metadata.clone());
                 let persist = self.remote_catalog_persist_task(None);
                 let maintenance = self.media_cache_maintenance_task();
                 self.remote_audition_cache_lease = Some(materialized.lease);
@@ -538,9 +528,7 @@ impl App {
                 self.state
                     .browser
                     .remote
-                    .availability
-                    .insert(path_lower, availability);
-                self.state.browser.remote.mark_catalog_runtime_changed();
+                    .set_availability(path_lower, availability);
                 self.state
                     .browser
                     .fail_waveform_load(&source, error.clone());

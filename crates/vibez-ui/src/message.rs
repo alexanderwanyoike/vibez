@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -173,7 +173,7 @@ pub struct RemoteMaterializedSample {
 pub struct RemoteCatalogStartupData {
     pub catalog: crate::remote_provider::RemoteCatalogSnapshot,
     pub catalog_children: HashMap<String, Vec<usize>>,
-    pub cached_provider_item_ids: HashSet<String>,
+    pub availability: HashMap<String, crate::state::RemoteAvailability>,
     pub cache_usage: vibez_dropbox::CacheUsage,
     pub load_error: Option<String>,
 }
