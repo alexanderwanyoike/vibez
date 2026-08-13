@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -166,6 +167,36 @@ pub struct RemoteMaterializedSample {
     pub source: MediaSourceRef,
     pub lease: vibez_dropbox::CacheLease,
     pub metadata: vibez_dropbox::DerivedMetadata,
+}
+
+#[derive(Debug)]
+pub struct RemoteCatalogStartupData {
+    pub catalog: crate::remote_provider::RemoteCatalogSnapshot,
+    pub catalog_children: HashMap<String, Vec<usize>>,
+    pub cached_provider_item_ids: HashSet<String>,
+    pub cache_usage: vibez_dropbox::CacheUsage,
+    pub load_error: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct RemoteCatalogStartupResult(
+    Arc<std::sync::Mutex<Option<Result<RemoteCatalogStartupData, String>>>>,
+);
+
+impl RemoteCatalogStartupResult {
+    pub fn new(result: Result<RemoteCatalogStartupData, String>) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Some(result))))
+    }
+
+    pub fn take(&self) -> Option<Result<RemoteCatalogStartupData, String>> {
+        self.0.lock().ok()?.take()
+    }
+}
+
+impl std::fmt::Debug for RemoteCatalogStartupResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RemoteCatalogStartupResult")
+    }
 }
 
 /// Successful background result from `quantize_audio_clip_async`.
@@ -619,6 +650,7 @@ pub enum Message {
     ConnectDropbox,
     DropboxConnected(Result<DropboxConnectOutcome, String>),
     DisconnectDropbox,
+    RemoteCatalogStartupLoaded(RemoteCatalogStartupResult),
     RefreshRemoteConnection,
     RemoteCatalogPageFetched {
         generation: u64,

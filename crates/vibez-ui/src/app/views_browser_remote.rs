@@ -141,6 +141,7 @@ impl App {
                 Some(format!("Partial refresh after {pages} page(s) · {error}"))
             }
             crate::state::RemoteCatalogState::Ready
+            | crate::state::RemoteCatalogState::Loading
             | crate::state::RemoteCatalogState::Refreshing => None,
         };
         if let Some(notice) = catalog_notice {
@@ -391,7 +392,9 @@ impl App {
                 .push(browser_row_divider());
         }
         if total_results == 0 {
-            let empty = if remote.catalog.entries.is_empty() {
+            let empty = if remote.catalog_state == crate::state::RemoteCatalogState::Loading {
+                "Loading saved Remote metadata…"
+            } else if remote.catalog.entries.is_empty() {
                 "No saved Remote metadata yet; connect and refresh when available"
             } else if searching {
                 "No media or folders match this scope"

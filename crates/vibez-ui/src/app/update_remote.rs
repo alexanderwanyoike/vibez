@@ -14,6 +14,65 @@ use crate::message::Message;
 use super::*;
 
 impl App {
+    pub(super) fn on_remote_catalog_startup_loaded(
+        &mut self,
+        result: crate::message::RemoteCatalogStartupResult,
+    ) -> Task<Message> {
+        let Some(result) = result.take() else {
+            return Task::none();
+        };
+        match result {
+            Ok(data) => {
+                let item_count = data.catalog.entries.len();
+                self.state.browser.remote.catalog = data.catalog;
+                self.state.browser.remote.catalog_children = data.catalog_children;
+                self.state.browser.remote.availability.clear();
+                self.state.browser.remote.availability.extend(
+                    data.cached_provider_item_ids
+                        .into_iter()
+                        .map(|provider_item_id| {
+                            (provider_item_id, crate::state::RemoteAvailability::Cached)
+                        }),
+                );
+                self.state.browser.remote.cache_usage_bytes = data.cache_usage.bytes;
+                self.state.browser.remote.cache_entries = data.cache_usage.entries;
+                self.state.browser.remote.refresh_items = item_count;
+                if let Some(error) = data.load_error {
+                    self.state.browser.remote.catalog_state =
+                        crate::state::RemoteCatalogState::Stale {
+                            error: error.clone(),
+                        };
+                    self.state.status_text = format!("Remote catalog load failed: {error}");
+                } else if self.dropbox_client.is_none() {
+                    self.state.browser.remote.catalog_state =
+                        crate::state::RemoteCatalogState::AuthenticationRequired {
+                            error: "Sign in to refresh; showing the last saved Remote catalog"
+                                .into(),
+                        };
+                    self.state.status_text =
+                        format!("Loaded {item_count} saved Remote catalog items");
+                } else {
+                    self.state.browser.remote.catalog_state =
+                        crate::state::RemoteCatalogState::Ready;
+                    self.state.status_text =
+                        format!("Loaded {item_count} saved Remote catalog items");
+                }
+            }
+            Err(error) => {
+                self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Stale {
+                    error: error.clone(),
+                };
+                self.state.status_text = error;
+            }
+        }
+
+        if self.dropbox_client.is_some() {
+            self.handle_remote_catalog_refresh()
+        } else {
+            Task::none()
+        }
+    }
+
     pub(super) fn on_save_dropbox_app_key(&mut self) -> Task<Message> {
         let value = self.state.browser.remote.app_key_input.trim().to_string();
         self.dropbox_settings.app_key = if value.is_empty() { None } else { Some(value) };
