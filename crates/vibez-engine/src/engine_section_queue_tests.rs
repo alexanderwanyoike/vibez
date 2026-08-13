@@ -26,10 +26,20 @@ fn source(
     length_beats: f64,
     value: f32,
 ) -> Box<PreparedSectionPlaybackSource> {
+    source_with_looping(section_id, track_id, length_beats, value, true)
+}
+
+fn source_with_looping(
+    section_id: SectionId,
+    track_id: TrackId,
+    length_beats: f64,
+    value: f32,
+    looping: bool,
+) -> Box<PreparedSectionPlaybackSource> {
     Box::new(PreparedSectionPlaybackSource::new(
         section_id,
         length_beats,
-        true,
+        looping,
         vec![(
             track_id,
             PreparedPlaybackSource::new(
@@ -268,6 +278,49 @@ fn one_bar_and_end_of_section_use_their_exact_boundaries() {
 #[test]
 fn end_of_section_track_mute_uses_the_active_section_wrap() {
     let (mut engine, mut commands, mut events, track_id) = playing_engine(0.6, 2.0);
+    while events.pop().is_ok() {}
+    commands
+        .push(EngineCommand::QueueTrackMute {
+            track_id,
+            muted: true,
+            quantization: TrackMuteQuantization::EndOfSection,
+        })
+        .unwrap();
+
+    engine.process(&mut [0.0; 10], 1);
+
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::TrackMuteChanged {
+                track_id: event_track,
+                muted: true,
+                effective_at_samples: 8,
+            } if event_track == track_id
+        ))
+    );
+    assert!(engine.tracks()[0].mute);
+}
+
+#[test]
+fn end_of_section_track_mute_applies_when_a_one_shot_section_stops() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+    commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+    commands
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::LaunchSection(source_with_looping(
+            SectionId::new(),
+            track_id,
+            2.0,
+            0.6,
+            false,
+        )))
+        .unwrap();
+    engine.process(&mut [0.0], 1);
     while events.pop().is_ok() {}
     commands
         .push(EngineCommand::QueueTrackMute {

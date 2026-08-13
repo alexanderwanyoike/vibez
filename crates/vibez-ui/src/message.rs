@@ -192,21 +192,32 @@ pub struct RemoteCatalogRefreshData {
     pub catalog: Arc<crate::remote_provider::RemoteCatalogSnapshot>,
     pub catalog_children: Option<HashMap<String, Vec<usize>>>,
     pub availability: Option<HashMap<String, crate::state::RemoteAvailability>>,
+    pub base_catalog: Arc<crate::remote_provider::RemoteCatalogSnapshot>,
+    pub base_availability: HashMap<String, crate::state::RemoteAvailability>,
+    pub base_runtime_revision: u64,
     pub continuation: RemoteCatalogRefreshContinuation,
 }
 
 #[derive(Clone)]
-pub struct RemoteCatalogRefreshResult(
-    Arc<std::sync::Mutex<Option<Result<RemoteCatalogRefreshData, String>>>>,
-);
+pub struct RemoteCatalogRefreshResult {
+    generation: u64,
+    result: Arc<std::sync::Mutex<Option<Result<RemoteCatalogRefreshData, String>>>>,
+}
 
 impl RemoteCatalogRefreshResult {
-    pub fn new(result: Result<RemoteCatalogRefreshData, String>) -> Self {
-        Self(Arc::new(std::sync::Mutex::new(Some(result))))
+    pub fn new(generation: u64, result: Result<RemoteCatalogRefreshData, String>) -> Self {
+        Self {
+            generation,
+            result: Arc::new(std::sync::Mutex::new(Some(result))),
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn take(&self) -> Option<Result<RemoteCatalogRefreshData, String>> {
-        self.0.lock().ok()?.take()
+        self.result.lock().ok()?.take()
     }
 }
 

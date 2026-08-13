@@ -174,6 +174,17 @@ impl AudioEngine {
         }
     }
 
+    pub(super) fn apply_end_of_section_track_mutes_at_queued_boundary(&mut self) {
+        while let Some((track_id, queued)) = self.tracks.iter().find_map(|track| {
+            track
+                .queued_mute
+                .filter(|queued| queued.end_of_section)
+                .map(|queued| (track.id, queued))
+        }) {
+            self.apply_track_mute_at(track_id, queued.muted, queued.effective_at_samples);
+        }
+    }
+
     pub(super) fn cancel_queued_track_mutes(&mut self) {
         for track in &mut self.tracks {
             if track.queued_mute.take().is_some() {
