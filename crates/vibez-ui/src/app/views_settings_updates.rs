@@ -56,10 +56,6 @@ impl App {
         .size(11)
         .color(th::text_dim());
 
-        // Manual escape hatch from the once-a-day throttle. Deliberately
-        // available even when the startup check is off: the toggle governs
-        // unattended traffic, and an explicit click is consent for one
-        // request.
         let check_now: Element<'_, Message> = if state.in_flight {
             text("Checking…").size(11).color(th::text_dim()).into()
         } else {
