@@ -811,6 +811,10 @@ pub struct RemoteUiState {
     /// A preview fetch / playback is in flight.
     pub preview_in_progress: bool,
     pub availability: HashMap<String, RemoteAvailability>,
+    /// Changes made by materialization/import flows while a catalog refresh
+    /// snapshot is being prepared. Prepared snapshots use this to detect and
+    /// rebase over newer UI-owned metadata instead of replacing it.
+    pub catalog_runtime_revision: u64,
     pub cache_usage_bytes: u64,
     pub cache_entries: usize,
     pub cache_budget_bytes: u64,
@@ -839,6 +843,7 @@ impl Default for RemoteUiState {
             selected_path: None,
             preview_in_progress: false,
             availability: HashMap::new(),
+            catalog_runtime_revision: 0,
             cache_usage_bytes: 0,
             cache_entries: 0,
             cache_budget_bytes: vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES,
@@ -849,6 +854,10 @@ impl Default for RemoteUiState {
 }
 
 impl RemoteUiState {
+    pub(crate) fn mark_catalog_runtime_changed(&mut self) {
+        self.catalog_runtime_revision = self.catalog_runtime_revision.wrapping_add(1);
+    }
+
     /// Rebuild the parent/children lookup after the catalog is loaded or
     /// reconciled. UI redraws can then navigate one folder without rescanning
     /// the complete provider catalog.

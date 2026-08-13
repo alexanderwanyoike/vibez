@@ -34,6 +34,7 @@ impl App {
                             (provider_item_id, crate::state::RemoteAvailability::Cached)
                         }),
                 );
+                self.state.browser.remote.mark_catalog_runtime_changed();
                 self.state.browser.remote.cache_usage_bytes = data.cache_usage.bytes;
                 self.state.browser.remote.cache_entries = data.cache_usage.entries;
                 self.state.browser.remote.refresh_items = item_count;
@@ -212,6 +213,10 @@ impl App {
         &mut self,
         result: crate::message::RemoteCatalogRefreshResult,
     ) -> Task<Message> {
+        if !self.remote_catalog_request.is_current(result.generation()) {
+            std::thread::spawn(move || drop(result));
+            return Task::none();
+        }
         let Some(result) = result.take() else {
             return Task::none();
         };
@@ -225,9 +230,8 @@ impl App {
                 return Task::none();
             }
         };
-        if !self.remote_catalog_request.is_current(data.generation) {
-            std::thread::spawn(move || drop(data));
-            return Task::none();
+        if data.base_runtime_revision != self.state.browser.remote.catalog_runtime_revision {
+            return self.rebase_remote_catalog_refresh(data);
         }
 
         let retired_catalog =
@@ -498,6 +502,7 @@ impl App {
                 {
                     entry.derived_metadata = Some(materialized.metadata.clone());
                 }
+                self.state.browser.remote.mark_catalog_runtime_changed();
                 let persist = self.remote_catalog_persist_task(None);
                 let maintenance = self.media_cache_maintenance_task();
                 self.remote_audition_cache_lease = Some(materialized.lease);
@@ -535,6 +540,7 @@ impl App {
                     .remote
                     .availability
                     .insert(path_lower, availability);
+                self.state.browser.remote.mark_catalog_runtime_changed();
                 self.state
                     .browser
                     .fail_waveform_load(&source, error.clone());
