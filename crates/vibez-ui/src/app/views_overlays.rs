@@ -30,6 +30,15 @@ fn project_track_deletion_list_height(location_count: usize) -> f32 {
     }
 }
 
+const FILE_MENU_ITEM_HEIGHT: f32 = 32.0;
+const FILE_MENU_ITEM_SPACING: f32 = 2.0;
+const FILE_MENU_CONTENT_PADDING: f32 = 4.0;
+const RECENT_PROJECTS_MENU_ITEM_INDEX: usize = 2;
+
+fn file_menu_item_top(item_index: usize) -> f32 {
+    FILE_MENU_CONTENT_PADDING + item_index as f32 * (FILE_MENU_ITEM_HEIGHT + FILE_MENU_ITEM_SPACING)
+}
+
 impl App {
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
         let track_id = self
@@ -562,6 +571,7 @@ impl App {
             )
             .on_press(Message::menu_item(MenuOverlay::File, msg))
             .padding([8, 16])
+            .height(Length::Fixed(FILE_MENU_ITEM_HEIGHT))
             .width(Length::Fill)
             .style(|_theme: &Theme, status| {
                 let bg = match status {
@@ -651,7 +661,7 @@ impl App {
         let about_btn = make_menu_btn("About vibez", icons::CIRCLE_DOT, Message::OpenAbout);
 
         let menu_content = column![new_btn]
-            .spacing(2)
+            .spacing(FILE_MENU_ITEM_SPACING)
             .push(open_btn)
             .push(recent_btn)
             .push(save_btn)
@@ -659,7 +669,7 @@ impl App {
             .push(export_btn)
             .push(settings_btn)
             .push(about_btn)
-            .padding(4)
+            .padding(FILE_MENU_CONTENT_PADDING)
             .width(Length::Fixed(220.0));
 
         let menu_card = container(menu_content).style(|_theme: &Theme| container::Style {
@@ -761,7 +771,13 @@ impl App {
 
         // Position below the header, near the File button.
         let menus = if let Some(recent_card) = recent_card {
-            row![menu_card, recent_card].spacing(4)
+            let aligned_recent_card = column![
+                vertical_space().height(Length::Fixed(file_menu_item_top(
+                    RECENT_PROJECTS_MENU_ITEM_INDEX
+                ))),
+                recent_card
+            ];
+            row![menu_card, aligned_recent_card].spacing(4)
         } else {
             row![menu_card]
         };
@@ -1022,7 +1038,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::project_track_deletion_list_height;
+    use super::{file_menu_item_top, project_track_deletion_list_height};
 
     #[test]
     fn deletion_location_list_grows_with_content_then_caps() {
@@ -1030,5 +1046,11 @@ mod tests {
         assert_eq!(project_track_deletion_list_height(1), 28.0);
         assert_eq!(project_track_deletion_list_height(2), 60.0);
         assert_eq!(project_track_deletion_list_height(8), 120.0);
+    }
+
+    #[test]
+    fn file_submenu_starts_at_its_parent_row() {
+        assert_eq!(file_menu_item_top(0), 4.0);
+        assert_eq!(file_menu_item_top(2), 72.0);
     }
 }
