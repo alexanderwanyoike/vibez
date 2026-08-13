@@ -5,10 +5,10 @@
 //! inside the real-time audio callback.
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -40,6 +40,39 @@ impl StreamHealth {
             CallbackAction::Process
         }
     }
+}
+
+/// Smoothed fraction of each device buffer deadline spent in the audio
+/// callback. Stored as basis points so the real-time writer and UI reader do
+/// not need a lock.
+#[derive(Clone, Default)]
+struct StreamCpuLoad(Arc<AtomicU32>);
+
+impl StreamCpuLoad {
+    fn record(&self, elapsed: Duration, frames: usize, sample_rate: u32) {
+        let instantaneous = callback_load_basis_points(elapsed, frames, sample_rate);
+        let previous = self.0.load(Ordering::Relaxed);
+        let smoothed = if previous == 0 {
+            instantaneous
+        } else {
+            (previous.saturating_mul(4) + instantaneous) / 5
+        };
+        self.0.store(smoothed, Ordering::Relaxed);
+    }
+
+    fn percent(&self) -> f32 {
+        self.0.load(Ordering::Relaxed) as f32 / 100.0
+    }
+}
+
+fn callback_load_basis_points(elapsed: Duration, frames: usize, sample_rate: u32) -> u32 {
+    if frames == 0 || sample_rate == 0 {
+        return 0;
+    }
+    let deadline_seconds = frames as f64 / sample_rate as f64;
+    ((elapsed.as_secs_f64() / deadline_seconds) * 10_000.0)
+        .round()
+        .clamp(0.0, 99_900.0) as u32
 }
 
 /// A presentation-facing transition in the output stream lifecycle.
@@ -181,6 +214,7 @@ pub struct AudioOutputStream {
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
     event_reporter: StreamEventReporter,
     event_rx: Receiver<AudioStreamEvent>,
+    cpu_load: StreamCpuLoad,
 }
 
 impl AudioOutputStream {
@@ -210,11 +244,13 @@ impl AudioOutputStream {
     ) -> Result<Self, AudioStreamError> {
         let engine_slot = Arc::new(Mutex::new(Some(engine)));
         let (event_reporter, event_rx) = StreamEventReporter::channel();
+        let cpu_load = StreamCpuLoad::default();
         let (stream, params) = Self::build_stream(
             Arc::clone(&engine_slot),
             device,
             buffer_size,
             event_reporter.clone(),
+            cpu_load.clone(),
         )?;
         Ok(Self {
             stream,
@@ -222,6 +258,7 @@ impl AudioOutputStream {
             engine_slot,
             event_reporter,
             event_rx,
+            cpu_load,
         })
     }
 
@@ -252,6 +289,7 @@ impl AudioOutputStream {
                 &device,
                 buffer_size,
                 self.event_reporter.clone(),
+                self.cpu_load.clone(),
             )?;
 
             self.stream = stream;
@@ -279,6 +317,7 @@ impl AudioOutputStream {
         device: &cpal::Device,
         buffer_size: Option<u32>,
         event_reporter: StreamEventReporter,
+        cpu_load: StreamCpuLoad,
     ) -> Result<(cpal::Stream, StreamParams), AudioStreamError> {
         let supported_config = device.default_output_config()?;
 
@@ -327,6 +366,7 @@ impl AudioOutputStream {
         let health = StreamHealth::default();
         let callback_health = health.clone();
         let error_reporter = event_reporter;
+        let callback_cpu_load = cpu_load;
 
         let stream = device.build_output_stream(
             &config,
@@ -366,14 +406,19 @@ impl AudioOutputStream {
 
                 // try_lock: never blocks the audio thread.  If the UI thread
                 // holds the lock during reconfigure, output silence.
+                let started = Instant::now();
+                let mut processed = false;
                 if let Ok(mut guard) = slot.try_lock() {
                     if let Some(engine) = guard.as_mut() {
                         engine.process(data, ch);
-                        return;
+                        processed = true;
                     }
                 }
                 // Fallback: silence
-                data.fill(0.0);
+                if !processed {
+                    data.fill(0.0);
+                }
+                callback_cpu_load.record(started.elapsed(), data.len() / ch, rt_sample_rate);
             },
             move |err| {
                 health.mark_failed();
@@ -428,6 +473,12 @@ impl AudioOutputStream {
     /// Return the next lifecycle event without blocking the UI thread.
     pub fn try_next_event(&self) -> Option<AudioStreamEvent> {
         self.event_rx.try_recv().ok()
+    }
+
+    /// Smoothed audio callback load as a percentage of the current buffer
+    /// deadline. Values over 100% mean the callback missed its deadline.
+    pub fn cpu_load_percent(&self) -> f32 {
+        self.cpu_load.percent()
     }
 }
 
@@ -485,6 +536,31 @@ mod tests {
 
         assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
         assert_eq!(health.callback_action(), CallbackAction::SilenceAndYield);
+    }
+
+    #[test]
+    fn callback_load_compares_processing_time_with_the_device_deadline() {
+        assert_eq!(
+            callback_load_basis_points(Duration::from_millis(5), 480, 48_000),
+            5_000
+        );
+        assert_eq!(
+            callback_load_basis_points(Duration::from_millis(12), 480, 48_000),
+            12_000
+        );
+        assert_eq!(
+            callback_load_basis_points(Duration::from_secs(1), 0, 48_000),
+            0
+        );
+    }
+
+    #[test]
+    fn callback_load_is_smoothed_without_locking_the_audio_thread() {
+        let load = StreamCpuLoad::default();
+        load.record(Duration::from_millis(5), 480, 48_000);
+        assert_eq!(load.percent(), 50.0);
+        load.record(Duration::from_millis(10), 480, 48_000);
+        assert_eq!(load.percent(), 60.0);
     }
 
     #[test]

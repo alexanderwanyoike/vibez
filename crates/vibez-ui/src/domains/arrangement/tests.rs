@@ -4,7 +4,7 @@ use super::test_support::*;
 use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::UiClip;
-use vibez_core::automation::{AutomationLane, AutomationTarget};
+use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
 
 #[test]
@@ -818,6 +818,203 @@ fn split_looped_audio_preserves_source_phase() {
     assert!(halves.iter().all(|clip| clip.loop_enabled));
     assert_eq!(halves[1].source_offset, 50);
     assert_eq!((halves[1].loop_start, halves[1].loop_end), (0, 100));
+}
+
+#[test]
+fn trim_track_mutes_replaces_audio_with_unmuted_fragments_and_preserves_loop_phase() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 800);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.loop_enabled = true;
+    clip.loop_start = 0;
+    clip.loop_end = 100;
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    for (beat, value) in [(2.5, 1.0), (4.5, 0.0)] {
+        lane.insert_point(AutomationPoint {
+            beat,
+            value,
+            curve: 0.0,
+        });
+    }
+    a.tracks[0].automation.push(lane);
+    a.selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::TrimSelectedByTrackMutes,
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    let mut fragments: Vec<_> = a.tracks[0].clips.iter().collect();
+    fragments.sort_by_key(|clip| clip.position);
+    assert_eq!(fragments.len(), 2);
+    assert_eq!((fragments[0].position, fragments[0].duration), (0, 250));
+    assert_eq!((fragments[1].position, fragments[1].duration), (450, 350));
+    assert_eq!(fragments[1].source_offset, 50);
+    assert!(fragments.iter().all(|clip| clip.loop_enabled));
+    assert_eq!(a.selected_clips.len(), 2);
+    assert_eq!(
+        engine
+            .0
+            .iter()
+            .filter(|command| matches!(command, EngineCommand::RemoveClip(..)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        engine
+            .0
+            .iter()
+            .filter(|command| matches!(command, EngineCommand::AddClip { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Trimmed 1 clip by Track Mutes · kept 2 fragments")
+    );
+}
+
+#[test]
+fn trim_track_mutes_materializes_midi_notes_across_unmuted_fragments() {
+    let mut a = arrangement_with_tracks(1);
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    engine.0.clear();
+    let track_id = a.tracks[1].id;
+    let clip_id = ClipId::new();
+    a.tracks[1].note_clips.push(UiNoteClip {
+        id: clip_id,
+        name: "Held note".to_string(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: vec![MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_beat: 1.0,
+            duration_beats: 5.0,
+        }],
+        selected_notes: HashSet::new(),
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 0.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    });
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    for (beat, value) in [(2.0, 1.0), (4.0, 0.0)] {
+        lane.insert_point(AutomationPoint {
+            beat,
+            value,
+            curve: 0.0,
+        });
+    }
+    a.tracks[1].automation.push(lane);
+    a.selected_clips
+        .insert(ArrangementSelection::NoteClip { track_id, clip_id });
+
+    a.update(
+        ArrangementMsg::TrimSelectedByTrackMutes,
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    let mut fragments: Vec<_> = a.tracks[1].note_clips.iter().collect();
+    fragments.sort_by(|a, b| a.position_beats.partial_cmp(&b.position_beats).unwrap());
+    assert_eq!(fragments.len(), 2);
+    assert_eq!(
+        (fragments[0].position_beats, fragments[0].duration_beats),
+        (0.0, 2.0)
+    );
+    assert_eq!(
+        (fragments[1].position_beats, fragments[1].duration_beats),
+        (4.0, 4.0)
+    );
+    assert_eq!(
+        (
+            fragments[0].notes[0].start_beat,
+            fragments[0].notes[0].duration_beats
+        ),
+        (1.0, 1.0)
+    );
+    assert_eq!(
+        (
+            fragments[1].notes[0].start_beat,
+            fragments[1].notes[0].duration_beats
+        ),
+        (0.0, 2.0)
+    );
+}
+
+#[test]
+fn trim_track_mutes_leaves_selected_clip_without_mute_automation_untouched() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 800);
+    a.selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::TrimSelectedByTrackMutes,
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(a.tracks[0].clips[0].id, clip_id);
+    assert!(engine.0.is_empty());
+    assert_eq!(
+        action.status.as_deref(),
+        Some("No selected clip material overlaps Track Mutes")
+    );
+}
+
+#[test]
+fn trim_track_mutes_ignores_redundant_unmuted_automation_points() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 800);
+    let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
+    for beat in [2.5, 6.0] {
+        lane.insert_point(AutomationPoint {
+            beat,
+            value: 0.0,
+            curve: 0.0,
+        });
+    }
+    a.tracks[0].automation.push(lane);
+    a.selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::TrimSelectedByTrackMutes,
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(a.tracks[0].clips.len(), 1);
+    assert_eq!(a.tracks[0].clips[0].id, clip_id);
+    assert!(engine.0.is_empty());
+    assert_eq!(
+        action.status.as_deref(),
+        Some("No selected clip material overlaps Track Mutes")
+    );
 }
 
 #[test]

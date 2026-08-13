@@ -215,6 +215,8 @@ impl App {
         // here rather than at the render site so a hand-edited ui.json
         // cannot open the window at an unusable size.
         let interface_scale = ui_settings.clamped_interface_scale();
+        let recent_project_paths =
+            crate::ui_settings::normalize_recent_projects(ui_settings.recent_project_paths.clone());
 
         let (stream, sample_rate, audio_stream_health) =
             match AudioOutputStream::open(engine, Some(512)) {
@@ -241,7 +243,6 @@ impl App {
             budget_bytes: ui_settings.media_cache_budget_bytes,
             automatic_eviction: ui_settings.media_cache_automatic_eviction,
         });
-        let cache_usage = dropbox_cache.usage().unwrap_or_default();
         let resolved_key = load_app_key_with_env_override(&dropbox_settings);
         let dropbox_client = match (&resolved_key, &dropbox_settings.tokens) {
             (Some(key), Some(tokens)) => {
@@ -249,39 +250,16 @@ impl App {
             }
             _ => None,
         };
-        let catalog_store = crate::remote_provider::RemoteCatalogStore::for_dropbox();
-        let (remote_catalog, mut remote_catalog_state) = match catalog_store.load() {
-            Ok(catalog) => (catalog, crate::state::RemoteCatalogState::Ready),
-            Err(error) => (
-                crate::remote_provider::RemoteCatalogSnapshot::default(),
-                crate::state::RemoteCatalogState::Stale { error },
-            ),
-        };
-        if dropbox_client.is_none()
-            && matches!(
-                remote_catalog_state,
-                crate::state::RemoteCatalogState::Ready
-            )
-        {
-            remote_catalog_state = crate::state::RemoteCatalogState::AuthenticationRequired {
-                error: "Sign in to refresh; showing the last saved Remote catalog".into(),
-            };
-        }
-        let mut remote_ui_state = crate::state::RemoteUiState {
+        let remote_ui_state = crate::state::RemoteUiState {
             connected: dropbox_client.is_some(),
             account_email: dropbox_settings.account_email.clone(),
             app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
             has_app_key: resolved_key.is_some(),
-            catalog: remote_catalog,
-            catalog_state: remote_catalog_state,
-            cache_usage_bytes: cache_usage.bytes,
-            cache_entries: cache_usage.entries,
+            catalog_state: crate::state::RemoteCatalogState::Loading,
             cache_budget_bytes: ui_settings.media_cache_budget_bytes,
             cache_automatic_eviction: ui_settings.media_cache_automatic_eviction,
             ..Default::default()
         };
-        remote_ui_state.rebuild_catalog_children();
-        dropbox_io::seed_remote_availability(&dropbox_cache, &mut remote_ui_state);
 
         let mut state = AppState {
             transport: crate::state::TransportState {
@@ -296,6 +274,10 @@ impl App {
             update_check: crate::update_check::UpdateCheckState {
                 enabled: ui_settings.check_for_updates,
                 last_check_unix: ui_settings.last_update_check_unix,
+                ..Default::default()
+            },
+            project: crate::state::ProjectState {
+                recent_project_paths,
                 ..Default::default()
             },
             view: crate::state::ViewState {
@@ -424,11 +406,8 @@ impl App {
                 })
             })
         }));
-        let remote_startup_task = if app.dropbox_client.is_some() {
-            Task::done(Message::RefreshRemoteConnection)
-        } else {
-            Task::none()
-        };
+        let remote_startup_task =
+            dropbox_io::remote_catalog_startup_task(app.dropbox_cache.clone());
         let plugin_catalog_startup_task = if app.state.plugin_settings.cache_needs_refresh() {
             Task::done(Message::ScanPlugins)
         } else {

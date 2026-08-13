@@ -53,6 +53,9 @@ impl App {
             self.apply_snapshot(snapshot);
             self.mark_project_dirty();
         }
+        if action.persist_ui_settings {
+            self.persist_ui_settings();
+        }
         Task::none()
     }
 
@@ -120,12 +123,16 @@ impl App {
     ) -> Task<Message> {
         if let Some(path) = path {
             self.state.status_text = format!("Opening {}...", path.display());
+            let completed_path = path.clone();
             let dropbox = self
                 .dropbox_client
                 .clone()
                 .map(|client| (client, self.dropbox_cache.clone()));
-            return Task::perform(load_project_async(path, dropbox), |result| {
-                Message::ProjectLoaded(Box::new(result))
+            return Task::perform(load_project_async(path, dropbox), move |result| {
+                Message::ProjectLoaded {
+                    path: completed_path.clone(),
+                    result: Box::new(result),
+                }
             });
         }
         Task::none()
@@ -157,13 +164,17 @@ impl App {
 
     pub(super) fn route_project_loaded(
         &mut self,
+        attempted_path: PathBuf,
         result: Result<ProjectLoadResult, String>,
     ) -> Task<Message> {
         match result {
             Ok(loaded) => {
+                let path = loaded.path.clone();
                 self.rebuild_from_loaded_project(loaded);
+                self.remember_recent_project(path);
             }
             Err(err) => {
+                self.forget_recent_project(&attempted_path);
                 self.state.status_text = format!("Project load error: {err}");
             }
         }
@@ -182,6 +193,7 @@ impl App {
             Ok(saved) => {
                 self.apply_saved_project_sources(&saved.project);
                 self.state.project.current_path = Some(saved.path.clone());
+                self.remember_recent_project(saved.path.clone());
                 self.state.project.dirty = !completion_is_current;
                 if !completion_is_current {
                     // An Untitled project can receive another edit while its

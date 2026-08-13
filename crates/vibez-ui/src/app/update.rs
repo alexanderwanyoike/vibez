@@ -267,8 +267,8 @@ impl App {
             Message::ProjectSavePathSelected(path) => {
                 return self.route_project_save_path_selected(path);
             }
-            Message::ProjectLoaded(result) => {
-                return self.route_project_loaded(*result);
+            Message::ProjectLoaded { path, result } => {
+                return self.route_project_loaded(path, *result);
             }
             Message::ProjectSaved(result) => {
                 return self.route_project_saved(*result);
@@ -862,6 +862,9 @@ impl App {
                 self.state.status_text = format!("Dropbox connect failed: {err}");
             }
             Message::DisconnectDropbox => return self.on_disconnect_dropbox(),
+            Message::RemoteCatalogStartupLoaded(result) => {
+                return self.on_remote_catalog_startup_loaded(result)
+            }
             Message::RefreshRemoteConnection => {
                 return self.handle_remote_catalog_refresh();
             }
@@ -870,6 +873,9 @@ impl App {
                 completed_pages,
                 result,
             } => return self.on_remote_catalog_page_fetched(generation, completed_pages, result),
+            Message::RemoteCatalogRefreshPrepared(result) => {
+                return self.on_remote_catalog_refresh_prepared(result)
+            }
             Message::RemoteCatalogSaved {
                 generation,
                 next_checkpoint,

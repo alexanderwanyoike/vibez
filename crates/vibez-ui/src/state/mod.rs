@@ -439,6 +439,8 @@ pub struct AppState {
     // Metering (master)
     pub peak_l: f32,
     pub peak_r: f32,
+    /// Smoothed audio callback work as a percentage of its buffer deadline.
+    pub audio_cpu_load_percent: f32,
     /// Spectrum analyser fed by the engine's per-track tap (follows
     /// the selected track); drawn behind the channel EQ curve.
     pub spectrum: crate::spectrum::SpectrumState,
@@ -511,6 +513,7 @@ impl Default for AppState {
             },
             peak_l: 0.0,
             peak_r: 0.0,
+            audio_cpu_load_percent: 0.0,
             spectrum: crate::spectrum::SpectrumState::default(),
             status_text: "Ready — Add a track to get started".to_string(),
             export_progress: None,
@@ -580,6 +583,7 @@ impl AppState {
             AudioStreamEvent::Error(cause) => {
                 self.status_text = format!("Audio stream error: {cause}");
                 self.audio_stream_health = AudioStreamHealth::Error(cause);
+                self.audio_cpu_load_percent = 0.0;
             }
             AudioStreamEvent::Rebuilding => {
                 self.status_text = "Rebuilding audio stream…".into();
@@ -590,6 +594,15 @@ impl AppState {
                 self.audio_stream_health = AudioStreamHealth::Running;
             }
         }
+    }
+
+    pub fn update_audio_cpu_load(&mut self, measured_percent: Option<f32>) {
+        self.audio_cpu_load_percent =
+            if matches!(self.audio_stream_health, AudioStreamHealth::Running) {
+                measured_percent.unwrap_or(0.0)
+            } else {
+                0.0
+            };
     }
 
     pub fn position_seconds(&self) -> f64 {
@@ -781,7 +794,10 @@ mod audio_stream_health_tests {
 
     #[test]
     fn stream_error_and_recovery_update_persistent_health_and_status() {
-        let mut state = AppState::default();
+        let mut state = AppState {
+            audio_cpu_load_percent: 45.0,
+            ..AppState::default()
+        };
 
         state.apply_audio_stream_event(AudioStreamEvent::Error(
             "device disconnected mid-session".into(),
@@ -794,6 +810,7 @@ mod audio_stream_health_tests {
             state.status_text,
             "Audio stream error: device disconnected mid-session"
         );
+        assert_eq!(state.audio_cpu_load_percent, 0.0);
 
         state.apply_audio_stream_event(AudioStreamEvent::Rebuilding);
         assert_eq!(state.audio_stream_health, AudioStreamHealth::Rebuilding);

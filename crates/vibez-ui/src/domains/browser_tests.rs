@@ -1,5 +1,7 @@
 //! Browser-domain update tests. Split from domains/browser.rs.
 
+use std::sync::Arc;
+
 use super::*;
 
 #[test]
@@ -390,7 +392,7 @@ fn selecting_visible_remote_folder_from_local_activates_that_folder_in_one_click
         }),
         ..BrowserState::default()
     };
-    browser.remote.catalog.entries = vec![
+    Arc::make_mut(&mut browser.remote.catalog).entries = vec![
         RemoteCatalogEntry {
             provider_item_id: "/megalodon".into(),
             path: "/Megalodon".into(),
@@ -511,7 +513,7 @@ fn remote_catalog_children_are_indexed_folder_first_per_parent() {
         derived_metadata: None,
     };
     let mut browser = BrowserState::default();
-    browser.remote.catalog.entries = vec![
+    Arc::make_mut(&mut browser.remote.catalog).entries = vec![
         entry("/z.wav", "", "z.wav", false),
         entry("/beats", "", "Beats", true),
         entry("/a.wav", "", "a.wav", false),

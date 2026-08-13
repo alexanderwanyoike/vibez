@@ -696,6 +696,7 @@ impl BrowserState {
 pub enum RemoteCatalogState {
     #[default]
     Ready,
+    Loading,
     Refreshing,
     Stale {
         error: String,
@@ -734,6 +735,7 @@ impl RemoteCatalogState {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Ready => "READY",
+            Self::Loading => "LOADING",
             Self::Refreshing => "REFRESHING",
             Self::Stale { .. } => "STALE",
             Self::Partial { .. } => "PARTIAL",
@@ -748,6 +750,7 @@ mod remote_catalog_state_tests {
 
     #[test]
     fn refresh_auth_stale_and_partial_states_have_distinct_labels() {
+        assert_eq!(RemoteCatalogState::Loading.label(), "LOADING");
         assert_eq!(RemoteCatalogState::Refreshing.label(), "REFRESHING");
         assert_eq!(
             RemoteCatalogState::AuthenticationRequired {
@@ -787,7 +790,7 @@ pub struct RemoteUiState {
     /// An OAuth flow is in progress; Connect button is disabled.
     pub auth_in_progress: bool,
     pub last_error: Option<String>,
-    pub catalog: RemoteCatalogSnapshot,
+    pub catalog: Arc<RemoteCatalogSnapshot>,
     pub catalog_state: RemoteCatalogState,
     /// Pages and entries applied during the current progressive Catalog Refresh.
     pub refresh_pages: usize,
@@ -808,6 +811,10 @@ pub struct RemoteUiState {
     /// A preview fetch / playback is in flight.
     pub preview_in_progress: bool,
     pub availability: HashMap<String, RemoteAvailability>,
+    /// Changes made by materialization/import flows while a catalog refresh
+    /// snapshot is being prepared. Prepared snapshots use this to detect and
+    /// rebase over newer UI-owned metadata instead of replacing it.
+    pub catalog_runtime_revision: u64,
     pub cache_usage_bytes: u64,
     pub cache_entries: usize,
     pub cache_budget_bytes: u64,
@@ -824,7 +831,7 @@ impl Default for RemoteUiState {
             has_app_key: false,
             auth_in_progress: false,
             last_error: None,
-            catalog: RemoteCatalogSnapshot::default(),
+            catalog: Arc::new(RemoteCatalogSnapshot::default()),
             catalog_state: RemoteCatalogState::default(),
             refresh_pages: 0,
             refresh_items: 0,
@@ -836,6 +843,7 @@ impl Default for RemoteUiState {
             selected_path: None,
             preview_in_progress: false,
             availability: HashMap::new(),
+            catalog_runtime_revision: 0,
             cache_usage_bytes: 0,
             cache_entries: 0,
             cache_budget_bytes: vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES,
@@ -846,34 +854,17 @@ impl Default for RemoteUiState {
 }
 
 impl RemoteUiState {
+    pub(crate) fn mark_catalog_runtime_changed(&mut self) {
+        self.catalog_runtime_revision = self.catalog_runtime_revision.wrapping_add(1);
+    }
+
     /// Rebuild the parent/children lookup after the catalog is loaded or
     /// reconciled. UI redraws can then navigate one folder without rescanning
     /// the complete provider catalog.
+    #[cfg(test)]
     pub fn rebuild_catalog_children(&mut self) {
-        let mut children: HashMap<String, Vec<usize>> = HashMap::new();
-        for (index, entry) in self.catalog.entries.iter().enumerate() {
-            children
-                .entry(entry.parent_path.clone())
-                .or_default()
-                .push(index);
-        }
-        for indexes in children.values_mut() {
-            indexes.sort_by(|left, right| {
-                let left = &self.catalog.entries[*left];
-                let right = &self.catalog.entries[*right];
-                (
-                    !left.is_folder,
-                    left.name.to_ascii_lowercase(),
-                    &left.provider_item_id,
-                )
-                    .cmp(&(
-                        !right.is_folder,
-                        right.name.to_ascii_lowercase(),
-                        &right.provider_item_id,
-                    ))
-            });
-        }
-        self.catalog_children = children;
+        self.catalog_children =
+            crate::remote_provider::build_remote_catalog_children(&self.catalog);
     }
 
     pub fn catalog_child_indices(&self, parent: &str) -> &[usize] {
