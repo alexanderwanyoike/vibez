@@ -280,6 +280,12 @@ pub fn reconcile_remote_catalog(
 ) {
     debug_assert!(result.pages > 0 || result.changes.is_empty());
     debug_assert!(result.error.is_none() || result.checkpoint.is_none());
+    if result.changes.is_empty() {
+        if let Some(checkpoint) = &result.checkpoint {
+            snapshot.checkpoint = Some(checkpoint.clone());
+        }
+        return;
+    }
     let mut entries: HashMap<String, RemoteCatalogEntry> = snapshot
         .entries
         .drain(..)
@@ -598,6 +604,30 @@ mod tests {
         reconcile_remote_catalog(&mut snapshot, &result);
         assert_eq!(snapshot.entries, vec![entry("/new.wav")]);
         assert_eq!(snapshot.checkpoint.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn an_empty_delta_advances_only_the_checkpoint() {
+        let mut snapshot = RemoteCatalogSnapshot {
+            checkpoint: Some("old".into()),
+            entries: vec![entry("/Megalodon/Kick.wav")],
+            ..RemoteCatalogSnapshot::default()
+        };
+        let entries_allocation = snapshot.entries.as_ptr();
+
+        reconcile_remote_catalog(
+            &mut snapshot,
+            &RemoteRefreshResult {
+                pages: 1,
+                changes: Vec::new(),
+                checkpoint: Some("next".into()),
+                error: None,
+            },
+        );
+
+        assert_eq!(snapshot.checkpoint.as_deref(), Some("next"));
+        assert_eq!(snapshot.entries.as_ptr(), entries_allocation);
+        assert_eq!(snapshot.entries, vec![entry("/Megalodon/Kick.wav")]);
     }
 
     #[test]

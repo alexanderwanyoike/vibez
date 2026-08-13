@@ -24,7 +24,7 @@ impl App {
         match result {
             Ok(data) => {
                 let item_count = data.catalog.entries.len();
-                self.state.browser.remote.catalog = data.catalog;
+                self.state.browser.remote.catalog = Arc::new(data.catalog);
                 self.state.browser.remote.catalog_children = data.catalog_children;
                 self.state.browser.remote.availability.clear();
                 self.state.browser.remote.availability.extend(
@@ -146,14 +146,10 @@ impl App {
                 let next_checkpoint = page.checkpoint.clone();
                 self.remote_catalog_pending.extend(page.changes);
                 self.state.browser.remote.refresh_pages = pages;
-                // Reconciling re-sorts the catalog and rebuilds the
-                // child index, so batch it to save intervals and the
-                // final page instead of every page.
+                // Reconciliation is prepared off the UI thread at save
+                // intervals and at the final page.
                 let save_due = !has_more
                     || pages.is_multiple_of(super::dropbox_io::REMOTE_CATALOG_SAVE_PAGE_INTERVAL);
-                if save_due {
-                    self.flush_remote_catalog_pages(pages, (!has_more).then_some(page.checkpoint));
-                }
                 if has_more {
                     self.state.status_text = format!(
                         "Remote catalog: {} items available · fetching page {}…",
@@ -169,10 +165,13 @@ impl App {
                         return Task::none();
                     }
                     if save_due {
-                        // The next page is chained behind the save so
-                        // a persistence failure still stops the
-                        // refresh and only one save runs at a time.
-                        return self.remote_catalog_persist_task(Some(next_checkpoint));
+                        return self.prepare_remote_catalog_refresh(
+                            pages,
+                            None,
+                            crate::message::RemoteCatalogRefreshContinuation::FetchNext {
+                                checkpoint: next_checkpoint,
+                            },
+                        );
                     }
                     if let Some(client) = self.dropbox_client.clone() {
                         return super::dropbox_io::remote_catalog_page_task(
@@ -183,66 +182,137 @@ impl App {
                         );
                     }
                 } else {
-                    self.state.browser.remote.catalog_state =
-                        crate::state::RemoteCatalogState::Ready;
-                    self.state.status_text = format!(
-                        "Remote catalog refreshed: {} items across {pages} page(s)",
-                        self.state.browser.remote.refresh_items
+                    return self.prepare_remote_catalog_refresh(
+                        pages,
+                        Some(page.checkpoint),
+                        crate::message::RemoteCatalogRefreshContinuation::Complete,
                     );
-                    return self.remote_catalog_persist_task(None);
                 }
             }
             Err(error) => {
-                // Keep the pages that did arrive: reconcile them now
-                // and persist below so a mid-refresh failure cannot
-                // silently drop reconciled progress.
-                let flushed = self.flush_remote_catalog_pages(completed_pages, None);
-                if error.kind == crate::remote_provider::RemoteProviderErrorKind::CheckpointExpired
-                {
-                    // The provider invalidated our delta cursor; keep
-                    // the browsable catalog but restart the refresh
-                    // as a full listing from scratch.
-                    self.state.browser.remote.catalog.checkpoint = None;
-                    if let Some(client) = self.dropbox_client.clone() {
-                        self.state.browser.remote.refresh_pages = 0;
-                        self.state.status_text = "Remote checkpoint expired; rebuilding \
-                            the catalog from a full listing…"
-                            .into();
-                        return Task::batch([
-                            self.remote_catalog_persist_task(None),
-                            super::dropbox_io::remote_catalog_page_task(
-                                client, None, 0, generation,
-                            ),
-                        ]);
-                    }
+                if !self.remote_catalog_pending.is_empty() {
+                    return self.prepare_remote_catalog_refresh(
+                        completed_pages,
+                        None,
+                        crate::message::RemoteCatalogRefreshContinuation::Failed(error),
+                    );
                 }
-                self.state.browser.remote.catalog_state = if error.kind
-                    == crate::remote_provider::RemoteProviderErrorKind::Authentication
-                {
-                    crate::state::RemoteCatalogState::AuthenticationRequired {
-                        error: error.message.clone(),
-                    }
-                } else if completed_pages > 0 {
-                    crate::state::RemoteCatalogState::Partial {
-                        pages: completed_pages,
-                        error: error.message.clone(),
-                    }
-                } else {
-                    crate::state::RemoteCatalogState::Stale {
-                        error: error.message.clone(),
-                    }
-                };
-                self.state.status_text = format!(
-                    "Remote catalog kept {} available items after refresh error: {}",
-                    self.state.browser.remote.catalog.entries.len(),
-                    error.message
+                return self.finish_remote_catalog_refresh_error(
+                    generation,
+                    completed_pages,
+                    error,
+                    false,
                 );
-                if flushed {
-                    return self.remote_catalog_persist_task(None);
-                }
             }
         }
         Task::none()
+    }
+
+    pub(super) fn on_remote_catalog_refresh_prepared(
+        &mut self,
+        result: crate::message::RemoteCatalogRefreshResult,
+    ) -> Task<Message> {
+        let Some(result) = result.take() else {
+            return Task::none();
+        };
+        let data = match result {
+            Ok(data) => data,
+            Err(error) => {
+                self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Stale {
+                    error: error.clone(),
+                };
+                self.state.status_text = error;
+                return Task::none();
+            }
+        };
+        if !self.remote_catalog_request.is_current(data.generation) {
+            std::thread::spawn(move || drop(data));
+            return Task::none();
+        }
+
+        let retired_catalog =
+            std::mem::replace(&mut self.state.browser.remote.catalog, data.catalog);
+        let retired_children = data.catalog_children.map(|children| {
+            std::mem::replace(&mut self.state.browser.remote.catalog_children, children)
+        });
+        let retired_availability = data.availability.map(|availability| {
+            std::mem::replace(&mut self.state.browser.remote.availability, availability)
+        });
+        // Large snapshots and their derived maps are destructed on a worker,
+        // too; replacing them must remain constant-time on the UI thread.
+        std::thread::spawn(move || {
+            drop((retired_catalog, retired_children, retired_availability));
+        });
+
+        self.state.browser.remote.refresh_items = self.state.browser.remote.catalog.entries.len();
+        match data.continuation {
+            crate::message::RemoteCatalogRefreshContinuation::FetchNext { checkpoint } => {
+                self.state.status_text = format!(
+                    "Remote catalog: {} items available · saving page {}…",
+                    self.state.browser.remote.refresh_items, data.pages
+                );
+                self.remote_catalog_persist_task(Some(checkpoint))
+            }
+            crate::message::RemoteCatalogRefreshContinuation::Complete => {
+                self.state.browser.remote.catalog_state = crate::state::RemoteCatalogState::Ready;
+                self.state.status_text = format!(
+                    "Remote catalog refreshed: {} items across {} page(s)",
+                    self.state.browser.remote.refresh_items, data.pages
+                );
+                self.remote_catalog_persist_task(None)
+            }
+            crate::message::RemoteCatalogRefreshContinuation::Failed(error) => {
+                self.finish_remote_catalog_refresh_error(data.generation, data.pages, error, true)
+            }
+        }
+    }
+
+    fn finish_remote_catalog_refresh_error(
+        &mut self,
+        generation: u64,
+        completed_pages: usize,
+        error: crate::remote_provider::RemoteProviderError,
+        reconciled_pages: bool,
+    ) -> Task<Message> {
+        if error.kind == crate::remote_provider::RemoteProviderErrorKind::CheckpointExpired {
+            // The provider invalidated our delta cursor; keep the browsable
+            // catalog but restart the refresh as a full listing from scratch.
+            Arc::make_mut(&mut self.state.browser.remote.catalog).checkpoint = None;
+            if let Some(client) = self.dropbox_client.clone() {
+                self.state.browser.remote.refresh_pages = 0;
+                self.state.status_text =
+                    "Remote checkpoint expired; rebuilding the catalog from a full listing…".into();
+                return Task::batch([
+                    self.remote_catalog_persist_task(None),
+                    super::dropbox_io::remote_catalog_page_task(client, None, 0, generation),
+                ]);
+            }
+        }
+        self.state.browser.remote.catalog_state =
+            if error.kind == crate::remote_provider::RemoteProviderErrorKind::Authentication {
+                crate::state::RemoteCatalogState::AuthenticationRequired {
+                    error: error.message.clone(),
+                }
+            } else if completed_pages > 0 {
+                crate::state::RemoteCatalogState::Partial {
+                    pages: completed_pages,
+                    error: error.message.clone(),
+                }
+            } else {
+                crate::state::RemoteCatalogState::Stale {
+                    error: error.message.clone(),
+                }
+            };
+        self.state.status_text = format!(
+            "Remote catalog kept {} available items after refresh error: {}",
+            self.state.browser.remote.catalog.entries.len(),
+            error.message
+        );
+        if reconciled_pages {
+            self.remote_catalog_persist_task(None)
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn on_remote_catalog_saved(
@@ -421,11 +491,7 @@ impl App {
                     .remote
                     .availability
                     .insert(path_lower.clone(), crate::state::RemoteAvailability::Cached);
-                if let Some(entry) = self
-                    .state
-                    .browser
-                    .remote
-                    .catalog
+                if let Some(entry) = Arc::make_mut(&mut self.state.browser.remote.catalog)
                     .entries
                     .iter_mut()
                     .find(|entry| entry.provider_item_id == path_lower)

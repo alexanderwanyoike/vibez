@@ -178,6 +178,44 @@ pub struct RemoteCatalogStartupData {
     pub load_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub enum RemoteCatalogRefreshContinuation {
+    FetchNext { checkpoint: String },
+    Complete,
+    Failed(crate::remote_provider::RemoteProviderError),
+}
+
+#[derive(Debug)]
+pub struct RemoteCatalogRefreshData {
+    pub generation: u64,
+    pub pages: usize,
+    pub catalog: Arc<crate::remote_provider::RemoteCatalogSnapshot>,
+    pub catalog_children: Option<HashMap<String, Vec<usize>>>,
+    pub availability: Option<HashMap<String, crate::state::RemoteAvailability>>,
+    pub continuation: RemoteCatalogRefreshContinuation,
+}
+
+#[derive(Clone)]
+pub struct RemoteCatalogRefreshResult(
+    Arc<std::sync::Mutex<Option<Result<RemoteCatalogRefreshData, String>>>>,
+);
+
+impl RemoteCatalogRefreshResult {
+    pub fn new(result: Result<RemoteCatalogRefreshData, String>) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Some(result))))
+    }
+
+    pub fn take(&self) -> Option<Result<RemoteCatalogRefreshData, String>> {
+        self.0.lock().ok()?.take()
+    }
+}
+
+impl std::fmt::Debug for RemoteCatalogRefreshResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RemoteCatalogRefreshResult")
+    }
+}
+
 #[derive(Clone)]
 pub struct RemoteCatalogStartupResult(
     Arc<std::sync::Mutex<Option<Result<RemoteCatalogStartupData, String>>>>,
@@ -658,6 +696,7 @@ pub enum Message {
         result:
             Result<crate::remote_provider::RemotePage, crate::remote_provider::RemoteProviderError>,
     },
+    RemoteCatalogRefreshPrepared(RemoteCatalogRefreshResult),
     RemoteCatalogSaved {
         generation: u64,
         /// `Some` continues pagination from this checkpoint after a

@@ -790,7 +790,7 @@ pub struct RemoteUiState {
     /// An OAuth flow is in progress; Connect button is disabled.
     pub auth_in_progress: bool,
     pub last_error: Option<String>,
-    pub catalog: RemoteCatalogSnapshot,
+    pub catalog: Arc<RemoteCatalogSnapshot>,
     pub catalog_state: RemoteCatalogState,
     /// Pages and entries applied during the current progressive Catalog Refresh.
     pub refresh_pages: usize,
@@ -827,7 +827,7 @@ impl Default for RemoteUiState {
             has_app_key: false,
             auth_in_progress: false,
             last_error: None,
-            catalog: RemoteCatalogSnapshot::default(),
+            catalog: Arc::new(RemoteCatalogSnapshot::default()),
             catalog_state: RemoteCatalogState::default(),
             refresh_pages: 0,
             refresh_items: 0,
@@ -852,6 +852,7 @@ impl RemoteUiState {
     /// Rebuild the parent/children lookup after the catalog is loaded or
     /// reconciled. UI redraws can then navigate one folder without rescanning
     /// the complete provider catalog.
+    #[cfg(test)]
     pub fn rebuild_catalog_children(&mut self) {
         self.catalog_children =
             crate::remote_provider::build_remote_catalog_children(&self.catalog);

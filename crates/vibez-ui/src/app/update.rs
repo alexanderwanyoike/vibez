@@ -873,6 +873,9 @@ impl App {
                 completed_pages,
                 result,
             } => return self.on_remote_catalog_page_fetched(generation, completed_pages, result),
+            Message::RemoteCatalogRefreshPrepared(result) => {
+                return self.on_remote_catalog_refresh_prepared(result)
+            }
             Message::RemoteCatalogSaved {
                 generation,
                 next_checkpoint,
