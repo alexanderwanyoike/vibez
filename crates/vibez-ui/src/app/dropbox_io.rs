@@ -44,11 +44,8 @@ pub(super) fn remote_catalog_startup_task(cache: DropboxCache) -> Task<Message> 
                 ),
             };
             let catalog_children = crate::remote_provider::build_remote_catalog_children(&catalog);
-            let availability = refreshed_remote_availability(
-                &cache,
-                &catalog,
-                std::collections::HashMap::new(),
-            );
+            let availability =
+                refreshed_remote_availability(&cache, &catalog, std::collections::HashMap::new());
             let cache_usage = cache.usage().unwrap_or_default();
             crate::message::RemoteCatalogStartupData {
                 catalog,
