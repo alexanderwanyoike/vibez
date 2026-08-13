@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -173,7 +173,7 @@ pub struct RemoteMaterializedSample {
 pub struct RemoteCatalogStartupData {
     pub catalog: crate::remote_provider::RemoteCatalogSnapshot,
     pub catalog_children: HashMap<String, Vec<usize>>,
-    pub cached_provider_item_ids: HashSet<String>,
+    pub availability: HashMap<String, crate::state::RemoteAvailability>,
     pub cache_usage: vibez_dropbox::CacheUsage,
     pub load_error: Option<String>,
 }
@@ -338,6 +338,34 @@ pub struct ProjectLoadResult {
 }
 
 #[derive(Debug, Clone)]
+pub enum ProjectLoadError {
+    MissingProject(String),
+    Other(String),
+}
+
+impl ProjectLoadError {
+    pub fn missing_project(error: impl Into<String>) -> Self {
+        Self::MissingProject(error.into())
+    }
+
+    pub fn other(error: impl Into<String>) -> Self {
+        Self::Other(error.into())
+    }
+
+    pub fn is_missing_project(&self) -> bool {
+        matches!(self, Self::MissingProject(_))
+    }
+}
+
+impl std::fmt::Display for ProjectLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingProject(error) | Self::Other(error) => formatter.write_str(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ProjectSaveResult {
     pub path: PathBuf,
     pub project: Project,
@@ -472,7 +500,7 @@ pub enum Message {
     ProjectSavePathSelected(Option<PathBuf>),
     ProjectLoaded {
         path: PathBuf,
-        result: Box<Result<ProjectLoadResult, String>>,
+        result: Box<Result<ProjectLoadResult, ProjectLoadError>>,
     },
     ProjectSaved(Box<ProjectSaveCompleted>),
 

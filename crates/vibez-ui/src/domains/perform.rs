@@ -186,7 +186,7 @@ pub struct PerformState {
     note_repeat_momentary: bool,
     note_repeat_momentary_key_id: Option<String>,
     note_repeat_latched: bool,
-    track_mute_quantization: TrackMuteQuantization,
+    track_mute_quantization: track_mutes::TrackMuteQuantizationSetting,
     pending_track_mutes: HashMap<TrackId, PendingTrackMute>,
     pub capture: CaptureState,
     pub section_record: section_record::SectionRecordState,
@@ -376,7 +376,7 @@ impl PerformState {
         Some(TrackMuteRequest {
             track_id,
             muted: !track.mute,
-            quantization: self.track_mute_quantization,
+            quantization: self.track_mute_quantization.0,
         })
     }
 
@@ -654,7 +654,7 @@ impl PerformState {
                 }
             }
             PerformMsg::SetTrackMuteQuantization(quantization) => {
-                self.track_mute_quantization = quantization;
+                self.track_mute_quantization.0 = quantization;
                 return PerformAction {
                     persist_settings: true,
                     ..PerformAction::default()

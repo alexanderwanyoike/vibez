@@ -17,13 +17,26 @@ pub struct PendingTrackMute {
     pub effective_at_samples: u64,
 }
 
+/// Private storage for the Perform-owned quantization setting. Exists so a
+/// fresh [`PerformState`] defaults to `Immediate` (the Track Mute
+/// compatibility default) while the shared quantization enum's own `Default`
+/// is the Section launch value (`OneBar`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TrackMuteQuantizationSetting(pub(super) TrackMuteQuantization);
+
+impl Default for TrackMuteQuantizationSetting {
+    fn default() -> Self {
+        Self(TrackMuteQuantization::Immediate)
+    }
+}
+
 impl PerformState {
     pub const fn track_mute_quantization(&self) -> TrackMuteQuantization {
-        self.track_mute_quantization
+        self.track_mute_quantization.0
     }
 
     pub fn set_track_mute_quantization(&mut self, quantization: TrackMuteQuantization) {
-        self.track_mute_quantization = quantization;
+        self.track_mute_quantization.0 = quantization;
     }
 
     pub fn queue_track_mute_ui(

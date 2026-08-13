@@ -571,33 +571,80 @@ pub(super) async fn finish_loaded_clip(
     }
 }
 
+/// Run CPU-bound work on the tokio blocking pool, labelling join failures.
+/// Every off-UI-thread hop in the app routes through here so the idiom (and
+/// its error shape) exists exactly once.
+pub(crate) async fn run_off_ui_thread<T, F>(label: &'static str, work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("{label} task failed: {error}"))
+}
+
+/// One rule for what counts as a missing project: only a confirmed
+/// `NotFound` io error prunes a Recent Projects entry; everything else is
+/// treated as transient.
+fn classify_load_error(
+    io_error: Option<&std::io::Error>,
+    message: String,
+) -> crate::message::ProjectLoadError {
+    if io_error.is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+        crate::message::ProjectLoadError::missing_project(message)
+    } else {
+        crate::message::ProjectLoadError::other(message)
+    }
+}
+
+fn classify_project_format_load_error(
+    error: vibez_project::project_format_v1::ProjectFormatError,
+) -> crate::message::ProjectLoadError {
+    let io_error = match &error {
+        vibez_project::project_format_v1::ProjectFormatError::Io(io_error) => Some(io_error),
+        _ => None,
+    };
+    classify_load_error(io_error, error.to_string())
+}
+
+fn classify_legacy_project_load_error(
+    error: vibez_project::ProjectError,
+) -> crate::message::ProjectLoadError {
+    let io_error = match &error {
+        vibez_project::ProjectError::Io(io_error) => Some(io_error),
+        _ => None,
+    };
+    classify_load_error(io_error, error.to_string())
+}
+
 pub(super) async fn load_project_async(
     path: PathBuf,
     dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
-) -> Result<ProjectLoadResult, String> {
+) -> Result<ProjectLoadResult, crate::message::ProjectLoadError> {
     let load_path = path.clone();
     let (project, container_path) = tokio::task::spawn_blocking(move || {
         match vibez_project::project_format_v1::detect_project_format(&load_path)
-            .map_err(|error| error.to_string())?
+            .map_err(classify_project_format_load_error)?
         {
             vibez_project::project_format_v1::ProjectFileFormat::V1 => {
                 let container =
                     vibez_project::project_format_v1::ProjectContainer::open(&load_path)
-                        .map_err(|error| error.to_string())?;
+                        .map_err(classify_project_format_load_error)?;
                 let document = container
                     .load_document()
-                    .map_err(|error| error.to_string())?;
+                    .map_err(classify_project_format_load_error)?;
                 Ok((document.project, Some(load_path)))
             }
             vibez_project::project_format_v1::ProjectFileFormat::LegacyJson => {
                 Project::load_from_file(&load_path)
                     .map(|project| (project, None))
-                    .map_err(|error| error.to_string())
+                    .map_err(classify_legacy_project_load_error)
             }
         }
     })
     .await
-    .map_err(|err| format!("load task failed: {err}"))??;
+    .map_err(|err| crate::message::ProjectLoadError::other(format!("load task failed: {err}")))??;
 
     let mut clips = Vec::new();
     let mut unresolved_clips = Vec::new();
@@ -880,5 +927,56 @@ mod export_tests {
             0,
             "failed export must clean up every temporary file"
         );
+    }
+}
+
+#[cfg(test)]
+mod off_ui_thread_tests {
+    use std::time::Duration;
+
+    use super::run_off_ui_thread;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_work_never_blocks_the_ui_executor() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let work = tokio::spawn(run_off_ui_thread("Test", move || {
+            release_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("UI executor should release the blocking worker");
+            42
+        }));
+
+        tokio::task::yield_now().await;
+        assert!(release_tx.send(()).is_ok());
+        assert_eq!(work.await.unwrap().unwrap(), 42);
+    }
+}
+
+#[cfg(test)]
+mod project_load_error_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_missing_top_level_project_is_classified_for_recent_path_pruning() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("removed.vzp");
+
+        let error = load_project_async(missing, None).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::message::ProjectLoadError::MissingProject(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_existing_but_invalid_project_is_not_classified_as_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let invalid = directory.path().join("invalid.vzp");
+        std::fs::write(&invalid, "not a Vibez project").unwrap();
+
+        let error = load_project_async(invalid, None).await.unwrap_err();
+
+        assert!(matches!(error, crate::message::ProjectLoadError::Other(_)));
     }
 }

@@ -165,7 +165,7 @@ impl App {
     pub(super) fn route_project_loaded(
         &mut self,
         attempted_path: PathBuf,
-        result: Result<ProjectLoadResult, String>,
+        result: Result<ProjectLoadResult, crate::message::ProjectLoadError>,
     ) -> Task<Message> {
         match result {
             Ok(loaded) => {
@@ -174,7 +174,9 @@ impl App {
                 self.remember_recent_project(path);
             }
             Err(err) => {
-                self.forget_recent_project(&attempted_path);
+                if err.is_missing_project() {
+                    self.forget_recent_project(&attempted_path);
+                }
                 self.state.status_text = format!("Project load error: {err}");
             }
         }
@@ -266,5 +268,23 @@ impl App {
         self.state.project.close_confirm_open = false;
         self.state.project.exit_after_save = false;
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod recent_project_load_error_tests {
+    #[test]
+    fn transient_load_errors_keep_the_recent_project_path() {
+        let error = crate::message::ProjectLoadError::other("permission temporarily denied");
+
+        assert!(!error.is_missing_project());
+    }
+
+    #[test]
+    fn a_confirmed_missing_project_prunes_the_recent_project_path() {
+        let error =
+            crate::message::ProjectLoadError::MissingProject("project file was not found".into());
+
+        assert!(error.is_missing_project());
     }
 }
