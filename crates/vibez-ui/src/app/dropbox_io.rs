@@ -12,29 +12,9 @@ pub(super) const REMOTE_SELECTION_DEBOUNCE: std::time::Duration =
     std::time::Duration::from_millis(200);
 pub(super) const REMOTE_CATALOG_SAVE_PAGE_INTERVAL: usize = 10;
 
-async fn run_remote_startup_loader<T, F>(loader: F) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    tokio::task::spawn_blocking(loader)
-        .await
-        .map_err(|error| format!("Remote catalog startup task failed: {error}"))
-}
-
-async fn run_remote_refresh_preparer<T, F>(preparer: F) -> Result<T, String>
-where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    tokio::task::spawn_blocking(preparer)
-        .await
-        .map_err(|error| format!("Remote catalog refresh task failed: {error}"))
-}
-
 pub(super) fn remote_catalog_startup_task(cache: DropboxCache) -> Task<Message> {
     Task::perform(
-        run_remote_startup_loader(move || {
+        run_off_ui_thread("Remote catalog startup", move || {
             let store = crate::remote_provider::RemoteCatalogStore::for_dropbox();
             let (catalog, load_error) = match store.load() {
                 Ok(catalog) => (catalog, None),
@@ -210,7 +190,7 @@ impl App {
         let changes = std::mem::take(&mut self.remote_catalog_pending);
         let cache = self.dropbox_cache.clone();
         Task::perform(
-            run_remote_refresh_preparer(move || {
+            run_off_ui_thread("Remote catalog refresh", move || {
                 if changes.is_empty() {
                     let catalog =
                         catalog_with_refresh_checkpoint(Arc::clone(&previous_catalog), checkpoint);
@@ -272,7 +252,7 @@ impl App {
         let live_availability = self.state.browser.remote.availability.clone();
         let live_runtime_revision = self.state.browser.remote.catalog_runtime_revision;
         Task::perform(
-            run_remote_refresh_preparer(move || {
+            run_off_ui_thread("Remote catalog refresh", move || {
                 rebase_remote_catalog_refresh(
                     data,
                     live_catalog,
@@ -531,43 +511,6 @@ impl App {
             return Task::none();
         };
         self.start_remote_import(entry, target, treatment)
-    }
-}
-
-#[cfg(test)]
-mod startup_tests {
-    use std::time::Duration;
-
-    use super::{run_remote_refresh_preparer, run_remote_startup_loader};
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn remote_startup_loader_never_blocks_the_ui_executor() {
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let loader = tokio::spawn(run_remote_startup_loader(move || {
-            release_rx
-                .recv_timeout(Duration::from_secs(1))
-                .expect("UI executor should release the background loader");
-            42
-        }));
-
-        tokio::task::yield_now().await;
-        assert!(release_tx.send(()).is_ok());
-        assert_eq!(loader.await.unwrap().unwrap(), 42);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn remote_refresh_preparation_never_blocks_the_ui_executor() {
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let preparation = tokio::spawn(run_remote_refresh_preparer(move || {
-            release_rx
-                .recv_timeout(Duration::from_secs(1))
-                .expect("UI executor should release Remote refresh preparation");
-            42
-        }));
-
-        tokio::task::yield_now().await;
-        assert!(release_tx.send(()).is_ok());
-        assert_eq!(preparation.await.unwrap().unwrap(), 42);
     }
 }
 
