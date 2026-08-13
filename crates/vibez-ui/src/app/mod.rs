@@ -435,7 +435,8 @@ impl App {
             app.state.update_check.enabled,
             app.state.update_check.last_check_unix,
             crate::update_check::now_unix(),
-        ) {
+        ) && app.state.update_check.begin_check()
+        {
             Task::perform(
                 crate::update_check::fetch_latest_tag(),
                 Message::UpdateCheckCompleted,

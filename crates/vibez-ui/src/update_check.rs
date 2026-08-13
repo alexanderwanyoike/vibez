@@ -133,6 +133,9 @@ pub struct UpdateCheckState {
     /// re-raises it, which is the gentlest way to keep a genuinely
     /// stale install from going unnoticed forever.
     pub dismissed: bool,
+    /// A check is currently on the wire. Runtime-only: gates the manual
+    /// "Check now" button so a slow request cannot be stacked.
+    pub in_flight: bool,
 }
 
 impl Default for UpdateCheckState {
@@ -142,6 +145,7 @@ impl Default for UpdateCheckState {
             last_check_unix: None,
             available: None,
             dismissed: false,
+            in_flight: false,
         }
     }
 }
@@ -155,9 +159,20 @@ impl UpdateCheckState {
         self.available.as_deref()
     }
 
+    /// Claim the right to start a check. Returns false when one is
+    /// already on the wire, so callers can skip spawning a duplicate.
+    pub fn begin_check(&mut self) -> bool {
+        if self.in_flight {
+            return false;
+        }
+        self.in_flight = true;
+        true
+    }
+
     /// Fold the outcome of a check into the state. Called for both
     /// outcomes so the throttle advances even when the request failed.
     pub fn record_result(&mut self, tag: Option<String>, now_unix: u64) {
+        self.in_flight = false;
         self.last_check_unix = Some(now_unix);
         let Some(tag) = tag else {
             return;
@@ -225,6 +240,19 @@ mod tests {
     #[test]
     fn an_identical_release_offers_no_update() {
         assert_eq!(newer_release("0.1.2", "0.1.2"), None);
+    }
+
+    #[test]
+    fn a_check_can_be_claimed_once_until_its_result_is_recorded() {
+        let mut state = UpdateCheckState::default();
+
+        assert!(state.begin_check());
+        assert!(!state.begin_check());
+
+        state.record_result(None, DAY);
+        assert!(!state.in_flight);
+        assert_eq!(state.last_check_unix, Some(DAY));
+        assert!(state.begin_check());
     }
 
     #[test]

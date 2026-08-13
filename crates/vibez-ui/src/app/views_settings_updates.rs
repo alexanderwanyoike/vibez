@@ -56,6 +56,37 @@ impl App {
         .size(11)
         .color(th::text_dim());
 
+        // Manual escape hatch from the once-a-day throttle. Deliberately
+        // available even when the startup check is off: the toggle governs
+        // unattended traffic, and an explicit click is consent for one
+        // request.
+        let check_now: Element<'_, Message> = if state.in_flight {
+            text("Checking…").size(11).color(th::text_dim()).into()
+        } else {
+            button(text("Check now").size(11).color(th::text()))
+                .on_press(Message::CheckForUpdatesNow)
+                .padding([3, 10])
+                .style(|_theme: &Theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Some(th::bg_hover().into())
+                        }
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: th::text(),
+                        border: iced::Border {
+                            color: th::border_light(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                })
+                .into()
+        };
+
         // Report only what the user can act on. A failed check is
         // indistinguishable from "nothing new" by design, so the
         // absence of a version here is never framed as an error.
@@ -102,7 +133,11 @@ impl App {
             },
         );
 
-        column![title, hint, toggle_btn, divider, current, found]
+        let status_row = row![check_now, found]
+            .spacing(10)
+            .align_y(iced::Alignment::Center);
+
+        column![title, hint, toggle_btn, divider, current, status_row]
             .spacing(10)
             .into()
     }
