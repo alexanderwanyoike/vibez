@@ -405,48 +405,12 @@ impl std::fmt::Display for SectionLaunchQuantization {
     }
 }
 
-/// Musical boundary at which a queued Track Mute becomes effective.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrackMuteQuantization {
-    #[default]
-    Immediate,
-    OneBeat,
-    OneBar,
-    EndOfSection,
-}
-
-impl TrackMuteQuantization {
-    pub const ALL: [Self; 4] = [
-        Self::Immediate,
-        Self::OneBeat,
-        Self::OneBar,
-        Self::EndOfSection,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        if let Some(boundary) = self.musical_boundary() {
-            boundary.label()
-        } else {
-            "End of Section"
-        }
-    }
-
-    pub const fn musical_boundary(self) -> Option<MusicalBoundary> {
-        match self {
-            Self::Immediate => Some(MusicalBoundary::Immediate),
-            Self::OneBeat => Some(MusicalBoundary::OneBeat),
-            Self::OneBar => Some(MusicalBoundary::OneBar),
-            Self::EndOfSection => None,
-        }
-    }
-}
-
-impl std::fmt::Display for TrackMuteQuantization {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
+/// Musical boundary at which a queued Track Mute becomes effective. Shares
+/// [`SectionLaunchQuantization`]'s definition (and serde representation); the
+/// Track Mute compatibility default of `Immediate` is expressed where the
+/// setting is stored (`UiSettings` in vibez-ui), NOT by this type's
+/// `Default`, which is the Section launch default of `OneBar`.
+pub type TrackMuteQuantization = SectionLaunchQuantization;
 
 #[cfg(test)]
 mod track_mute_quantization_tests {
@@ -464,11 +428,7 @@ mod track_mute_quantization_tests {
     }
 
     #[test]
-    fn immediate_is_the_stable_compatibility_default() {
-        assert_eq!(
-            TrackMuteQuantization::default(),
-            TrackMuteQuantization::Immediate
-        );
+    fn track_mute_quantization_shares_the_section_launch_definition() {
         assert_eq!(
             TrackMuteQuantization::ALL.map(TrackMuteQuantization::label),
             ["Immediate", "1 Beat", "1 Bar", "End of Section"]
@@ -480,6 +440,13 @@ mod track_mute_quantization_tests {
         assert_eq!(
             serde_json::to_string(&TrackMuteQuantization::EndOfSection).unwrap(),
             "\"end_of_section\""
+        );
+        // The Track Mute compatibility default (Immediate) lives on the
+        // UiSettings field, not here: this shared type defaults to the
+        // Section launch default.
+        assert_eq!(
+            TrackMuteQuantization::default(),
+            SectionLaunchQuantization::OneBar
         );
     }
 }

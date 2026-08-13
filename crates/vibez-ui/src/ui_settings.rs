@@ -11,7 +11,7 @@ pub struct UiSettings {
     pub perform_input_mapping: crate::domains::perform::PerformInputMapping,
     #[serde(default = "default_fixed_computer_velocity")]
     pub fixed_computer_velocity: u8,
-    #[serde(default)]
+    #[serde(default = "default_track_mute_quantization")]
     pub track_mute_quantization: vibez_core::perform::TrackMuteQuantization,
     #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
@@ -113,7 +113,7 @@ impl Default for UiSettings {
             recent_project_paths: Vec::new(),
             perform_input_mapping: crate::domains::perform::PerformInputMapping::default(),
             fixed_computer_velocity: default_fixed_computer_velocity(),
-            track_mute_quantization: vibez_core::perform::TrackMuteQuantization::default(),
+            track_mute_quantization: default_track_mute_quantization(),
             sample_library_roots: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
@@ -197,6 +197,13 @@ impl UiSettings {
 
 fn default_sample_browser_open() -> bool {
     true
+}
+
+/// Track Mutes default to Immediate for back-compat with settings written
+/// before quantization existed; the shared enum's own Default is the Section
+/// launch default (OneBar).
+const fn default_track_mute_quantization() -> vibez_core::perform::TrackMuteQuantization {
+    vibez_core::perform::TrackMuteQuantization::Immediate
 }
 
 const fn default_fixed_computer_velocity() -> u8 {
