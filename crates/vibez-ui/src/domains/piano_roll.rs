@@ -42,6 +42,13 @@ pub enum PianoRollMsg {
     },
     RemoveNote(TrackId, ClipId, usize),
     EditNote(TrackId, ClipId, usize, MidiNote),
+    /// Set attack Velocity for one or more MIDI Notes as one project edit.
+    /// Invalid note indices are ignored and values are clamped to `1..127`.
+    SetNoteVelocities {
+        track_id: TrackId,
+        clip_id: ClipId,
+        velocities: Vec<(usize, u8)>,
+    },
     SelectNote(TrackId, ClipId, Option<usize>, bool),
     SelectAllNotes(TrackId, ClipId),
     /// Rubber-band selection: catch every note overlapping the beat span
@@ -373,6 +380,32 @@ impl PianoRollState {
                     note_index,
                     note: new_note,
                 });
+            }
+            PianoRollMsg::SetNoteVelocities {
+                track_id,
+                clip_id,
+                velocities,
+            } => {
+                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
+                if let Some(track) = find_track_mut(tracks, track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        for (note_index, velocity) in velocities {
+                            let Some(note) = clip.notes.get_mut(note_index) else {
+                                continue;
+                            };
+                            note.velocity = velocity.clamp(1, 127);
+                            updates.push((note_index, *note));
+                        }
+                    }
+                }
+                for (note_index, note) in updates {
+                    engine.send(EngineCommand::EditNote {
+                        track_id,
+                        clip_id,
+                        note_index,
+                        note,
+                    });
+                }
             }
             PianoRollMsg::SelectNote(track_id, clip_id, note_index, shift_held) => {
                 if let Some(track) = find_track_mut(tracks, track_id) {
@@ -901,6 +934,69 @@ mod tests {
         );
         assert_eq!(tracks.get(tid).unwrap().note_clips[0].notes.len(), 3);
         assert!(matches!(engine.0[0], EngineCommand::AddNote { .. }));
+    }
+
+    #[test]
+    fn batch_velocity_edit_updates_valid_notes_and_the_engine() {
+        let (mut tracks, tid, cid) = midi_track_with_clip();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        piano_roll.update(
+            PianoRollMsg::SetNoteVelocities {
+                track_id: tid,
+                clip_id: cid,
+                velocities: vec![(0, 72), (1, 118), (99, 64)],
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
+        assert_eq!(clip.notes[0].velocity, 72);
+        assert_eq!(clip.notes[1].velocity, 118);
+        assert_eq!(engine.0.len(), 2);
+        assert!(matches!(
+            engine.0[0],
+            EngineCommand::EditNote {
+                note_index: 0,
+                note: MidiNote { velocity: 72, .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            engine.0[1],
+            EngineCommand::EditNote {
+                note_index: 1,
+                note: MidiNote { velocity: 118, .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn velocity_edit_clamps_zero_without_changing_shared_selection() {
+        let (mut tracks, tid, cid) = midi_track_with_clip();
+        tracks.get_mut(tid).unwrap().note_clips[0].selected_notes = HashSet::from([0, 1]);
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        piano_roll.update(
+            PianoRollMsg::SetNoteVelocities {
+                track_id: tid,
+                clip_id: cid,
+                velocities: vec![(0, 0), (1, u8::MAX)],
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
+        assert_eq!(clip.notes[0].velocity, 1);
+        assert_eq!(clip.notes[1].velocity, 127);
+        assert_eq!(clip.selected_notes, HashSet::from([0, 1]));
     }
 
     #[test]
