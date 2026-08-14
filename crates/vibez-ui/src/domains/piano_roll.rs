@@ -148,6 +148,17 @@ fn find_track_mut(
     timeline.get_mut(track_id)
 }
 
+fn find_note_clip_mut(
+    timeline: &mut TimelineContent,
+    track_id: TrackId,
+    clip_id: ClipId,
+) -> Option<&mut UiNoteClip> {
+    find_track_mut(timeline, track_id)?
+        .note_clips
+        .iter_mut()
+        .find(|clip| clip.id == clip_id)
+}
+
 /// Loop region that covers the note content, rounded up to whole
 /// bars (Ableton semantics; dogfood bug #3).
 pub fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
@@ -387,15 +398,13 @@ impl PianoRollState {
                 velocities,
             } => {
                 let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        for (note_index, velocity) in velocities {
-                            let Some(note) = clip.notes.get_mut(note_index) else {
-                                continue;
-                            };
-                            note.velocity = velocity.clamp(1, 127);
-                            updates.push((note_index, *note));
-                        }
+                if let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) {
+                    for (note_index, velocity) in velocities {
+                        let Some(note) = clip.notes.get_mut(note_index) else {
+                            continue;
+                        };
+                        note.velocity = velocity.clamp(1, 127);
+                        updates.push((note_index, *note));
                     }
                 }
                 for (note_index, note) in updates {
