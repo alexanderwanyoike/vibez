@@ -316,6 +316,21 @@ impl App {
             Message::SetBufferSize(size) => {
                 return self.handle_set_buffer_size(size);
             }
+            Message::SetAudioSampleRate(sample_rate) => {
+                return self.handle_set_audio_sample_rate(sample_rate);
+            }
+            Message::SelectAudioInput(choice) => {
+                return self.handle_select_audio_input(choice);
+            }
+            Message::SelectAudioOutput(choice) => {
+                return self.handle_select_audio_output(choice);
+            }
+            Message::RescanAudioDevices => {
+                return self.handle_rescan_audio_devices();
+            }
+            Message::ReconnectAudioOutput => {
+                return self.handle_reconnect_audio_output();
+            }
 
             // -- Plugin scanning --
             Message::ScanPlugins => {

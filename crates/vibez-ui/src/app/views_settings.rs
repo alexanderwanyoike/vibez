@@ -1,7 +1,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, slider, text,
+    button, center, column, container, horizontal_space, mouse_area, pick_list, row, scrollable,
+    slider, text,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -183,15 +184,82 @@ impl App {
     }
 
     pub(super) fn view_settings_audio_tab(&self) -> Element<'_, Message> {
+        let hardware_label = text("Audio Hardware").size(14).color(th::text());
+        let hardware_hint =
+            text("Hardware choices are application-wide. Projects keep their own musical state.")
+                .size(11)
+                .color(th::text_dim());
+        let catalog_error: Element<'_, Message> = self
+            .state
+            .audio_settings
+            .catalog_error
+            .as_ref()
+            .map(|error| {
+                text(format!("Device scan failed: {error}"))
+                    .size(11)
+                    .color(th::danger())
+                    .into()
+            })
+            .unwrap_or_else(|| column![].into());
+
+        let output_picker = pick_list(
+            self.state.audio_settings.output_choices(),
+            Some(self.state.audio_settings.selected_output_choice()),
+            Message::SelectAudioOutput,
+        )
+        .placeholder("No Audio Output")
+        .width(Length::Fill);
+        let input_picker = pick_list(
+            self.state.audio_settings.input_choices(),
+            Some(self.state.audio_settings.selected_input_choice()),
+            Message::SelectAudioInput,
+        )
+        .placeholder("No Audio Input")
+        .width(Length::Fill);
+
+        let output_status = match &self.state.audio_stream_health {
+            AudioStreamHealth::Running => {
+                let active = self
+                    .state
+                    .audio_settings
+                    .active_output_name
+                    .as_deref()
+                    .unwrap_or("System Default");
+                text(format!("Running: {active}"))
+                    .size(11)
+                    .color(th::accent())
+            }
+            AudioStreamHealth::Rebuilding => text("Applying Audio Configuration…")
+                .size(11)
+                .color(th::text_dim()),
+            AudioStreamHealth::Error(cause) => text(format!("Output error: {cause}"))
+                .size(11)
+                .color(th::danger()),
+        };
+        let input_status = text(self.state.audio_settings.input_description())
+            .size(11)
+            .color(if self.state.audio_settings.selected_input().is_some() {
+                th::accent()
+            } else {
+                th::text_dim()
+            });
+
+        let rescan_audio = button(text("Rescan").size(11).color(th::text()))
+            .on_press(Message::RescanAudioDevices)
+            .padding([5, 10]);
+        let reconnect_audio = button(text("Reconnect").size(11).color(th::text()))
+            .on_press(Message::ReconnectAudioOutput)
+            .padding([5, 10]);
+
         let buf_label = text("Buffer Size").size(14).color(th::text());
         let buf_hint = text("Lower = less latency, higher = more CPU headroom")
             .size(11)
             .color(th::text_dim());
 
-        let sizes: &[u32] = &[64, 128, 256, 512, 1024, 2048, 4096];
+        let sizes = self.state.audio_settings.buffer_size_choices();
         let mut buf_row = row![].spacing(4);
-        for &size in sizes {
-            let is_selected = self.state.settings_buffer_size == size;
+        for size in sizes {
+            let is_selected = self.state.audio_settings.buffer_size == size;
             let label = format!("{size}");
             let btn = button(text(label).size(11).color(if is_selected {
                 th::text()
@@ -235,9 +303,14 @@ impl App {
         }
 
         let sr_label = text("Sample Rate").size(14).color(th::text());
-        let sr_value = text(format!("{} Hz", self.state.transport.sample_rate))
-            .size(13)
-            .color(th::text_dim());
+        let sr_picker = pick_list(
+            self.state.audio_settings.sample_rate_choices(),
+            Some(crate::domains::audio_settings::AudioSampleRate(
+                self.state.audio_settings.sample_rate,
+            )),
+            Message::SetAudioSampleRate,
+        )
+        .width(Length::Fixed(150.0));
 
         // ---- MIDI input picker ----
         let midi_label = text("MIDI Input").size(14).color(th::text());
@@ -353,12 +426,22 @@ impl App {
             port_list = port_list.push(port_btn);
         }
 
-        column![
+        let body = column![
+            hardware_label,
+            hardware_hint,
+            catalog_error,
+            text("Audio Output").size(12).color(th::text_dim()),
+            output_picker,
+            output_status,
+            text("Audio Input").size(12).color(th::text_dim()),
+            input_picker,
+            input_status,
+            row![rescan_audio, reconnect_audio].spacing(6),
+            sr_label,
+            sr_picker,
             buf_label,
             buf_hint,
             buf_row,
-            sr_label,
-            sr_value,
             container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
                 |_theme: &Theme| container::Style {
                     background: Some(th::border().into()),
@@ -371,8 +454,8 @@ impl App {
             midi_actions,
             port_list,
         ]
-        .spacing(8)
-        .into()
+        .spacing(8);
+        scrollable(body).height(Length::Fixed(440.0)).into()
     }
 
     pub(super) fn view_settings_plugins_tab(&self) -> Element<'_, Message> {
