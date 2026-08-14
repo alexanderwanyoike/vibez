@@ -342,7 +342,7 @@ impl App {
             .into();
         let velocity_canvas: Element<'_, Message> = canvas(velocity_widget)
             .width(Length::Fill)
-            .height(Length::Fixed(92.0))
+            .height(Length::Fixed(VelocityLaneWidget::HEIGHT))
             .into();
 
         // ── Clip properties bar (shown when a clip is selected) ──

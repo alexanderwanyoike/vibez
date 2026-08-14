@@ -11,11 +11,11 @@ use crate::widgets::local_drag::LocalDrag;
 
 use super::*;
 
-const TOP_PADDING: f32 = 8.0;
-const BOTTOM_PADDING: f32 = 14.0;
-const BAR_MIN_WIDTH: f32 = 5.0;
-const BAR_MAX_WIDTH: f32 = 12.0;
-const BAR_HEAD_HEIGHT: f32 = 4.0;
+const TOP_PADDING: f32 = 6.0;
+const BOTTOM_PADDING: f32 = 10.0;
+const BAR_MIN_WIDTH: f32 = 3.0;
+const BAR_MAX_WIDTH: f32 = 7.0;
+const BAR_HEAD_HEIGHT: f32 = 3.0;
 const HIT_SLOP: f32 = 3.0;
 
 /// Fixed-height editor for the attack Velocity stored on MIDI Notes.
@@ -28,6 +28,8 @@ pub struct VelocityLaneWidget {
 }
 
 impl VelocityLaneWidget {
+    pub const HEIGHT: f32 = 64.0;
+
     pub fn from_clip(
         track_id: TrackId,
         clip: &UiNoteClip,
@@ -506,7 +508,7 @@ mod tests {
             Color::WHITE,
             GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
         );
-        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, VelocityLaneWidget::HEIGHT));
         let x = widget.geometry(&bounds).beat_to_x(0.0) + 2.0;
         let start_y = VelocityLaneWidget::velocity_y(50, &bounds) + 2.0;
         let mut state = VelocityLaneState::default();
@@ -590,7 +592,7 @@ mod tests {
             Color::WHITE,
             GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
         );
-        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, VelocityLaneWidget::HEIGHT));
         let x = widget.geometry(&bounds).beat_to_x(0.0) + 2.0;
         let start_y = VelocityLaneWidget::velocity_y(50, &bounds) + 2.0;
         let mut state = VelocityLaneState::default();
@@ -649,7 +651,7 @@ mod tests {
             Color::WHITE,
             GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
         );
-        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, VelocityLaneWidget::HEIGHT));
         let x = widget.geometry(&bounds).beat_to_x(0.0) + 2.0;
         let start_y = VelocityLaneWidget::velocity_y(1, &bounds);
         let mut state = VelocityLaneState::default();
@@ -689,7 +691,7 @@ mod tests {
             Color::WHITE,
             GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
         );
-        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, VelocityLaneWidget::HEIGHT));
         let x = widget.geometry(&bounds).beat_to_x(1.0) + 2.0;
         let y = VelocityLaneWidget::velocity_y(80, &bounds) + 2.0;
         let mut state = VelocityLaneState::default();
