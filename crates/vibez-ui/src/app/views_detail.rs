@@ -11,18 +11,18 @@ use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, SectionId, TrackId};
-use vibez_core::perform::GrooveGrid;
 
 use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState, UiClip};
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
-use crate::widgets::piano_roll::PianoRollWidget;
+use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
 use super::*;
 
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const MIDI_DETAIL_PANEL_MIN_HEIGHT: f32 = 360.0;
 const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
 
@@ -41,8 +41,17 @@ fn resolved_detail_playhead_samples(
         .map(|_| section_samples)
 }
 
-fn effective_detail_panel_height(preferred_height: f32, window_height: f32) -> f32 {
+fn effective_detail_panel_height(
+    preferred_height: f32,
+    window_height: f32,
+    midi_clip_editor_visible: bool,
+) -> f32 {
     let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
+    let preferred_height = if midi_clip_editor_visible {
+        preferred_height.max(MIDI_DETAIL_PANEL_MIN_HEIGHT)
+    } else {
+        preferred_height
+    };
     preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
 }
 
@@ -106,6 +115,10 @@ impl App {
         let track_id = self.piano_roll_track()?;
         let clip_id = focused_note_clip_for_track(self.state.active_timeline_editor(), track_id)?;
         Some((track_id, clip_id))
+    }
+
+    fn midi_clip_editor_visible(&self) -> bool {
+        self.visible_piano_roll_clip().is_some()
     }
 
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
@@ -230,6 +243,7 @@ impl App {
         let panel_height = effective_detail_panel_height(
             self.state.view.detail_panel_height,
             self.state.view.window_height,
+            self.midi_clip_editor_visible(),
         );
         container(detail_content)
             .width(Length::Fill)
@@ -250,6 +264,7 @@ impl App {
         effective_detail_panel_height(
             self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
             self.state.view.window_height,
+            self.midi_clip_editor_visible(),
         )
     }
 
@@ -284,31 +299,18 @@ impl App {
         })
         .unwrap_or(-1.0);
 
-        // Extract clip data as owned values (avoids lifetime conflicts with widget construction)
-        let clip_data: Option<(String, f64, f64, bool, GrooveGrid, TrackId, ClipId)> = self
+        let visible_clip = self
             .visible_piano_roll_clip()
             .filter(|(open_track_id, _)| *open_track_id == track_id)
-            .and_then(|(tid, cid)| {
-                self.state
-                    .active_timeline_content(track_id)
-                    .and_then(|content| content.note_clips.iter().find(|c| c.id == cid))
-                    .map(|c| {
-                        (
-                            c.name.clone(),
-                            c.position_beats,
-                            c.duration_beats,
-                            c.loop_enabled,
-                            c.groove_grid,
-                            tid,
-                            cid,
-                        )
-                    })
+            .and_then(|(_, clip_id)| {
+                let content = self.state.active_timeline_content(track_id)?;
+                content.note_clips.iter().find(|clip| clip.id == clip_id)
             });
 
-        let piano_widget = if let Some(ref cd) = clip_data {
-            if let Some(content) = self.state.active_timeline_content(track_id) {
-                if let Some(clip) = content.note_clips.iter().find(|c| c.id == cd.6) {
-                    let clip_relative_playhead = playhead_beats - clip.position_beats;
+        let (piano_widget, velocity_widget) = match visible_clip {
+            Some(clip) => {
+                let clip_relative_playhead = playhead_beats - clip.position_beats;
+                (
                     PianoRollWidget::from_clip(
                         track_id,
                         clip,
@@ -318,38 +320,51 @@ impl App {
                         self.state.view.grid_config(),
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
-                    )
-                } else {
-                    PianoRollWidget::empty(track_id, playhead_beats, track_color)
-                }
-            } else {
-                PianoRollWidget::empty(track_id, playhead_beats, track_color)
+                    ),
+                    VelocityLaneWidget::from_clip(
+                        track_id,
+                        clip,
+                        clip.duration_beats,
+                        track_color,
+                        self.state.view.grid_config(),
+                    ),
+                )
             }
-        } else {
-            PianoRollWidget::empty(track_id, playhead_beats, track_color)
+            None => (
+                PianoRollWidget::empty(track_id, playhead_beats, track_color),
+                VelocityLaneWidget::empty(track_id, track_color),
+            ),
         };
 
         let piano_canvas: Element<'_, Message> = canvas(piano_widget)
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
+        let velocity_canvas: Element<'_, Message> = canvas(velocity_widget)
+            .width(Length::Fill)
+            .height(Length::Fixed(VelocityLaneWidget::HEIGHT))
+            .into();
 
         // ── Clip properties bar (shown when a clip is selected) ──
         let mut content_col = column![].spacing(2).padding(4);
 
-        if let Some((ref clip_name_str, clip_pos, clip_dur, clip_loop, groove_grid, tid, cid)) =
-            clip_data
-        {
-            let clip_name = text(clip_name_str.clone()).size(11).color(th::text());
-            let pos_label = text(format!("Pos: {clip_pos:.1}"))
+        if let Some(clip) = visible_clip {
+            let clip_id = clip.id;
+            let clip_loop = clip.loop_enabled;
+            let groove_grid = clip.groove_grid;
+            let clip_name = text(clip.name.clone()).size(11).color(th::text());
+            let pos_label = text(format!("Pos: {:.1}", clip.position_beats))
                 .size(10)
                 .color(th::text_dim());
-            let dur_label = text(format!("Dur: {clip_dur:.1}"))
+            let dur_label = text(format!("Dur: {:.1}", clip.duration_beats))
                 .size(10)
                 .color(th::text_dim());
 
-            let swing_relationship =
-                self.view_clip_swing_relationship(tid, track_color, Some((cid, groove_grid)));
+            let swing_relationship = self.view_clip_swing_relationship(
+                track_id,
+                track_color,
+                Some((clip_id, groove_grid)),
+            );
 
             // Loop toggle
             let loop_icon_color = if clip_loop {
@@ -359,7 +374,7 @@ impl App {
             };
             let loop_btn = button(icons::icon(icons::REPEAT).size(10).color(loop_icon_color))
                 .on_press(Message::PianoRoll(PianoRollMsg::ToggleNoteClipLoop(
-                    tid, cid,
+                    track_id, clip_id,
                 )))
                 .padding([2, 4])
                 .style(move |_theme: &Theme, _status| button::Style {
@@ -401,17 +416,21 @@ impl App {
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::duplicate_note_clip(tid, cid))
+            .on_press(Message::duplicate_note_clip(track_id, clip_id))
             .padding([2, 6])
             .style(op_btn_style);
 
             let double_btn = button(text("2x").size(10).color(th::text_dim()))
-                .on_press(Message::PianoRoll(PianoRollMsg::DoubleNoteClip(tid, cid)))
+                .on_press(Message::PianoRoll(PianoRollMsg::DoubleNoteClip(
+                    track_id, clip_id,
+                )))
                 .padding([2, 6])
                 .style(op_btn_style);
 
             let halve_btn = button(text("\u{00BD}x").size(10).color(th::text_dim()))
-                .on_press(Message::PianoRoll(PianoRollMsg::HalveNoteClip(tid, cid)))
+                .on_press(Message::PianoRoll(PianoRollMsg::HalveNoteClip(
+                    track_id, clip_id,
+                )))
                 .padding([2, 6])
                 .style(op_btn_style);
 
@@ -423,7 +442,9 @@ impl App {
                 .spacing(2)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(Message::PianoRoll(PianoRollMsg::CropNoteClip(tid, cid)))
+            .on_press(Message::PianoRoll(PianoRollMsg::CropNoteClip(
+                track_id, clip_id,
+            )))
             .padding([2, 6])
             .style(op_btn_style);
 
@@ -520,9 +541,12 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
-        content_col = content_col.push(header_row).push(piano_canvas);
+        content_col = content_col
+            .push(header_row)
+            .push(piano_canvas)
+            .push(velocity_canvas);
 
-        container(content_col)
+        container(content_col.height(Length::Fill))
             .width(Length::FillPortion(1))
             .height(Length::Fill)
             .style(|_theme: &Theme| container::Style {
@@ -781,10 +805,17 @@ mod tests {
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
-        assert_eq!(effective_detail_panel_height(80.0, 900.0), 180.0);
-        assert_eq!(effective_detail_panel_height(360.0, 900.0), 360.0);
-        assert_eq!(effective_detail_panel_height(800.0, 900.0), 540.0);
-        assert_eq!(effective_detail_panel_height(320.0, 520.0), 180.0);
+        assert_eq!(effective_detail_panel_height(80.0, 900.0, false), 180.0);
+        assert_eq!(effective_detail_panel_height(360.0, 900.0, false), 360.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0, false), 540.0);
+        assert_eq!(effective_detail_panel_height(320.0, 520.0, false), 180.0);
+    }
+
+    #[test]
+    fn visible_midi_clip_keeps_both_note_and_velocity_editors_usable() {
+        assert_eq!(effective_detail_panel_height(280.0, 900.0, true), 360.0);
+        assert_eq!(effective_detail_panel_height(420.0, 900.0, true), 420.0);
+        assert_eq!(effective_detail_panel_height(280.0, 520.0, true), 180.0);
     }
 
     #[test]
