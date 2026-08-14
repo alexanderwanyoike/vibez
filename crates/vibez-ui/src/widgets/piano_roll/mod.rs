@@ -1021,3 +1021,6 @@ mod tests {
 }
 
 mod draw;
+mod velocity_lane;
+
+pub use velocity_lane::VelocityLaneWidget;
