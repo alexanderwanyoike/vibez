@@ -117,6 +117,10 @@ impl App {
         Some((track_id, clip_id))
     }
 
+    fn midi_clip_editor_visible(&self) -> bool {
+        self.visible_piano_roll_clip().is_some()
+    }
+
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
@@ -236,12 +240,10 @@ impl App {
                 .into()
         };
 
-        let midi_clip_editor_visible = self.state.view.detail_panel_tab == DetailPanelTab::Clip
-            && self.visible_piano_roll_clip().is_some();
         let panel_height = effective_detail_panel_height(
             self.state.view.detail_panel_height,
             self.state.view.window_height,
-            midi_clip_editor_visible,
+            self.midi_clip_editor_visible(),
         );
         container(detail_content)
             .width(Length::Fill)
@@ -259,12 +261,10 @@ impl App {
     }
 
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
-        let midi_clip_editor_visible = self.state.view.detail_panel_tab == DetailPanelTab::Clip
-            && self.visible_piano_roll_clip().is_some();
         effective_detail_panel_height(
             self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
             self.state.view.window_height,
-            midi_clip_editor_visible,
+            self.midi_clip_editor_visible(),
         )
     }
 

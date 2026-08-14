@@ -239,6 +239,7 @@ impl VelocityLaneWidget {
 struct VelocityDrag {
     start_y: f32,
     original_velocities: Vec<(usize, u8)>,
+    last_sent_velocities: Vec<(usize, u8)>,
     undo_gesture: UndoGestureId,
 }
 
@@ -334,11 +335,16 @@ impl canvas::Program<Message> for VelocityLaneWidget {
                 };
                 let mut original_velocities: Vec<(usize, u8)> = selected
                     .into_iter()
-                    .filter_map(|index| clip.notes.get(index).map(|note| (index, note.velocity)))
+                    .filter_map(|index| {
+                        clip.notes
+                            .get(index)
+                            .map(|note| (index, note.velocity.clamp(1, 127)))
+                    })
                     .collect();
                 original_velocities.sort_unstable_by_key(|(index, _)| *index);
                 state.drag = Some(VelocityDrag {
                     start_y: position.y,
+                    last_sent_velocities: original_velocities.clone(),
                     original_velocities,
                     undo_gesture: UndoGestureId::new(),
                 });
@@ -356,7 +362,7 @@ impl canvas::Program<Message> for VelocityLaneWidget {
                 return (canvas::event::Status::Captured, selection_message);
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                let Some(drag) = &state.drag else {
+                let Some(drag) = &mut state.drag else {
                     return (canvas::event::Status::Ignored, None);
                 };
                 let Some(position) = LocalDrag::unclamped().position(cursor, bounds) else {
@@ -368,12 +374,13 @@ impl canvas::Program<Message> for VelocityLaneWidget {
                     position.y,
                     VelocityLaneWidget::usable_height(&bounds),
                 );
-                if velocities == drag.original_velocities {
+                if velocities == drag.last_sent_velocities {
                     return (canvas::event::Status::Captured, None);
                 }
                 let Some(clip) = &self.clip else {
                     return (canvas::event::Status::Captured, None);
                 };
+                drag.last_sent_velocities.clone_from(&velocities);
                 return (
                     canvas::event::Status::Captured,
                     Some(
@@ -570,6 +577,105 @@ mod tests {
             )
             .1;
         assert_ne!(gesture_id(&first), gesture_id(&later_drag));
+    }
+
+    #[test]
+    fn returning_to_drag_origin_restores_the_original_velocities() {
+        let track_id = TrackId::new();
+        let clip = clip(vec![note(0.0, 50)], HashSet::from([0]));
+        let widget = VelocityLaneWidget::from_clip(
+            track_id,
+            &clip,
+            4.0,
+            Color::WHITE,
+            GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        );
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let x = widget.geometry(&bounds).beat_to_x(0.0) + 2.0;
+        let start_y = VelocityLaneWidget::velocity_y(50, &bounds) + 2.0;
+        let mut state = VelocityLaneState::default();
+        let at = |y| mouse::Cursor::Available(Point::new(x, y));
+
+        widget.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            at(start_y),
+        );
+        let upward_edit = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, start_y - 10.0),
+                }),
+                bounds,
+                at(start_y - 10.0),
+            )
+            .1;
+        assert!(matches!(
+            piano_roll_message(upward_edit),
+            Some(PianoRollMsg::SetNoteVelocities { ref velocities, .. })
+                if velocities != &vec![(0, 50)]
+        ));
+
+        let restored = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, start_y),
+                }),
+                bounds,
+                at(start_y),
+            )
+            .1;
+        assert!(matches!(
+            piano_roll_message(restored),
+            Some(PianoRollMsg::SetNoteVelocities { ref velocities, .. })
+                if velocities == &vec![(0, 50)]
+        ));
+    }
+
+    #[test]
+    fn drag_capture_normalizes_stored_velocities_before_group_clamping() {
+        let track_id = TrackId::new();
+        let clip = clip(
+            vec![note(0.0, 0), note(1.0, u8::MAX)],
+            HashSet::from([0, 1]),
+        );
+        let widget = VelocityLaneWidget::from_clip(
+            track_id,
+            &clip,
+            4.0,
+            Color::WHITE,
+            GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        );
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(452.0, 92.0));
+        let x = widget.geometry(&bounds).beat_to_x(0.0) + 2.0;
+        let start_y = VelocityLaneWidget::velocity_y(1, &bounds);
+        let mut state = VelocityLaneState::default();
+
+        widget.update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            mouse::Cursor::Available(Point::new(x, start_y)),
+        );
+
+        let drag = state.drag.as_ref().expect("velocity drag should start");
+        assert_eq!(drag.original_velocities, vec![(0, 1), (1, 127)]);
+        assert_eq!(drag.last_sent_velocities, drag.original_velocities);
+
+        let message = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved {
+                    position: Point::new(x, start_y - 20.0),
+                }),
+                bounds,
+                mouse::Cursor::Available(Point::new(x, start_y - 20.0)),
+            )
+            .1;
+        assert!(message.is_none(), "the full-range group cannot move");
     }
 
     #[test]
