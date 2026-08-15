@@ -199,6 +199,7 @@ impl TrackClipCanvas {
                 duration: c.duration,
                 name: c.name.clone(),
                 peaks: compute_clip_peaks(c),
+                peak_span_frames: None,
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,

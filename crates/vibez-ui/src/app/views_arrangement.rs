@@ -338,6 +338,7 @@ impl App {
                         duration: preview.duration,
                         name,
                         peaks: preview.peaks,
+                        peak_span_frames: Some(preview.frames_per_peak),
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: 0,
