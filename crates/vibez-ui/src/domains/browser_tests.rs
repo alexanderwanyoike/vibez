@@ -208,6 +208,79 @@ fn trustworthy_detected_source_bpm_is_ready_without_manual_entry() {
 }
 
 #[test]
+fn warp_intent_without_confirmed_bpm_falls_back_to_raw_audition() {
+    let mut browser = BrowserState {
+        audition_mode: crate::state::AuditionMode::Warp,
+        ..BrowserState::default()
+    };
+
+    assert_eq!(
+        browser.audition_playback_plan(),
+        crate::state::BrowserAuditionPlan::Raw
+    );
+    assert!(browser.audition_import_input().is_none());
+
+    browser.audition_bpm_edit = "128".into();
+    browser.confirm_audition_bpm().unwrap();
+    assert_eq!(
+        browser.audition_playback_plan(),
+        crate::state::BrowserAuditionPlan::Warp { source_bpm: 128.0 }
+    );
+}
+
+#[test]
+fn selected_source_can_reuse_its_decoded_waveform_for_retriggering() {
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/loop.wav"),
+    };
+    let other = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/other.wav"),
+    };
+    let audio = std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0, 0.8, -0.4]],
+        sample_rate: 44_100,
+    });
+    let mut browser = BrowserState::default();
+    browser.select_source(source.clone());
+    assert!(browser.install_waveform(source.clone(), std::sync::Arc::clone(&audio)));
+
+    assert!(std::sync::Arc::ptr_eq(
+        &browser.waveform_for_source(&source).unwrap(),
+        &audio
+    ));
+    assert!(browser.waveform_for_source(&other).is_none());
+}
+
+#[test]
+fn warp_preparation_keeps_the_loaded_waveform_and_raw_voice_live() {
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/loop.wav"),
+    };
+    let audio = std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0, 0.8, -0.4]],
+        sample_rate: 44_100,
+    });
+    let mut browser = BrowserState::default();
+    browser.select_source(source.clone());
+    assert!(browser.install_waveform(source.clone(), audio));
+    browser.mark_audition_requested(false, crate::state::AuditionMode::Raw);
+
+    let preparation = browser.begin_audition_preparation(&source);
+    assert!(browser.audition_loading);
+    assert!(!browser.waveform_loading);
+    assert!(browser.audition_playing);
+
+    browser.cancel_audition_preparation();
+    assert!(!browser.audition_request_is_current(preparation));
+    assert!(!browser.audition_loading);
+    assert!(browser.audition_playing);
+    assert_eq!(
+        browser.audition_playback_mode,
+        Some(crate::state::AuditionMode::Raw)
+    );
+}
+
+#[test]
 fn manual_confirmation_during_detection_wins_over_late_estimate() {
     let source = MediaSourceRef::LocalFile {
         path: PathBuf::from("/samples/loop.wav"),
