@@ -447,10 +447,25 @@ The first output callback after Record latches the exact Arrange sample
 position. The UI never estimates the take boundary from its 60 fps tick. It
 drains recorded frames off the real-time thread, encodes the completed take on
 a background thread, stages it in Project Media, and only then inserts the
-canonical clip. Device loss or bounded-buffer overflow abandons the open
-project transaction, leaving no partial clip. Input route and monitoring mode
-are project state; soundcard selection, sample rate, and buffer size remain
-global application settings.
+canonical clip. Device loss abandons the open project transaction, leaving no
+partial clip; bounded-buffer overflow stops capture and offers the valid prefix
+as a visibly warned take. Input route and monitoring mode are project state;
+soundcard selection, sample rate, and buffer size remain global application
+settings.
+
+That exact position is the output-clock boundary, not calibrated acoustic
+alignment. V1 does not measure input/output round-trip latency or continuously
+resample independently clocked devices, so recorded audio may land late by the
+hardware latency. Input underruns are counted and surfaced as silence-substituted
+frames; overflow stops capture and salvages the valid prefix with a warning.
+Measured round-trip compensation and cross-device drift correction remain a
+later recording-depth slice.
+
+Completed takes are accumulated in RAM and encoded directly to WAV bytes on a
+background thread before staging. This avoids real-time file I/O and the former
+temporary-file/read-back copy, but very long takes still scale linearly in
+memory. Streaming long-form capture into a recoverable project-owned staging
+file is a future durability optimisation.
 
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.

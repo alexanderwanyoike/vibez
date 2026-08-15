@@ -169,6 +169,30 @@ impl AudioSettingsState {
         )
     }
 
+    /// Concrete device name represented by the persisted picker choice.
+    /// For System Default this follows the latest hardware catalog snapshot.
+    pub fn selected_input_name(&self) -> Option<&str> {
+        self.selected_input().map(|device| device.name.as_str())
+    }
+
+    pub fn input_channel_count(&self) -> u16 {
+        self.selected_input()
+            .and_then(|device| {
+                device
+                    .default_config
+                    .as_ref()
+                    .map(|config| config.channels)
+                    .or_else(|| {
+                        device
+                            .supported_configs
+                            .iter()
+                            .map(|config| config.channels)
+                            .max()
+                    })
+            })
+            .unwrap_or(0)
+    }
+
     pub fn sample_rate_choices(&self) -> Vec<AudioSampleRate> {
         self.target_output()
             .map(supported_sample_rates)
@@ -182,25 +206,14 @@ impl AudioSettingsState {
     }
 
     pub fn input_description(&self) -> String {
-        let Some(device) = self.selected_input() else {
+        if self.selected_input().is_none() {
             return self
                 .preferred_input_name
                 .as_ref()
                 .map(|name| format!("{name} is unavailable"))
                 .unwrap_or_else(|| "No Audio Input available".into());
-        };
-        let channels = device
-            .default_config
-            .as_ref()
-            .map(|config| config.channels)
-            .or_else(|| {
-                device
-                    .supported_configs
-                    .iter()
-                    .map(|config| config.channels)
-                    .max()
-            })
-            .unwrap_or(0);
+        }
+        let channels = self.input_channel_count();
         match channels {
             0 => "Input capabilities unavailable".into(),
             1 => "1 available input channel".into(),

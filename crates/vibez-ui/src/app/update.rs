@@ -16,6 +16,41 @@ use crate::message::Message;
 use super::update_policy::apply_project_track_deletion_policy;
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioRecordingTransportGuard {
+    Pass,
+    StopRecording,
+    BlockTimelineChange,
+}
+
+fn audio_recording_transport_guard(
+    phase: crate::domains::audio_recording::AudioRecordingPhase,
+    message: &TransportMsg,
+) -> AudioRecordingTransportGuard {
+    match message {
+        TransportMsg::Stop | TransportMsg::TogglePlayback
+            if phase == crate::domains::audio_recording::AudioRecordingPhase::Recording =>
+        {
+            AudioRecordingTransportGuard::StopRecording
+        }
+        TransportMsg::Seek(_)
+        | TransportMsg::SeekToBeat(_)
+        | TransportMsg::ToggleArrangementLoop
+        | TransportMsg::SetArrangementLoopRegion { .. }
+        | TransportMsg::BpmSubmit
+        | TransportMsg::NudgeBpm(_)
+            if matches!(
+                phase,
+                crate::domains::audio_recording::AudioRecordingPhase::Recording
+                    | crate::domains::audio_recording::AudioRecordingPhase::Stopping
+            ) =>
+        {
+            AudioRecordingTransportGuard::BlockTimelineChange
+        }
+        _ => AudioRecordingTransportGuard::Pass,
+    }
+}
+
 impl App {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let message = match message {
@@ -37,6 +72,19 @@ impl App {
         };
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
+        if let Message::Transport(transport) = &message {
+            match audio_recording_transport_guard(self.state.audio_recording.phase, transport) {
+                AudioRecordingTransportGuard::StopRecording => {
+                    return self.stop_audio_recording();
+                }
+                AudioRecordingTransportGuard::BlockTimelineChange => {
+                    self.state.status_text =
+                        "Stop Audio recording before changing position, loop, or tempo".into();
+                    return Task::none();
+                }
+                AudioRecordingTransportGuard::Pass => {}
+            }
+        }
         if self.prepare_capture_message(undo_gesture, &message) {
             return Task::none();
         }
@@ -101,9 +149,6 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
-                if matches!(msg, TransportMsg::Stop) && self.state.audio_recording.is_recording() {
-                    return self.stop_audio_recording();
-                }
                 if self.place_focused_section_playhead(&msg) {
                     return Task::none();
                 }
@@ -950,5 +995,62 @@ impl App {
             }
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod audio_recording_transport_tests {
+    use super::*;
+
+    #[test]
+    fn stop_and_space_finalize_an_active_audio_recording() {
+        assert_eq!(
+            audio_recording_transport_guard(
+                crate::domains::audio_recording::AudioRecordingPhase::Recording,
+                &TransportMsg::Stop,
+            ),
+            AudioRecordingTransportGuard::StopRecording
+        );
+        assert_eq!(
+            audio_recording_transport_guard(
+                crate::domains::audio_recording::AudioRecordingPhase::Recording,
+                &TransportMsg::TogglePlayback,
+            ),
+            AudioRecordingTransportGuard::StopRecording
+        );
+    }
+
+    #[test]
+    fn recording_blocks_seek_loop_and_tempo_changes_before_the_transport_domain() {
+        for message in [
+            TransportMsg::Seek(0.5),
+            TransportMsg::SeekToBeat(8.0),
+            TransportMsg::ToggleArrangementLoop,
+            TransportMsg::SetArrangementLoopRegion {
+                start_beats: 4.0,
+                end_beats: 8.0,
+            },
+            TransportMsg::BpmSubmit,
+            TransportMsg::NudgeBpm(1.0),
+        ] {
+            assert_eq!(
+                audio_recording_transport_guard(
+                    crate::domains::audio_recording::AudioRecordingPhase::Recording,
+                    &message,
+                ),
+                AudioRecordingTransportGuard::BlockTimelineChange
+            );
+        }
+    }
+
+    #[test]
+    fn the_internal_stop_passes_to_transport_after_recording_enters_stopping() {
+        assert_eq!(
+            audio_recording_transport_guard(
+                crate::domains::audio_recording::AudioRecordingPhase::Stopping,
+                &TransportMsg::Stop,
+            ),
+            AudioRecordingTransportGuard::Pass
+        );
     }
 }

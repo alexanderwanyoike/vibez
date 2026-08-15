@@ -203,18 +203,11 @@ impl App {
         {
             self.state.audio_recording.armed_track = None;
         }
-        self.state.audio_recording.monitor_track =
-            self.state.audio_recording.armed_track.or_else(|| {
-                self.state
-                    .project_tracks
-                    .tracks
-                    .iter()
-                    .find(|track| {
-                        track.kind == TrackKind::Audio
-                            && track.input_monitoring == vibez_core::track::InputMonitoring::On
-                    })
-                    .map(|track| track.id)
-            });
+        self.state.audio_recording.monitor_track = self
+            .state
+            .audio_recording
+            .armed_track
+            .or_else(|| self.persisted_monitor_on_track());
         if let Err(error) = self.sync_audio_input_runtime() {
             eprintln!("vibez: Audio Input could not follow project restore: {error}");
         }

@@ -1,6 +1,9 @@
 //! Runtime lifecycle for one Arrange hardware-input recording target.
 
+use std::time::{Duration, Instant};
 use vibez_core::id::TrackId;
+
+pub const STOP_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AudioRecordingPhase {
@@ -20,6 +23,8 @@ pub struct AudioRecordingState {
     pub captured_frames: Vec<[f32; 2]>,
     pub input_peak_l: f32,
     pub input_peak_r: f32,
+    pub truncated: bool,
+    stop_requested_at: Option<Instant>,
 }
 
 impl AudioRecordingState {
@@ -51,6 +56,8 @@ impl AudioRecordingState {
         }
         self.captured_frames.clear();
         self.start_position_samples = position_samples;
+        self.truncated = false;
+        self.stop_requested_at = None;
         self.phase = AudioRecordingPhase::Recording;
         true
     }
@@ -60,7 +67,19 @@ impl AudioRecordingState {
             return false;
         }
         self.phase = AudioRecordingPhase::Stopping;
+        self.stop_requested_at = Some(Instant::now());
         true
+    }
+
+    pub fn mark_truncated(&mut self) {
+        self.truncated = true;
+    }
+
+    pub fn stop_ack_timed_out(&self, now: Instant) -> bool {
+        self.phase == AudioRecordingPhase::Stopping
+            && self
+                .stop_requested_at
+                .is_some_and(|requested| now.duration_since(requested) >= STOP_ACK_TIMEOUT)
     }
 
     pub fn begin_finalizing(&mut self) -> Option<(TrackId, u64, Vec<[f32; 2]>)> {
@@ -77,6 +96,7 @@ impl AudioRecordingState {
 
     pub fn finish(&mut self) {
         self.phase = AudioRecordingPhase::Idle;
+        self.stop_requested_at = None;
     }
 }
 
@@ -97,5 +117,15 @@ mod tests {
         assert_eq!(take, vec![[0.2, -0.2]]);
         state.finish();
         assert_eq!(state.phase, AudioRecordingPhase::Idle);
+    }
+
+    #[test]
+    fn a_missing_output_callback_cannot_leave_stop_pending_forever() {
+        let mut state = AudioRecordingState::default();
+        state.arm(TrackId::new());
+        assert!(state.begin(0));
+        assert!(state.request_stop());
+        state.stop_requested_at = Some(Instant::now() - STOP_ACK_TIMEOUT);
+        assert!(state.stop_ack_timed_out(Instant::now()));
     }
 }

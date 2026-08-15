@@ -6,8 +6,10 @@ use std::time::{Duration, Instant};
 
 use crate::audio_input::AudioInputBridge;
 use cpal::traits::DeviceTrait;
-use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, SupportedBufferSize, I24};
+use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, SupportedBufferSize};
 use vibez_engine::engine::AudioEngine;
+
+use crate::stream_config::StreamOpenError;
 
 use super::{AudioStreamError, AudioStreamEvent, StreamEventReporter};
 
@@ -182,44 +184,19 @@ pub(super) fn build_output_stream_for_format(
     callback: OutputCallback,
     event_reporter: StreamEventReporter,
 ) -> Result<cpal::Stream, AudioStreamError> {
-    let stream = match sample_format {
-        SampleFormat::F32 => build_f32_stream(device, config, callback, event_reporter)?,
-        SampleFormat::I8 => {
-            build_converting_stream::<i8>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::I16 => {
-            build_converting_stream::<i16>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::I24 => {
-            build_converting_stream::<I24>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::I32 => {
-            build_converting_stream::<i32>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::I64 => {
-            build_converting_stream::<i64>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::U8 => {
-            build_converting_stream::<u8>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::U16 => {
-            build_converting_stream::<u16>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::U32 => {
-            build_converting_stream::<u32>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::U64 => {
-            build_converting_stream::<u64>(device, config, callback, event_reporter)?
-        }
-        SampleFormat::F64 => {
-            build_converting_stream::<f64>(device, config, callback, event_reporter)?
-        }
-        format => {
-            return Err(AudioStreamError::UnsupportedConfiguration(format!(
-                "audio output sample format {format} is not supported"
-            )));
-        }
-    };
+    macro_rules! build {
+        (f32) => {
+            build_f32_stream(device, config, callback, event_reporter)?
+        };
+        ($sample:ty) => {
+            build_converting_stream::<$sample>(device, config, callback, event_reporter)?
+        };
+    }
+    let stream = dispatch_sample_format!(sample_format, build, |format| {
+        AudioStreamError::from(StreamOpenError::Unsupported(format!(
+            "audio output sample format {format} is not supported"
+        )))
+    });
     Ok(stream)
 }
 

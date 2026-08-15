@@ -261,12 +261,7 @@ impl App {
             // Track header (iced widgets)
             let editing = self.state.view.editing_track_name == Some(track.id);
             let automation_open = self.state.automation_ui.expanded.contains(&track.id);
-            let input_channels = self
-                .state
-                .audio_settings
-                .selected_input()
-                .and_then(|device| device.default_config.as_ref().map(|config| config.channels))
-                .unwrap_or(0);
+            let input_channels = self.state.audio_settings.input_channel_count();
             let input_target = self.state.audio_recording.armed_track == Some(track.id)
                 || self.state.audio_recording.monitor_track == Some(track.id);
             let header = view_track_header(

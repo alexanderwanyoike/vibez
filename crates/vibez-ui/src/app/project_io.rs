@@ -904,16 +904,7 @@ impl App {
             )
         };
 
-        self.state.audio_recording.monitor_track = self
-            .state
-            .project_tracks
-            .tracks
-            .iter()
-            .find(|track| {
-                track.kind == TrackKind::Audio
-                    && track.input_monitoring == vibez_core::track::InputMonitoring::On
-            })
-            .map(|track| track.id);
+        self.state.audio_recording.monitor_track = self.persisted_monitor_on_track();
         if let Err(error) = self.sync_audio_input_runtime() {
             self.state.status_text = format!(
                 "{} · Input monitoring unavailable: {error}",

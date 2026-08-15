@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use iced::widget::{
     button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, text,
     text_input,
@@ -27,6 +29,63 @@ pub struct TrackHeaderRecordingView {
     pub input_channels: u16,
     pub armed: bool,
     pub input_peaks: Option<(f32, f32)>,
+}
+
+fn compact_input_pick_list<'a, T>(
+    options: impl Borrow<[T]> + 'a,
+    selected: T,
+    on_selected: impl Fn(T) -> Message + 'a,
+    width: f32,
+    highlighted: bool,
+) -> Element<'a, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+{
+    pick_list(options, Some(selected), on_selected)
+        .width(Length::Fixed(width))
+        .padding([3, 5])
+        .text_size(9)
+        .style(move |_theme: &Theme, status| {
+            let engaged = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: if highlighted {
+                    th::accent()
+                } else {
+                    th::text()
+                },
+                placeholder_color: th::text_muted(),
+                handle_color: if engaged || highlighted {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::bg_dark().into(),
+                border: iced::Border {
+                    color: if engaged || highlighted {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into()
 }
 
 /// Inline-editable channel name shared by arrangement headers and
@@ -227,27 +286,38 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let mute_solo_row: Element<'_, Message> = if track.kind == TrackKind::Audio {
+    let track_controls: Element<'_, Message> = if track.kind == TrackKind::Audio {
         let arm_color = if armed { th::danger() } else { th::text_dim() };
-        let arm_btn = button(text("R").size(11).color(arm_color))
+        let arm_icon = if armed {
+            icons::CIRCLE_DOT
+        } else {
+            icons::CIRCLE
+        };
+        let arm_btn = button(icons::icon(arm_icon).size(11).color(arm_color))
             .on_press(Message::ToggleAudioTrackArm(track.id))
-            .padding([3, 7])
-            .style(move |_theme: &Theme, _status| button::Style {
-                background: Some(
-                    if armed {
-                        th::blend(th::danger(), th::bg_dark(), 0.28)
-                    } else {
-                        th::bg_elevated()
-                    }
-                    .into(),
-                ),
-                text_color: arm_color,
-                border: iced::Border {
-                    color: if armed { th::danger() } else { th::border() },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
+            .width(Length::Fixed(25.0))
+            .padding([4, 6])
+            .style(move |_theme: &Theme, status| {
+                let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(
+                        if armed {
+                            th::blend(th::danger(), th::bg_dark(), 0.28)
+                        } else if engaged {
+                            th::bg_hover()
+                        } else {
+                            th::bg_dark()
+                        }
+                        .into(),
+                    ),
+                    text_color: arm_color,
+                    border: iced::Border {
+                        color: if armed { th::danger() } else { th::border() },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }
             });
         let mut routes = Vec::new();
         for channel in 0..audio_input_channels {
@@ -260,21 +330,21 @@ pub fn view_track_header<'a>(
             routes.push(track.audio_input_route);
         }
         let track_id = track.id;
-        let route = pick_list(routes, Some(track.audio_input_route), move |value| {
-            Message::SetAudioTrackInputRoute(track_id, value)
-        })
-        .width(Length::Fixed(62.0))
-        .padding([2, 4])
-        .text_size(9);
+        let route = compact_input_pick_list(
+            routes,
+            track.audio_input_route,
+            move |value| Message::SetAudioTrackInputRoute(track_id, value),
+            58.0,
+            false,
+        );
         let track_id = track.id;
-        let monitor = pick_list(
+        let monitor = compact_input_pick_list(
             InputMonitoring::ALL,
-            Some(track.input_monitoring),
+            track.input_monitoring,
             move |value| Message::SetAudioTrackMonitoring(track_id, value),
-        )
-        .width(Length::Fixed(56.0))
-        .padding([2, 4])
-        .text_size(9);
+            52.0,
+            track.input_monitoring != InputMonitoring::Off,
+        );
         row![mute_btn, solo_btn, arm_btn, route, monitor]
             .spacing(3)
             .align_y(iced::Alignment::Center)
@@ -292,13 +362,20 @@ pub fn view_track_header<'a>(
 
     // Row 4: Horizontal VU meter (spans width)
     let (meter_l, meter_r) = input_peaks.unwrap_or((track.peak_l, track.peak_r));
-    let meter = HorizontalVuMeterWidget::new(meter_l, meter_r, track_color);
+    let meter_color = if armed {
+        th::danger()
+    } else if input_peaks.is_some() {
+        th::accent()
+    } else {
+        track_color
+    };
+    let meter = HorizontalVuMeterWidget::new(meter_l, meter_r, meter_color);
     let meter_canvas: Element<'_, Message> = canvas(meter)
         .width(Length::Fill)
         .height(Length::Fixed(6.0))
         .into();
 
-    let header = column![name_row, mute_solo_row, fader_canvas, meter_canvas]
+    let header = column![name_row, track_controls, fader_canvas, meter_canvas]
         .spacing(4)
         .padding([6, 6])
         .width(Length::Fixed(TRACK_HEADER_WIDTH));

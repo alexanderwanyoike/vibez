@@ -161,6 +161,7 @@ pub struct AudioRecordingOutcome {
     pub clip_name: String,
     pub audio: Arc<DecodedAudio>,
     pub source: MediaSourceRef,
+    pub quality_warning: Option<String>,
 }
 
 /// OAuth flow success payload passed to the UI as `Message::DropboxConnected`.
