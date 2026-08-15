@@ -410,6 +410,13 @@ impl TimelineEditorState {
                 selection,
                 shift_held,
             } => {
+                // Clicking a clip switches the editor back to clip selection.
+                // Leaving an older time range active makes split/cut commands
+                // silently operate on that range instead of the visible clip
+                // selection.
+                self.time_selection_active = false;
+                self.time_selection_track = None;
+                self.marquee = None;
                 if shift_held {
                     // Toggle in/out of selection set
                     if !self.selected_clips.remove(&selection) {
