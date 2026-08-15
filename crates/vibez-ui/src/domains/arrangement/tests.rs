@@ -1349,6 +1349,7 @@ fn selecting_a_clip_replaces_a_stale_time_range_before_split_and_delete() {
     a.update(ArrangementMsg::SplitSelectedAtPlayhead, &mut engine, ctx);
 
     assert!(!a.time_selection_active);
+    assert_eq!(a.time_selection_track, None);
     assert_eq!(a.tracks[0].clips.len(), 2);
 
     a.update(ArrangementMsg::DeleteSelectedClip, &mut engine, ctx);

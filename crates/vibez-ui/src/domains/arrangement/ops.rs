@@ -148,7 +148,7 @@ impl TimelineEditorState {
         }
         self.selected_clips.clear();
         self.selected_note_clip = None;
-        self.time_selection_active = false;
+        self.clear_time_selection();
         let count = audio_removals.len() + note_removals.len();
         action.status = Some(format!("Deleted {count} clips in region"));
         action

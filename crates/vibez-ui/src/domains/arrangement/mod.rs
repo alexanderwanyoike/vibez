@@ -82,6 +82,12 @@ impl ProjectTracksState {
 }
 
 impl TimelineEditorState {
+    pub(super) fn clear_time_selection(&mut self) {
+        self.time_selection_active = false;
+        self.time_selection_track = None;
+        self.marquee = None;
+    }
+
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.timeline.get(track_id)
     }
@@ -414,9 +420,7 @@ impl TimelineEditorState {
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
                 // selection.
-                self.time_selection_active = false;
-                self.time_selection_track = None;
-                self.marquee = None;
+                self.clear_time_selection();
                 if shift_held {
                     // Toggle in/out of selection set
                     if !self.selected_clips.remove(&selection) {
@@ -793,9 +797,10 @@ impl TimelineEditorState {
                 action.focus_clip_tab = !self.selected_clips.is_empty();
             }
             ArrangementMsg::SetTimeSelectionActive(active) => {
-                self.time_selection_active = active;
-                if !active {
-                    self.time_selection_track = None;
+                if active {
+                    self.time_selection_active = true;
+                } else {
+                    self.clear_time_selection();
                 }
             }
             ArrangementMsg::DuplicateNoteClip(track_id, clip_id) => {
