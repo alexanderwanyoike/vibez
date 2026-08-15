@@ -20,7 +20,7 @@ use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas,
+    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
     TRACK_ROW_HEIGHT,
 };
 use crate::widgets::track_header::{
@@ -277,11 +277,12 @@ impl App {
                         self.state.audio_recording.input_peak_l,
                         self.state.audio_recording.input_peak_r,
                     )),
+                    source_tracks: &self.state.project_tracks.tracks,
                 },
             );
 
             // Clip canvas for this track
-            let clip_canvas_widget = TrackClipCanvas::from_track(
+            let mut clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
                 content,
                 playhead_beats,
@@ -317,6 +318,32 @@ impl App {
                 row_spans.clone(),
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
             );
+            if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
+                let name = match preview.source {
+                    crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
+                        "● RECORDING INPUT".into()
+                    }
+                    crate::domains::audio_recording::AudioRecordingSource::TrackOutput(source) => {
+                        let source_name = self
+                            .state
+                            .find_track(source)
+                            .map_or("MIDI TRACK", |track| track.name.as_str());
+                        format!("● RESAMPLING {source_name}")
+                    }
+                };
+                clip_canvas_widget =
+                    clip_canvas_widget.with_audio_recording_preview(TimelineClip {
+                        clip_id: preview.clip_id,
+                        position: preview.position,
+                        duration: preview.duration,
+                        name,
+                        peaks: preview.peaks,
+                        loop_enabled: false,
+                        loop_start: 0,
+                        loop_end: 0,
+                        warp_stale: false,
+                    });
+            }
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
             let grid = self.state.view.grid_config();

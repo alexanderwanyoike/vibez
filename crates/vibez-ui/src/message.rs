@@ -161,6 +161,7 @@ pub struct AudioRecordingOutcome {
     pub clip_name: String,
     pub audio: Arc<DecodedAudio>,
     pub source: MediaSourceRef,
+    pub completion_label: String,
     pub quality_warning: Option<String>,
 }
 

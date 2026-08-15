@@ -127,11 +127,27 @@ impl TrackClipCanvas {
         // Draw audio clips
         if self.bpm > 0.0 {
             let spb = self.sample_rate as f64 * 60.0 / self.bpm;
-            let clip_color = theme::with_alpha(self.track_color, 0.5);
-            let clip_border_color = theme::darken(self.track_color, 0.7);
-            let waveform_color = theme::with_alpha(self.track_color, 0.6);
-
-            for clip in &self.clips {
+            for (clip, is_recording_preview) in self
+                .clips
+                .iter()
+                .map(|clip| (clip, false))
+                .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
+            {
+                let clip_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.28)
+                } else {
+                    theme::with_alpha(self.track_color, 0.5)
+                };
+                let clip_border_color = if is_recording_preview {
+                    theme::danger()
+                } else {
+                    theme::darken(self.track_color, 0.7)
+                };
+                let waveform_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.92)
+                } else {
+                    theme::with_alpha(self.track_color, 0.6)
+                };
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -213,7 +229,8 @@ impl TrackClipCanvas {
                 }
 
                 // Selection highlight
-                let is_selected = self.selected_clips.contains(&clip.clip_id);
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
                 let border_color = if is_selected {
                     theme::accent()
                 } else {

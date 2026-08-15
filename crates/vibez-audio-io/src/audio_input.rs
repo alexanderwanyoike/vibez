@@ -128,6 +128,7 @@ pub struct AudioInputBridge {
     route: AtomicU32,
     target_track: AtomicU64,
     monitoring: AtomicBool,
+    resample_source_track: AtomicU64,
     recording: AtomicBool,
     recording_stopped: AtomicBool,
     record_start_position: AtomicU64,
@@ -151,6 +152,7 @@ impl AudioInputBridge {
             route: AtomicU32::new(0),
             target_track: AtomicU64::new(0),
             monitoring: AtomicBool::new(false),
+            resample_source_track: AtomicU64::new(0),
             recording: AtomicBool::new(false),
             recording_stopped: AtomicBool::new(true),
             record_start_position: AtomicU64::new(u64::MAX),
@@ -165,6 +167,7 @@ impl AudioInputBridge {
         let encoded = match route {
             AudioInputRoute::Mono { channel } => u32::from(channel),
             AudioInputRoute::Stereo { left } => STEREO_ROUTE_BIT | u32::from(left),
+            AudioInputRoute::Resample { .. } => return,
         };
         self.route.store(encoded, Ordering::Release);
     }
@@ -194,6 +197,20 @@ impl AudioInputBridge {
 
     pub fn target_track_raw(&self) -> Option<u64> {
         match self.target_track.load(Ordering::Acquire) {
+            0 => None,
+            raw => Some(raw),
+        }
+    }
+
+    pub fn set_resample_source(&self, source: Option<TrackId>) {
+        self.resample_source_track
+            .store(source.map_or(0, TrackId::raw), Ordering::Release);
+        self.peak_l.store(0, Ordering::Relaxed);
+        self.peak_r.store(0, Ordering::Relaxed);
+    }
+
+    pub fn resample_source_track_raw(&self) -> Option<u64> {
+        match self.resample_source_track.load(Ordering::Acquire) {
             0 => None,
             raw => Some(raw),
         }
@@ -263,7 +280,9 @@ impl AudioInputBridge {
     pub fn clock_output(&self, destination: &mut [f32], channels: usize) -> Option<u64> {
         let target = self.target_track_raw();
         let monitoring = target.is_some() && self.monitoring.load(Ordering::Acquire);
-        let recording = target.is_some() && self.recording.load(Ordering::Acquire);
+        let recording = target.is_some()
+            && self.resample_source_track_raw().is_none()
+            && self.recording.load(Ordering::Acquire);
         for frame in destination.chunks_mut(channels.max(1)) {
             let input = match self.input.pop() {
                 Some(input) => input,
@@ -297,11 +316,46 @@ impl AudioInputBridge {
         monitoring.then_some(target?)
     }
 
+    /// Capture one output-clock block tapped from a Project Track. The engine
+    /// supplies post-device/post-fader samples; this bridge owns only bounded
+    /// transfer, metering, and the Stop acknowledgement shared with hardware
+    /// input recording.
+    pub fn capture_track_output(&self, source: &[f32], channels: usize) {
+        if self.resample_source_track_raw().is_none() {
+            return;
+        }
+        let recording = self.recording.load(Ordering::Acquire);
+        let mut peak_l = 0.0f32;
+        let mut peak_r = 0.0f32;
+        for frame in source.chunks(channels.max(1)) {
+            let routed = [
+                frame.first().copied().unwrap_or(0.0),
+                frame
+                    .get(1)
+                    .copied()
+                    .unwrap_or_else(|| frame.first().copied().unwrap_or(0.0)),
+            ];
+            peak_l = peak_l.max(routed[0].abs());
+            peak_r = peak_r.max(routed[1].abs());
+            if recording && !self.recorded.push(routed) {
+                self.overflowed.store(true, Ordering::Release);
+            }
+        }
+        self.peak_l.fetch_max(peak_l.to_bits(), Ordering::Relaxed);
+        self.peak_r.fetch_max(peak_r.to_bits(), Ordering::Relaxed);
+        if !recording {
+            self.recording_stopped.store(true, Ordering::Release);
+        }
+    }
+
     fn push_interleaved<T>(&self, data: &[T], channels: usize)
     where
         T: Copy,
         f32: FromSample<T>,
     {
+        if self.resample_source_track_raw().is_some() {
+            return;
+        }
         let route = self.route();
         let mut peak_l = 0.0f32;
         let mut peak_r = 0.0f32;
@@ -330,6 +384,7 @@ impl AudioInputBridge {
                             .unwrap_or(0.0),
                     ]
                 }
+                AudioInputRoute::Resample { .. } => [0.0; 2],
             };
             peak_l = peak_l.max(routed[0].abs());
             peak_r = peak_r.max(routed[1].abs());
@@ -494,6 +549,24 @@ mod tests {
         bridge.clock_output(&mut output, 2);
         assert_eq!(bridge.underrun_frames(), 3);
         assert_eq!(output, [0.0; 6]);
+    }
+
+    #[test]
+    fn resample_capture_uses_track_output_without_hardware_underruns() {
+        let bridge = AudioInputBridge::new(8);
+        let source = TrackId::new();
+        bridge.set_resample_source(Some(source));
+        bridge.begin_recording();
+        bridge.capture_track_output(&[0.25, -0.5, 0.75, -1.0], 2);
+        let mut take = Vec::new();
+        bridge.drain_recorded(&mut take);
+        assert_eq!(take, vec![[0.25, -0.5], [0.75, -1.0]]);
+        assert_eq!(bridge.underrun_frames(), 0);
+        assert_eq!(bridge.meter(), (0.75, 1.0));
+
+        bridge.end_recording();
+        bridge.capture_track_output(&[0.0, 0.0], 2);
+        assert!(bridge.recording_stopped());
     }
 
     #[test]

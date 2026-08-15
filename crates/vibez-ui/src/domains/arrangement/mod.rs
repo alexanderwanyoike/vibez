@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
+use vibez_core::track::{AudioInputRoute, InputMonitoring};
 use vibez_engine::commands::EngineCommand;
 
 use super::timeline_editor::TimelineEditorAdapter;
@@ -116,6 +117,12 @@ impl ArrangementState {
             .unwrap_or_else(|| format!("{track_id}"));
         engine.send(EngineCommand::RemoveTrack(track_id));
         project_tracks.tracks.retain(|track| track.id != track_id);
+        for track in &mut project_tracks.tracks {
+            if track.audio_input_route.resample_source() == Some(track_id) {
+                track.audio_input_route = AudioInputRoute::default();
+                track.input_monitoring = InputMonitoring::Off;
+            }
+        }
         Arc::make_mut(&mut self.timeline).remove(track_id);
         if self.selected_track == Some(track_id) {
             self.selected_track = project_tracks.tracks.first().map(|track| track.id);

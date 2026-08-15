@@ -178,7 +178,7 @@ pub struct AudioOutputStream {
     params: Option<StreamParams>,
     active_device_name: Option<String>,
     /// Shared engine slot.  The audio callback `try_lock`s this each
-    /// invocation and calls `engine.process()` if the lock is obtained.
+    /// invocation and calls `engine.process_block()` if the lock is obtained.
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
     event_reporter: StreamEventReporter,
     event_rx: Receiver<AudioStreamEvent>,

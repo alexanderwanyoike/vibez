@@ -539,6 +539,7 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{InstrumentKind, MidiNote};
     use vibez_core::perform::GrooveGrid;
+    use vibez_engine::engine::AudioProcessBlock;
 
     struct NoteLogInstrument(Arc<Mutex<Vec<u8>>>);
 
@@ -835,7 +836,7 @@ mod tests {
                 instrument: Box::new(NoteLogInstrument(Arc::clone(&heard))),
             })
             .unwrap();
-        audio_engine.process(&mut [0.0; 2], 2);
+        audio_engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
 
         let note_clip = |pitch, note_count| UiNoteClip {
             id: ClipId::new(),
@@ -877,13 +878,13 @@ mod tests {
         apply_capture_to_arrangement(&mut timeline, captured, &mut commands);
         assert_eq!(commands.pending_len(), 2);
 
-        audio_engine.process(&mut [0.0; 2], 2);
+        audio_engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
         commands.flush();
         assert_eq!(commands.pending_len(), 0);
-        audio_engine.process(&mut [0.0; 2], 2);
+        audio_engine.process_block(AudioProcessBlock::new(&mut [0.0; 2], 2));
         commands.send(EngineCommand::Seek(0));
         commands.send(EngineCommand::Play);
-        audio_engine.process(&mut [0.0; 512], 2);
+        audio_engine.process_block(AudioProcessBlock::new(&mut [0.0; 512], 2));
 
         assert!(
             heard.lock().unwrap().contains(&72),

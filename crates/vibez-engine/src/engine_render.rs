@@ -12,6 +12,41 @@ pub(super) struct MultitrackRenderBlock<'a> {
     pub live_input: Option<LiveInputBlock<'a>>,
 }
 
+fn split_track_output_capture<'a>(
+    capture: Option<&'a mut TrackOutputCapture<'_>>,
+    split: usize,
+) -> (
+    Option<TrackOutputCapture<'a>>,
+    Option<TrackOutputCapture<'a>>,
+) {
+    let Some(capture) = capture else {
+        return (None, None);
+    };
+    let split = split.min(capture.samples.len());
+    let source_track_raw = capture.source_track_raw;
+    let (first, rest) = capture.samples.split_at_mut(split);
+    (
+        Some(TrackOutputCapture {
+            source_track_raw,
+            samples: first,
+        }),
+        Some(TrackOutputCapture {
+            source_track_raw,
+            samples: rest,
+        }),
+    )
+}
+
+fn write_track_output_sample(
+    capture: Option<&mut TrackOutputCapture<'_>>,
+    index: usize,
+    sample: f32,
+) {
+    if let Some(destination) = capture.and_then(|capture| capture.samples.get_mut(index)) {
+        *destination = sample;
+    }
+}
+
 impl AudioEngine {
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
     ///
@@ -26,6 +61,7 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
         live_input: Option<LiveInputBlock<'_>>,
+        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
         if !self.transport.is_playing() {
             // Stopped transport still renders instruments so
@@ -37,6 +73,7 @@ impl AudioEngine {
                 channels,
                 self.performance_position,
                 live_input,
+                track_output_capture,
             );
             return;
         }
@@ -62,6 +99,10 @@ impl AudioEngine {
             if pos < loop_end && pos + frames as u64 >= loop_end {
                 let first = (loop_end - pos) as usize;
                 let rest = frames - first;
+                let (mut first_capture, mut rest_capture) = split_track_output_capture(
+                    track_output_capture.as_deref_mut(),
+                    first * channels,
+                );
                 self.render_multitrack_segment(
                     &mut output[..first * channels],
                     MultitrackRenderBlock {
@@ -72,6 +113,7 @@ impl AudioEngine {
                         loop_region: self.transport.active_loop_region(),
                         live_input: live_input.map(|input| input.slice(0, first, channels)),
                     },
+                    first_capture.as_mut(),
                 );
                 // The transport jumps directly from loop_end to loop_start.
                 // Apply work owned by that exact musical boundary before the
@@ -93,6 +135,7 @@ impl AudioEngine {
                             loop_region: self.transport.active_loop_region(),
                             live_input: live_input.map(|input| input.slice(first, rest, channels)),
                         },
+                        rest_capture.as_mut(),
                     );
                 }
                 self.split_wrap_handled = true;
@@ -109,6 +152,7 @@ impl AudioEngine {
                 loop_region: self.transport.active_loop_region(),
                 live_input,
             },
+            track_output_capture,
         );
     }
 
@@ -116,6 +160,7 @@ impl AudioEngine {
         &mut self,
         output: &mut [f32],
         block: MultitrackRenderBlock<'_>,
+        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
         let MultitrackRenderBlock {
             pos,
@@ -138,6 +183,13 @@ impl AudioEngine {
                 .unwrap_or(frames - rendered_frames);
             let start = rendered_frames * channels;
             let end = (rendered_frames + segment_frames) * channels;
+            let mut segment_capture = track_output_capture.as_deref_mut().map(|capture| {
+                let samples = capture.samples.get_mut(start..end).unwrap_or(&mut []);
+                TrackOutputCapture {
+                    source_track_raw: capture.source_track_raw,
+                    samples,
+                }
+            });
             self.render_multitrack_frames(
                 &mut output[start..end],
                 MultitrackRenderBlock {
@@ -149,12 +201,18 @@ impl AudioEngine {
                     live_input: live_input
                         .map(|input| input.slice(rendered_frames, segment_frames, channels)),
                 },
+                segment_capture.as_mut(),
             );
             rendered_frames += segment_frames;
         }
     }
 
-    fn render_multitrack_frames(&mut self, output: &mut [f32], block: MultitrackRenderBlock<'_>) {
+    fn render_multitrack_frames(
+        &mut self,
+        output: &mut [f32],
+        block: MultitrackRenderBlock<'_>,
+        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
+    ) {
         let MultitrackRenderBlock {
             pos,
             repeat_pos,
@@ -292,6 +350,9 @@ impl AudioEngine {
             let gain = auto_gain.unwrap_or(track.gain);
             let (pan_l, pan_r) = equal_power_pan(auto_pan.unwrap_or(track.pan));
             let track_id = track.id;
+            let capture_this_track = track_output_capture
+                .as_ref()
+                .is_some_and(|capture| capture.source_track_raw == track_id.raw());
             let buf_size = frames * channels;
             let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
 
@@ -320,6 +381,13 @@ impl AudioEngine {
 
                     if dry_audible {
                         output[idx] += panned;
+                    }
+                    if capture_this_track {
+                        write_track_output_sample(
+                            track_output_capture.as_deref_mut(),
+                            idx,
+                            if dry_audible { panned } else { 0.0 },
+                        );
                     }
 
                     // Track per-channel peaks
@@ -408,6 +476,7 @@ impl AudioEngine {
         channels: usize,
         repeat_pos: u64,
         live_input: Option<LiveInputBlock<'_>>,
+        mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
@@ -486,6 +555,9 @@ impl AudioEngine {
             let (pan_l, pan_r) = equal_power_pan(track.pan);
             let buf_size = frames * channels;
             let dry_audible = (!has_track_solo && !has_bus_solo) || track.solo;
+            let capture_this_track = track_output_capture
+                .as_ref()
+                .is_some_and(|capture| capture.source_track_raw == track.id.raw());
             for frame in 0..frames {
                 for ch in 0..channels {
                     let idx = frame * channels + ch;
@@ -504,6 +576,13 @@ impl AudioEngine {
                     };
                     if dry_audible {
                         output[idx] += panned;
+                    }
+                    if capture_this_track {
+                        write_track_output_sample(
+                            track_output_capture.as_deref_mut(),
+                            idx,
+                            if dry_audible { panned } else { 0.0 },
+                        );
                     }
                 }
             }

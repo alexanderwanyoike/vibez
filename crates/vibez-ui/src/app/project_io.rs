@@ -61,6 +61,7 @@ impl App {
         self.stop_browser_audition();
         self.input_bridge.end_recording();
         self.input_bridge.set_target(None, false);
+        self.input_bridge.set_resample_source(None);
         self._input_stream = None;
         self.state.audio_recording = Default::default();
         self.state.transport.playing = false;

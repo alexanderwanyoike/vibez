@@ -467,6 +467,38 @@ temporary-file/read-back copy, but very long takes still scale linearly in
 memory. Streaming long-form capture into a recoverable project-owned staging
 file is a future durability optimisation.
 
+Live **Resample** reuses that recording lifecycle without opening hardware
+Audio Input. An Audio Track may persistently choose one playable MIDI/
+instrument Project Track as its input. The output callback gives the engine a
+preallocated scratch slice, and the ordinary channel renderer copies only the
+selected source Track's direct output into it after the instrument, insert
+effects, mute envelope, automated/manual gain, and pan have run. The callback
+then feeds those stereo frames into the same bounded recording bridge used by
+hardware capture.
+
+```mermaid
+flowchart LR
+    MIDI["MIDI/instrument Track source"] --> DEV["instrument + inserts"]
+    DEV --> CH["mute + gain/pan"]
+    CH --> TAP["bounded Resample tap"]
+    TAP --> REC["shared recording finalizer<br/>+ Project Media"]
+    CH --> MIX["project mix"]
+    CH --> SEND["post-fader sends"]
+    SEND --> RET["returns"]
+    MIX --> MASTER["master"]
+    RET --> MASTER
+    AUD["Browser Audition"] -->|"post-master, excluded"| OUT["device output"]
+    MASTER --> OUT
+```
+
+The Track-output tap is deliberately pre-send and pre-master: it records the
+source Project Track's audible direct output, but not return buses, master
+processing, other Tracks, or the dedicated Browser Audition Bus. Source mute
+and solo audibility therefore become silence in the take. The source remains
+audible through the normal project mix while recording; Resample never injects
+it into the target Audio Track and cannot create a feedback edge. This is live
+Resample, distinct from the existing offline Bounce renderer.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned

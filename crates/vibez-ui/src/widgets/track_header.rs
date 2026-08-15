@@ -24,11 +24,24 @@ pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 /// Total width including the 3px color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TrackHeaderRecordingView {
+#[derive(Debug, Clone, Copy)]
+pub struct TrackHeaderRecordingView<'a> {
     pub input_channels: u16,
     pub armed: bool,
     pub input_peaks: Option<(f32, f32)>,
+    pub source_tracks: &'a [ProjectTrack],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AudioInputChoice {
+    route: AudioInputRoute,
+    label: String,
+}
+
+impl std::fmt::Display for AudioInputChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
 }
 
 fn compact_input_pick_list<'a, T>(
@@ -128,12 +141,13 @@ pub fn view_track_header<'a>(
     editing_name: bool,
     edit_text: &'a str,
     automation_open: bool,
-    recording: TrackHeaderRecordingView,
+    recording: TrackHeaderRecordingView<'a>,
 ) -> Element<'a, Message> {
     let TrackHeaderRecordingView {
         input_channels: audio_input_channels,
         armed,
         input_peaks,
+        source_tracks,
     } = recording;
     let track_color = th::track_color(track.color_index);
 
@@ -321,34 +335,72 @@ pub fn view_track_header<'a>(
             });
         let mut routes = Vec::new();
         for channel in 0..audio_input_channels {
-            routes.push(AudioInputRoute::Mono { channel });
+            let route = AudioInputRoute::Mono { channel };
+            routes.push(AudioInputChoice {
+                route,
+                label: route.to_string(),
+            });
         }
         for left in (0..audio_input_channels.saturating_sub(1)).step_by(2) {
-            routes.push(AudioInputRoute::Stereo { left });
+            let route = AudioInputRoute::Stereo { left };
+            routes.push(AudioInputChoice {
+                route,
+                label: route.to_string(),
+            });
         }
+        routes.extend(
+            source_tracks
+                .iter()
+                .filter(|source| source.id != track.id && source.is_playable_midi_target())
+                .map(|source| AudioInputChoice {
+                    route: AudioInputRoute::Resample {
+                        track_id: source.id,
+                    },
+                    label: format!("RS · {}", source.name),
+                }),
+        );
+        let selected_route = routes
+            .iter()
+            .find(|choice| choice.route == track.audio_input_route)
+            .cloned()
+            .unwrap_or_else(|| AudioInputChoice {
+                route: track.audio_input_route,
+                label: match track.audio_input_route {
+                    AudioInputRoute::Resample { .. } => "RS · Missing Track".into(),
+                    route => route.to_string(),
+                },
+            });
         if routes.is_empty() {
-            routes.push(track.audio_input_route);
+            routes.push(selected_route.clone());
         }
+        let is_resample = track.audio_input_route.resample_source().is_some();
         let track_id = track.id;
         let route = compact_input_pick_list(
             routes,
-            track.audio_input_route,
-            move |value| Message::SetAudioTrackInputRoute(track_id, value),
-            58.0,
-            false,
+            selected_route,
+            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.route),
+            if is_resample { 119.0 } else { 78.0 },
+            is_resample,
         );
-        let track_id = track.id;
-        let monitor = compact_input_pick_list(
-            InputMonitoring::ALL,
-            track.input_monitoring,
-            move |value| Message::SetAudioTrackMonitoring(track_id, value),
-            52.0,
-            track.input_monitoring != InputMonitoring::Off,
-        );
-        row![mute_btn, solo_btn, arm_btn, route, monitor]
-            .spacing(3)
-            .align_y(iced::Alignment::Center)
-            .into()
+        if is_resample {
+            row![mute_btn, solo_btn, arm_btn, route]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
+        } else {
+            let track_id = track.id;
+            let monitor = compact_input_pick_list(
+                InputMonitoring::ALL,
+                track.input_monitoring,
+                move |value| Message::SetAudioTrackMonitoring(track_id, value),
+                42.0,
+                track.input_monitoring != InputMonitoring::Off,
+            );
+            row![mute_btn, solo_btn, arm_btn, route, monitor]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
+        }
     } else {
         row![mute_btn, solo_btn].spacing(4).into()
     };

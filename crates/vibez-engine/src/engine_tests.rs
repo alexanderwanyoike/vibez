@@ -57,7 +57,9 @@ fn live_input_uses_the_target_track_while_transport_is_stopped() {
     let input = [0.5f32, -0.25, 0.25, -0.5];
     let mut output = [0.0; 4];
 
-    engine.process_with_live_input(&mut output, 2, target.raw(), &input);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(target.raw(), &input),
+    );
 
     let centre = std::f32::consts::FRAC_1_SQRT_2;
     assert!((output[0] - 0.5 * centre).abs() < 1e-6);
@@ -70,7 +72,9 @@ fn live_input_uses_the_target_track_while_transport_is_stopped() {
 fn live_input_is_silent_when_its_target_does_not_exist() {
     let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
     let mut output = [1.0; 4];
-    engine.process_with_live_input(&mut output, 2, TrackId::new().raw(), &[0.5; 4]);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(TrackId::new().raw(), &[0.5; 4]),
+    );
     assert_eq!(output, [0.0; 4]);
 }
 
@@ -312,6 +316,26 @@ fn auto_stop_at_end_of_audio() {
         assert_eq!(buf[frame * 2], 0.0, "frame {frame} L should be 0");
         assert_eq!(buf[frame * 2 + 1], 0.0, "frame {frame} R should be 0");
     }
+}
+
+#[test]
+fn arrangement_recording_advances_past_the_existing_content_end() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    constant_clip_track(&mut cmd_tx, 16);
+    cmd_tx.push(EngineCommand::Seek(16)).unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementRecording(true))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    engine.process(&mut [0.0; 32], 2);
+
+    assert_eq!(engine.transport().position(), 32);
+    assert!(engine.transport().is_playing());
+
+    cmd_tx.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 2], 2);
+    assert_eq!(engine.transport().audio_length(), Some(16));
 }
 
 #[test]
@@ -1300,6 +1324,179 @@ fn constant_clip_track(
         })
         .unwrap();
     (tid, cid)
+}
+
+#[test]
+fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
+    let (_other, _) = constant_clip_track(&mut cmd_tx, 4096);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(source, 0.5))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackPan(source, 0.0))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+
+    assert!(capture
+        .iter()
+        .step_by(2)
+        .all(|sample| (*sample - 0.25).abs() < 1e-6));
+    assert!(capture
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .all(|sample| sample.abs() < 1e-6));
+    assert!(output.iter().skip(1).step_by(2).any(|sample| *sample > 0.3));
+}
+
+#[test]
+fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let source = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(source, "Source".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: source,
+            clip_id: ClipId::new(),
+            audio: make_test_audio(32),
+            position: 0,
+            source_offset: 0,
+            duration: 32,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoopRegion { start: 4, end: 16 })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoop(true))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 24 * 2];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+
+    assert_eq!(capture, output);
+    assert_eq!(&capture[16 * 2..24 * 2], &capture[4 * 2..12 * 2]);
+}
+
+#[test]
+fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
+    let (mut engine, mut cmd_tx, source, _bus) = engine_with_send(1.0);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25))
+        .unwrap();
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+    let direct = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!((capture[0] - direct).abs() < 1e-6);
+    assert!((output[0] - direct * 0.5).abs() < 1e-3);
+
+    cmd_tx
+        .push(start_audition(make_constant_audio(4096, 0.8)))
+        .unwrap();
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+    assert!((capture[0] - direct).abs() < 1e-6);
+    let output_peak = output.iter().copied().fold(0.0_f32, f32::max);
+    let capture_peak = capture.iter().copied().fold(0.0_f32, f32::max);
+    assert!(
+        output_peak > capture_peak,
+        "Browser Audition must stay outside the Track tap"
+    );
+
+    let solo = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(solo, "Solo".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: solo,
+            clip_id: ClipId::new(),
+            audio: make_constant_audio(4096, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 4096,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackSolo(solo, true))
+        .unwrap();
+    capture.fill(1.0);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+    assert!(capture.iter().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn track_output_capture_follows_active_gain_and_pan_automation() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
+    let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
+    gain.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.25,
+        curve: 0.0,
+    });
+    let mut pan = AutomationLane::new(AutomationTarget::TrackPan);
+    pan.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    for lane in [gain, pan] {
+        cmd_tx
+            .push(EngineCommand::SetAutomationLane {
+                track_id: source,
+                lane,
+            })
+            .unwrap();
+    }
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+
+    assert!(capture.iter().step_by(2).all(|sample| sample.abs() < 1e-6));
+    assert!(capture
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .all(|sample| (*sample - 0.25).abs() < 1e-6));
 }
 
 #[test]
