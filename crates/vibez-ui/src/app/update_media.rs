@@ -316,12 +316,19 @@ impl App {
                     Message::BrowserWaveformReady(source.clone(), result)
                 });
             }
+        } else if self.state.browser.audition_enabled {
+            if let Some(raw) = self.state.browser.waveform_for_source(&source) {
+                return self.play_browser_mode(source, raw);
+            }
         }
         Task::none()
     }
 
     pub(super) fn on_preview_local_entry(&mut self, source: MediaSourceRef) -> Task<Message> {
         self.state.browser.select_source(source.clone());
+        if let Some(raw) = self.state.browser.waveform_for_source(&source) {
+            return self.play_browser_mode(source, raw);
+        }
         let generation = self.state.browser.begin_audition_load(&source);
         if let MediaSourceRef::LocalFile { path } = source.clone() {
             self.state.status_text = "Preparing Audition...".to_string();
@@ -417,11 +424,13 @@ impl App {
     pub(super) fn on_audition_bpm_edit_changed(&mut self, value: String) -> Task<Message> {
         self.state.browser.audition_bpm_edit = value;
         self.state.browser.audition_bpm_confirmed = None;
-        if self.state.browser.audition_mode == crate::state::AuditionMode::Warp
-            && (self.state.browser.audition_playing || self.state.browser.audition_queued)
-        {
-            self.stop_browser_audition();
-            self.state.status_text = "Confirm the edited source BPM for WARP".into();
+        if self.state.browser.audition_mode == crate::state::AuditionMode::Warp {
+            self.state.browser.cancel_audition_preparation();
+            if self.state.browser.audition_enabled {
+                self.ensure_raw_browser_audition();
+            }
+            self.state.status_text =
+                "RAW Audition continues; confirm the edited BPM to hear WARP".into();
         }
         Task::none()
     }
@@ -442,7 +451,6 @@ impl App {
             let Some(raw) = self.state.browser.waveform_audio.clone() else {
                 return Task::none();
             };
-            self.stop_browser_audition();
             return self.prepare_browser_warp(source, raw, source_bpm);
         }
         Task::none()
@@ -606,7 +614,6 @@ impl App {
                 );
                 if self.state.browser.audition_enabled {
                     if let Some(raw) = self.state.browser.waveform_audio.clone() {
-                        self.stop_browser_audition();
                         return self.prepare_browser_warp(source_for_warp, raw, source_bpm);
                     }
                 }
@@ -645,7 +652,7 @@ impl App {
         }
         self.state.browser.audition_loading = false;
         match result {
-            Ok(audio) => self.start_browser_audition(audio),
+            Ok(audio) => self.start_browser_audition(audio, crate::state::AuditionMode::Warp),
             Err(error) => {
                 self.state.browser.stop_audition_state();
                 self.state.status_text = format!("WARP Audition error: {error}");

@@ -67,7 +67,10 @@ impl App {
                         self.state.browser.stop_audition_state();
                         if matches!(
                             self.state.status_text.as_str(),
-                            "RAW Audition playing" | "WARP Audition playing"
+                            "RAW Audition playing"
+                                | "WARP Audition playing"
+                                | "RAW Audition playing while WARP awaits source BPM"
+                                | "RAW Audition continues; confirm the edited BPM to hear WARP"
                         ) {
                             self.state.status_text = "Audition finished".into();
                         }
@@ -81,7 +84,17 @@ impl App {
                         self.state.browser.audition_loading = false;
                         self.state.browser.audition_queued = false;
                         self.state.browser.audition_playing = true;
-                        self.state.status_text = match self.state.browser.audition_mode {
+                        let playback_mode = self
+                            .state
+                            .browser
+                            .audition_playback_mode
+                            .unwrap_or(self.state.browser.audition_mode);
+                        self.state.status_text = match playback_mode {
+                            AuditionMode::Raw
+                                if self.state.browser.audition_mode == AuditionMode::Warp =>
+                            {
+                                "RAW Audition playing while WARP awaits source BPM".into()
+                            }
                             AuditionMode::Raw => "RAW Audition playing".into(),
                             AuditionMode::Warp => "WARP Audition playing".into(),
                         };

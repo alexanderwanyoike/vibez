@@ -452,18 +452,22 @@ impl App {
         self.state
             .browser
             .update(BrowserMsg::SelectRemoteEntry(entry.clone()));
+        let audition_entry = DropboxEntry {
+            path_lower: entry.provider_item_id,
+            path_display: entry.path,
+            name: entry.name,
+            is_folder: false,
+            rev: entry.revision,
+            size: entry.size,
+        };
         if changed {
-            return self.start_remote_audition(
-                DropboxEntry {
-                    path_lower: entry.provider_item_id,
-                    path_display: entry.path,
-                    name: entry.name,
-                    is_folder: false,
-                    rev: entry.revision,
-                    size: entry.size,
-                },
-                true,
-            );
+            return self.start_remote_audition(audition_entry, true);
+        }
+        if self.state.browser.audition_enabled {
+            if let Some(raw) = self.state.browser.waveform_for_source(&source) {
+                return self.play_browser_mode(source, raw);
+            }
+            return self.start_remote_audition(audition_entry, true);
         }
         Task::none()
     }
