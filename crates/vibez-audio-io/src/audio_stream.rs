@@ -14,6 +14,7 @@ use cpal::{
     SampleFormat, SampleRate, StreamConfig, SupportedStreamConfigsError,
 };
 
+use crate::audio_input::AudioInputBridge;
 use vibez_core::constants::DEFAULT_CHANNELS;
 use vibez_engine::engine::AudioEngine;
 
@@ -208,6 +209,7 @@ pub struct AudioOutputStream {
     event_reporter: StreamEventReporter,
     event_rx: Receiver<AudioStreamEvent>,
     cpu_load: StreamCpuLoad,
+    input_bridge: Arc<AudioInputBridge>,
 }
 
 impl AudioOutputStream {
@@ -222,6 +224,7 @@ impl AudioOutputStream {
             event_reporter,
             event_rx,
             cpu_load: StreamCpuLoad::default(),
+            input_bridge: Arc::new(AudioInputBridge::default()),
         }
     }
 
@@ -258,6 +261,7 @@ impl AudioOutputStream {
             buffer_size,
             output.event_reporter.clone(),
             output.cpu_load.clone(),
+            Arc::clone(&output.input_bridge),
         )?;
         stream.play()?;
         output.stream = Some(stream);
@@ -295,6 +299,7 @@ impl AudioOutputStream {
                 request.buffer_size,
                 self.event_reporter.clone(),
                 self.cpu_load.clone(),
+                Arc::clone(&self.input_bridge),
             )?;
 
             if let Some(current) = self.stream.as_ref() {
@@ -339,6 +344,7 @@ impl AudioOutputStream {
         buffer_size: Option<u32>,
         event_reporter: StreamEventReporter,
         cpu_load: StreamCpuLoad,
+        input_bridge: Arc<AudioInputBridge>,
     ) -> Result<(cpal::Stream, StreamParams), AudioStreamError> {
         let supported_config = select_output_config(device, requested_sample_rate, buffer_size)?;
         let sample_rate = supported_config.sample_rate().0;
@@ -367,6 +373,7 @@ impl AudioOutputStream {
             buffer_size.unwrap_or(512),
             scratch_buffer_frames(buffer_size, supported_config.buffer_size()),
             sample_rate,
+            input_bridge,
         );
         let stream = build_output_stream_for_format(
             device,
@@ -443,6 +450,11 @@ impl AudioOutputStream {
     /// deadline. Values over 100% mean the callback missed its deadline.
     pub fn cpu_load_percent(&self) -> f32 {
         self.cpu_load.percent()
+    }
+
+    /// Lock-free bridge shared with an on-demand hardware input stream.
+    pub fn input_bridge(&self) -> Arc<AudioInputBridge> {
+        Arc::clone(&self.input_bridge)
     }
 }
 

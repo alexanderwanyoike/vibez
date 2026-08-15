@@ -10,7 +10,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
-use vibez_core::track::{DrumPadState, MediaSourceRef};
+use vibez_core::track::{AudioInputRoute, DrumPadState, InputMonitoring, MediaSourceRef};
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -205,6 +205,8 @@ pub struct ProjectTrack {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    pub audio_input_route: AudioInputRoute,
+    pub input_monitoring: InputMonitoring,
     pub swing_offset: Option<vibez_core::perform::SwingOffset>,
     pub peak_l: f32,
     pub peak_r: f32,
@@ -251,6 +253,8 @@ impl ProjectTrack {
             pan: 0.5,
             mute: false,
             solo: false,
+            audio_input_route: AudioInputRoute::default(),
+            input_monitoring: InputMonitoring::default(),
             swing_offset: None,
             peak_l: 0.0,
             peak_r: 0.0,
@@ -285,6 +289,8 @@ impl ProjectTrack {
             pan: 0.5,
             mute: false,
             solo: false,
+            audio_input_route: AudioInputRoute::default(),
+            input_monitoring: InputMonitoring::default(),
             swing_offset: None,
             peak_l: 0.0,
             peak_r: 0.0,

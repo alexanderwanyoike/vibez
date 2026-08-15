@@ -425,6 +425,33 @@ flowchart LR
     MET -- "peaks, position" --> EV["EngineEvent ring"]
 ```
 
+Hardware input is opened on demand when an Audio Track is armed or its input
+monitor is On. The cpal input callback writes routed mono or stereo frames to a
+bounded single-producer/single-consumer ring. The output callback is the only
+consumer, so the output device remains the clock for both monitoring and
+recording. It injects those frames into exactly one target `EngineTrack` before
+that track's effects, mute, gain/pan, sends, and master mix. Browser audition
+uses a separate path and cannot enter a recording.
+
+```mermaid
+flowchart LR
+    IN(("device input")) --> IC["cpal input callback"]
+    IC -->|"bounded stereo ring"| OC["output callback"]
+    OC -->|"live input"| TR["armed EngineTrack<br/>effects + mixer"]
+    OC -->|"recorded-frame ring"| UI["UI recording session"]
+    UI -->|"background WAV encode"| ST["staged Project Media"]
+    ST --> CL["Arrange audio clip<br/>one undo step"]
+```
+
+The first output callback after Record latches the exact Arrange sample
+position. The UI never estimates the take boundary from its 60 fps tick. It
+drains recorded frames off the real-time thread, encodes the completed take on
+a background thread, stages it in Project Media, and only then inserts the
+canonical clip. Device loss or bounded-buffer overflow abandons the open
+project transaction, leaving no partial clip. Input route and monitoring mode
+are project state; soundcard selection, sample rate, and buffer size remain
+global application settings.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned

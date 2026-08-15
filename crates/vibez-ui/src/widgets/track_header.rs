@@ -1,5 +1,6 @@
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, text, text_input,
+    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, text,
+    text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -13,12 +14,20 @@ use crate::theme as th;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
 use vibez_core::midi::TrackKind;
+use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
 /// Width of the track header panel in the arrangement view.
 pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 
 /// Total width including the 3px color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TrackHeaderRecordingView {
+    pub input_channels: u16,
+    pub armed: bool,
+    pub input_peaks: Option<(f32, f32)>,
+}
 
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
@@ -60,7 +69,13 @@ pub fn view_track_header<'a>(
     editing_name: bool,
     edit_text: &'a str,
     automation_open: bool,
+    recording: TrackHeaderRecordingView,
 ) -> Element<'a, Message> {
+    let TrackHeaderRecordingView {
+        input_channels: audio_input_channels,
+        armed,
+        input_peaks,
+    } = recording;
     let track_color = th::track_color(track.color_index);
 
     // Row 1: Track type icon + name + "+" add clip button + delete button
@@ -212,7 +227,61 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let mute_solo_row = row![mute_btn, solo_btn].spacing(4);
+    let mute_solo_row: Element<'_, Message> = if track.kind == TrackKind::Audio {
+        let arm_color = if armed { th::danger() } else { th::text_dim() };
+        let arm_btn = button(text("R").size(11).color(arm_color))
+            .on_press(Message::ToggleAudioTrackArm(track.id))
+            .padding([3, 7])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(
+                    if armed {
+                        th::blend(th::danger(), th::bg_dark(), 0.28)
+                    } else {
+                        th::bg_elevated()
+                    }
+                    .into(),
+                ),
+                text_color: arm_color,
+                border: iced::Border {
+                    color: if armed { th::danger() } else { th::border() },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            });
+        let mut routes = Vec::new();
+        for channel in 0..audio_input_channels {
+            routes.push(AudioInputRoute::Mono { channel });
+        }
+        for left in (0..audio_input_channels.saturating_sub(1)).step_by(2) {
+            routes.push(AudioInputRoute::Stereo { left });
+        }
+        if routes.is_empty() {
+            routes.push(track.audio_input_route);
+        }
+        let track_id = track.id;
+        let route = pick_list(routes, Some(track.audio_input_route), move |value| {
+            Message::SetAudioTrackInputRoute(track_id, value)
+        })
+        .width(Length::Fixed(62.0))
+        .padding([2, 4])
+        .text_size(9);
+        let track_id = track.id;
+        let monitor = pick_list(
+            InputMonitoring::ALL,
+            Some(track.input_monitoring),
+            move |value| Message::SetAudioTrackMonitoring(track_id, value),
+        )
+        .width(Length::Fixed(56.0))
+        .padding([2, 4])
+        .text_size(9);
+        row![mute_btn, solo_btn, arm_btn, route, monitor]
+            .spacing(3)
+            .align_y(iced::Alignment::Center)
+            .into()
+    } else {
+        row![mute_btn, solo_btn].spacing(4).into()
+    };
 
     // Row 3: Horizontal gain fader (spans width)
     let fader = HorizontalFaderWidget::new(track.id, track.gain, track_color);
@@ -222,7 +291,8 @@ pub fn view_track_header<'a>(
         .into();
 
     // Row 4: Horizontal VU meter (spans width)
-    let meter = HorizontalVuMeterWidget::new(track.peak_l, track.peak_r, track_color);
+    let (meter_l, meter_r) = input_peaks.unwrap_or((track.peak_l, track.peak_r));
+    let meter = HorizontalVuMeterWidget::new(meter_l, meter_r, track_color);
     let meter_canvas: Element<'_, Message> = canvas(meter)
         .width(Length::Fill)
         .height(Length::Fixed(6.0))

@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::audio_input::AudioInputBridge;
 use cpal::traits::DeviceTrait;
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, SupportedBufferSize, I24};
 use vibez_engine::engine::AudioEngine;
@@ -64,6 +65,8 @@ pub(super) struct OutputCallback {
     scratch_frames: u32,
     sample_rate: u32,
     rt_state: Option<Result<audio_thread_priority::RtPriorityHandle, ()>>,
+    input_bridge: Arc<AudioInputBridge>,
+    input_scratch: Vec<f32>,
 }
 
 impl OutputCallback {
@@ -74,6 +77,7 @@ impl OutputCallback {
         buffer_frames: u32,
         scratch_frames: u32,
         sample_rate: u32,
+        input_bridge: Arc<AudioInputBridge>,
     ) -> Self {
         Self {
             engine_slot,
@@ -84,6 +88,8 @@ impl OutputCallback {
             scratch_frames,
             sample_rate,
             rt_state: None,
+            input_bridge,
+            input_scratch: vec![0.0; scratch_frames as usize * channels],
         }
     }
 
@@ -123,7 +129,21 @@ impl OutputCallback {
         let mut processed = false;
         if let Ok(mut guard) = self.engine_slot.try_lock() {
             if let Some(engine) = guard.as_mut() {
-                engine.process(data, self.channels);
+                self.input_bridge
+                    .latch_record_start_position(engine.arrangement_position_samples());
+                let live_input = self.input_scratch.get_mut(..data.len()).map(|scratch| {
+                    let target = self.input_bridge.clock_output(scratch, self.channels);
+                    (target, &*scratch)
+                });
+                if live_input.is_none() {
+                    self.input_bridge.report_overflow();
+                }
+                match live_input {
+                    Some((Some(target), samples)) => {
+                        engine.process_with_live_input(data, self.channels, target, samples)
+                    }
+                    _ => engine.process(data, self.channels),
+                }
                 processed = true;
             }
         }

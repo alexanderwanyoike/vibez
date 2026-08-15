@@ -59,6 +59,10 @@ impl App {
         self.browser_import_request.cancel();
         self.section_residency_request.cancel();
         self.stop_browser_audition();
+        self.input_bridge.end_recording();
+        self.input_bridge.set_target(None, false);
+        self._input_stream = None;
+        self.state.audio_recording = Default::default();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
         self.send_command(EngineCommand::Stop);
@@ -371,6 +375,8 @@ impl App {
             pan: track.pan,
             mute: track.mute,
             solo: track.solo,
+            audio_input_route: track.audio_input_route,
+            input_monitoring: track.input_monitoring,
             swing_offset: track.swing_offset,
             effects,
             kind: track.kind,
@@ -515,6 +521,8 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
+            track.audio_input_route = track_info.audio_input_route;
+            track.input_monitoring = track_info.input_monitoring;
             track.swing_offset = track_info.swing_offset;
             let automation = super::project_sections::legacy_automation_for_track(
                 &loaded.project,
@@ -895,6 +903,23 @@ impl App {
                 loaded.warnings.len()
             )
         };
+
+        self.state.audio_recording.monitor_track = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .find(|track| {
+                track.kind == TrackKind::Audio
+                    && track.input_monitoring == vibez_core::track::InputMonitoring::On
+            })
+            .map(|track| track.id);
+        if let Err(error) = self.sync_audio_input_runtime() {
+            self.state.status_text = format!(
+                "{} · Input monitoring unavailable: {error}",
+                self.state.status_text
+            );
+        }
 
         self.spawn_project_plugin_loads(plugin_effect_requests, plugin_instrument_requests);
     }

@@ -101,6 +101,9 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                if matches!(msg, TransportMsg::Stop) && self.state.audio_recording.is_recording() {
+                    return self.stop_audio_recording();
+                }
                 if self.place_focused_section_playhead(&msg) {
                     return Task::none();
                 }
@@ -658,6 +661,20 @@ impl App {
             }
             Message::ClipDecodeError(_, err) => {
                 self.state.status_text = format!("Error: {err}");
+            }
+
+            Message::ToggleAudioTrackArm(track_id) => {
+                return self.toggle_audio_track_arm(track_id);
+            }
+            Message::SetAudioTrackInputRoute(track_id, route) => {
+                return self.set_audio_track_input_route(track_id, route);
+            }
+            Message::SetAudioTrackMonitoring(track_id, monitoring) => {
+                return self.set_audio_track_monitoring(track_id, monitoring);
+            }
+            Message::ToggleAudioRecording => return self.toggle_audio_recording(),
+            Message::AudioRecordingFinalized(result) => {
+                return self.finish_audio_recording(result);
             }
 
             // -- Sampler / drum rack --

@@ -476,6 +476,8 @@ pub struct AppState {
     pub settings_tab: SettingsTab,
     /// Application-scoped hardware state; never serialized into a Project.
     pub audio_settings: crate::domains::audio_settings::AudioSettingsState,
+    /// Runtime Audio Input arm, meter, and take buffer; never persisted or undone.
+    pub audio_recording: crate::domains::audio_recording::AudioRecordingState,
     pub confirm_project_track_deletion: bool,
     /// Global autosave preference mirrored from [`crate::ui_settings::UiSettings`].
     pub auto_save_enabled: bool,
@@ -533,6 +535,7 @@ impl Default for AppState {
             about_open: false,
             settings_tab: SettingsTab::default(),
             audio_settings: crate::domains::audio_settings::AudioSettingsState::default(),
+            audio_recording: crate::domains::audio_recording::AudioRecordingState::default(),
             confirm_project_track_deletion: false,
             auto_save_enabled: true,
             update_check: crate::update_check::UpdateCheckState::default(),

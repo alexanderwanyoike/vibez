@@ -23,7 +23,9 @@ use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TrackClipCanvas,
     TRACK_ROW_HEIGHT,
 };
-use crate::widgets::track_header::{view_editable_channel_name, view_track_header};
+use crate::widgets::track_header::{
+    view_editable_channel_name, view_track_header, TrackHeaderRecordingView,
+};
 
 use super::*;
 
@@ -259,12 +261,28 @@ impl App {
             // Track header (iced widgets)
             let editing = self.state.view.editing_track_name == Some(track.id);
             let automation_open = self.state.automation_ui.expanded.contains(&track.id);
+            let input_channels = self
+                .state
+                .audio_settings
+                .selected_input()
+                .and_then(|device| device.default_config.as_ref().map(|config| config.channels))
+                .unwrap_or(0);
+            let input_target = self.state.audio_recording.armed_track == Some(track.id)
+                || self.state.audio_recording.monitor_track == Some(track.id);
             let header = view_track_header(
                 track,
                 selected,
                 editing,
                 &self.state.view.edit_name_text,
                 automation_open,
+                TrackHeaderRecordingView {
+                    input_channels,
+                    armed: self.state.audio_recording.armed_track == Some(track.id),
+                    input_peaks: input_target.then_some((
+                        self.state.audio_recording.input_peak_l,
+                        self.state.audio_recording.input_peak_r,
+                    )),
+                },
             );
 
             // Clip canvas for this track

@@ -109,6 +109,25 @@ struct QueuedSectionPlayback {
     effective_at_samples: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct LiveInputBlock<'a> {
+    pub target_track_raw: u64,
+    pub samples: &'a [f32],
+}
+
+impl<'a> LiveInputBlock<'a> {
+    pub(super) fn slice(self, frame_offset: usize, frames: usize, channels: usize) -> Self {
+        let start = frame_offset.saturating_mul(channels);
+        let end = start
+            .saturating_add(frames.saturating_mul(channels))
+            .min(self.samples.len());
+        Self {
+            target_track_raw: self.target_track_raw,
+            samples: self.samples.get(start..end).unwrap_or(&[]),
+        }
+    }
+}
+
 impl AudioEngine {
     /// Timing profile compiled into V1 generated-event scheduling.
     pub const fn groove_profile() -> GrooveProfile {
@@ -174,6 +193,39 @@ impl AudioEngine {
     /// 4. Otherwise: falls back to legacy single-audio path.
     /// 5. Sends metering and position events to the UI thread.
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
+        self.process_block(output, channels, None);
+    }
+
+    /// Process one output-clock block with a transient hardware-input source.
+    /// The slice is borrowed only for this callback and is never retained.
+    pub fn process_with_live_input(
+        &mut self,
+        output: &mut [f32],
+        channels: usize,
+        target_track_raw: u64,
+        input: &[f32],
+    ) {
+        self.process_block(
+            output,
+            channels,
+            Some(LiveInputBlock {
+                target_track_raw,
+                samples: input,
+            }),
+        );
+    }
+
+    /// Exact Arrange cursor at the next output-clock block boundary.
+    pub fn arrangement_position_samples(&self) -> u64 {
+        self.transport.position()
+    }
+
+    fn process_block(
+        &mut self,
+        output: &mut [f32],
+        channels: usize,
+        live_input: Option<LiveInputBlock<'_>>,
+    ) {
         // A musical boundary due at this block start owns the same timestamp
         // as commands drained below. Publish the recording start first so a
         // first pad strike at the boundary cannot reach consumers while the
@@ -196,7 +248,7 @@ impl AudioEngine {
 
         if !self.tracks.is_empty() {
             // ---- 3. Multi-track rendering path --------------------------
-            self.process_multitrack(output, frames, channels);
+            self.process_multitrack(output, frames, channels, live_input);
         } else {
             // ---- 4. Legacy single-audio path ----------------------------
             self.process_legacy(output, frames, channels);
