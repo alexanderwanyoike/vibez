@@ -12,8 +12,11 @@ pub struct TimelineClip {
     pub position: u64,
     pub duration: u64,
     pub name: String,
-    /// Pre-computed waveform peaks for mini display (per pixel column).
+    /// Pre-computed waveform extrema for the mini display.
     pub peaks: Arc<Vec<(f32, f32)>>,
+    /// Exact source-frame span represented by each peak for a growing live
+    /// waveform. Persisted Clips use fitted peaks and leave this unset.
+    pub peak_span_frames: Option<usize>,
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,

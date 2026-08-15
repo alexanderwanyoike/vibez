@@ -84,6 +84,7 @@ pub struct AudioRecordingPreview {
     pub position: u64,
     pub duration: u64,
     pub peaks: Arc<Vec<(f32, f32)>>,
+    pub frames_per_peak: usize,
     pub source: AudioRecordingSource,
 }
 
@@ -159,6 +160,7 @@ impl AudioRecordingState {
             position: self.start_position_samples,
             duration: self.captured_frames.len() as u64,
             peaks: Arc::clone(&self.live_waveform.peaks),
+            frames_per_peak: self.live_waveform.frames_per_peak,
             source: self.source?,
         })
     }
@@ -248,6 +250,7 @@ mod tests {
         let preview = state.preview_for_track(track).unwrap();
         assert_eq!(preview.position, 9_600);
         assert_eq!(preview.duration, 80);
+        assert_eq!(preview.frames_per_peak, LIVE_WAVEFORM_FRAMES_PER_PEAK);
         assert_eq!(preview.peaks.as_slice(), &[(-0.5, 0.75)]);
         assert!(state.preview_for_track(TrackId::new()).is_none());
     }
@@ -266,6 +269,7 @@ mod tests {
 
         let preview = state.preview_for_track(track).unwrap();
         assert_eq!(preview.peaks.len(), LIVE_WAVEFORM_MAX_PEAKS / 2);
+        assert_eq!(preview.frames_per_peak, LIVE_WAVEFORM_FRAMES_PER_PEAK * 2);
         assert!(preview.peaks.iter().all(|peak| *peak == (-0.7, 0.9)));
     }
 }
