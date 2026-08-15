@@ -66,6 +66,17 @@ const MARQUEE_MIN_PX: f32 = 4.0;
 /// horizontal drag near a row boundary would flicker between tracks.
 const CROSS_TRACK_MIN_PX: f32 = 20.0;
 
+/// Where an unmodified vertical wheel gesture should be handled.
+///
+/// Arrange treats it as timeline panning. Section construction lives inside
+/// a vertical track scroller, so its lanes must let the parent consume it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum VerticalWheelRouting {
+    #[default]
+    PanTimeline,
+    BubbleToTrackScroller,
+}
+
 /// Interaction state for clip canvas.
 #[derive(Debug, Default)]
 pub struct ClipInteractionState {
@@ -75,6 +86,7 @@ pub struct ClipInteractionState {
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
 pub struct TrackClipCanvas {
+    vertical_wheel_routing: VerticalWheelRouting,
     pub track_id: TrackId,
     pub track_index: usize,
     pub total_tracks: usize,
@@ -222,6 +234,7 @@ impl TrackClipCanvas {
             })
             .collect();
         Self {
+            vertical_wheel_routing: VerticalWheelRouting::default(),
             track_id,
             track_index,
             total_tracks,
@@ -284,6 +297,14 @@ impl TrackClipCanvas {
 
     pub fn with_playback_playhead(mut self, playback_playhead_beats: Option<f64>) -> Self {
         self.playback_playhead_beats = playback_playhead_beats;
+        self
+    }
+
+    /// Let the surrounding track list handle ordinary vertical wheel input.
+    /// Horizontal wheel input and Shift+wheel remain lane-local timeline
+    /// navigation gestures.
+    pub fn with_vertical_track_scrolling(mut self) -> Self {
+        self.vertical_wheel_routing = VerticalWheelRouting::BubbleToTrackScroller;
         self
     }
 
@@ -907,6 +928,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
+                        if self.vertical_wheel_routing
+                            == VerticalWheelRouting::BubbleToTrackScroller
+                        {
+                            return (canvas::event::Status::Ignored, None);
+                        }
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::View(ViewMsg::ScrollArrangement(
