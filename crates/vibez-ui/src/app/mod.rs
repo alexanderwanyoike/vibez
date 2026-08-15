@@ -478,6 +478,12 @@ impl App {
             .filter(|p| p.is_file())
             .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
             .unwrap_or_else(Task::none);
+        // `window::Settings` has no maximized field in iced 0.13. The
+        // initial task runs after the first window exists, so ask the window
+        // manager to maximize that concrete window instead of merely opening
+        // at a large hard-coded size.
+        let maximize_window_task =
+            iced::window::get_latest().and_then(|id| iced::window::maximize(id, true));
 
         (
             app,
@@ -487,6 +493,7 @@ impl App {
                 plugin_catalog_startup_task,
                 update_check_task,
                 open_task,
+                maximize_window_task,
             ]),
         )
     }
