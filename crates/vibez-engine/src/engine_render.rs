@@ -12,6 +12,41 @@ pub(super) struct MultitrackRenderBlock<'a> {
     pub live_input: Option<LiveInputBlock<'a>>,
 }
 
+fn split_track_output_capture<'a>(
+    capture: Option<&'a mut TrackOutputCapture<'_>>,
+    split: usize,
+) -> (
+    Option<TrackOutputCapture<'a>>,
+    Option<TrackOutputCapture<'a>>,
+) {
+    let Some(capture) = capture else {
+        return (None, None);
+    };
+    let split = split.min(capture.samples.len());
+    let source_track_raw = capture.source_track_raw;
+    let (first, rest) = capture.samples.split_at_mut(split);
+    (
+        Some(TrackOutputCapture {
+            source_track_raw,
+            samples: first,
+        }),
+        Some(TrackOutputCapture {
+            source_track_raw,
+            samples: rest,
+        }),
+    )
+}
+
+fn write_track_output_sample(
+    capture: Option<&mut TrackOutputCapture<'_>>,
+    index: usize,
+    sample: f32,
+) {
+    if let Some(destination) = capture.and_then(|capture| capture.samples.get_mut(index)) {
+        *destination = sample;
+    }
+}
+
 impl AudioEngine {
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
     ///
@@ -64,55 +99,10 @@ impl AudioEngine {
             if pos < loop_end && pos + frames as u64 >= loop_end {
                 let first = (loop_end - pos) as usize;
                 let rest = frames - first;
-                if let Some(capture) = track_output_capture.as_deref_mut() {
-                    let split = (first * channels).min(capture.samples.len());
-                    let (first_samples, rest_samples) = capture.samples.split_at_mut(split);
-                    let source_track_raw = capture.source_track_raw;
-                    let mut first_capture = TrackOutputCapture {
-                        source_track_raw,
-                        samples: first_samples,
-                    };
-                    self.render_multitrack_segment(
-                        &mut output[..first * channels],
-                        MultitrackRenderBlock {
-                            pos,
-                            repeat_pos: pos,
-                            frames: first,
-                            channels,
-                            loop_region: self.transport.active_loop_region(),
-                            live_input: live_input.map(|input| input.slice(0, first, channels)),
-                        },
-                        Some(&mut first_capture),
-                    );
-                    // The transport jumps directly from loop_end to loop_start.
-                    // Apply work owned by that exact musical boundary before the
-                    // clock wraps so it cannot remain pending forever.
-                    self.apply_track_mutes_due(loop_end);
-                    for track in &mut self.tracks {
-                        track.flush_notes();
-                    }
-                    if rest > 0 {
-                        let mut rest_capture = TrackOutputCapture {
-                            source_track_raw,
-                            samples: rest_samples,
-                        };
-                        self.render_multitrack_segment(
-                            &mut output[first * channels..],
-                            MultitrackRenderBlock {
-                                pos: loop_start,
-                                repeat_pos: loop_start,
-                                frames: rest,
-                                channels,
-                                loop_region: self.transport.active_loop_region(),
-                                live_input: live_input
-                                    .map(|input| input.slice(first, rest, channels)),
-                            },
-                            Some(&mut rest_capture),
-                        );
-                    }
-                    self.split_wrap_handled = true;
-                    return;
-                }
+                let (mut first_capture, mut rest_capture) = split_track_output_capture(
+                    track_output_capture.as_deref_mut(),
+                    first * channels,
+                );
                 self.render_multitrack_segment(
                     &mut output[..first * channels],
                     MultitrackRenderBlock {
@@ -123,7 +113,7 @@ impl AudioEngine {
                         loop_region: self.transport.active_loop_region(),
                         live_input: live_input.map(|input| input.slice(0, first, channels)),
                     },
-                    None,
+                    first_capture.as_mut(),
                 );
                 // The transport jumps directly from loop_end to loop_start.
                 // Apply work owned by that exact musical boundary before the
@@ -145,7 +135,7 @@ impl AudioEngine {
                             loop_region: self.transport.active_loop_region(),
                             live_input: live_input.map(|input| input.slice(first, rest, channels)),
                         },
-                        None,
+                        rest_capture.as_mut(),
                     );
                 }
                 self.split_wrap_handled = true;
@@ -393,11 +383,11 @@ impl AudioEngine {
                         output[idx] += panned;
                     }
                     if capture_this_track {
-                        if let Some(capture) = track_output_capture.as_deref_mut() {
-                            if let Some(destination) = capture.samples.get_mut(idx) {
-                                *destination = if dry_audible { panned } else { 0.0 };
-                            }
-                        }
+                        write_track_output_sample(
+                            track_output_capture.as_deref_mut(),
+                            idx,
+                            if dry_audible { panned } else { 0.0 },
+                        );
                     }
 
                     // Track per-channel peaks
@@ -588,11 +578,11 @@ impl AudioEngine {
                         output[idx] += panned;
                     }
                     if capture_this_track {
-                        if let Some(capture) = track_output_capture.as_deref_mut() {
-                            if let Some(destination) = capture.samples.get_mut(idx) {
-                                *destination = if dry_audible { panned } else { 0.0 };
-                            }
-                        }
+                        write_track_output_sample(
+                            track_output_capture.as_deref_mut(),
+                            idx,
+                            if dry_audible { panned } else { 0.0 },
+                        );
                     }
                 }
             }

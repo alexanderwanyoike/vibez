@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crate::audio_input::AudioInputBridge;
 use cpal::traits::DeviceTrait;
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, SupportedBufferSize};
-use vibez_engine::engine::AudioEngine;
+use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
 
 use crate::stream_config::StreamOpenError;
 
@@ -147,27 +147,14 @@ impl OutputCallback {
                 if resample_source.is_some() && resample_scratch.is_none() {
                     self.input_bridge.report_overflow();
                 }
-                match (live_input, resample_source, resample_scratch) {
-                    (Some((Some(target), input)), Some(source), Some(capture)) => engine
-                        .process_with_live_input_and_track_output_capture(
-                            data,
-                            self.channels,
-                            target,
-                            input,
-                            source,
-                            capture,
-                        ),
-                    (_, Some(source), Some(capture)) => engine.process_with_track_output_capture(
-                        data,
-                        self.channels,
-                        source,
-                        capture,
-                    ),
-                    (Some((Some(target), input)), _, _) => {
-                        engine.process_with_live_input(data, self.channels, target, input)
-                    }
-                    _ => engine.process(data, self.channels),
+                let mut block = AudioProcessBlock::new(data, self.channels);
+                if let Some((Some(target), input)) = live_input {
+                    block = block.with_live_input(target, input);
                 }
+                if let (Some(source), Some(capture)) = (resample_source, resample_scratch) {
+                    block = block.with_track_output_capture(source, capture);
+                }
+                engine.process_block(block);
                 if resample_source.is_some() {
                     if let Some(capture) = self.resample_scratch.get(..data.len()) {
                         self.input_bridge

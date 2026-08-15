@@ -57,7 +57,9 @@ fn live_input_uses_the_target_track_while_transport_is_stopped() {
     let input = [0.5f32, -0.25, 0.25, -0.5];
     let mut output = [0.0; 4];
 
-    engine.process_with_live_input(&mut output, 2, target.raw(), &input);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(target.raw(), &input),
+    );
 
     let centre = std::f32::consts::FRAC_1_SQRT_2;
     assert!((output[0] - 0.5 * centre).abs() < 1e-6);
@@ -70,7 +72,9 @@ fn live_input_uses_the_target_track_while_transport_is_stopped() {
 fn live_input_is_silent_when_its_target_does_not_exist() {
     let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
     let mut output = [1.0; 4];
-    engine.process_with_live_input(&mut output, 2, TrackId::new().raw(), &[0.5; 4]);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2).with_live_input(TrackId::new().raw(), &[0.5; 4]),
+    );
     assert_eq!(output, [0.0; 4]);
 }
 
@@ -1317,7 +1321,10 @@ fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
 
     let mut output = vec![0.0; 256];
     let mut capture = vec![0.0; output.len()];
-    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
 
     assert!(capture
         .iter()
@@ -1332,6 +1339,45 @@ fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
 }
 
 #[test]
+fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let source = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(source, "Source".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: source,
+            clip_id: ClipId::new(),
+            audio: make_test_audio(32),
+            position: 0,
+            source_offset: 0,
+            duration: 32,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoopRegion { start: 4, end: 16 })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementLoop(true))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 24 * 2];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
+
+    assert_eq!(capture, output);
+    assert_eq!(&capture[16 * 2..24 * 2], &capture[4 * 2..12 * 2]);
+}
+
+#[test]
 fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
     let (mut engine, mut cmd_tx, source, _bus) = engine_with_send(1.0);
     cmd_tx
@@ -1339,7 +1385,10 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
         .unwrap();
     let mut output = vec![0.0; 256];
     let mut capture = vec![0.0; output.len()];
-    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
     let direct = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
     assert!((capture[0] - direct).abs() < 1e-6);
     assert!((output[0] - direct * 0.5).abs() < 1e-3);
@@ -1347,7 +1396,10 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
     cmd_tx
         .push(start_audition(make_constant_audio(4096, 0.8)))
         .unwrap();
-    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
     assert!((capture[0] - direct).abs() < 1e-6);
     let output_peak = output.iter().copied().fold(0.0_f32, f32::max);
     let capture_peak = capture.iter().copied().fold(0.0_f32, f32::max);
@@ -1377,7 +1429,10 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
         .push(EngineCommand::SetTrackSolo(solo, true))
         .unwrap();
     capture.fill(1.0);
-    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
     assert!(capture.iter().all(|sample| *sample == 0.0));
 }
 
@@ -1411,7 +1466,10 @@ fn track_output_capture_follows_active_gain_and_pan_automation() {
 
     let mut output = vec![0.0; 256];
     let mut capture = vec![0.0; output.len()];
-    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(source.raw(), &mut capture),
+    );
 
     assert!(capture.iter().step_by(2).all(|sample| sample.abs() < 1e-6));
     assert!(capture

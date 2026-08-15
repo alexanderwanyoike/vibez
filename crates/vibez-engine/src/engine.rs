@@ -30,9 +30,10 @@ const SPECTRUM_RING_CAPACITY: usize = 16_384;
 
 /// The real-time audio engine.
 ///
-/// `AudioEngine` lives on the audio thread.  Its [`process()`](AudioEngine::process)
-/// method is called once per audio callback to fill an output buffer with audio
-/// and communicate with the UI thread via lock-free ring buffers.
+/// `AudioEngine` lives on the audio thread. Its
+/// [`process_block()`](AudioEngine::process_block) method is called once per
+/// audio callback to fill an output buffer with audio and communicate with the
+/// UI thread via lock-free ring buffers.
 ///
 /// # Construction
 ///
@@ -122,6 +123,48 @@ pub(super) struct TrackOutputCapture<'a> {
     pub samples: &'a mut [f32],
 }
 
+/// All transient sources and destinations for one audio callback.
+///
+/// The builder keeps callback-only borrows together so adding another optional
+/// source does not multiply the public `AudioEngine` process API.
+pub struct AudioProcessBlock<'a> {
+    output: &'a mut [f32],
+    channels: usize,
+    live_input: Option<LiveInputBlock<'a>>,
+    track_output_capture: Option<TrackOutputCapture<'a>>,
+}
+
+impl<'a> AudioProcessBlock<'a> {
+    pub fn new(output: &'a mut [f32], channels: usize) -> Self {
+        Self {
+            output,
+            channels,
+            live_input: None,
+            track_output_capture: None,
+        }
+    }
+
+    pub fn with_live_input(mut self, target_track_raw: u64, samples: &'a [f32]) -> Self {
+        self.live_input = Some(LiveInputBlock {
+            target_track_raw,
+            samples,
+        });
+        self
+    }
+
+    pub fn with_track_output_capture(
+        mut self,
+        source_track_raw: u64,
+        samples: &'a mut [f32],
+    ) -> Self {
+        self.track_output_capture = Some(TrackOutputCapture {
+            source_track_raw,
+            samples,
+        });
+        self
+    }
+}
+
 impl<'a> LiveInputBlock<'a> {
     pub(super) fn slice(self, frame_offset: usize, frames: usize, channels: usize) -> Self {
         let start = frame_offset.saturating_mul(channels);
@@ -199,73 +242,9 @@ impl AudioEngine {
     /// 3. If tracks exist: renders each → applies gain/pan → sums into output.
     /// 4. Otherwise: falls back to legacy single-audio path.
     /// 5. Sends metering and position events to the UI thread.
-    pub fn process(&mut self, output: &mut [f32], channels: usize) {
-        self.process_block(output, channels, None, None);
-    }
-
-    /// Process one output-clock block with a transient hardware-input source.
-    /// The slice is borrowed only for this callback and is never retained.
-    pub fn process_with_live_input(
-        &mut self,
-        output: &mut [f32],
-        channels: usize,
-        target_track_raw: u64,
-        input: &[f32],
-    ) {
-        self.process_block(
-            output,
-            channels,
-            Some(LiveInputBlock {
-                target_track_raw,
-                samples: input,
-            }),
-            None,
-        );
-    }
-
-    /// Process one block while copying the selected Track's post-device,
-    /// post-fader direct output into caller-owned, preallocated scratch.
-    pub fn process_with_track_output_capture(
-        &mut self,
-        output: &mut [f32],
-        channels: usize,
-        source_track_raw: u64,
-        capture: &mut [f32],
-    ) {
-        self.process_block(
-            output,
-            channels,
-            None,
-            Some(TrackOutputCapture {
-                source_track_raw,
-                samples: capture,
-            }),
-        );
-    }
-
-    /// Hardware monitoring and internal Resample can coexist in one callback,
-    /// although a recording session chooses exactly one capture source.
-    pub fn process_with_live_input_and_track_output_capture(
-        &mut self,
-        output: &mut [f32],
-        channels: usize,
-        target_track_raw: u64,
-        input: &[f32],
-        source_track_raw: u64,
-        capture: &mut [f32],
-    ) {
-        self.process_block(
-            output,
-            channels,
-            Some(LiveInputBlock {
-                target_track_raw,
-                samples: input,
-            }),
-            Some(TrackOutputCapture {
-                source_track_raw,
-                samples: capture,
-            }),
-        );
+    #[cfg(test)]
+    fn process(&mut self, output: &mut [f32], channels: usize) {
+        self.process_block(AudioProcessBlock::new(output, channels));
     }
 
     /// Exact Arrange cursor at the next output-clock block boundary.
@@ -273,13 +252,13 @@ impl AudioEngine {
         self.transport.position()
     }
 
-    fn process_block(
-        &mut self,
-        output: &mut [f32],
-        channels: usize,
-        live_input: Option<LiveInputBlock<'_>>,
-        mut track_output_capture: Option<TrackOutputCapture<'_>>,
-    ) {
+    pub fn process_block(&mut self, block: AudioProcessBlock<'_>) {
+        let AudioProcessBlock {
+            output,
+            channels,
+            live_input,
+            mut track_output_capture,
+        } = block;
         // A musical boundary due at this block start owns the same timestamp
         // as commands drained below. Publish the recording start first so a
         // first pad strike at the boundary cannot reach consumers while the
