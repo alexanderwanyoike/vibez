@@ -27,6 +27,16 @@ fn apply_track_mute_event(
     pending
 }
 
+fn active_audition_status(status: &str) -> bool {
+    matches!(
+        status,
+        RAW_AUDITION_PLAYING
+            | WARP_AUDITION_PLAYING
+            | RAW_AUDITION_AWAITING_BPM
+            | RAW_AUDITION_CONTINUES_FOR_BPM_EDIT
+    )
+}
+
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
         let mut completed_section_recordings = Vec::new();
@@ -65,13 +75,7 @@ impl App {
                     }
                     EngineEvent::AuditionStopped => {
                         self.state.browser.stop_audition_state();
-                        if matches!(
-                            self.state.status_text.as_str(),
-                            "RAW Audition playing"
-                                | "WARP Audition playing"
-                                | "RAW Audition playing while WARP awaits source BPM"
-                                | "RAW Audition continues; confirm the edited BPM to hear WARP"
-                        ) {
+                        if active_audition_status(&self.state.status_text) {
                             self.state.status_text = "Audition finished".into();
                         }
                     }
@@ -93,10 +97,10 @@ impl App {
                             AuditionMode::Raw
                                 if self.state.browser.audition_mode == AuditionMode::Warp =>
                             {
-                                "RAW Audition playing while WARP awaits source BPM".into()
+                                RAW_AUDITION_AWAITING_BPM.into()
                             }
-                            AuditionMode::Raw => "RAW Audition playing".into(),
-                            AuditionMode::Warp => "WARP Audition playing".into(),
+                            AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
+                            AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
                         };
                     }
                     EngineEvent::TrackMeter {
@@ -393,6 +397,19 @@ mod tests {
     use crate::domains::perform::PendingTrackMute;
     use crate::state::ProjectTrack;
     use vibez_core::id::TrackId;
+
+    #[test]
+    fn audition_completion_recognizes_every_canonical_playing_status() {
+        for status in [
+            RAW_AUDITION_PLAYING,
+            WARP_AUDITION_PLAYING,
+            RAW_AUDITION_AWAITING_BPM,
+            RAW_AUDITION_CONTINUES_FOR_BPM_EDIT,
+        ] {
+            assert!(active_audition_status(status));
+        }
+        assert!(!active_audition_status(WARP_BPM_EDIT_NEEDS_CONFIRMATION));
+    }
 
     #[test]
     fn effective_quantized_mute_commits_one_undoable_project_edit() {

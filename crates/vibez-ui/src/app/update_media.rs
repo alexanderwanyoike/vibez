@@ -426,11 +426,13 @@ impl App {
         self.state.browser.audition_bpm_confirmed = None;
         if self.state.browser.audition_mode == crate::state::AuditionMode::Warp {
             self.state.browser.cancel_audition_preparation();
-            if self.state.browser.audition_enabled {
-                self.ensure_raw_browser_audition();
-            }
-            self.state.status_text =
-                "RAW Audition continues; confirm the edited BPM to hear WARP".into();
+            let raw_audition_active =
+                self.state.browser.audition_enabled && self.ensure_raw_browser_audition();
+            self.state.status_text = if raw_audition_active {
+                RAW_AUDITION_CONTINUES_FOR_BPM_EDIT.into()
+            } else {
+                WARP_BPM_EDIT_NEEDS_CONFIRMATION.into()
+            };
         }
         Task::none()
     }

@@ -34,6 +34,15 @@ use crate::state::{AppState, AudioStreamHealth};
 use crate::theme as th;
 use crate::ui_settings::UiSettings;
 
+pub(super) const RAW_AUDITION_PLAYING: &str = "RAW Audition playing";
+pub(super) const WARP_AUDITION_PLAYING: &str = "WARP Audition playing";
+pub(super) const RAW_AUDITION_AWAITING_BPM: &str =
+    "RAW Audition playing while WARP awaits source BPM";
+pub(super) const RAW_AUDITION_CONTINUES_FOR_BPM_EDIT: &str =
+    "RAW Audition continues; confirm the edited BPM to hear WARP";
+pub(super) const WARP_BPM_EDIT_NEEDS_CONFIRMATION: &str =
+    "Confirm the edited BPM before preparing WARP Audition";
+
 struct App {
     state: AppState,
     edge_shortcuts: EdgeShortcutState,

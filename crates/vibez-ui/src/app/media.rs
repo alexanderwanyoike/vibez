@@ -272,27 +272,32 @@ impl App {
         } else if playback_mode == AuditionMode::Raw
             && self.state.browser.audition_mode == AuditionMode::Warp
         {
-            "RAW Audition playing while WARP awaits source BPM".into()
+            RAW_AUDITION_AWAITING_BPM.into()
         } else {
-            format!("{mode} Audition playing")
+            match playback_mode {
+                AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
+                AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
+            }
         };
     }
 
     /// Keep a truthful RAW voice underneath BPM editing and WARP preparation.
     /// Repeated calls are idempotent so UI state changes do not restart a loop.
-    pub(super) fn ensure_raw_browser_audition(&mut self) {
+    /// Returns whether a RAW voice is active or was successfully requested.
+    pub(super) fn ensure_raw_browser_audition(&mut self) -> bool {
         if self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
             && (self.state.browser.audition_playing || self.state.browser.audition_queued)
         {
-            return;
+            return true;
         }
         let Some(source) = self.state.browser.selected_source.clone() else {
-            return;
+            return false;
         };
         let Some(raw) = self.state.browser.waveform_for_source(&source) else {
-            return;
+            return false;
         };
         self.start_browser_audition(raw, AuditionMode::Raw);
+        true
     }
 
     pub(super) fn schedule_browser_bpm_detection(
@@ -345,7 +350,7 @@ impl App {
                 detection
             }
             crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
-                self.ensure_raw_browser_audition();
+                let _ = self.ensure_raw_browser_audition();
                 Task::batch([
                     detection,
                     self.prepare_browser_warp(source, raw, source_bpm),
