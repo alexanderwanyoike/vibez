@@ -598,6 +598,7 @@ impl AppState {
                 self.status_text = format!(
                     "Audio configuration rejected — previous output remains active: {cause}"
                 );
+                self.audio_stream_health = AudioStreamHealth::Running;
             }
         }
     }
@@ -834,6 +835,9 @@ mod audio_stream_health_tests {
     #[test]
     fn rejected_configuration_keeps_the_working_stream_healthy() {
         let mut state = AppState::default();
+
+        state.apply_audio_stream_event(AudioStreamEvent::Rebuilding);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Rebuilding);
 
         state.apply_audio_stream_event(AudioStreamEvent::ConfigurationRejected(
             "unsupported rate".into(),

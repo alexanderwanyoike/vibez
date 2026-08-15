@@ -27,31 +27,48 @@ pub(super) fn initialize_audio_output(
     buffer_size: u32,
 ) -> InitialAudioOutput {
     let mut stream = AudioOutputStream::idle(engine);
-    let saved_request = OutputStreamConfig {
-        device_name: preferred_output_name.clone(),
-        sample_rate,
-        buffer_size: Some(buffer_size),
-    };
-    let (health, status) = match stream.reconfigure(saved_request) {
-        Ok(()) => (AudioStreamHealth::Running, None),
-        Err(saved_error) if preferred_output_name.is_some() => {
-            eprintln!("vibez: saved audio configuration unavailable: {saved_error}");
-            let fallback = OutputStreamConfig {
-                device_name: None,
-                sample_rate,
-                buffer_size: Some(buffer_size),
-            };
-            match stream.reconfigure(fallback) {
-                Ok(()) => (
-                    AudioStreamHealth::Running,
-                    Some(format!(
-                        "Saved audio configuration unavailable — using System Default: {saved_error}"
-                    )),
-                ),
-                Err(fallback_error) => failed_initial_audio(fallback_error),
+    let requests = initial_output_requests(preferred_output_name.clone(), sample_rate, buffer_size);
+    let mut errors = Vec::new();
+    let mut successful_attempt = None;
+    for (attempt, request) in requests.iter().cloned().enumerate() {
+        match stream.reconfigure(request) {
+            Ok(()) => {
+                successful_attempt = Some(attempt);
+                break;
+            }
+            Err(error) => {
+                eprintln!("vibez: audio startup attempt rejected: {error}");
+                errors.push(error.to_string());
             }
         }
-        Err(error) => failed_initial_audio(error),
+    }
+    let (health, status) = match successful_attempt {
+        Some(0) => (AudioStreamHealth::Running, None),
+        Some(attempt) => {
+            let fallback = if requests[attempt].sample_rate.is_none()
+                && requests[attempt].buffer_size.is_none()
+            {
+                "System Default device settings"
+            } else {
+                "System Default"
+            };
+            (
+                AudioStreamHealth::Running,
+                Some(format!(
+                    "Saved audio configuration unavailable — using {fallback}: {}",
+                    errors
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("unknown error")
+                )),
+            )
+        }
+        None => failed_initial_audio(
+            errors
+                .last()
+                .map(String::as_str)
+                .unwrap_or("no audio output configuration was attempted"),
+        ),
     };
     // Startup owns the status above; lifecycle events are for later changes.
     while stream.try_next_event().is_some() {}
@@ -62,6 +79,35 @@ pub(super) fn initialize_audio_output(
         health,
         status,
     }
+}
+
+fn initial_output_requests(
+    preferred_output_name: Option<String>,
+    sample_rate: Option<u32>,
+    buffer_size: u32,
+) -> Vec<OutputStreamConfig> {
+    let saved_request = OutputStreamConfig {
+        device_name: preferred_output_name.clone(),
+        sample_rate,
+        buffer_size: Some(buffer_size),
+    };
+    let mut requests = vec![saved_request];
+    if preferred_output_name.is_some() {
+        requests.push(OutputStreamConfig {
+            device_name: None,
+            sample_rate,
+            buffer_size: Some(buffer_size),
+        });
+    }
+    let device_defaults = OutputStreamConfig {
+        device_name: None,
+        sample_rate: None,
+        buffer_size: None,
+    };
+    if requests.last() != Some(&device_defaults) {
+        requests.push(device_defaults);
+    }
+    requests
 }
 
 fn failed_initial_audio(error: impl std::fmt::Display) -> (AudioStreamHealth, Option<String>) {
@@ -150,7 +196,7 @@ impl App {
         }
         self.state.audio_settings.preferred_input_name = choice.name;
         self.state.status_text = format!(
-            "Audio Input ready — {}",
+            "Audio Input selected — {}. Recording starts only when a track is armed",
             self.state.audio_settings.input_description()
         );
         self.persist_ui_settings();
@@ -213,6 +259,11 @@ impl App {
                     stream.active_device_name().map(str::to_owned),
                 ))
             });
+        // Reconfiguration reports synchronously through the stream's lifecycle
+        // queue. Consume those events now so the next UI tick cannot overwrite
+        // the more useful producer-facing result below with generic recovery
+        // copy.
+        self.poll_audio_stream_events();
         match result {
             Ok((actual_sample_rate, active_output_name)) => {
                 self.state.audio_settings.preferred_output_name = preferred_output_name;
@@ -231,10 +282,59 @@ impl App {
             }
             Err(error) => {
                 eprintln!("vibez: audio configuration rejected: {error}");
-                self.state.status_text = format!(
-                    "Audio configuration rejected — previous output remains active: {error}"
-                );
+                if self._stream.is_none() {
+                    self.state.status_text = format!("Audio configuration rejected: {error}");
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial_output_requests;
+    use vibez_audio_io::audio_stream::OutputStreamConfig;
+
+    #[test]
+    fn startup_fallbacks_progress_from_saved_device_to_device_defaults() {
+        assert_eq!(
+            initial_output_requests(Some("Dock".into()), Some(96_000), 64),
+            vec![
+                OutputStreamConfig {
+                    device_name: Some("Dock".into()),
+                    sample_rate: Some(96_000),
+                    buffer_size: Some(64),
+                },
+                OutputStreamConfig {
+                    device_name: None,
+                    sample_rate: Some(96_000),
+                    buffer_size: Some(64),
+                },
+                OutputStreamConfig {
+                    device_name: None,
+                    sample_rate: None,
+                    buffer_size: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn system_default_saved_configuration_still_falls_back_to_device_defaults() {
+        assert_eq!(
+            initial_output_requests(None, Some(192_000), 64),
+            vec![
+                OutputStreamConfig {
+                    device_name: None,
+                    sample_rate: Some(192_000),
+                    buffer_size: Some(64),
+                },
+                OutputStreamConfig {
+                    device_name: None,
+                    sample_rate: None,
+                    buffer_size: None,
+                },
+            ]
+        );
     }
 }

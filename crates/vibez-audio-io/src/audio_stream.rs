@@ -18,7 +18,9 @@ use vibez_core::constants::DEFAULT_CHANNELS;
 use vibez_engine::engine::AudioEngine;
 
 mod callback;
-use callback::{build_output_stream_for_format, OutputCallback, StreamCpuLoad};
+use callback::{
+    build_output_stream_for_format, scratch_buffer_frames, OutputCallback, StreamCpuLoad,
+};
 #[cfg(test)]
 use callback::{callback_load_basis_points, CallbackAction, StreamHealth};
 
@@ -363,6 +365,7 @@ impl AudioOutputStream {
             cpu_load,
             channels,
             buffer_size.unwrap_or(512),
+            scratch_buffer_frames(buffer_size, supported_config.buffer_size()),
             sample_rate,
         );
         let stream = build_output_stream_for_format(
@@ -547,6 +550,25 @@ mod tests {
             None => cpal::BufferSize::Default,
         };
         assert!(matches!(buf, cpal::BufferSize::Fixed(1024)));
+    }
+
+    #[test]
+    fn conversion_scratch_is_preallocated_without_trusting_unbounded_hints() {
+        let bounded = cpal::SupportedBufferSize::Range {
+            min: 128,
+            max: 4096,
+        };
+        assert_eq!(scratch_buffer_frames(Some(512), &bounded), 4096);
+
+        let unbounded = cpal::SupportedBufferSize::Range {
+            min: 0,
+            max: u32::MAX,
+        };
+        assert_eq!(scratch_buffer_frames(Some(512), &unbounded), 16_384);
+        assert_eq!(
+            scratch_buffer_frames(None, &cpal::SupportedBufferSize::Unknown),
+            16_384
+        );
     }
 
     #[test]

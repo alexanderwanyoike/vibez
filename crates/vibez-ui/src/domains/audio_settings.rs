@@ -83,42 +83,32 @@ impl Default for AudioSettingsState {
 
 impl AudioSettingsState {
     pub fn output_choices(&self) -> Vec<AudioDeviceChoice> {
-        let devices = self.output_devices_with_configs();
-        let default_available = self
-            .catalog
-            .default_output_name
-            .as_deref()
-            .is_some_and(|default_name| devices.iter().any(|device| device.name == default_name));
         device_choices(
-            &devices,
-            default_available,
+            self.usable_output_devices(),
+            self.default_output_available(),
             self.preferred_output_name.as_deref(),
         )
     }
 
     pub fn input_choices(&self) -> Vec<AudioDeviceChoice> {
         device_choices(
-            &self.catalog.input_devices,
+            self.catalog.input_devices.iter(),
             self.catalog.default_input_name.is_some(),
             self.preferred_input_name.as_deref(),
         )
     }
 
     pub fn selected_output_choice(&self) -> AudioDeviceChoice {
-        let devices = self.output_devices_with_configs();
         selected_choice(
-            &devices,
-            self.catalog
-                .default_output_name
-                .as_deref()
-                .is_some_and(|name| devices.iter().any(|device| device.name == name)),
+            self.usable_output_devices(),
+            self.default_output_available(),
             self.preferred_output_name.as_deref(),
         )
     }
 
     pub fn selected_input_choice(&self) -> AudioDeviceChoice {
         selected_choice(
-            &self.catalog.input_devices,
+            self.catalog.input_devices.iter(),
             self.catalog.default_input_name.is_some(),
             self.preferred_input_name.as_deref(),
         )
@@ -237,45 +227,52 @@ impl AudioSettingsState {
             .or_else(|| sizes.first().copied())
     }
 
-    fn output_devices_with_configs(&self) -> Vec<DeviceInfo> {
+    fn usable_output_devices(&self) -> impl Iterator<Item = &DeviceInfo> + Clone {
         self.catalog
             .output_devices
             .iter()
             .filter(|device| !device.supported_configs.is_empty())
-            .cloned()
-            .collect()
+    }
+
+    fn default_output_available(&self) -> bool {
+        self.catalog
+            .default_output_name
+            .as_deref()
+            .is_some_and(|name| {
+                self.usable_output_devices()
+                    .any(|device| device.name == name)
+            })
     }
 }
 
-fn device_choices(
-    devices: &[DeviceInfo],
+fn device_choices<'a>(
+    devices: impl Iterator<Item = &'a DeviceInfo> + Clone,
     default_available: bool,
     preferred_name: Option<&str>,
 ) -> Vec<AudioDeviceChoice> {
     let mut choices = vec![AudioDeviceChoice::system_default(default_available)];
     choices.extend(
         devices
-            .iter()
+            .clone()
             .map(|device| AudioDeviceChoice::named(device.name.clone(), true)),
     );
     if let Some(name) = preferred_name {
-        if !devices.iter().any(|device| device.name == name) {
+        if !devices.clone().any(|device| device.name == name) {
             choices.push(AudioDeviceChoice::named(name.to_string(), false));
         }
     }
     choices
 }
 
-fn selected_choice(
-    devices: &[DeviceInfo],
+fn selected_choice<'a>(
+    mut devices: impl Iterator<Item = &'a DeviceInfo>,
     default_available: bool,
     preferred_name: Option<&str>,
 ) -> AudioDeviceChoice {
     match preferred_name {
-        Some(name) => AudioDeviceChoice::named(
-            name.to_string(),
-            devices.iter().any(|device| device.name == name),
-        ),
+        Some(name) => {
+            AudioDeviceChoice::named(name.to_string(), devices.any(|device| device.name == name))
+        }
         None => AudioDeviceChoice::system_default(default_available),
     }
 }

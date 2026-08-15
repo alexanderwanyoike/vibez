@@ -206,29 +206,51 @@ fn buffer_size_range(size: &cpal::SupportedBufferSize) -> Option<(u32, u32)> {
     }
 }
 
-fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {
+#[derive(Clone, Copy)]
+enum StreamDirection {
+    Input,
+    Output,
+}
+
+fn stream_config_info(config: cpal::SupportedStreamConfig) -> StreamConfigInfo {
+    StreamConfigInfo {
+        sample_rate: config.sample_rate().0,
+        channels: config.channels(),
+        sample_format: format!("{:?}", config.sample_format()),
+    }
+}
+
+fn supported_config_info(range: cpal::SupportedStreamConfigRange) -> SupportedConfigRange {
+    SupportedConfigRange {
+        channels: range.channels(),
+        min_sample_rate: range.min_sample_rate().0,
+        max_sample_rate: range.max_sample_rate().0,
+        sample_format: format!("{:?}", range.sample_format()),
+        buffer_size_range: buffer_size_range(range.buffer_size()),
+    }
+}
+
+fn device_info(
+    device: &cpal::Device,
+    direction: StreamDirection,
+) -> Result<DeviceInfo, AudioHostError> {
     let name = device.name()?;
-
-    let default_config = device
-        .default_output_config()
-        .ok()
-        .map(|cfg| StreamConfigInfo {
-            sample_rate: cfg.sample_rate().0,
-            channels: cfg.channels(),
-            sample_format: format!("{:?}", cfg.sample_format()),
-        });
-
-    let supported_configs: Vec<SupportedConfigRange> = device
-        .supported_output_configs()?
-        .map(|range| SupportedConfigRange {
-            channels: range.channels(),
-            min_sample_rate: range.min_sample_rate().0,
-            max_sample_rate: range.max_sample_rate().0,
-            sample_format: format!("{:?}", range.sample_format()),
-            buffer_size_range: buffer_size_range(range.buffer_size()),
-        })
-        .collect();
-
+    let default_config = match direction {
+        StreamDirection::Input => device.default_input_config(),
+        StreamDirection::Output => device.default_output_config(),
+    }
+    .ok()
+    .map(stream_config_info);
+    let supported_configs = match direction {
+        StreamDirection::Input => device
+            .supported_input_configs()?
+            .map(supported_config_info)
+            .collect(),
+        StreamDirection::Output => device
+            .supported_output_configs()?
+            .map(supported_config_info)
+            .collect(),
+    };
     Ok(DeviceInfo {
         name,
         default_config,
@@ -236,31 +258,12 @@ fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostErro
     })
 }
 
+fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {
+    device_info(device, StreamDirection::Output)
+}
+
 fn input_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {
-    let name = device.name()?;
-    let default_config = device
-        .default_input_config()
-        .ok()
-        .map(|cfg| StreamConfigInfo {
-            sample_rate: cfg.sample_rate().0,
-            channels: cfg.channels(),
-            sample_format: format!("{:?}", cfg.sample_format()),
-        });
-    let supported_configs = device
-        .supported_input_configs()?
-        .map(|range| SupportedConfigRange {
-            channels: range.channels(),
-            min_sample_rate: range.min_sample_rate().0,
-            max_sample_rate: range.max_sample_rate().0,
-            sample_format: format!("{:?}", range.sample_format()),
-            buffer_size_range: buffer_size_range(range.buffer_size()),
-        })
-        .collect();
-    Ok(DeviceInfo {
-        name,
-        default_config,
-        supported_configs,
-    })
+    device_info(device, StreamDirection::Input)
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cpal::traits::DeviceTrait;
-use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, I24};
+use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig, SupportedBufferSize, I24};
 use vibez_engine::engine::AudioEngine;
 
 use super::{AudioStreamError, AudioStreamEvent, StreamEventReporter};
@@ -61,6 +61,7 @@ pub(super) struct OutputCallback {
     cpu_load: StreamCpuLoad,
     channels: usize,
     buffer_frames: u32,
+    scratch_frames: u32,
     sample_rate: u32,
     rt_state: Option<Result<audio_thread_priority::RtPriorityHandle, ()>>,
 }
@@ -71,6 +72,7 @@ impl OutputCallback {
         cpu_load: StreamCpuLoad,
         channels: usize,
         buffer_frames: u32,
+        scratch_frames: u32,
         sample_rate: u32,
     ) -> Self {
         Self {
@@ -79,6 +81,7 @@ impl OutputCallback {
             cpu_load,
             channels,
             buffer_frames,
+            scratch_frames,
             sample_rate,
             rt_state: None,
         }
@@ -133,6 +136,23 @@ impl OutputCallback {
             self.sample_rate,
         );
     }
+}
+
+const CONSERVATIVE_SCRATCH_FRAMES: u32 = 16_384;
+
+/// Preallocate conversion scratch on the UI thread. Some backends report an
+/// unbounded maximum, so cap that hint at a generous callback size while never
+/// shrinking below the explicitly requested buffer.
+pub(super) fn scratch_buffer_frames(
+    requested_frames: Option<u32>,
+    supported: &SupportedBufferSize,
+) -> u32 {
+    let requested = requested_frames.unwrap_or(512);
+    let reported = match supported {
+        SupportedBufferSize::Range { max, .. } => (*max).min(CONSERVATIVE_SCRATCH_FRAMES),
+        SupportedBufferSize::Unknown => CONSERVATIVE_SCRATCH_FRAMES,
+    };
+    requested.max(reported).max(1)
 }
 
 pub(super) fn build_output_stream_for_format(
@@ -207,16 +227,19 @@ fn build_converting_stream<T>(
 where
     T: SizedSample + FromSample<f32>,
 {
-    // Fixed-size UI configurations never grow this on the callback thread.
-    let mut scratch = vec![0.0; callback.buffer_frames as usize * callback.channels];
+    let mut scratch = vec![0.0; callback.scratch_frames as usize * callback.channels];
     let health = callback.health.clone();
     device.build_output_stream(
         config,
         move |data: &mut [T], _info| {
-            // Defensive for backends that ignore a fixed-size hint.
-            scratch.resize(data.len(), 0.0);
-            callback.process(&mut scratch[..data.len()]);
-            for (output, sample) in data.iter_mut().zip(&scratch) {
+            // A backend violating its advertised maximum must not force an
+            // allocation on the real-time thread. Silence that callback.
+            let Some(scratch) = scratch.get_mut(..data.len()) else {
+                data.fill(T::from_sample(0.0));
+                return;
+            };
+            callback.process(&mut *scratch);
+            for (output, sample) in data.iter_mut().zip(scratch.iter()) {
                 *output = T::from_sample(*sample);
             }
         },
