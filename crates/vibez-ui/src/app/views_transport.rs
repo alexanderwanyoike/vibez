@@ -4,7 +4,7 @@
 use iced::widget::{
     button, canvas, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
 };
-use iced::{Element, Length, Theme};
+use iced::{Color, Element, Length, Theme};
 
 use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
@@ -63,6 +63,18 @@ fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
         .into()
 }
 
+fn audio_cpu_value(displayed: u32, color: Color) -> Element<'static, Message> {
+    container(
+        text(format!("{displayed}%"))
+            .font(crate::typography::PERFORM_TECH)
+            .size(10)
+            .color(color),
+    )
+    .width(Length::Fixed(AUDIO_CPU_VALUE_WIDTH))
+    .align_x(iced::alignment::Horizontal::Right)
+    .into()
+}
+
 fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
     let color = if load_percent >= 85.0 {
         th::danger()
@@ -72,14 +84,7 @@ fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
         th::success()
     };
     let displayed = load_percent.round().clamp(0.0, 999.0) as u32;
-    let value = container(
-        text(format!("{displayed}%"))
-            .font(crate::typography::PERFORM_TECH)
-            .size(10)
-            .color(color),
-    )
-    .width(Length::Fixed(AUDIO_CPU_VALUE_WIDTH))
-    .align_x(iced::alignment::Horizontal::Right);
+    let value = audio_cpu_value(displayed, color);
     let control = container(
         row![text("CPU").size(9).color(th::text_dim()), value,]
             .spacing(4)
@@ -495,19 +500,30 @@ fn transport_time_label(state: &AppState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{audio_cpu_indicator, transport_time_label, AUDIO_CPU_INDICATOR_WIDTH};
+    use super::{
+        audio_cpu_indicator, audio_cpu_value, transport_time_label, AUDIO_CPU_INDICATOR_WIDTH,
+        AUDIO_CPU_VALUE_WIDTH,
+    };
     use crate::state::{AppState, Workspace};
-    use iced::Length;
+    use iced::{Color, Length};
 
     #[test]
-    fn cpu_indicator_keeps_one_fixed_toolbar_width_for_every_digit_count() {
-        for load in [5.0, 13.0, 100.0, 999.0] {
-            let indicator = audio_cpu_indicator(load);
+    fn cpu_value_box_absorbs_every_supported_digit_count() {
+        for displayed in [5, 13, 100, 999] {
+            let value = audio_cpu_value(displayed, Color::WHITE);
             assert_eq!(
-                indicator.as_widget().size().width,
-                Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH)
+                value.as_widget().size().width,
+                Length::Fixed(AUDIO_CPU_VALUE_WIDTH)
             );
         }
+    }
+
+    #[test]
+    fn cpu_indicator_keeps_its_fixed_toolbar_footprint() {
+        assert_eq!(
+            audio_cpu_indicator(13.0).as_widget().size().width,
+            Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH)
+        );
     }
 
     #[test]
