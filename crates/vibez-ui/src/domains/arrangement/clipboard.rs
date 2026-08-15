@@ -404,7 +404,7 @@ impl TimelineEditorState {
         let count = selected.len();
         self.selected_clips = selected;
         self.selected_track = Some(anchor_track);
-        self.time_selection_active = false;
+        self.clear_time_selection();
         ArrangementAction {
             status: Some(if count == 1 {
                 "Pasted clip".to_string()
