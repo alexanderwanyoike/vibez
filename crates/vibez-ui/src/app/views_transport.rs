@@ -19,6 +19,9 @@ use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
 
+const AUDIO_CPU_INDICATOR_WIDTH: f32 = 62.0;
+const AUDIO_CPU_VALUE_WIDTH: f32 = 28.0;
+
 fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
     let (color, description) = match health {
         AudioStreamHealth::Running => (th::success(), health.description().to_string()),
@@ -69,14 +72,20 @@ fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
         th::success()
     };
     let displayed = load_percent.round().clamp(0.0, 999.0) as u32;
-    let control = container(
-        row![
-            text("CPU").size(9).color(th::text_dim()),
-            text(format!("{displayed}%")).size(10).color(color),
-        ]
-        .spacing(4)
-        .align_y(iced::Alignment::Center),
+    let value = container(
+        text(format!("{displayed}%"))
+            .font(crate::typography::PERFORM_TECH)
+            .size(10)
+            .color(color),
     )
+    .width(Length::Fixed(AUDIO_CPU_VALUE_WIDTH))
+    .align_x(iced::alignment::Horizontal::Right);
+    let control = container(
+        row![text("CPU").size(9).color(th::text_dim()), value,]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH))
     .padding([4, 6])
     .style(move |_theme: &Theme| container::Style {
         background: Some(th::bg_elevated().into()),
@@ -486,8 +495,20 @@ fn transport_time_label(state: &AppState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::transport_time_label;
+    use super::{audio_cpu_indicator, transport_time_label, AUDIO_CPU_INDICATOR_WIDTH};
     use crate::state::{AppState, Workspace};
+    use iced::Length;
+
+    #[test]
+    fn cpu_indicator_keeps_one_fixed_toolbar_width_for_every_digit_count() {
+        for load in [5.0, 13.0, 100.0, 999.0] {
+            let indicator = audio_cpu_indicator(load);
+            assert_eq!(
+                indicator.as_widget().size().width,
+                Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH)
+            );
+        }
+    }
 
     #[test]
     fn perform_labels_its_independent_zero_based_clock() {
