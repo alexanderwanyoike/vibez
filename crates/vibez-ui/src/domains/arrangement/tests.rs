@@ -1382,6 +1382,31 @@ fn select_all_clips_takes_every_clip_on_every_track() {
 }
 
 #[test]
+fn select_all_replaces_a_stale_time_range_before_split() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, _) = add_audio_clip(&mut a, 0, 0, 800);
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_samples: 300,
+        playhead_beats: 3.0,
+    };
+    a.time_selection_active = true;
+    a.selection_start_beats = 2.0;
+    a.selection_end_beats = 5.0;
+    a.time_selection_track = Some(track_id);
+
+    a.update(ArrangementMsg::SelectAllClips, &mut engine, ctx);
+    a.update(ArrangementMsg::SplitSelectedAtPlayhead, &mut engine, ctx);
+
+    assert!(!a.time_selection_active);
+    assert_eq!(a.time_selection_track, None);
+    assert_eq!(a.tracks[0].clips.len(), 2);
+    assert_eq!(a.tracks[0].clips[0].duration, 300);
+    assert_eq!(a.tracks[0].clips[1].position, 300);
+}
+
+#[test]
 fn select_all_clips_on_an_empty_timeline_selects_nothing() {
     let mut a = arrangement_with_tracks(2);
     let stale_track = a.tracks[0].id;
