@@ -4,7 +4,7 @@
 use iced::widget::{
     button, canvas, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
 };
-use iced::{Element, Length, Theme};
+use iced::{Color, Element, Length, Theme};
 
 use crate::domains::perform::PerformMsg;
 use crate::domains::transport::TransportMsg;
@@ -18,6 +18,9 @@ use crate::widgets::swing_knob::{parse_swing_percent, SwingKnobWidget};
 use crate::widgets::vu_meter::VuMeterWidget;
 
 use super::*;
+
+const AUDIO_CPU_INDICATOR_WIDTH: f32 = 62.0;
+const AUDIO_CPU_VALUE_WIDTH: f32 = 28.0;
 
 fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
     let (color, description) = match health {
@@ -60,6 +63,18 @@ fn audio_stream_indicator(health: &AudioStreamHealth) -> Element<'_, Message> {
         .into()
 }
 
+fn audio_cpu_value(displayed: u32, color: Color) -> Element<'static, Message> {
+    container(
+        text(format!("{displayed}%"))
+            .font(crate::typography::PERFORM_TECH)
+            .size(10)
+            .color(color),
+    )
+    .width(Length::Fixed(AUDIO_CPU_VALUE_WIDTH))
+    .align_x(iced::alignment::Horizontal::Right)
+    .into()
+}
+
 fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
     let color = if load_percent >= 85.0 {
         th::danger()
@@ -69,14 +84,13 @@ fn audio_cpu_indicator(load_percent: f32) -> Element<'static, Message> {
         th::success()
     };
     let displayed = load_percent.round().clamp(0.0, 999.0) as u32;
+    let value = audio_cpu_value(displayed, color);
     let control = container(
-        row![
-            text("CPU").size(9).color(th::text_dim()),
-            text(format!("{displayed}%")).size(10).color(color),
-        ]
-        .spacing(4)
-        .align_y(iced::Alignment::Center),
+        row![text("CPU").size(9).color(th::text_dim()), value,]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
     )
+    .width(Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH))
     .padding([4, 6])
     .style(move |_theme: &Theme| container::Style {
         background: Some(th::bg_elevated().into()),
@@ -486,8 +500,31 @@ fn transport_time_label(state: &AppState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::transport_time_label;
+    use super::{
+        audio_cpu_indicator, audio_cpu_value, transport_time_label, AUDIO_CPU_INDICATOR_WIDTH,
+        AUDIO_CPU_VALUE_WIDTH,
+    };
     use crate::state::{AppState, Workspace};
+    use iced::{Color, Length};
+
+    #[test]
+    fn cpu_value_box_absorbs_every_supported_digit_count() {
+        for displayed in [5, 13, 100, 999] {
+            let value = audio_cpu_value(displayed, Color::WHITE);
+            assert_eq!(
+                value.as_widget().size().width,
+                Length::Fixed(AUDIO_CPU_VALUE_WIDTH)
+            );
+        }
+    }
+
+    #[test]
+    fn cpu_indicator_keeps_its_fixed_toolbar_footprint() {
+        assert_eq!(
+            audio_cpu_indicator(13.0).as_widget().size().width,
+            Length::Fixed(AUDIO_CPU_INDICATOR_WIDTH)
+        );
+    }
 
     #[test]
     fn perform_labels_its_independent_zero_based_clock() {
