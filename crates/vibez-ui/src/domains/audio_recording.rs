@@ -14,11 +14,18 @@ pub enum AudioRecordingPhase {
     Finalizing,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioRecordingSource {
+    HardwareInput,
+    TrackOutput(TrackId),
+}
+
 #[derive(Debug, Default)]
 pub struct AudioRecordingState {
     pub armed_track: Option<TrackId>,
     pub monitor_track: Option<TrackId>,
     pub phase: AudioRecordingPhase,
+    pub source: Option<AudioRecordingSource>,
     pub start_position_samples: u64,
     pub captured_frames: Vec<[f32; 2]>,
     pub input_peak_l: f32,
@@ -50,12 +57,13 @@ impl AudioRecordingState {
         }
     }
 
-    pub fn begin(&mut self, position_samples: u64) -> bool {
+    pub fn begin(&mut self, position_samples: u64, source: AudioRecordingSource) -> bool {
         if self.armed_track.is_none() || self.phase != AudioRecordingPhase::Idle {
             return false;
         }
         self.captured_frames.clear();
         self.start_position_samples = position_samples;
+        self.source = Some(source);
         self.truncated = false;
         self.stop_requested_at = None;
         self.phase = AudioRecordingPhase::Recording;
@@ -96,6 +104,7 @@ impl AudioRecordingState {
 
     pub fn finish(&mut self) {
         self.phase = AudioRecordingPhase::Idle;
+        self.source = None;
         self.stop_requested_at = None;
     }
 }
@@ -109,7 +118,7 @@ mod tests {
         let track = TrackId::new();
         let mut state = AudioRecordingState::default();
         state.arm(track);
-        assert!(state.begin(4_800));
+        assert!(state.begin(4_800, AudioRecordingSource::HardwareInput));
         state.captured_frames.push([0.2, -0.2]);
         assert!(state.request_stop());
         let (target, start, take) = state.begin_finalizing().unwrap();
@@ -123,7 +132,7 @@ mod tests {
     fn a_missing_output_callback_cannot_leave_stop_pending_forever() {
         let mut state = AudioRecordingState::default();
         state.arm(TrackId::new());
-        assert!(state.begin(0));
+        assert!(state.begin(0, AudioRecordingSource::TrackOutput(TrackId::new())));
         assert!(state.request_stop());
         state.stop_requested_at = Some(Instant::now() - STOP_ACK_TIMEOUT);
         assert!(state.stop_ack_timed_out(Instant::now()));

@@ -12,8 +12,16 @@ use crate::perform::SwingOffset;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum AudioInputRoute {
-    Mono { channel: u16 },
-    Stereo { left: u16 },
+    Mono {
+        channel: u16,
+    },
+    Stereo {
+        left: u16,
+    },
+    /// Live post-device/post-fader output of one MIDI/instrument Project Track.
+    Resample {
+        track_id: TrackId,
+    },
 }
 
 impl Default for AudioInputRoute {
@@ -27,7 +35,21 @@ impl std::fmt::Display for AudioInputRoute {
         match self {
             Self::Mono { channel } => write!(formatter, "IN {}", channel + 1),
             Self::Stereo { left } => write!(formatter, "IN {}/{}", left + 1, left + 2),
+            Self::Resample { .. } => formatter.write_str("RESAMPLE"),
         }
+    }
+}
+
+impl AudioInputRoute {
+    pub fn resample_source(self) -> Option<TrackId> {
+        match self {
+            Self::Resample { track_id } => Some(track_id),
+            Self::Mono { .. } | Self::Stereo { .. } => None,
+        }
+    }
+
+    pub fn is_hardware(self) -> bool {
+        self.resample_source().is_none()
     }
 }
 
@@ -349,6 +371,16 @@ mod tests {
         let decoded: TrackInfo = serde_json::from_value(legacy).unwrap();
         assert_eq!(decoded.audio_input_route, AudioInputRoute::default());
         assert_eq!(decoded.input_monitoring, InputMonitoring::Off);
+
+        let source = TrackId::new();
+        let mut track = TrackInfo::new("Resample");
+        track.audio_input_route = AudioInputRoute::Resample { track_id: source };
+        let decoded: TrackInfo =
+            serde_json::from_str(&serde_json::to_string(&track).unwrap()).unwrap();
+        assert_eq!(
+            decoded.audio_input_route,
+            AudioInputRoute::Resample { track_id: source }
+        );
     }
 
     fn test_clip(position: u64, duration: u64) -> ClipInfo {

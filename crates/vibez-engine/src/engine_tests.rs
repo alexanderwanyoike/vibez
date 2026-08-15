@@ -1303,6 +1303,125 @@ fn constant_clip_track(
 }
 
 #[test]
+fn track_output_capture_is_post_fader_and_excludes_other_tracks() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
+    let (_other, _) = constant_clip_track(&mut cmd_tx, 4096);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(source, 0.5))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackPan(source, 0.0))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+
+    assert!(capture
+        .iter()
+        .step_by(2)
+        .all(|sample| (*sample - 0.25).abs() < 1e-6));
+    assert!(capture
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .all(|sample| sample.abs() < 1e-6));
+    assert!(output.iter().skip(1).step_by(2).any(|sample| *sample > 0.3));
+}
+
+#[test]
+fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
+    let (mut engine, mut cmd_tx, source, _bus) = engine_with_send(1.0);
+    cmd_tx
+        .push(EngineCommand::SetTrackGain(TrackId::MASTER, 0.25))
+        .unwrap();
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    let direct = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!((capture[0] - direct).abs() < 1e-6);
+    assert!((output[0] - direct * 0.5).abs() < 1e-3);
+
+    cmd_tx
+        .push(start_audition(make_constant_audio(4096, 0.8)))
+        .unwrap();
+    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    assert!((capture[0] - direct).abs() < 1e-6);
+    let output_peak = output.iter().copied().fold(0.0_f32, f32::max);
+    let capture_peak = capture.iter().copied().fold(0.0_f32, f32::max);
+    assert!(
+        output_peak > capture_peak,
+        "Browser Audition must stay outside the Track tap"
+    );
+
+    let solo = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(solo, "Solo".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id: solo,
+            clip_id: ClipId::new(),
+            audio: make_constant_audio(4096, 0.5),
+            position: 0,
+            source_offset: 0,
+            duration: 4096,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetTrackSolo(solo, true))
+        .unwrap();
+    capture.fill(1.0);
+    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+    assert!(capture.iter().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn track_output_capture_follows_active_gain_and_pan_automation() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let (source, _) = constant_clip_track(&mut cmd_tx, 4096);
+    let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
+    gain.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 0.25,
+        curve: 0.0,
+    });
+    let mut pan = AutomationLane::new(AutomationTarget::TrackPan);
+    pan.insert_point(AutomationPoint {
+        beat: 0.0,
+        value: 1.0,
+        curve: 0.0,
+    });
+    for lane in [gain, pan] {
+        cmd_tx
+            .push(EngineCommand::SetAutomationLane {
+                track_id: source,
+                lane,
+            })
+            .unwrap();
+    }
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 256];
+    let mut capture = vec![0.0; output.len()];
+    engine.process_with_track_output_capture(&mut output, 2, source.raw(), &mut capture);
+
+    assert!(capture.iter().step_by(2).all(|sample| sample.abs() < 1e-6));
+    assert!(capture
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .all(|sample| (*sample - 0.25).abs() < 1e-6));
+}
+
+#[test]
 fn gain_lane_ramps_track_volume_down() {
     use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 

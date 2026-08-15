@@ -238,6 +238,7 @@ impl AudioEngine {
                     loop_region: None,
                     live_input: None,
                 },
+                None,
             );
             for track in &mut self.tracks {
                 track.suppress_source_notes = false;

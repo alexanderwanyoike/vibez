@@ -1,4 +1,4 @@
-//! Arrange hardware-input recording lifecycle and Project Media commit.
+//! Arrange Audio Track Recording and live Resample lifecycle.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -12,10 +12,10 @@ use vibez_core::midi::TrackKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring};
 use vibez_engine::commands::EngineCommand;
 
-use crate::domains::audio_recording::AudioRecordingPhase;
+use crate::domains::audio_recording::{AudioRecordingPhase, AudioRecordingSource};
 use crate::domains::transport::TransportMsg;
 use crate::message::{AudioRecordingOutcome, Message};
-use crate::state::{ArrangementSelection, UiClip, Workspace};
+use crate::state::{ArrangementSelection, ProjectTrack, UiClip, Workspace};
 
 use super::*;
 
@@ -51,7 +51,15 @@ impl App {
                 self.input_bridge.set_target(None, false);
                 self.state.status_text = format!("Could not arm {name} — {error}");
             } else {
-                self.state.status_text = format!("{name} armed for Audio Input");
+                self.state.status_text = match track_recording_source_label(
+                    self.state
+                        .find_track(track_id)
+                        .map(|track| track.audio_input_route),
+                    &self.state,
+                ) {
+                    Some(source) => format!("{name} armed for {source}"),
+                    None => format!("{name} armed"),
+                };
             }
         }
         Task::none()
@@ -66,8 +74,8 @@ impl App {
             self.state.status_text = "Stop recording before changing the Audio Input route".into();
             return Task::none();
         }
-        if !self.input_route_is_available(route) {
-            self.state.status_text = "That Audio Input channel is unavailable".into();
+        if !self.input_route_is_available(track_id, route) {
+            self.state.status_text = "That Audio Track input is unavailable".into();
             return Task::none();
         }
         let unchanged = self
@@ -80,7 +88,11 @@ impl App {
         self.push_undo_snapshot(None);
         if let Some(track) = Arc::make_mut(&mut self.state.project_tracks).find_mut(track_id) {
             track.audio_input_route = route;
+            if route.resample_source().is_some() {
+                track.input_monitoring = InputMonitoring::Off;
+            }
         }
+        self.state.audio_recording.monitor_track = self.persisted_monitor_on_track();
         self.mark_project_dirty();
         if let Err(error) = self.sync_audio_input_runtime() {
             self.state.status_text =
@@ -96,6 +108,16 @@ impl App {
     ) -> Task<Message> {
         if self.state.audio_recording.is_busy() {
             self.state.status_text = "Stop recording before changing input monitoring".into();
+            return Task::none();
+        }
+        if self
+            .state
+            .find_track(track_id)
+            .is_some_and(|track| track.audio_input_route.resample_source().is_some())
+        {
+            self.state.status_text =
+                "Resample follows the source Track's audible output; input monitoring is not needed"
+                    .into();
             return Task::none();
         }
         if monitoring == InputMonitoring::On
@@ -178,7 +200,11 @@ impl App {
             self.state.status_text = "Arm an Audio Project Track before recording".into();
             return Task::none();
         };
-        if self._input_stream.is_none() {
+        let Some(source) = self.recording_source_for_target(track_id) else {
+            self.state.status_text = "The armed Audio Track input is unavailable".into();
+            return Task::none();
+        };
+        if source == AudioRecordingSource::HardwareInput && self._input_stream.is_none() {
             if let Err(error) = self.sync_audio_input_runtime() {
                 self.state.status_text = format!("Audio Input could not start — {error}");
                 return Task::none();
@@ -189,7 +215,7 @@ impl App {
             return Task::none();
         }
         let start = self.state.transport.position_samples;
-        if !self.state.audio_recording.begin(start) {
+        if !self.state.audio_recording.begin(start, source) {
             self.discard_audio_recording_transaction();
             return Task::none();
         }
@@ -199,7 +225,18 @@ impl App {
             .state
             .find_track(track_id)
             .map_or("Audio Track", |track| track.name.as_str());
-        self.state.status_text = format!("Recording Audio Input into {track_name}");
+        self.state.status_text = match source {
+            AudioRecordingSource::HardwareInput => {
+                format!("Recording Audio Input into {track_name}")
+            }
+            AudioRecordingSource::TrackOutput(source_id) => {
+                let source_name = self
+                    .state
+                    .find_track(source_id)
+                    .map_or("MIDI Track", |track| track.name.as_str());
+                format!("Resampling {source_name} into {track_name}")
+            }
+        };
         if self.state.transport.playing {
             Task::none()
         } else {
@@ -224,6 +261,21 @@ impl App {
             .drain_recorded(&mut self.state.audio_recording.captured_frames);
         let truncated = self.state.audio_recording.truncated;
         let underrun_frames = self.input_bridge.underrun_frames();
+        let source = self
+            .state
+            .audio_recording
+            .source
+            .unwrap_or(AudioRecordingSource::HardwareInput);
+        let completion_label = match source {
+            AudioRecordingSource::HardwareInput => "Recorded Audio Input".into(),
+            AudioRecordingSource::TrackOutput(source_id) => {
+                let source_name = self
+                    .state
+                    .find_track(source_id)
+                    .map_or("MIDI Track", |track| track.name.as_str());
+                format!("Resampled {source_name}")
+            }
+        };
         let Some((track_id, fallback_start_position, frames)) =
             self.state.audio_recording.begin_finalizing()
         else {
@@ -236,14 +288,16 @@ impl App {
         let sample_rate = self.state.transport.sample_rate;
         self.state.status_text = "Writing recorded take to Project Media…".into();
         Task::perform(
-            finalize_audio_input_take(
+            finalize_audio_take(FinalizeAudioTake {
                 track_id,
                 start_position_samples,
                 sample_rate,
                 frames,
+                recording_source: source,
+                completion_label,
                 truncated,
                 underrun_frames,
-            ),
+            }),
             Message::AudioRecordingFinalized,
         )
     }
@@ -321,8 +375,8 @@ impl App {
                 self.state.audio_recording.finish();
                 self.sync_audio_input_target();
                 let completed = format!(
-                    "Recorded {} · {:.2} s · one undo step",
-                    outcome.clip_name,
+                    "{} · {:.2} s · one undo step",
+                    outcome.completion_label,
                     duration as f64 / self.state.transport.sample_rate as f64,
                 );
                 self.state.status_text = quality_warning
@@ -349,6 +403,16 @@ impl App {
                 "Audio recording stopped — its target Track was removed. No Clip was created.",
             ));
         }
+        let source_missing = matches!(
+            self.state.audio_recording.source,
+            Some(AudioRecordingSource::TrackOutput(source_id))
+                if !self.state.find_track(source_id).is_some_and(ProjectTrack::is_playable_midi_target)
+        );
+        if self.state.audio_recording.is_busy() && source_missing {
+            return Some(self.abort_audio_recording(
+                "Resample stopped because its source MIDI Track was removed or became unavailable. No Clip was created.",
+            ));
+        }
         if !self.state.audio_recording.is_busy() && target_missing {
             self.state.audio_recording.armed_track = None;
             self.state.audio_recording.monitor_track = None;
@@ -370,7 +434,16 @@ impl App {
                 self.state.audio_recording.mark_truncated();
                 if self.state.audio_recording.is_recording() {
                     let task = self.stop_audio_recording();
-                    self.state.status_text = "Audio clock drift filled the bounded input buffer — salvaging the valid part of this take…".into();
+                    self.state.status_text = if matches!(
+                        self.state.audio_recording.source,
+                        Some(AudioRecordingSource::TrackOutput(_))
+                    ) {
+                        "The bounded Resample buffer filled — salvaging the valid part of this take…"
+                            .into()
+                    } else {
+                        "Audio clock drift filled the bounded input buffer — salvaging the valid part of this take…"
+                            .into()
+                    };
                     return Some(task);
                 }
             }
@@ -384,7 +457,9 @@ impl App {
         }
         if let Some(error) = errors.into_iter().next() {
             self._input_stream = None;
-            if self.state.audio_recording.is_capturing() {
+            if self.state.audio_recording.is_capturing()
+                && self.state.audio_recording.source == Some(AudioRecordingSource::HardwareInput)
+            {
                 return Some(self.abort_audio_recording(&format!(
                     "Audio Input disconnected — {error}. No Clip was created."
                 )));
@@ -413,6 +488,14 @@ impl App {
         self.sync_audio_input_target();
         let target = self.active_audio_input_target();
         if target.is_none() {
+            self._input_stream = None;
+            return Ok(());
+        }
+        let route = self
+            .state
+            .find_track(target.expect("checked target"))
+            .map(|track| track.audio_input_route);
+        if route.is_some_and(|route| route.resample_source().is_some()) {
             self._input_stream = None;
             return Ok(());
         }
@@ -466,20 +549,31 @@ impl App {
             .tracks
             .iter()
             .find(|track| {
-                track.kind == TrackKind::Audio && track.input_monitoring == InputMonitoring::On
+                track.kind == TrackKind::Audio
+                    && track.audio_input_route.is_hardware()
+                    && track.input_monitoring == InputMonitoring::On
             })
             .map(|track| track.id)
     }
 
     fn sync_audio_input_target(&self) {
+        self.input_bridge.set_target(None, false);
+        self.input_bridge.set_resample_source(None);
         let Some(track_id) = self.active_audio_input_target() else {
-            self.input_bridge.set_target(None, false);
             return;
         };
         let Some(track) = self.state.find_track(track_id) else {
-            self.input_bridge.set_target(None, false);
             return;
         };
+        if let Some(source_id) = track.audio_input_route.resample_source() {
+            self.input_bridge.set_resample_source(
+                self.state
+                    .find_track(source_id)
+                    .is_some_and(ProjectTrack::is_playable_midi_target)
+                    .then_some(source_id),
+            );
+            return;
+        }
         let monitoring = match track.input_monitoring {
             InputMonitoring::Off => false,
             InputMonitoring::Auto => self.state.audio_recording.armed_track == Some(track_id),
@@ -489,8 +583,31 @@ impl App {
         self.input_bridge.set_target(Some(track_id), monitoring);
     }
 
-    fn input_route_is_available(&self, route: AudioInputRoute) -> bool {
-        route_fits_channels(route, self.state.audio_settings.input_channel_count())
+    fn input_route_is_available(&self, target_id: TrackId, route: AudioInputRoute) -> bool {
+        match route {
+            AudioInputRoute::Mono { .. } | AudioInputRoute::Stereo { .. } => {
+                route_fits_channels(route, self.state.audio_settings.input_channel_count())
+            }
+            AudioInputRoute::Resample { track_id } => {
+                track_id != target_id
+                    && self
+                        .state
+                        .find_track(track_id)
+                        .is_some_and(ProjectTrack::is_playable_midi_target)
+            }
+        }
+    }
+
+    fn recording_source_for_target(&self, target_id: TrackId) -> Option<AudioRecordingSource> {
+        let route = self.state.find_track(target_id)?.audio_input_route;
+        match route {
+            AudioInputRoute::Mono { .. } | AudioInputRoute::Stereo { .. } => self
+                .input_route_is_available(target_id, route)
+                .then_some(AudioRecordingSource::HardwareInput),
+            AudioInputRoute::Resample { track_id } => self
+                .input_route_is_available(target_id, route)
+                .then_some(AudioRecordingSource::TrackOutput(track_id)),
+        }
     }
 
     fn abort_audio_recording(&mut self, status: &str) -> Task<Message> {
@@ -518,6 +635,19 @@ fn route_fits_channels(route: AudioInputRoute, channels: u16) -> bool {
     match route {
         AudioInputRoute::Mono { channel } => channel < channels,
         AudioInputRoute::Stereo { left } => left.saturating_add(1) < channels,
+        AudioInputRoute::Resample { .. } => false,
+    }
+}
+
+fn track_recording_source_label(
+    route: Option<AudioInputRoute>,
+    state: &crate::state::AppState,
+) -> Option<String> {
+    match route? {
+        AudioInputRoute::Mono { .. } | AudioInputRoute::Stereo { .. } => Some("Audio Input".into()),
+        AudioInputRoute::Resample { track_id } => state
+            .find_track(track_id)
+            .map(|track| format!("Resample · {}", track.name)),
     }
 }
 
@@ -541,19 +671,36 @@ fn recording_target_accepts_finalizer(
     phase == AudioRecordingPhase::Finalizing && armed_track == Some(outcome_track) && target_exists
 }
 
-async fn finalize_audio_input_take(
+struct FinalizeAudioTake {
     track_id: TrackId,
     start_position_samples: u64,
     sample_rate: u32,
     frames: Vec<[f32; 2]>,
+    recording_source: AudioRecordingSource,
+    completion_label: String,
     truncated: bool,
     underrun_frames: u64,
-) -> Result<AudioRecordingOutcome, String> {
+}
+
+async fn finalize_audio_take(request: FinalizeAudioTake) -> Result<AudioRecordingOutcome, String> {
+    let FinalizeAudioTake {
+        track_id,
+        start_position_samples,
+        sample_rate,
+        frames,
+        recording_source,
+        completion_label,
+        truncated,
+        underrun_frames,
+    } = request;
     tokio::task::spawn_blocking(move || {
         if frames.is_empty() {
-            return Err("the take contained no Audio Input frames".into());
+            return Err("the take contained no recorded audio frames".into());
         }
-        let clip_name = format!("Recording {}", start_position_samples);
+        let clip_name = match recording_source {
+            AudioRecordingSource::HardwareInput => format!("Recording {start_position_samples}"),
+            AudioRecordingSource::TrackOutput(_) => format!("Resample {start_position_samples}"),
+        };
         let audio = Arc::new(DecodedAudio {
             channels: vec![
                 frames.iter().map(|frame| frame[0]).collect(),
@@ -570,9 +717,10 @@ async fn finalize_audio_input_take(
         .map_err(|error| format!("Project Media staging failed: {error}"))?;
         let mut warnings = Vec::new();
         if truncated {
-            warnings.push("input overflow truncated the take to its valid captured frames".into());
+            warnings
+                .push("capture overflow truncated the take to its valid captured frames".into());
         }
-        if underrun_frames > 0 {
+        if recording_source == AudioRecordingSource::HardwareInput && underrun_frames > 0 {
             warnings.push(format!(
                 "{underrun_frames} input frame(s) were unavailable and replaced with silence"
             ));
@@ -583,6 +731,7 @@ async fn finalize_audio_input_take(
             clip_name,
             audio,
             source,
+            completion_label,
             quality_warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
         })
     })
@@ -597,14 +746,16 @@ mod tests {
 
     #[tokio::test]
     async fn completed_take_is_staged_before_it_can_become_project_content() {
-        let outcome = finalize_audio_input_take(
-            TrackId::new(),
-            9_600,
-            48_000,
-            vec![[0.25, -0.25]; 480],
-            false,
-            0,
-        )
+        let outcome = finalize_audio_take(FinalizeAudioTake {
+            track_id: TrackId::new(),
+            start_position_samples: 9_600,
+            sample_rate: 48_000,
+            frames: vec![[0.25, -0.25]; 480],
+            recording_source: AudioRecordingSource::HardwareInput,
+            completion_label: "Recorded Audio Input".into(),
+            truncated: false,
+            underrun_frames: 0,
+        })
         .await
         .unwrap();
 
@@ -662,13 +813,46 @@ mod tests {
 
     #[tokio::test]
     async fn drift_damage_is_preserved_as_an_explicit_salvage_warning() {
-        let outcome =
-            finalize_audio_input_take(TrackId::new(), 0, 48_000, vec![[0.1, -0.1]; 32], true, 7)
-                .await
-                .unwrap();
+        let outcome = finalize_audio_take(FinalizeAudioTake {
+            track_id: TrackId::new(),
+            start_position_samples: 0,
+            sample_rate: 48_000,
+            frames: vec![[0.1, -0.1]; 32],
+            recording_source: AudioRecordingSource::HardwareInput,
+            completion_label: "Recorded Audio Input".into(),
+            truncated: true,
+            underrun_frames: 7,
+        })
+        .await
+        .unwrap();
         let warning = outcome.quality_warning.unwrap();
         assert!(warning.contains("overflow truncated"));
         assert!(warning.contains("7 input frame(s)"));
+    }
+
+    #[tokio::test]
+    async fn resample_take_uses_recorded_audio_staging_without_hardware_drift_warnings() {
+        let outcome = finalize_audio_take(FinalizeAudioTake {
+            track_id: TrackId::new(),
+            start_position_samples: 24_000,
+            sample_rate: 48_000,
+            frames: vec![[0.3, -0.2]; 128],
+            recording_source: AudioRecordingSource::TrackOutput(TrackId::new()),
+            completion_label: "Resampled MIDI 2".into(),
+            truncated: false,
+            underrun_frames: 99,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.clip_name, "Resample 24000");
+        assert_eq!(outcome.completion_label, "Resampled MIDI 2");
+        assert_eq!(outcome.audio.num_frames(), 128);
+        assert!(outcome.quality_warning.is_none());
+        assert!(matches!(
+            outcome.source,
+            MediaSourceRef::StagedProjectMedia { .. }
+        ));
     }
 
     #[tokio::test]
@@ -676,10 +860,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let project_path = directory.path().join("recording-roundtrip.vzp");
         let track = vibez_core::track::TrackInfo::new("Vocal");
-        let outcome =
-            finalize_audio_input_take(track.id, 12_345, 48_000, vec![[0.4, -0.2]; 960], false, 0)
-                .await
-                .unwrap();
+        let outcome = finalize_audio_take(FinalizeAudioTake {
+            track_id: track.id,
+            start_position_samples: 12_345,
+            sample_rate: 48_000,
+            frames: vec![[0.4, -0.2]; 960],
+            recording_source: AudioRecordingSource::HardwareInput,
+            completion_label: "Recorded Audio Input".into(),
+            truncated: false,
+            underrun_frames: 0,
+        })
+        .await
+        .unwrap();
         let project = vibez_project::Project {
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {

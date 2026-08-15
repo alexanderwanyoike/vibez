@@ -6,6 +6,7 @@ use crate::domains::test_support::RecordingEngine;
 use crate::state::UiClip;
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
+use vibez_core::track::AudioInputRoute;
 
 #[test]
 fn add_track_selects_it_and_names_uniquely() {
@@ -82,6 +83,30 @@ fn immediate_track_removal_reuses_the_confirmed_deletion_operation() {
     assert_eq!(action.close_track_guis, Some(victim));
     assert_eq!(action.remove_track_from_sections, Some(victim));
     assert!(ArrangementMsg::RemoveTrack(victim).marks_dirty());
+}
+
+#[test]
+fn removing_a_resample_source_resets_dependent_audio_track_routes() {
+    let mut a = arrangement_with_tracks(2);
+    let source = a.tracks[0].id;
+    let target = a.tracks[1].id;
+    a.tracks[1].audio_input_route = AudioInputRoute::Resample { track_id: source };
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::RemoveTrack(source),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(
+        a.tracks
+            .iter()
+            .find(|track| track.id == target)
+            .unwrap()
+            .audio_input_route,
+        AudioInputRoute::default(),
+    );
 }
 
 #[test]

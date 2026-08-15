@@ -277,6 +277,7 @@ impl App {
                         self.state.audio_recording.input_peak_l,
                         self.state.audio_recording.input_peak_r,
                     )),
+                    source_tracks: &self.state.project_tracks.tracks,
                 },
             );
 

@@ -247,11 +247,18 @@ impl App {
                 PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
             });
         }
+        let track_removed = action.remove_track_from_sections.is_some();
         if let Some(track_id) = action.remove_track_from_sections {
             Arc::make_mut(&mut self.state.perform.sections).remove_track(track_id);
         }
         if let Some(status) = action.status {
             self.state.status_text = status;
+        }
+        if track_removed {
+            if let Err(error) = self.sync_audio_input_runtime() {
+                self.state.status_text =
+                    format!("Track removed · Audio Track input could not recover — {error}");
+            }
         }
         if action.mark_dirty {
             self.mark_project_dirty();
