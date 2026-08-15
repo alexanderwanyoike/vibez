@@ -46,6 +46,9 @@ struct App {
     /// it when the selection moves.
     spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
+    input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
+    /// Open only while one Audio Track is armed or explicitly monitors input.
+    _input_stream: Option<vibez_audio_io::audio_input::AudioInputStream>,
     // Channels for receiving loaded plugins from background threads
     plugin_effect_rx: std::sync::mpsc::Receiver<PluginLoadResult>,
     plugin_effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
@@ -147,6 +150,7 @@ pub fn run() -> iced::Result {
 
 mod actions;
 mod async_helpers;
+mod audio_recording;
 mod audio_settings;
 mod audio_tasks;
 mod bounce;
@@ -246,6 +250,7 @@ impl App {
             requested_sample_rate,
             requested_buffer_size,
         );
+        let input_bridge = output_stream.input_bridge();
 
         let dropbox_settings = DropboxSettings::load();
         let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
@@ -373,6 +378,8 @@ impl App {
             spectrum_rx,
             spectrum_tap: None,
             _stream: Some(output_stream),
+            input_bridge,
+            _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_instrument_rx,

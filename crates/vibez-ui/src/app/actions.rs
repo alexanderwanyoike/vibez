@@ -706,6 +706,9 @@ impl App {
     pub(super) fn handle_tick(&mut self) -> Task<Message> {
         self.cmd_tx.flush();
         self.poll_audio_stream_events();
+        if let Some(task) = self.poll_audio_input() {
+            return task;
+        }
         self.poll_engine_events();
         self.poll_spectrum();
         self.poll_plugin_loads();

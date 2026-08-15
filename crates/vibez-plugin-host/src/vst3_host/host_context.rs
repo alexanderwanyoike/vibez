@@ -525,7 +525,7 @@ mod tests {
             assert_eq!(hr, K_RESULT_OK);
             let msg = obj as *mut Message;
 
-            set_message_id(msg, c"JuceVST3EditController".as_ptr() as *const i8);
+            set_message_id(msg, c"JuceVST3EditController".as_ptr());
             let id = get_message_id(msg);
             assert_eq!(
                 std::ffi::CStr::from_ptr(id as *const std::os::raw::c_char)
@@ -536,7 +536,7 @@ mod tests {
 
             let attrs = get_attributes(msg);
             assert!(!attrs.is_null());
-            let key = c"JuceVST3EditController".as_ptr() as *const i8;
+            let key = c"JuceVST3EditController".as_ptr();
             assert_eq!(set_int(attrs, key, 0x1234), K_RESULT_OK);
             let mut out = 0i64;
             assert_eq!(get_int(attrs, key, &mut out), K_RESULT_OK);

@@ -189,6 +189,10 @@ impl App {
     }
 
     pub(super) fn handle_select_audio_input(&mut self, choice: AudioDeviceChoice) -> Task<Message> {
+        if self.state.audio_recording.is_busy() {
+            self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
+            return Task::none();
+        }
         if !choice.available {
             self.state.status_text =
                 format!("{} is unavailable — rescan after reconnecting it", choice);
@@ -200,6 +204,9 @@ impl App {
             self.state.audio_settings.input_description()
         );
         self.persist_ui_settings();
+        if let Err(error) = self.sync_audio_input_runtime() {
+            self.state.status_text = format!("Audio Input selected but could not start — {error}");
+        }
         Task::none()
     }
 
@@ -241,6 +248,10 @@ impl App {
         sample_rate: u32,
         buffer_size: u32,
     ) {
+        if self.state.audio_recording.is_busy() {
+            self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
+            return;
+        }
         let request = OutputStreamConfig {
             device_name: preferred_output_name.clone(),
             sample_rate: Some(sample_rate),
@@ -273,6 +284,11 @@ impl App {
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
                 self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                if let Err(error) = self.sync_audio_input_runtime() {
+                    self.state.status_text =
+                        format!("Audio Output changed, but Audio Input could not reopen — {error}");
+                    return;
+                }
                 self.persist_ui_settings();
                 self.state.status_text = format!(
                     "Audio Output running — {}, {} Hz, {buffer_size} frames",

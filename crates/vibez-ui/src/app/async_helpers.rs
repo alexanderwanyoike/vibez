@@ -873,6 +873,8 @@ mod export_tests {
             pan: DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            audio_input_route: Default::default(),
+            input_monitoring: Default::default(),
             swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::Midi,

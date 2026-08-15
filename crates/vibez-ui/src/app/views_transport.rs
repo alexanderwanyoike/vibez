@@ -156,6 +156,37 @@ impl App {
                 })
         };
 
+        let audio_recording = self.state.audio_recording.is_recording();
+        let record_color = if audio_recording {
+            th::danger()
+        } else {
+            th::text_dim()
+        };
+        let record_btn = button(icons::icon(icons::CIRCLE).size(15).color(record_color))
+            .on_press(Message::ToggleAudioRecording)
+            .padding([8, 12])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(
+                    if audio_recording {
+                        th::blend(th::danger(), th::bg_dark(), 0.24)
+                    } else {
+                        th::bg_elevated()
+                    }
+                    .into(),
+                ),
+                text_color: record_color,
+                border: iced::Border {
+                    color: if audio_recording {
+                        th::danger()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
+
         // Loop toggle button
         let loop_btn = if self.state.transport.loop_enabled {
             button(icons::icon(icons::REPEAT).size(16).color(th::accent()))
@@ -187,7 +218,8 @@ impl App {
                 })
         };
 
-        let transport_buttons = row![skip_back_btn, play_pause_btn, loop_btn].spacing(4);
+        let transport_buttons =
+            row![skip_back_btn, play_pause_btn, record_btn, loop_btn].spacing(4);
 
         // Time display
         let time_text = text(transport_time_label(&self.state))

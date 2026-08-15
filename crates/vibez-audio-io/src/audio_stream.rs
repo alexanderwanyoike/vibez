@@ -9,15 +9,16 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{
-    BuildStreamError, DefaultStreamConfigError, DevicesError, PauseStreamError, PlayStreamError,
-    SampleFormat, SampleRate, StreamConfig, SupportedStreamConfigsError,
-};
+use cpal::{DevicesError, PauseStreamError, SampleRate, StreamConfig};
 
+use crate::audio_input::AudioInputBridge;
+use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 use vibez_core::constants::DEFAULT_CHANNELS;
 use vibez_engine::engine::AudioEngine;
 
 mod callback;
+#[cfg(test)]
+use crate::stream_config::buffer_size_supported;
 use callback::{
     build_output_stream_for_format, scratch_buffer_frames, OutputCallback, StreamCpuLoad,
 };
@@ -62,18 +63,10 @@ pub enum AudioStreamError {
     OutputDeviceNotFound(String),
     /// Could not enumerate devices.
     DevicesError(DevicesError),
-    /// Could not query default stream config.
-    DefaultConfigError(DefaultStreamConfigError),
-    /// Could not query supported stream configurations.
-    SupportedConfigsError(SupportedStreamConfigsError),
-    /// Could not build the cpal stream.
-    BuildStreamError(BuildStreamError),
-    /// Could not start the stream.
-    PlayError(PlayStreamError),
+    /// Shared stream configuration/build/start failure.
+    StreamOpen(StreamOpenError),
     /// Could not pause the stream.
     PauseError(PauseStreamError),
-    /// The requested sample-rate/buffer combination is unavailable.
-    UnsupportedConfiguration(String),
     /// There is no connected stream to start or pause.
     NoActiveStream,
 }
@@ -86,14 +79,8 @@ impl fmt::Display for AudioStreamError {
                 write!(f, "audio output device is unavailable: {name}")
             }
             Self::DevicesError(e) => write!(f, "device enumeration error: {e}"),
-            Self::DefaultConfigError(e) => write!(f, "default stream config error: {e}"),
-            Self::SupportedConfigsError(e) => {
-                write!(f, "supported stream config error: {e}")
-            }
-            Self::BuildStreamError(e) => write!(f, "failed to build audio stream: {e}"),
-            Self::PlayError(e) => write!(f, "failed to play audio stream: {e}"),
+            Self::StreamOpen(error) => error.fmt(f),
             Self::PauseError(e) => write!(f, "failed to pause audio stream: {e}"),
-            Self::UnsupportedConfiguration(description) => write!(f, "{description}"),
             Self::NoActiveStream => write!(f, "no active audio output stream"),
         }
     }
@@ -102,15 +89,9 @@ impl fmt::Display for AudioStreamError {
 impl std::error::Error for AudioStreamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::NoOutputDevice
-            | Self::OutputDeviceNotFound(_)
-            | Self::UnsupportedConfiguration(_)
-            | Self::NoActiveStream => None,
+            Self::NoOutputDevice | Self::OutputDeviceNotFound(_) | Self::NoActiveStream => None,
             Self::DevicesError(e) => Some(e),
-            Self::DefaultConfigError(e) => Some(e),
-            Self::SupportedConfigsError(e) => Some(e),
-            Self::BuildStreamError(e) => Some(e),
-            Self::PlayError(e) => Some(e),
+            Self::StreamOpen(error) => Some(error),
             Self::PauseError(e) => Some(e),
         }
     }
@@ -122,27 +103,21 @@ impl From<DevicesError> for AudioStreamError {
     }
 }
 
-impl From<DefaultStreamConfigError> for AudioStreamError {
-    fn from(e: DefaultStreamConfigError) -> Self {
-        Self::DefaultConfigError(e)
+impl From<StreamOpenError> for AudioStreamError {
+    fn from(error: StreamOpenError) -> Self {
+        Self::StreamOpen(error)
     }
 }
 
-impl From<SupportedStreamConfigsError> for AudioStreamError {
-    fn from(e: SupportedStreamConfigsError) -> Self {
-        Self::SupportedConfigsError(e)
+impl From<cpal::BuildStreamError> for AudioStreamError {
+    fn from(error: cpal::BuildStreamError) -> Self {
+        StreamOpenError::from(error).into()
     }
 }
 
-impl From<BuildStreamError> for AudioStreamError {
-    fn from(e: BuildStreamError) -> Self {
-        Self::BuildStreamError(e)
-    }
-}
-
-impl From<PlayStreamError> for AudioStreamError {
-    fn from(e: PlayStreamError) -> Self {
-        Self::PlayError(e)
+impl From<cpal::PlayStreamError> for AudioStreamError {
+    fn from(error: cpal::PlayStreamError) -> Self {
+        StreamOpenError::from(error).into()
     }
 }
 
@@ -208,6 +183,7 @@ pub struct AudioOutputStream {
     event_reporter: StreamEventReporter,
     event_rx: Receiver<AudioStreamEvent>,
     cpu_load: StreamCpuLoad,
+    input_bridge: Arc<AudioInputBridge>,
 }
 
 impl AudioOutputStream {
@@ -222,6 +198,7 @@ impl AudioOutputStream {
             event_reporter,
             event_rx,
             cpu_load: StreamCpuLoad::default(),
+            input_bridge: Arc::new(AudioInputBridge::default()),
         }
     }
 
@@ -258,6 +235,7 @@ impl AudioOutputStream {
             buffer_size,
             output.event_reporter.clone(),
             output.cpu_load.clone(),
+            Arc::clone(&output.input_bridge),
         )?;
         stream.play()?;
         output.stream = Some(stream);
@@ -295,6 +273,7 @@ impl AudioOutputStream {
                 request.buffer_size,
                 self.event_reporter.clone(),
                 self.cpu_load.clone(),
+                Arc::clone(&self.input_bridge),
             )?;
 
             if let Some(current) = self.stream.as_ref() {
@@ -339,8 +318,15 @@ impl AudioOutputStream {
         buffer_size: Option<u32>,
         event_reporter: StreamEventReporter,
         cpu_load: StreamCpuLoad,
+        input_bridge: Arc<AudioInputBridge>,
     ) -> Result<(cpal::Stream, StreamParams), AudioStreamError> {
-        let supported_config = select_output_config(device, requested_sample_rate, buffer_size)?;
+        let supported_config = select_stream_config(
+            device,
+            StreamDirection::Output,
+            requested_sample_rate,
+            buffer_size,
+            Some(DEFAULT_CHANNELS as u16),
+        )?;
         let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels() as usize;
 
@@ -367,6 +353,7 @@ impl AudioOutputStream {
             buffer_size.unwrap_or(512),
             scratch_buffer_frames(buffer_size, supported_config.buffer_size()),
             sample_rate,
+            input_bridge,
         );
         let stream = build_output_stream_for_format(
             device,
@@ -444,6 +431,11 @@ impl AudioOutputStream {
     pub fn cpu_load_percent(&self) -> f32 {
         self.cpu_load.percent()
     }
+
+    /// Lock-free bridge shared with an on-demand hardware input stream.
+    pub fn input_bridge(&self) -> Arc<AudioInputBridge> {
+        Arc::clone(&self.input_bridge)
+    }
 }
 
 fn resolve_output_device(
@@ -458,52 +450,6 @@ fn resolve_output_device(
     host.output_devices()?
         .find(|device| device.name().is_ok_and(|name| name == requested_name))
         .ok_or_else(|| AudioStreamError::OutputDeviceNotFound(requested_name.to_string()))
-}
-
-fn buffer_size_supported(size: Option<u32>, range: &cpal::SupportedBufferSize) -> bool {
-    let Some(size) = size else {
-        return true;
-    };
-    match range {
-        cpal::SupportedBufferSize::Range { min, max } => (*min..=*max).contains(&size),
-        cpal::SupportedBufferSize::Unknown => true,
-    }
-}
-
-fn select_output_config(
-    device: &cpal::Device,
-    requested_sample_rate: Option<u32>,
-    buffer_size: Option<u32>,
-) -> Result<cpal::SupportedStreamConfig, AudioStreamError> {
-    let default = device.default_output_config()?;
-    let sample_rate = requested_sample_rate.unwrap_or(default.sample_rate().0);
-    let mut candidates: Vec<_> = device
-        .supported_output_configs()?
-        .filter(|range| {
-            (range.min_sample_rate().0..=range.max_sample_rate().0).contains(&sample_rate)
-        })
-        .filter(|range| buffer_size_supported(buffer_size, range.buffer_size()))
-        .collect();
-    candidates.sort_by_key(|range| {
-        let channels = range.channels();
-        (
-            range.sample_format() != SampleFormat::F32,
-            channels != DEFAULT_CHANNELS as u16,
-            channels,
-        )
-    });
-    candidates
-        .into_iter()
-        .next()
-        .and_then(|range| range.try_with_sample_rate(SampleRate(sample_rate)))
-        .ok_or_else(|| {
-            AudioStreamError::UnsupportedConfiguration(format!(
-                "audio output does not support {sample_rate} Hz with {} buffer",
-                buffer_size
-                    .map(|size| format!("a {size}-frame"))
-                    .unwrap_or_else(|| "the default".into())
-            ))
-        })
 }
 
 #[cfg(test)]

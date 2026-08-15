@@ -48,6 +48,33 @@ fn process_outputs_silence_when_stopped() {
 }
 
 #[test]
+fn live_input_uses_the_target_track_while_transport_is_stopped() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let target = TrackId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(target, "Input".into()))
+        .unwrap();
+    let input = [0.5f32, -0.25, 0.25, -0.5];
+    let mut output = [0.0; 4];
+
+    engine.process_with_live_input(&mut output, 2, target.raw(), &input);
+
+    let centre = std::f32::consts::FRAC_1_SQRT_2;
+    assert!((output[0] - 0.5 * centre).abs() < 1e-6);
+    assert!((output[1] - -0.25 * centre).abs() < 1e-6);
+    assert!((output[2] - 0.25 * centre).abs() < 1e-6);
+    assert!((output[3] - -0.5 * centre).abs() < 1e-6);
+}
+
+#[test]
+fn live_input_is_silent_when_its_target_does_not_exist() {
+    let (mut engine, _cmd_tx, _event_rx) = AudioEngine::new();
+    let mut output = [1.0; 4];
+    engine.process_with_live_input(&mut output, 2, TrackId::new().raw(), &[0.5; 4]);
+    assert_eq!(output, [0.0; 4]);
+}
+
+#[test]
 fn midi_clip_commands_keep_project_length_in_sync() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let track_id = TrackId::new();

@@ -2,6 +2,16 @@
 
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) struct MultitrackRenderBlock<'a> {
+    pub pos: u64,
+    pub repeat_pos: u64,
+    pub frames: usize,
+    pub channels: usize,
+    pub loop_region: Option<(u64, u64)>,
+    pub live_input: Option<LiveInputBlock<'a>>,
+}
+
 impl AudioEngine {
     /// Multi-track rendering: render each track, apply gain/pan, sum into output.
     ///
@@ -15,12 +25,19 @@ impl AudioEngine {
         output: &mut [f32],
         frames: usize,
         channels: usize,
+        live_input: Option<LiveInputBlock<'_>>,
     ) {
         if !self.transport.is_playing() {
             // Stopped transport still renders instruments so
             // auditioned notes (piano-roll keys, drum pads) and
             // plugin-queued events are audible, like any DAW.
-            self.render_idle_instruments(output, frames, channels, self.performance_position);
+            self.render_idle_instruments(
+                output,
+                frames,
+                channels,
+                self.performance_position,
+                live_input,
+            );
             return;
         }
 
@@ -47,11 +64,14 @@ impl AudioEngine {
                 let rest = frames - first;
                 self.render_multitrack_segment(
                     &mut output[..first * channels],
-                    pos,
-                    pos,
-                    first,
-                    channels,
-                    self.transport.active_loop_region(),
+                    MultitrackRenderBlock {
+                        pos,
+                        repeat_pos: pos,
+                        frames: first,
+                        channels,
+                        loop_region: self.transport.active_loop_region(),
+                        live_input: live_input.map(|input| input.slice(0, first, channels)),
+                    },
                 );
                 // The transport jumps directly from loop_end to loop_start.
                 // Apply work owned by that exact musical boundary before the
@@ -65,11 +85,14 @@ impl AudioEngine {
                 if rest > 0 {
                     self.render_multitrack_segment(
                         &mut output[first * channels..],
-                        loop_start,
-                        loop_start,
-                        rest,
-                        channels,
-                        self.transport.active_loop_region(),
+                        MultitrackRenderBlock {
+                            pos: loop_start,
+                            repeat_pos: loop_start,
+                            frames: rest,
+                            channels,
+                            loop_region: self.transport.active_loop_region(),
+                            live_input: live_input.map(|input| input.slice(first, rest, channels)),
+                        },
                     );
                 }
                 self.split_wrap_handled = true;
@@ -78,23 +101,30 @@ impl AudioEngine {
         }
         self.render_multitrack_segment(
             output,
-            pos,
-            pos,
-            frames,
-            channels,
-            self.transport.active_loop_region(),
+            MultitrackRenderBlock {
+                pos,
+                repeat_pos: pos,
+                frames,
+                channels,
+                loop_region: self.transport.active_loop_region(),
+                live_input,
+            },
         );
     }
 
     pub(super) fn render_multitrack_segment(
         &mut self,
         output: &mut [f32],
-        pos: u64,
-        repeat_pos: u64,
-        frames: usize,
-        channels: usize,
-        loop_region: Option<(u64, u64)>,
+        block: MultitrackRenderBlock<'_>,
     ) {
+        let MultitrackRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            loop_region,
+            live_input,
+        } = block;
         let mut rendered_frames = 0usize;
         while rendered_frames < frames {
             let segment_start = repeat_pos.saturating_add(rendered_frames as u64);
@@ -110,25 +140,29 @@ impl AudioEngine {
             let end = (rendered_frames + segment_frames) * channels;
             self.render_multitrack_frames(
                 &mut output[start..end],
-                pos.saturating_add(rendered_frames as u64),
-                segment_start,
-                segment_frames,
-                channels,
-                loop_region,
+                MultitrackRenderBlock {
+                    pos: pos.saturating_add(rendered_frames as u64),
+                    repeat_pos: segment_start,
+                    frames: segment_frames,
+                    channels,
+                    loop_region,
+                    live_input: live_input
+                        .map(|input| input.slice(rendered_frames, segment_frames, channels)),
+                },
             );
             rendered_frames += segment_frames;
         }
     }
 
-    fn render_multitrack_frames(
-        &mut self,
-        output: &mut [f32],
-        pos: u64,
-        repeat_pos: u64,
-        frames: usize,
-        channels: usize,
-        loop_region: Option<(u64, u64)>,
-    ) {
+    fn render_multitrack_frames(&mut self, output: &mut [f32], block: MultitrackRenderBlock<'_>) {
+        let MultitrackRenderBlock {
+            pos,
+            repeat_pos,
+            frames,
+            channels,
+            loop_region,
+            live_input,
+        } = block;
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
         let bpm = self.transport.bpm();
@@ -166,7 +200,7 @@ impl AudioEngine {
             };
             let (auto_gain, auto_pan) = track.apply_automation(beat);
 
-            let rendered = if track.instrument.is_some() {
+            let mut rendered = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
@@ -214,6 +248,20 @@ impl AudioEngine {
             } else {
                 track.render(pos, frames, channels, loop_region)
             };
+
+            if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
+                let input = live_input.expect("checked live input");
+                if !rendered && track.instrument.is_none() {
+                    track.clear_buffer(frames, channels);
+                }
+                for (destination, sample) in track.mix_buffer[..frames * channels]
+                    .iter_mut()
+                    .zip(input.samples.iter().copied())
+                {
+                    *destination += sample;
+                }
+                rendered = rendered || input.samples.iter().any(|sample| *sample != 0.0);
+            }
 
             // Always run the shared device chain. A silent new Section stops
             // source material while already-produced effect tails continue.
@@ -359,6 +407,7 @@ impl AudioEngine {
         frames: usize,
         channels: usize,
         repeat_pos: u64,
+        live_input: Option<LiveInputBlock<'_>>,
     ) {
         let has_track_solo = any_solo(&self.tracks);
         let has_bus_solo = any_solo(&self.buses);
@@ -381,7 +430,7 @@ impl AudioEngine {
             if track.effective_muted() {
                 continue;
             }
-            let has_signal = if track.instrument.is_some() {
+            let mut has_signal = if track.instrument.is_some() {
                 let tempo_map = TempoMap::new(self.transport.bpm(), self.sample_rate);
                 let track_id = track.id;
                 let event_tx = &mut self.event_tx;
@@ -409,11 +458,21 @@ impl AudioEngine {
             } else {
                 false
             };
-            if !has_signal && track.effects.is_empty() {
-                continue;
-            }
             if !has_signal && track.instrument.is_none() {
                 track.clear_buffer(frames, channels);
+            }
+            if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
+                let input = live_input.expect("checked live input");
+                for (destination, sample) in track.mix_buffer[..frames * channels]
+                    .iter_mut()
+                    .zip(input.samples.iter().copied())
+                {
+                    *destination += sample;
+                }
+                has_signal = has_signal || input.samples.iter().any(|sample| *sample != 0.0);
+            }
+            if !has_signal && track.effects.is_empty() {
+                continue;
             }
             track.process_effects(frames, channels);
             if self.spectrum_track == Some(track.id) {

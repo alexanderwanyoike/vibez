@@ -230,11 +230,14 @@ impl AudioEngine {
             let end = (rendered_frames + segment_frames) * channels;
             self.render_multitrack_segment(
                 &mut output[start..end],
-                local_position,
-                segment_performance_position,
-                segment_frames,
-                channels,
-                None,
+                super::render_paths::MultitrackRenderBlock {
+                    pos: local_position,
+                    repeat_pos: segment_performance_position,
+                    frames: segment_frames,
+                    channels,
+                    loop_region: None,
+                    live_input: None,
+                },
             );
             for track in &mut self.tracks {
                 track.suppress_source_notes = false;
