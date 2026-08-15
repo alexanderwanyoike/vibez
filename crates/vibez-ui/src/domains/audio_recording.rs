@@ -56,11 +56,19 @@ impl LiveWaveformPreview {
     fn extend(&mut self, frames: &[[f32; 2]]) {
         let peaks = Arc::make_mut(&mut self.peaks);
         for frame in frames {
+            if self.pending_frames == 0 {
+                // Publish the in-progress bucket immediately. Its source span
+                // is partial, but the Clip duration bounds drawing to frames
+                // that have actually arrived.
+                peaks.push((0.0, 0.0));
+            }
             self.pending_min = self.pending_min.min(frame[0]).min(frame[1]);
             self.pending_max = self.pending_max.max(frame[0]).max(frame[1]);
             self.pending_frames += 1;
+            if let Some(pending) = peaks.last_mut() {
+                *pending = (self.pending_min, self.pending_max);
+            }
             if self.pending_frames == self.frames_per_peak {
-                peaks.push((self.pending_min, self.pending_max));
                 self.pending_min = 0.0;
                 self.pending_max = 0.0;
                 self.pending_frames = 0;
@@ -251,7 +259,7 @@ mod tests {
         assert_eq!(preview.position, 9_600);
         assert_eq!(preview.duration, 80);
         assert_eq!(preview.frames_per_peak, LIVE_WAVEFORM_FRAMES_PER_PEAK);
-        assert_eq!(preview.peaks.as_slice(), &[(-0.5, 0.75)]);
+        assert_eq!(preview.peaks.as_slice(), &[(-0.5, 0.75), (-0.2, 0.75)]);
         assert!(state.preview_for_track(TrackId::new()).is_none());
     }
 
@@ -271,5 +279,27 @@ mod tests {
         assert_eq!(preview.peaks.len(), LIVE_WAVEFORM_MAX_PEAKS / 2);
         assert_eq!(preview.frames_per_peak, LIVE_WAVEFORM_FRAMES_PER_PEAK * 2);
         assert!(preview.peaks.iter().all(|peak| *peak == (-0.7, 0.9)));
+    }
+
+    #[test]
+    fn partial_peak_stays_visible_after_long_recording_compaction() {
+        let track = TrackId::new();
+        let mut state = AudioRecordingState::default();
+        state.arm(track);
+        assert!(state.begin(0, AudioRecordingSource::HardwareInput));
+        state.captured_frames.resize(
+            LIVE_WAVEFORM_MAX_PEAKS * LIVE_WAVEFORM_FRAMES_PER_PEAK,
+            [0.9, -0.7],
+        );
+        state.captured_frames_appended(0);
+        let previous_len = state.captured_frames.len();
+
+        state.captured_frames.push([0.25, -0.4]);
+        state.captured_frames_appended(previous_len);
+
+        let preview = state.preview_for_track(track).unwrap();
+        assert_eq!(preview.frames_per_peak, LIVE_WAVEFORM_FRAMES_PER_PEAK * 2);
+        assert_eq!(preview.peaks.len(), LIVE_WAVEFORM_MAX_PEAKS / 2 + 1);
+        assert_eq!(preview.peaks.last(), Some(&(-0.4, 0.25)));
     }
 }
