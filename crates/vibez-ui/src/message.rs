@@ -42,6 +42,7 @@ impl std::fmt::Debug for ResidentSection {
     }
 }
 
+use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
     UndoGestureId,
@@ -634,6 +635,11 @@ pub enum Message {
     CloseSettings,
     SelectSettingsTab(SettingsTab),
     SetBufferSize(u32),
+    SetAudioSampleRate(AudioSampleRate),
+    SelectAudioInput(AudioDeviceChoice),
+    SelectAudioOutput(AudioDeviceChoice),
+    RescanAudioDevices,
+    ReconnectAudioOutput,
 
     // Plugin scanning
     ScanPlugins,

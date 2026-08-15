@@ -474,7 +474,8 @@ pub struct AppState {
     pub settings_open: bool,
     pub about_open: bool,
     pub settings_tab: SettingsTab,
-    pub settings_buffer_size: u32,
+    /// Application-scoped hardware state; never serialized into a Project.
+    pub audio_settings: crate::domains::audio_settings::AudioSettingsState,
     pub confirm_project_track_deletion: bool,
     /// Global autosave preference mirrored from [`crate::ui_settings::UiSettings`].
     pub auto_save_enabled: bool,
@@ -531,7 +532,7 @@ impl Default for AppState {
             settings_open: false,
             about_open: false,
             settings_tab: SettingsTab::default(),
-            settings_buffer_size: 512,
+            audio_settings: crate::domains::audio_settings::AudioSettingsState::default(),
             confirm_project_track_deletion: false,
             auto_save_enabled: true,
             update_check: crate::update_check::UpdateCheckState::default(),
@@ -591,6 +592,12 @@ impl AppState {
             }
             AudioStreamEvent::Recovered => {
                 self.status_text = "Audio stream recovered".into();
+                self.audio_stream_health = AudioStreamHealth::Running;
+            }
+            AudioStreamEvent::ConfigurationRejected(cause) => {
+                self.status_text = format!(
+                    "Audio configuration rejected — previous output remains active: {cause}"
+                );
                 self.audio_stream_health = AudioStreamHealth::Running;
             }
         }
@@ -824,6 +831,24 @@ mod audio_stream_health_tests {
         assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
         assert_eq!(state.status_text, "Audio stream recovered");
     }
+
+    #[test]
+    fn rejected_configuration_keeps_the_working_stream_healthy() {
+        let mut state = AppState::default();
+
+        state.apply_audio_stream_event(AudioStreamEvent::Rebuilding);
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Rebuilding);
+
+        state.apply_audio_stream_event(AudioStreamEvent::ConfigurationRejected(
+            "unsupported rate".into(),
+        ));
+
+        assert_eq!(state.audio_stream_health, AudioStreamHealth::Running);
+        assert_eq!(
+            state.status_text,
+            "Audio configuration rejected — previous output remains active: unsupported rate"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -994,7 +1019,7 @@ mod tests {
     #[test]
     fn app_state_default_buffer_size() {
         let state = AppState::default();
-        assert_eq!(state.settings_buffer_size, 512);
+        assert_eq!(state.audio_settings.buffer_size, 512);
     }
 
     #[test]
