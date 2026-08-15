@@ -497,7 +497,8 @@ impl App {
                 .with_marquee(
                     row_spans.clone(),
                     editor.marquee.as_ref().map(|marquee| marquee.rect),
-                );
+                )
+                .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.section_id == section_id && preview.track_id == track.id
                 }) {

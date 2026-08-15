@@ -210,7 +210,7 @@ impl AudioEngine {
             return false;
         }
         if timing.boundary >= block_end {
-            self.render_idle_instruments(output, frames, channels, block_start);
+            self.render_idle_instruments(output, frames, channels, block_start, None, None);
             self.mix_section_record_count_in_click(output, frames, channels, block_start, timing);
             return true;
         }
@@ -222,6 +222,8 @@ impl AudioEngine {
                 frames_before,
                 channels,
                 block_start,
+                None,
+                None,
             );
             self.mix_section_record_count_in_click(
                 &mut output[..frames_before * channels],

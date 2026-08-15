@@ -61,6 +61,8 @@ mod tests {
             spectrum_rx: None,
             spectrum_tap: None,
             _stream: None,
+            input_bridge: std::sync::Arc::new(Default::default()),
+            _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_instrument_rx,

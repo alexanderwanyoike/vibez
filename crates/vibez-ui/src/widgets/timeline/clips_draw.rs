@@ -61,6 +61,31 @@ fn visible_title_bounds(
     (right > left).then(|| (left, right - left, (clip_x + 4.0).max(left + 4.0)))
 }
 
+fn waveform_peak_for_pixel(
+    peaks: &[(f32, f32)],
+    pixel: usize,
+    rendered_pixels: usize,
+    frames_per_pixel: f64,
+    peak_span_frames: Option<usize>,
+) -> Option<(f32, f32)> {
+    if let Some(peak_span_frames) = peak_span_frames.filter(|span| *span > 0) {
+        let peak_span_frames = peak_span_frames as f64;
+        let first = (pixel as f64 * frames_per_pixel / peak_span_frames).floor() as usize;
+        let end = (((pixel + 1) as f64 * frames_per_pixel / peak_span_frames).ceil() as usize)
+            .max(first + 1)
+            .min(peaks.len());
+        let visible = peaks.get(first..end)?;
+        return visible
+            .iter()
+            .copied()
+            .reduce(|combined, peak| (combined.0.min(peak.0), combined.1.max(peak.1)));
+    }
+
+    peaks
+        .get(pixel.saturating_mul(peaks.len()) / rendered_pixels.max(1))
+        .copied()
+}
+
 impl TrackClipCanvas {
     pub(super) fn draw_impl(
         &self,
@@ -127,11 +152,27 @@ impl TrackClipCanvas {
         // Draw audio clips
         if self.bpm > 0.0 {
             let spb = self.sample_rate as f64 * 60.0 / self.bpm;
-            let clip_color = theme::with_alpha(self.track_color, 0.5);
-            let clip_border_color = theme::darken(self.track_color, 0.7);
-            let waveform_color = theme::with_alpha(self.track_color, 0.6);
-
-            for clip in &self.clips {
+            for (clip, is_recording_preview) in self
+                .clips
+                .iter()
+                .map(|clip| (clip, false))
+                .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
+            {
+                let clip_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.28)
+                } else {
+                    theme::with_alpha(self.track_color, 0.5)
+                };
+                let clip_border_color = if is_recording_preview {
+                    theme::danger()
+                } else {
+                    theme::darken(self.track_color, 0.7)
+                };
+                let waveform_color = if is_recording_preview {
+                    theme::with_alpha(theme::danger(), 0.92)
+                } else {
+                    theme::with_alpha(self.track_color, 0.6)
+                };
                 let clip_start_beat = clip.position as f64 / spb;
                 let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -160,13 +201,18 @@ impl TrackClipCanvas {
                     let center_y = body_top + body_h / 2.0;
                     let half_h = body_h / 2.0 - 2.0;
                     let pixels = clip_w as usize;
+                    let frames_per_pixel = spb / f64::from(ppb);
                     for px in visible_pixel_columns(clip_x, clip_w, w) {
                         let screen_x = clip_x + px as f32;
-                        let peak_idx = px * clip.peaks.len() / pixels.max(1);
-                        if peak_idx >= clip.peaks.len() {
+                        let Some((min_val, max_val)) = waveform_peak_for_pixel(
+                            &clip.peaks,
+                            px,
+                            pixels,
+                            frames_per_pixel,
+                            clip.peak_span_frames,
+                        ) else {
                             break;
-                        }
-                        let (min_val, max_val) = clip.peaks[peak_idx];
+                        };
                         let y_top = center_y - (max_val * half_h);
                         let y_bottom = center_y - (min_val * half_h);
                         let height = (y_bottom - y_top).max(1.0);
@@ -213,7 +259,8 @@ impl TrackClipCanvas {
                 }
 
                 // Selection highlight
-                let is_selected = self.selected_clips.contains(&clip.clip_id);
+                let is_selected =
+                    !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
                 let border_color = if is_selected {
                     theme::accent()
                 } else {
@@ -698,7 +745,47 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_clip_title, visible_pixel_columns, visible_title_bounds};
+    use super::{
+        fit_clip_title, visible_pixel_columns, visible_title_bounds, waveform_peak_for_pixel,
+    };
+
+    #[test]
+    fn a_live_waveform_pixel_keeps_its_source_range_as_the_take_grows() {
+        let first: Vec<_> = (0..120).map(|index| (index as f32, index as f32)).collect();
+        let grown: Vec<_> = (0..132).map(|index| (index as f32, index as f32)).collect();
+
+        let before = waveform_peak_for_pixel(&first, 10, 12, 600.0, Some(64));
+        let after = waveform_peak_for_pixel(&grown, 10, 14, 600.0, Some(64));
+
+        assert_eq!(before, after);
+        assert_eq!(before, Some((93.0, 103.0)));
+    }
+
+    #[test]
+    fn compacting_live_peaks_keeps_the_same_pixel_extrema() {
+        let original: Vec<_> = (0..240)
+            .map(|index| (-(index as f32), index as f32))
+            .collect();
+        let compacted: Vec<_> = original
+            .chunks_exact(2)
+            .map(|pair| (pair[0].0.min(pair[1].0), pair[0].1.max(pair[1].1)))
+            .collect();
+
+        let before = waveform_peak_for_pixel(&original, 10, 24, 600.0, Some(64));
+        let after = waveform_peak_for_pixel(&compacted, 10, 24, 600.0, Some(128));
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn fitted_clip_peaks_keep_the_existing_width_based_sampling() {
+        let peaks = [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)];
+
+        assert_eq!(
+            waveform_peak_for_pixel(&peaks, 2, 8, 600.0, None),
+            Some((1.0, 1.0))
+        );
+    }
 
     #[test]
     fn clip_title_is_constrained_to_its_visible_width() {

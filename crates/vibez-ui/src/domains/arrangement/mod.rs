@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
+use vibez_core::track::{AudioInputRoute, InputMonitoring};
 use vibez_engine::commands::EngineCommand;
 
 use super::timeline_editor::TimelineEditorAdapter;
@@ -81,6 +82,12 @@ impl ProjectTracksState {
 }
 
 impl TimelineEditorState {
+    pub(super) fn clear_time_selection(&mut self) {
+        self.time_selection_active = false;
+        self.time_selection_track = None;
+        self.marquee = None;
+    }
+
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.timeline.get(track_id)
     }
@@ -116,6 +123,12 @@ impl ArrangementState {
             .unwrap_or_else(|| format!("{track_id}"));
         engine.send(EngineCommand::RemoveTrack(track_id));
         project_tracks.tracks.retain(|track| track.id != track_id);
+        for track in &mut project_tracks.tracks {
+            if track.audio_input_route.resample_source() == Some(track_id) {
+                track.audio_input_route = AudioInputRoute::default();
+                track.input_monitoring = InputMonitoring::Off;
+            }
+        }
         Arc::make_mut(&mut self.timeline).remove(track_id);
         if self.selected_track == Some(track_id) {
             self.selected_track = project_tracks.tracks.first().map(|track| track.id);
@@ -403,6 +416,11 @@ impl TimelineEditorState {
                 selection,
                 shift_held,
             } => {
+                // Clicking a clip switches the editor back to clip selection.
+                // Leaving an older time range active makes split/cut commands
+                // silently operate on that range instead of the visible clip
+                // selection.
+                self.clear_time_selection();
                 if shift_held {
                     // Toggle in/out of selection set
                     if !self.selected_clips.remove(&selection) {
@@ -754,6 +772,7 @@ impl TimelineEditorState {
                 self.marquee = None;
             }
             ArrangementMsg::SelectAllClips => {
+                self.clear_time_selection();
                 self.selected_clips =
                     self.timeline
                         .by_track
@@ -779,9 +798,10 @@ impl TimelineEditorState {
                 action.focus_clip_tab = !self.selected_clips.is_empty();
             }
             ArrangementMsg::SetTimeSelectionActive(active) => {
-                self.time_selection_active = active;
-                if !active {
-                    self.time_selection_track = None;
+                if active {
+                    self.time_selection_active = true;
+                } else {
+                    self.clear_time_selection();
                 }
             }
             ArrangementMsg::DuplicateNoteClip(track_id, clip_id) => {

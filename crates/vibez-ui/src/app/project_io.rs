@@ -59,6 +59,11 @@ impl App {
         self.browser_import_request.cancel();
         self.section_residency_request.cancel();
         self.stop_browser_audition();
+        self.input_bridge.end_recording();
+        self.input_bridge.set_target(None, false);
+        self.input_bridge.set_resample_source(None);
+        self._input_stream = None;
+        self.state.audio_recording = Default::default();
         self.state.transport.playing = false;
         self.state.transport.position_samples = 0;
         self.send_command(EngineCommand::Stop);
@@ -272,6 +277,10 @@ impl App {
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
+            preferred_audio_input: self.state.audio_settings.preferred_input_name.clone(),
+            preferred_audio_output: self.state.audio_settings.preferred_output_name.clone(),
+            audio_sample_rate: Some(self.state.audio_settings.sample_rate),
+            audio_buffer_size: self.state.audio_settings.buffer_size,
             theme: Some(self.state.current_theme_name.clone()),
             media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
             media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
@@ -367,6 +376,8 @@ impl App {
             pan: track.pan,
             mute: track.mute,
             solo: track.solo,
+            audio_input_route: track.audio_input_route,
+            input_monitoring: track.input_monitoring,
             swing_offset: track.swing_offset,
             effects,
             kind: track.kind,
@@ -511,6 +522,8 @@ impl App {
             track.pan = track_info.pan;
             track.mute = track_info.mute;
             track.solo = track_info.solo;
+            track.audio_input_route = track_info.audio_input_route;
+            track.input_monitoring = track_info.input_monitoring;
             track.swing_offset = track_info.swing_offset;
             let automation = super::project_sections::legacy_automation_for_track(
                 &loaded.project,
@@ -891,6 +904,14 @@ impl App {
                 loaded.warnings.len()
             )
         };
+
+        self.state.audio_recording.monitor_track = self.persisted_monitor_on_track();
+        if let Err(error) = self.sync_audio_input_runtime() {
+            self.state.status_text = format!(
+                "{} · Input monitoring unavailable: {error}",
+                self.state.status_text
+            );
+        }
 
         self.spawn_project_plugin_loads(plugin_effect_requests, plugin_instrument_requests);
     }

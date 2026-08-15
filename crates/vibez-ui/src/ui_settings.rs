@@ -44,6 +44,17 @@ pub struct UiSettings {
     /// startup. `None` means auto-pick the first visible port.
     #[serde(default)]
     pub preferred_midi_input: Option<String>,
+    /// `None` follows the platform's System Default Audio Input.
+    #[serde(default)]
+    pub preferred_audio_input: Option<String>,
+    /// `None` follows the platform's System Default Audio Output.
+    #[serde(default)]
+    pub preferred_audio_output: Option<String>,
+    /// `None` uses the output device's default until the producer chooses one.
+    #[serde(default)]
+    pub audio_sample_rate: Option<u32>,
+    #[serde(default = "default_audio_buffer_size")]
+    pub audio_buffer_size: u32,
     /// Selected theme name (built-in or user `.vzt`); `None` means
     /// the default Charcoal.
     #[serde(default)]
@@ -125,6 +136,10 @@ impl Default for UiSettings {
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
+            preferred_audio_input: None,
+            preferred_audio_output: None,
+            audio_sample_rate: None,
+            audio_buffer_size: default_audio_buffer_size(),
             theme: None,
             media_cache_budget_bytes: default_media_cache_budget_bytes(),
             media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
@@ -208,6 +223,10 @@ const fn default_track_mute_quantization() -> vibez_core::perform::TrackMuteQuan
 
 const fn default_fixed_computer_velocity() -> u8 {
     100
+}
+
+const fn default_audio_buffer_size() -> u32 {
+    512
 }
 
 fn default_media_cache_budget_bytes() -> u64 {
@@ -324,6 +343,27 @@ mod tests {
     fn old_settings_start_with_no_recent_projects() {
         let loaded: UiSettings = serde_json::from_str("{}").unwrap();
         assert!(loaded.recent_project_paths.is_empty());
+        assert_eq!(loaded.audio_buffer_size, 512);
+        assert_eq!(loaded.audio_sample_rate, None);
+        assert_eq!(loaded.preferred_audio_input, None);
+        assert_eq!(loaded.preferred_audio_output, None);
+    }
+
+    #[test]
+    fn audio_configuration_roundtrips_outside_project_state() {
+        let settings = UiSettings {
+            preferred_audio_input: Some("USB In".into()),
+            preferred_audio_output: Some("USB Out".into()),
+            audio_sample_rate: Some(48_000),
+            audio_buffer_size: 128,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.preferred_audio_input.as_deref(), Some("USB In"));
+        assert_eq!(loaded.preferred_audio_output.as_deref(), Some("USB Out"));
+        assert_eq!(loaded.audio_sample_rate, Some(48_000));
+        assert_eq!(loaded.audio_buffer_size, 128);
     }
 
     #[test]

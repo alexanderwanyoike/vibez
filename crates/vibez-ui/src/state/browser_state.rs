@@ -21,6 +21,12 @@ pub const BROWSER_RESULTS_PAGE_SIZE: usize = 200;
 pub const AUDITION_BPM_MIN: f64 = 20.0;
 pub const AUDITION_BPM_MAX: f64 = 999.0;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BrowserAuditionPlan {
+    Raw,
+    Warp { source_bpm: f64 },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserSearchScope {
     #[default]
@@ -93,6 +99,9 @@ pub struct BrowserState {
     pub audition_loading: bool,
     pub audition_playing: bool,
     pub audition_queued: bool,
+    /// Treatment currently handed to the Audition Bus. This can be RAW while
+    /// the selected intent remains WARP and its source BPM is unresolved.
+    pub audition_playback_mode: Option<AuditionMode>,
     /// Monotonic token minted by [`Self::begin_audition_load`] and
     /// invalidated by [`Self::cancel_audition_requests`]; async decode
     /// and WARP completions carry it so stale results never start
@@ -158,6 +167,7 @@ impl Default for BrowserState {
             audition_loading: false,
             audition_playing: false,
             audition_queued: false,
+            audition_playback_mode: None,
             audition_generation: 0,
             audition_audio: None,
             audition_audio_retired: [None, None, None, None],
@@ -416,8 +426,26 @@ impl BrowserState {
         self.audition_generation
     }
 
+    /// Start preparing an alternate treatment for an already decoded source.
+    /// Unlike [`Self::begin_audition_load`], this does not mark the selected
+    /// waveform as loading again.
+    pub fn begin_audition_preparation(&mut self, source: &MediaSourceRef) -> u64 {
+        if self.selected_source.as_ref() == Some(source) {
+            self.audition_loading = true;
+        }
+        self.audition_generation = self.audition_generation.wrapping_add(1);
+        self.audition_generation
+    }
+
     pub fn audition_request_is_current(&self, generation: u64) -> bool {
         self.audition_generation == generation
+    }
+
+    /// Invalidate only background decode/WARP preparation. Unlike an explicit
+    /// Stop this deliberately leaves the currently audible voice alone.
+    pub fn cancel_audition_preparation(&mut self) {
+        self.audition_generation = self.audition_generation.wrapping_add(1);
+        self.audition_loading = false;
     }
 
     /// Explicit user cancellation: clears audition state and
@@ -448,6 +476,7 @@ impl BrowserState {
         self.audition_loading = false;
         self.audition_playing = false;
         self.audition_queued = false;
+        self.audition_playback_mode = None;
     }
 
     pub fn toggle_audition_enabled(&mut self) -> bool {
@@ -459,10 +488,11 @@ impl BrowserState {
         self.audition_gain = gain.clamp(0.0, 2.0);
     }
 
-    pub fn mark_audition_requested(&mut self, queued: bool) {
+    pub fn mark_audition_requested(&mut self, queued: bool, mode: AuditionMode) {
         self.audition_loading = false;
         self.audition_queued = queued;
         self.audition_playing = !queued;
+        self.audition_playback_mode = Some(mode);
     }
 
     pub fn begin_bpm_detection(&mut self, source: &MediaSourceRef) -> bool {
@@ -546,6 +576,24 @@ impl BrowserState {
                     })
             }
         }
+    }
+
+    /// Choose a safe Audition plan without weakening WARP's confirmed-BPM
+    /// requirement. An unconfirmed WARP selection remains a WARP import
+    /// intent, but Audition falls back to the truthful RAW source instead of
+    /// going silent.
+    pub fn audition_playback_plan(&self) -> BrowserAuditionPlan {
+        match (self.audition_mode, self.audition_bpm_confirmed) {
+            (AuditionMode::Warp, Some(source_bpm)) => BrowserAuditionPlan::Warp { source_bpm },
+            _ => BrowserAuditionPlan::Raw,
+        }
+    }
+
+    pub fn waveform_for_source(&self, source: &MediaSourceRef) -> Option<Arc<DecodedAudio>> {
+        if self.waveform_source.as_ref() != Some(source) {
+            return None;
+        }
+        self.waveform_audio.clone()
     }
 
     pub fn begin_pending_drag(

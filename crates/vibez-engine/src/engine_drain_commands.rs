@@ -23,6 +23,7 @@ impl AudioEngine {
                         effective_at_samples: self.effective_position(),
                     });
                     self.transport.stop();
+                    self.arrangement_recording = false;
                     self.clock_domain = ClockDomain::Arrange;
                     self.performance_position = self.transport.position();
                     self.cancel_section_queue();
@@ -171,7 +172,7 @@ impl AudioEngine {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
                     self.arrangement_audio_length = Some(len);
-                    if self.active_section.is_none() {
+                    if self.active_section.is_none() && !self.arrangement_recording {
                         self.transport.set_audio_length(Some(len));
                     }
                 }
@@ -182,6 +183,7 @@ impl AudioEngine {
                     });
                     self.audio = None;
                     self.arrangement_audio_length = None;
+                    self.arrangement_recording = false;
                     self.active_section = None;
                     self.clock_domain = ClockDomain::Arrange;
                     self.transport.set_audio_length(None);
@@ -679,7 +681,17 @@ impl AudioEngine {
                     }
                 }
 
-                // -- Clip looping --
+                // -- Arrangement recording / looping --
+                EngineCommand::SetArrangementRecording(active) => {
+                    self.arrangement_recording = active;
+                    if self.active_section.is_none() {
+                        self.transport.set_audio_length(if active {
+                            None
+                        } else {
+                            self.arrangement_audio_length
+                        });
+                    }
+                }
                 EngineCommand::SetArrangementLoop(enabled) => {
                     self.transport.set_loop_enabled(enabled);
                 }
@@ -963,7 +975,7 @@ impl AudioEngine {
         } else {
             self.audio.as_ref().map(|audio| audio.num_frames() as u64)
         };
-        if self.active_section.is_none() {
+        if self.active_section.is_none() && !self.arrangement_recording {
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
         }

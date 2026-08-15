@@ -1,5 +1,8 @@
+use std::borrow::Borrow;
+
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, row, text, text_input,
+    button, canvas, column, container, horizontal_space, mouse_area, pick_list, row, text,
+    text_input,
 };
 use iced::{Element, Length, Theme};
 
@@ -13,12 +16,90 @@ use crate::theme as th;
 use crate::widgets::fader::HorizontalFaderWidget;
 use crate::widgets::vu_meter::HorizontalVuMeterWidget;
 use vibez_core::midi::TrackKind;
+use vibez_core::track::{AudioInputRoute, InputMonitoring};
 
 /// Width of the track header panel in the arrangement view.
 pub const TRACK_HEADER_WIDTH: f32 = 220.0;
 
 /// Total width including the 3px color bar on the left edge.
 pub const TRACK_HEADER_TOTAL_WIDTH: f32 = TRACK_HEADER_WIDTH + 3.0;
+
+#[derive(Debug, Clone, Copy)]
+pub struct TrackHeaderRecordingView<'a> {
+    pub input_channels: u16,
+    pub armed: bool,
+    pub input_peaks: Option<(f32, f32)>,
+    pub source_tracks: &'a [ProjectTrack],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AudioInputChoice {
+    route: AudioInputRoute,
+    label: String,
+}
+
+impl std::fmt::Display for AudioInputChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
+}
+
+fn compact_input_pick_list<'a, T>(
+    options: impl Borrow<[T]> + 'a,
+    selected: T,
+    on_selected: impl Fn(T) -> Message + 'a,
+    width: f32,
+    highlighted: bool,
+) -> Element<'a, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+{
+    pick_list(options, Some(selected), on_selected)
+        .width(Length::Fixed(width))
+        .padding([3, 5])
+        .text_size(9)
+        .style(move |_theme: &Theme, status| {
+            let engaged = matches!(
+                status,
+                pick_list::Status::Hovered | pick_list::Status::Opened
+            );
+            pick_list::Style {
+                text_color: if highlighted {
+                    th::accent()
+                } else {
+                    th::text()
+                },
+                placeholder_color: th::text_muted(),
+                handle_color: if engaged || highlighted {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                background: th::bg_dark().into(),
+                border: iced::Border {
+                    color: if engaged || highlighted {
+                        th::accent_dim()
+                    } else {
+                        th::border()
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+            }
+        })
+        .menu_style(|_theme: &Theme| iced::widget::overlay::menu::Style {
+            background: th::bg_elevated().into(),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            text_color: th::text(),
+            selected_text_color: th::accent(),
+            selected_background: th::bg_hover().into(),
+        })
+        .into()
+}
 
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
@@ -60,7 +141,14 @@ pub fn view_track_header<'a>(
     editing_name: bool,
     edit_text: &'a str,
     automation_open: bool,
+    recording: TrackHeaderRecordingView<'a>,
 ) -> Element<'a, Message> {
+    let TrackHeaderRecordingView {
+        input_channels: audio_input_channels,
+        armed,
+        input_peaks,
+        source_tracks,
+    } = recording;
     let track_color = th::track_color(track.color_index);
 
     // Row 1: Track type icon + name + "+" add clip button + delete button
@@ -212,7 +300,110 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let mute_solo_row = row![mute_btn, solo_btn].spacing(4);
+    let track_controls: Element<'_, Message> = if track.kind == TrackKind::Audio {
+        let arm_color = if armed { th::danger() } else { th::text_dim() };
+        let arm_icon = if armed {
+            icons::CIRCLE_DOT
+        } else {
+            icons::CIRCLE
+        };
+        let arm_btn = button(icons::icon(arm_icon).size(11).color(arm_color))
+            .on_press(Message::ToggleAudioTrackArm(track.id))
+            .width(Length::Fixed(25.0))
+            .padding([4, 6])
+            .style(move |_theme: &Theme, status| {
+                let engaged = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: Some(
+                        if armed {
+                            th::blend(th::danger(), th::bg_dark(), 0.28)
+                        } else if engaged {
+                            th::bg_hover()
+                        } else {
+                            th::bg_dark()
+                        }
+                        .into(),
+                    ),
+                    text_color: arm_color,
+                    border: iced::Border {
+                        color: if armed { th::danger() } else { th::border() },
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }
+            });
+        let mut routes = Vec::new();
+        for channel in 0..audio_input_channels {
+            let route = AudioInputRoute::Mono { channel };
+            routes.push(AudioInputChoice {
+                route,
+                label: route.to_string(),
+            });
+        }
+        for left in (0..audio_input_channels.saturating_sub(1)).step_by(2) {
+            let route = AudioInputRoute::Stereo { left };
+            routes.push(AudioInputChoice {
+                route,
+                label: route.to_string(),
+            });
+        }
+        routes.extend(
+            source_tracks
+                .iter()
+                .filter(|source| source.id != track.id && source.is_playable_midi_target())
+                .map(|source| AudioInputChoice {
+                    route: AudioInputRoute::Resample {
+                        track_id: source.id,
+                    },
+                    label: format!("RS · {}", source.name),
+                }),
+        );
+        let selected_route = routes
+            .iter()
+            .find(|choice| choice.route == track.audio_input_route)
+            .cloned()
+            .unwrap_or_else(|| AudioInputChoice {
+                route: track.audio_input_route,
+                label: match track.audio_input_route {
+                    AudioInputRoute::Resample { .. } => "RS · Missing Track".into(),
+                    route => route.to_string(),
+                },
+            });
+        if routes.is_empty() {
+            routes.push(selected_route.clone());
+        }
+        let is_resample = track.audio_input_route.resample_source().is_some();
+        let track_id = track.id;
+        let route = compact_input_pick_list(
+            routes,
+            selected_route,
+            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.route),
+            if is_resample { 119.0 } else { 78.0 },
+            is_resample,
+        );
+        if is_resample {
+            row![mute_btn, solo_btn, arm_btn, route]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
+        } else {
+            let track_id = track.id;
+            let monitor = compact_input_pick_list(
+                InputMonitoring::ALL,
+                track.input_monitoring,
+                move |value| Message::SetAudioTrackMonitoring(track_id, value),
+                42.0,
+                track.input_monitoring != InputMonitoring::Off,
+            );
+            row![mute_btn, solo_btn, arm_btn, route, monitor]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
+        }
+    } else {
+        row![mute_btn, solo_btn].spacing(4).into()
+    };
 
     // Row 3: Horizontal gain fader (spans width)
     let fader = HorizontalFaderWidget::new(track.id, track.gain, track_color);
@@ -222,13 +413,21 @@ pub fn view_track_header<'a>(
         .into();
 
     // Row 4: Horizontal VU meter (spans width)
-    let meter = HorizontalVuMeterWidget::new(track.peak_l, track.peak_r, track_color);
+    let (meter_l, meter_r) = input_peaks.unwrap_or((track.peak_l, track.peak_r));
+    let meter_color = if armed {
+        th::danger()
+    } else if input_peaks.is_some() {
+        th::accent()
+    } else {
+        track_color
+    };
+    let meter = HorizontalVuMeterWidget::new(meter_l, meter_r, meter_color);
     let meter_canvas: Element<'_, Message> = canvas(meter)
         .width(Length::Fill)
         .height(Length::Fixed(6.0))
         .into();
 
-    let header = column![name_row, mute_solo_row, fader_canvas, meter_canvas]
+    let header = column![name_row, track_controls, fader_canvas, meter_canvas]
         .spacing(4)
         .padding([6, 6])
         .width(Length::Fixed(TRACK_HEADER_WIDTH));

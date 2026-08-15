@@ -6,6 +6,7 @@ use crate::domains::test_support::RecordingEngine;
 use crate::state::UiClip;
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
+use vibez_core::track::AudioInputRoute;
 
 #[test]
 fn add_track_selects_it_and_names_uniquely() {
@@ -82,6 +83,30 @@ fn immediate_track_removal_reuses_the_confirmed_deletion_operation() {
     assert_eq!(action.close_track_guis, Some(victim));
     assert_eq!(action.remove_track_from_sections, Some(victim));
     assert!(ArrangementMsg::RemoveTrack(victim).marks_dirty());
+}
+
+#[test]
+fn removing_a_resample_source_resets_dependent_audio_track_routes() {
+    let mut a = arrangement_with_tracks(2);
+    let source = a.tracks[0].id;
+    let target = a.tracks[1].id;
+    a.tracks[1].audio_input_route = AudioInputRoute::Resample { track_id: source };
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::RemoveTrack(source),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(
+        a.tracks
+            .iter()
+            .find(|track| track.id == target)
+            .unwrap()
+            .audio_input_route,
+        AudioInputRoute::default(),
+    );
 }
 
 #[test]
@@ -1298,6 +1323,43 @@ fn ending_the_drag_drops_the_box_but_keeps_the_selection() {
 }
 
 #[test]
+fn selecting_a_clip_replaces_a_stale_time_range_before_split_and_delete() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 800);
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_samples: 300,
+        playhead_beats: 3.0,
+    };
+
+    a.time_selection_active = true;
+    a.selection_start_beats = 2.0;
+    a.selection_end_beats = 5.0;
+    a.time_selection_track = Some(track_id);
+
+    a.update(
+        ArrangementMsg::SelectArrangementClip {
+            selection: ArrangementSelection::AudioClip { track_id, clip_id },
+            shift_held: false,
+        },
+        &mut engine,
+        ctx,
+    );
+    a.update(ArrangementMsg::SplitSelectedAtPlayhead, &mut engine, ctx);
+
+    assert!(!a.time_selection_active);
+    assert_eq!(a.time_selection_track, None);
+    assert_eq!(a.tracks[0].clips.len(), 2);
+
+    a.update(ArrangementMsg::DeleteSelectedClip, &mut engine, ctx);
+
+    assert_eq!(a.tracks[0].clips.len(), 1);
+    assert_eq!(a.tracks[0].clips[0].position, 300);
+    assert!(a.selected_clips.is_empty());
+}
+
+#[test]
 fn select_all_clips_takes_every_clip_on_every_track() {
     let mut a = arrangement_with_tracks(2);
     let (t0, first) = add_audio_clip(&mut a, 0, 0, 100);
@@ -1317,6 +1379,31 @@ fn select_all_clips_takes_every_clip_on_every_track() {
             .selected_clips
             .contains(&ArrangementSelection::AudioClip { track_id, clip_id }));
     }
+}
+
+#[test]
+fn select_all_replaces_a_stale_time_range_before_split() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, _) = add_audio_clip(&mut a, 0, 0, 800);
+    let mut engine = RecordingEngine::default();
+    let ctx = ArrangementCtx {
+        samples_per_beat: 100.0,
+        playhead_samples: 300,
+        playhead_beats: 3.0,
+    };
+    a.time_selection_active = true;
+    a.selection_start_beats = 2.0;
+    a.selection_end_beats = 5.0;
+    a.time_selection_track = Some(track_id);
+
+    a.update(ArrangementMsg::SelectAllClips, &mut engine, ctx);
+    a.update(ArrangementMsg::SplitSelectedAtPlayhead, &mut engine, ctx);
+
+    assert!(!a.time_selection_active);
+    assert_eq!(a.time_selection_track, None);
+    assert_eq!(a.tracks[0].clips.len(), 2);
+    assert_eq!(a.tracks[0].clips[0].duration, 300);
+    assert_eq!(a.tracks[0].clips[1].position, 300);
 }
 
 #[test]

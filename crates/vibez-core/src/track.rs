@@ -7,6 +7,76 @@ use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 use crate::perform::SwingOffset;
 
+/// Persisted hardware-input channel selection for an Audio Project Track.
+/// Channel indexes are zero-based internally and presented as one-based labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum AudioInputRoute {
+    Mono {
+        channel: u16,
+    },
+    Stereo {
+        left: u16,
+    },
+    /// Live post-device/post-fader output of one MIDI/instrument Project Track.
+    Resample {
+        track_id: TrackId,
+    },
+}
+
+impl Default for AudioInputRoute {
+    fn default() -> Self {
+        Self::Mono { channel: 0 }
+    }
+}
+
+impl std::fmt::Display for AudioInputRoute {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mono { channel } => write!(formatter, "IN {}", channel + 1),
+            Self::Stereo { left } => write!(formatter, "IN {}/{}", left + 1, left + 2),
+            Self::Resample { .. } => formatter.write_str("RESAMPLE"),
+        }
+    }
+}
+
+impl AudioInputRoute {
+    pub fn resample_source(self) -> Option<TrackId> {
+        match self {
+            Self::Resample { track_id } => Some(track_id),
+            Self::Mono { .. } | Self::Stereo { .. } => None,
+        }
+    }
+
+    pub fn is_hardware(self) -> bool {
+        self.resample_source().is_none()
+    }
+}
+
+/// Explicit input-monitoring behaviour for an Audio Project Track.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputMonitoring {
+    #[default]
+    Off,
+    Auto,
+    On,
+}
+
+impl InputMonitoring {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Auto, Self::On];
+}
+
+impl std::fmt::Display for InputMonitoring {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Off => "OFF",
+            Self::Auto => "AUTO",
+            Self::On => "ON",
+        })
+    }
+}
+
 /// Credential-free identity retained after external media becomes project-owned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -146,6 +216,12 @@ pub struct TrackInfo {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    /// Hardware Audio Input routing. Meaningful only for Audio Tracks.
+    #[serde(default)]
+    pub audio_input_route: AudioInputRoute,
+    /// Hardware input monitoring. Track arm itself remains runtime state.
+    #[serde(default)]
+    pub input_monitoring: InputMonitoring,
     /// Optional adjustment combined with the Project Swing amount for
     /// generated events on this Project Track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -180,6 +256,8 @@ impl TrackInfo {
             pan: crate::constants::DEFAULT_TRACK_PAN,
             mute: false,
             solo: false,
+            audio_input_route: AudioInputRoute::default(),
+            input_monitoring: InputMonitoring::default(),
             swing_offset: None,
             effects: Vec::new(),
             kind: TrackKind::default(),
@@ -267,6 +345,42 @@ mod tests {
         assert!((track.pan - 0.5).abs() < f32::EPSILON);
         assert!(!track.mute);
         assert!(!track.solo);
+        assert_eq!(
+            track.audio_input_route,
+            AudioInputRoute::Mono { channel: 0 }
+        );
+        assert_eq!(track.input_monitoring, InputMonitoring::Off);
+    }
+
+    #[test]
+    fn audio_input_routing_roundtrips_and_old_tracks_receive_safe_defaults() {
+        let mut track = TrackInfo::new("Vocal");
+        track.audio_input_route = AudioInputRoute::Stereo { left: 2 };
+        track.input_monitoring = InputMonitoring::Auto;
+        let encoded = serde_json::to_string(&track).unwrap();
+        let decoded: TrackInfo = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            decoded.audio_input_route,
+            AudioInputRoute::Stereo { left: 2 }
+        );
+        assert_eq!(decoded.input_monitoring, InputMonitoring::Auto);
+
+        let mut legacy = serde_json::to_value(track).unwrap();
+        legacy.as_object_mut().unwrap().remove("audio_input_route");
+        legacy.as_object_mut().unwrap().remove("input_monitoring");
+        let decoded: TrackInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.audio_input_route, AudioInputRoute::default());
+        assert_eq!(decoded.input_monitoring, InputMonitoring::Off);
+
+        let source = TrackId::new();
+        let mut track = TrackInfo::new("Resample");
+        track.audio_input_route = AudioInputRoute::Resample { track_id: source };
+        let decoded: TrackInfo =
+            serde_json::from_str(&serde_json::to_string(&track).unwrap()).unwrap();
+        assert_eq!(
+            decoded.audio_input_route,
+            AudioInputRoute::Resample { track_id: source }
+        );
     }
 
     fn test_clip(position: u64, duration: u64) -> ClipInfo {

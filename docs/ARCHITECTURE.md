@@ -425,6 +425,80 @@ flowchart LR
     MET -- "peaks, position" --> EV["EngineEvent ring"]
 ```
 
+Hardware input is opened on demand when an Audio Track is armed or its input
+monitor is On. The cpal input callback writes routed mono or stereo frames to a
+bounded single-producer/single-consumer ring. The output callback is the only
+consumer, so the output device remains the clock for both monitoring and
+recording. It injects those frames into exactly one target `EngineTrack` before
+that track's effects, mute, gain/pan, sends, and master mix. Browser audition
+uses a separate path and cannot enter a recording.
+
+```mermaid
+flowchart LR
+    IN(("device input")) --> IC["cpal input callback"]
+    IC -->|"bounded stereo ring"| OC["output callback"]
+    OC -->|"live input"| TR["armed EngineTrack<br/>effects + mixer"]
+    OC -->|"recorded-frame ring"| UI["UI recording session"]
+    UI -->|"background WAV encode"| ST["staged Project Media"]
+    ST --> CL["Arrange audio clip<br/>one undo step"]
+```
+
+The first output callback after Record latches the exact Arrange sample
+position. The UI never estimates the take boundary from its 60 fps tick. It
+drains recorded frames off the real-time thread, encodes the completed take on
+a background thread, stages it in Project Media, and only then inserts the
+canonical clip. Device loss abandons the open project transaction, leaving no
+partial clip; bounded-buffer overflow stops capture and offers the valid prefix
+as a visibly warned take. Input route and monitoring mode are project state;
+soundcard selection, sample rate, and buffer size remain global application
+settings.
+
+That exact position is the output-clock boundary, not calibrated acoustic
+alignment. V1 does not measure input/output round-trip latency or continuously
+resample independently clocked devices, so recorded audio may land late by the
+hardware latency. Input underruns are counted and surfaced as silence-substituted
+frames; overflow stops capture and salvages the valid prefix with a warning.
+Measured round-trip compensation and cross-device drift correction remain a
+later recording-depth slice.
+
+Completed takes are accumulated in RAM and encoded directly to WAV bytes on a
+background thread before staging. This avoids real-time file I/O and the former
+temporary-file/read-back copy, but very long takes still scale linearly in
+memory. Streaming long-form capture into a recoverable project-owned staging
+file is a future durability optimisation.
+
+Live **Resample** reuses that recording lifecycle without opening hardware
+Audio Input. An Audio Track may persistently choose one playable MIDI/
+instrument Project Track as its input. The output callback gives the engine a
+preallocated scratch slice, and the ordinary channel renderer copies only the
+selected source Track's direct output into it after the instrument, insert
+effects, mute envelope, automated/manual gain, and pan have run. The callback
+then feeds those stereo frames into the same bounded recording bridge used by
+hardware capture.
+
+```mermaid
+flowchart LR
+    MIDI["MIDI/instrument Track source"] --> DEV["instrument + inserts"]
+    DEV --> CH["mute + gain/pan"]
+    CH --> TAP["bounded Resample tap"]
+    TAP --> REC["shared recording finalizer<br/>+ Project Media"]
+    CH --> MIX["project mix"]
+    CH --> SEND["post-fader sends"]
+    SEND --> RET["returns"]
+    MIX --> MASTER["master"]
+    RET --> MASTER
+    AUD["Browser Audition"] -->|"post-master, excluded"| OUT["device output"]
+    MASTER --> OUT
+```
+
+The Track-output tap is deliberately pre-send and pre-master: it records the
+source Project Track's audible direct output, but not return buses, master
+processing, other Tracks, or the dedicated Browser Audition Bus. Source mute
+and solo audibility therefore become silence in the take. The source remains
+audible through the normal project mix while recording; Resample never injects
+it into the target Audio Track and cannot create a feedback edge. This is live
+Resample, distinct from the existing offline Bounce renderer.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned

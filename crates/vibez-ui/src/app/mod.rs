@@ -7,6 +7,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
 use rtrb::Consumer;
+use vibez_audio_io::audio_host::AudioHost;
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
@@ -22,6 +23,7 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use crate::services::plugin_loader::{PluginInstrumentLoadResult, PluginLoadResult};
 use vibez_project::Project;
 
+use crate::domains::audio_settings::AudioSettingsState;
 use crate::icons;
 use crate::message::{
     LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message, ProjectLoadResult,
@@ -31,6 +33,15 @@ use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::{AppState, AudioStreamHealth};
 use crate::theme as th;
 use crate::ui_settings::UiSettings;
+
+pub(super) const RAW_AUDITION_PLAYING: &str = "RAW Audition playing";
+pub(super) const WARP_AUDITION_PLAYING: &str = "WARP Audition playing";
+pub(super) const RAW_AUDITION_AWAITING_BPM: &str =
+    "RAW Audition playing while WARP awaits source BPM";
+pub(super) const RAW_AUDITION_CONTINUES_FOR_BPM_EDIT: &str =
+    "RAW Audition continues; confirm the edited BPM to hear WARP";
+pub(super) const WARP_BPM_EDIT_NEEDS_CONFIRMATION: &str =
+    "Confirm the edited BPM before preparing WARP Audition";
 
 struct App {
     state: AppState,
@@ -44,6 +55,9 @@ struct App {
     /// it when the selection moves.
     spectrum_tap: Option<vibez_core::id::TrackId>,
     _stream: Option<AudioOutputStream>,
+    input_bridge: Arc<vibez_audio_io::audio_input::AudioInputBridge>,
+    /// Open only while one Audio Track is armed or explicitly monitors input.
+    _input_stream: Option<vibez_audio_io::audio_input::AudioInputStream>,
     // Channels for receiving loaded plugins from background threads
     plugin_effect_rx: std::sync::mpsc::Receiver<PluginLoadResult>,
     plugin_effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
@@ -145,6 +159,8 @@ pub fn run() -> iced::Result {
 
 mod actions;
 mod async_helpers;
+mod audio_recording;
+mod audio_settings;
 mod audio_tasks;
 mod bounce;
 mod capture;
@@ -196,6 +212,7 @@ mod views_perform_record;
 mod views_perform_sections;
 mod views_settings;
 mod views_settings_appearance;
+mod views_settings_audio;
 mod views_settings_dropbox;
 mod views_settings_perform;
 mod views_settings_project;
@@ -219,25 +236,30 @@ impl App {
         let recent_project_paths =
             crate::ui_settings::normalize_recent_projects(ui_settings.recent_project_paths.clone());
 
-        let (stream, sample_rate, audio_stream_health) =
-            match AudioOutputStream::open(engine, Some(512)) {
-                Ok(s) => {
-                    let sr = s.sample_rate();
-                    let health = match s.play() {
-                        Ok(()) => AudioStreamHealth::Running,
-                        Err(e) => {
-                            eprintln!("vibez: failed to start audio stream: {e}");
-                            AudioStreamHealth::Error(e.to_string())
-                        }
-                    };
-                    (Some(s), sr, health)
-                }
-                Err(e) => {
-                    eprintln!("vibez: failed to open audio stream: {e}");
-                    let cause = e.to_string();
-                    (None, 44_100, AudioStreamHealth::Error(cause))
-                }
-            };
+        let (audio_catalog, catalog_error) = match AudioHost::new().catalog() {
+            Ok(catalog) => (catalog, None),
+            Err(error) => {
+                eprintln!("vibez: failed to scan audio devices: {error}");
+                (Default::default(), Some(error.to_string()))
+            }
+        };
+        let preferred_audio_input = ui_settings.preferred_audio_input.clone();
+        let preferred_audio_output = ui_settings.preferred_audio_output.clone();
+        let requested_sample_rate = ui_settings.audio_sample_rate;
+        let requested_buffer_size = ui_settings.audio_buffer_size;
+        let audio_settings::InitialAudioOutput {
+            stream: output_stream,
+            sample_rate,
+            active_output_name,
+            health: audio_stream_health,
+            status: initial_audio_status,
+        } = audio_settings::initialize_audio_output(
+            engine,
+            preferred_audio_output.clone(),
+            requested_sample_rate,
+            requested_buffer_size,
+        );
+        let input_bridge = output_stream.input_bridge();
 
         let dropbox_settings = DropboxSettings::load();
         let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
@@ -268,6 +290,15 @@ impl App {
                 ..Default::default()
             },
             audio_stream_health,
+            audio_settings: AudioSettingsState {
+                catalog: audio_catalog,
+                preferred_input_name: preferred_audio_input,
+                preferred_output_name: preferred_audio_output,
+                active_output_name,
+                sample_rate,
+                buffer_size: requested_buffer_size,
+                catalog_error,
+            },
             auto_warp_on_import: ui_settings.auto_warp_on_import,
             warp_confidence_threshold: ui_settings.warp_confidence_threshold,
             confirm_project_track_deletion: ui_settings.confirm_project_track_deletion,
@@ -301,8 +332,8 @@ impl App {
             },
             ..Default::default()
         };
-        if let AudioStreamHealth::Error(cause) = &state.audio_stream_health {
-            state.status_text = format!("Audio stream error: {cause}");
+        if let Some(status) = initial_audio_status {
+            state.status_text = status;
         }
         state.perform.input_mapping = ui_settings.perform_input_mapping.clone();
         state
@@ -355,7 +386,9 @@ impl App {
             event_rx: Some(event_rx),
             spectrum_rx,
             spectrum_tap: None,
-            _stream: stream,
+            _stream: Some(output_stream),
+            input_bridge,
+            _input_stream: None,
             plugin_effect_rx,
             plugin_effect_tx,
             plugin_instrument_rx,
@@ -383,7 +416,10 @@ impl App {
             save_runtime: save_runtime::SaveRuntime::default(),
         };
 
-        // Inform the engine of the actual sample rate
+        // Inform the engine of the actual hardware clock and project tempo.
+        app.send_command(EngineCommand::SetSampleRate(
+            app.state.transport.sample_rate,
+        ));
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,
@@ -451,6 +487,12 @@ impl App {
             .filter(|p| p.is_file())
             .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
             .unwrap_or_else(Task::none);
+        // `window::Settings` has no maximized field in iced 0.13. The
+        // initial task runs after the first window exists, so ask the window
+        // manager to maximize that concrete window instead of merely opening
+        // at a large hard-coded size.
+        let maximize_window_task =
+            iced::window::get_latest().and_then(|id| iced::window::maximize(id, true));
 
         (
             app,
@@ -460,6 +502,7 @@ impl App {
                 plugin_catalog_startup_task,
                 update_check_task,
                 open_task,
+                maximize_window_task,
             ]),
         )
     }

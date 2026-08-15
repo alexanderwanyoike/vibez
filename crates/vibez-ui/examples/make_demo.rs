@@ -23,6 +23,8 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         pan: 0.5,
         mute: false,
         solo: false,
+        audio_input_route: Default::default(),
+        input_monitoring: Default::default(),
         swing_offset: None,
         effects: Vec::new(),
         kind: TrackKind::Midi,

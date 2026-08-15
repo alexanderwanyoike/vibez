@@ -66,6 +66,17 @@ const MARQUEE_MIN_PX: f32 = 4.0;
 /// horizontal drag near a row boundary would flicker between tracks.
 const CROSS_TRACK_MIN_PX: f32 = 20.0;
 
+/// Where an unmodified vertical wheel gesture should be handled.
+///
+/// Arrange treats it as timeline panning. Section construction lives inside
+/// a vertical track scroller, so its lanes must let the parent consume it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum VerticalWheelRouting {
+    #[default]
+    PanTimeline,
+    BubbleToTrackScroller,
+}
+
 /// Interaction state for clip canvas.
 #[derive(Debug, Default)]
 pub struct ClipInteractionState {
@@ -75,6 +86,7 @@ pub struct ClipInteractionState {
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
 pub struct TrackClipCanvas {
+    vertical_wheel_routing: VerticalWheelRouting,
     pub track_id: TrackId,
     pub track_index: usize,
     pub total_tracks: usize,
@@ -93,6 +105,9 @@ pub struct TrackClipCanvas {
     /// Transient Section Record visualization. It is deliberately excluded
     /// from hit testing and edit messages.
     pub recording_preview: Option<TimelineNoteClip>,
+    /// Transient Audio Track Recording waveform. Like Section Record, it is
+    /// display-only until Stop commits one canonical Clip.
+    pub audio_recording_preview: Option<TimelineClip>,
     /// Primary edit cursor (or Arrange's shared transport/edit cursor).
     pub playhead_beats: f64,
     /// Section playback truth, rendered independently from the edit cursor.
@@ -184,6 +199,7 @@ impl TrackClipCanvas {
                 duration: c.duration,
                 name: c.name.clone(),
                 peaks: compute_clip_peaks(c),
+                peak_span_frames: None,
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
@@ -219,6 +235,7 @@ impl TrackClipCanvas {
             })
             .collect();
         Self {
+            vertical_wheel_routing: VerticalWheelRouting::default(),
             track_id,
             track_index,
             total_tracks,
@@ -230,6 +247,7 @@ impl TrackClipCanvas {
             clips,
             note_clips,
             recording_preview: None,
+            audio_recording_preview: None,
             playhead_beats,
             playback_playhead_beats: None,
             zoom_level,
@@ -273,8 +291,21 @@ impl TrackClipCanvas {
         self
     }
 
+    pub fn with_audio_recording_preview(mut self, preview: TimelineClip) -> Self {
+        self.audio_recording_preview = Some(preview);
+        self
+    }
+
     pub fn with_playback_playhead(mut self, playback_playhead_beats: Option<f64>) -> Self {
         self.playback_playhead_beats = playback_playhead_beats;
+        self
+    }
+
+    /// Let the surrounding track list handle ordinary vertical wheel input.
+    /// Horizontal wheel input and Shift+wheel remain lane-local timeline
+    /// navigation gestures.
+    pub fn with_vertical_track_scrolling(mut self) -> Self {
+        self.vertical_wheel_routing = VerticalWheelRouting::BubbleToTrackScroller;
         self
     }
 
@@ -898,6 +929,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     }
                     // Plain scroll for horizontal panning
                     if dy.abs() > 0.0 {
+                        if self.vertical_wheel_routing
+                            == VerticalWheelRouting::BubbleToTrackScroller
+                        {
+                            return (canvas::event::Status::Ignored, None);
+                        }
                         return (
                             canvas::event::Status::Captured,
                             Some(Message::View(ViewMsg::ScrollArrangement(

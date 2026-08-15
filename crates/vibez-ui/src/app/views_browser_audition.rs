@@ -102,7 +102,7 @@ impl App {
             .padding([3, 5])
             .width(Length::Fixed(if compact { 54.0 } else { 62.0 }))
             .style(browser_compact_input_style);
-        let confirm_bpm = button(text(if compact { "USE" } else { "USE SOURCE" }).size(9))
+        let confirm_bpm = button(text(if compact { "USE" } else { "CONFIRM BPM" }).size(9))
             .on_press(Message::ConfirmAuditionBpm)
             .padding([3, 5])
             .style(browser_utility_action_style);
@@ -170,12 +170,25 @@ impl App {
             stop,
             text(if self.state.browser.remote.preview_in_progress {
                 "FETCHING"
+            } else if self.state.browser.audition_loading
+                && self.state.browser.audition_playing
+                && self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
+            {
+                "RAW · WARPING"
             } else if self.state.browser.audition_loading {
                 "PREPARING"
             } else if self.state.browser.audition_queued {
                 "QUEUED"
             } else if self.state.browser.audition_playing {
-                "PLAYING"
+                match self.state.browser.audition_playback_mode {
+                    Some(AuditionMode::Raw)
+                        if self.state.browser.audition_mode == AuditionMode::Warp =>
+                    {
+                        "RAW · BPM NEEDED"
+                    }
+                    Some(mode) => mode.label(),
+                    None => "PLAYING",
+                }
             } else if self.state.browser.waveform_error.is_some() {
                 "UNAVAILABLE"
             } else if self.state.browser.waveform_audio.is_some() {

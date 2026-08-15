@@ -9,6 +9,8 @@
 use std::collections::VecDeque;
 
 pub mod arrangement;
+pub mod audio_recording;
+pub mod audio_settings;
 pub mod automation;
 pub mod browser;
 pub mod devices;

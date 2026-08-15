@@ -236,7 +236,11 @@ impl App {
         self.state.browser.cancel_audition_requests();
     }
 
-    pub(super) fn start_browser_audition(&mut self, audio: Arc<DecodedAudio>) {
+    pub(super) fn start_browser_audition(
+        &mut self,
+        audio: Arc<DecodedAudio>,
+        playback_mode: AuditionMode,
+    ) {
         let queued =
             self.state.transport.playing && self.state.browser.audition_sync != AuditionSync::Off;
         // Retain a UI-side clone (never cleared on stop) so the engine
@@ -259,16 +263,41 @@ impl App {
             sync: self.state.browser.audition_sync,
             looped: self.state.browser.audition_loop,
         });
-        self.state.browser.mark_audition_requested(queued);
-        let mode = match self.state.browser.audition_mode {
-            AuditionMode::Raw => "RAW",
-            AuditionMode::Warp => "WARP",
-        };
+        self.state
+            .browser
+            .mark_audition_requested(queued, playback_mode);
+        let mode = playback_mode.label();
         self.state.status_text = if queued {
             format!("{mode} Audition queued")
+        } else if playback_mode == AuditionMode::Raw
+            && self.state.browser.audition_mode == AuditionMode::Warp
+        {
+            RAW_AUDITION_AWAITING_BPM.into()
         } else {
-            format!("{mode} Audition playing")
+            match playback_mode {
+                AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
+                AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
+            }
         };
+    }
+
+    /// Keep a truthful RAW voice underneath BPM editing and WARP preparation.
+    /// Repeated calls are idempotent so UI state changes do not restart a loop.
+    /// Returns whether a RAW voice is active or was successfully requested.
+    pub(super) fn ensure_raw_browser_audition(&mut self) -> bool {
+        if self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
+            && (self.state.browser.audition_playing || self.state.browser.audition_queued)
+        {
+            return true;
+        }
+        let Some(source) = self.state.browser.selected_source.clone() else {
+            return false;
+        };
+        let Some(raw) = self.state.browser.waveform_for_source(&source) else {
+            return false;
+        };
+        self.start_browser_audition(raw, AuditionMode::Raw);
+        true
     }
 
     pub(super) fn schedule_browser_bpm_detection(
@@ -295,7 +324,7 @@ impl App {
         source_bpm: f64,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
-        let generation = self.state.browser.begin_audition_load(&source);
+        let generation = self.state.browser.begin_audition_preparation(&source);
         self.state.status_text = format!("Preparing WARP at {source_bpm:.1} BPM...");
         Task::perform(
             warp_browser_audition_async(raw, source_bpm, project_bpm),
@@ -315,26 +344,17 @@ impl App {
         raw: Arc<DecodedAudio>,
     ) -> Task<Message> {
         let detection = self.schedule_browser_bpm_detection(source.clone(), Arc::clone(&raw));
-        match self.state.browser.audition_mode {
-            AuditionMode::Raw => {
-                self.start_browser_audition(raw);
+        match self.state.browser.audition_playback_plan() {
+            crate::state::BrowserAuditionPlan::Raw => {
+                self.start_browser_audition(raw, AuditionMode::Raw);
                 detection
             }
-            AuditionMode::Warp => {
-                self.stop_browser_audition();
-                if let Some(source_bpm) = self.state.browser.audition_bpm_confirmed {
-                    Task::batch([
-                        detection,
-                        self.prepare_browser_warp(source, raw, source_bpm),
-                    ])
-                } else {
-                    self.state.status_text = if self.state.browser.audition_bpm_detecting {
-                        "Detecting source BPM; WARP awaits confirmation".into()
-                    } else {
-                        "Confirm or enter a positive source BPM for WARP".into()
-                    };
-                    detection
-                }
+            crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
+                let _ = self.ensure_raw_browser_audition();
+                Task::batch([
+                    detection,
+                    self.prepare_browser_warp(source, raw, source_bpm),
+                ])
             }
         }
     }

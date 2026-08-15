@@ -30,6 +30,24 @@ fn project_track_deletion_list_height(location_count: usize) -> f32 {
     }
 }
 
+const CONTEXT_MENU_EDGE_INSET: f32 = 16.0;
+const CONTEXT_MENU_CARD_PADDING: f32 = 8.0;
+const CONTEXT_MENU_CLIP_WIDTH: f32 = 220.0 + CONTEXT_MENU_CARD_PADDING;
+
+fn context_menu_width(target: &ContextMenuTarget) -> f32 {
+    match target {
+        ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
+        ContextMenuTarget::TimeSelection { .. } | ContextMenuTarget::ArrangementEmpty => {
+            200.0 + CONTEXT_MENU_CARD_PADDING
+        }
+    }
+}
+
+fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
+    let maximum_x = (window_width - menu_width - CONTEXT_MENU_EDGE_INSET).max(0.0);
+    requested_x.clamp(0.0, maximum_x)
+}
+
 impl App {
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
         let track_id = self
@@ -584,7 +602,11 @@ impl App {
 
     pub(super) fn view_context_menu_overlay(&self) -> Element<'_, Message> {
         let menu = self.state.view.context_menu.as_ref().unwrap();
-        let x = menu.x;
+        let x = context_menu_x(
+            menu.x,
+            context_menu_width(&menu.target),
+            self.state.view.window_width,
+        );
         let y = menu.y;
 
         let menu_btn =
@@ -797,7 +819,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::project_track_deletion_list_height;
+    use super::{context_menu_x, project_track_deletion_list_height, CONTEXT_MENU_CLIP_WIDTH};
 
     #[test]
     fn deletion_location_list_grows_with_content_then_caps() {
@@ -805,5 +827,12 @@ mod tests {
         assert_eq!(project_track_deletion_list_height(1), 28.0);
         assert_eq!(project_track_deletion_list_height(2), 60.0);
         assert_eq!(project_track_deletion_list_height(8), 120.0);
+    }
+
+    #[test]
+    fn clip_context_menu_stays_full_width_at_the_right_window_edge() {
+        let x = context_menu_x(1_862.0, CONTEXT_MENU_CLIP_WIDTH, 1_920.0);
+
+        assert_eq!(x, 1_676.0);
     }
 }

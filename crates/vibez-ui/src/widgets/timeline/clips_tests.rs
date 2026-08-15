@@ -168,7 +168,7 @@ fn section_lane_keeps_edit_cursor_and_playback_playhead_distinct() {
 
 #[test]
 fn one_pixel_shift_wheel_event_requests_continuous_cursor_anchored_zoom() {
-    let canvas = empty_track_canvas();
+    let canvas = empty_track_canvas().with_vertical_track_scrolling();
     let mut state = ClipInteractionState {
         shift_held: true,
         ..ClipInteractionState::default()
@@ -189,6 +189,47 @@ fn one_pixel_shift_wheel_event_requests_continuous_cursor_anchored_zoom() {
         message,
         Some(Message::View(ViewMsg::ZoomAround { factor, anchor_x }))
             if factor > 1.0 && factor < 1.01 && anchor_x == 320.0
+    ));
+}
+
+#[test]
+fn section_lane_bubbles_plain_vertical_wheel_to_its_track_scroller() {
+    let canvas = empty_track_canvas().with_vertical_track_scrolling();
+    let mut state = ClipInteractionState::default();
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0.0, y: -12.0 },
+        }),
+        bounds,
+        mouse::Cursor::Available(Point::new(320.0, 20.0)),
+    );
+
+    assert_eq!(status, canvas::event::Status::Ignored);
+    assert!(message.is_none());
+}
+
+#[test]
+fn arrangement_lane_keeps_plain_vertical_wheel_timeline_panning() {
+    let canvas = empty_track_canvas();
+    let mut state = ClipInteractionState::default();
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: 0.0, y: -12.0 },
+        }),
+        bounds,
+        mouse::Cursor::Available(Point::new(320.0, 20.0)),
+    );
+
+    assert_eq!(status, canvas::event::Status::Captured);
+    assert!(matches!(
+        message,
+        Some(Message::View(ViewMsg::ScrollArrangement(delta))) if delta < 0.0
     ));
 }
 
@@ -276,6 +317,7 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
         duration: 44_100,
         name: "Clip".into(),
         peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
@@ -341,6 +383,29 @@ fn recording_preview_is_visible_but_not_hit_testable() {
 
     assert_eq!(
         canvas.recording_preview.as_ref().unwrap().clip_id,
+        preview_id
+    );
+    assert!(canvas.hit_test(10.0).is_none());
+}
+
+#[test]
+fn audio_recording_waveform_is_visible_but_not_hit_testable() {
+    let preview_id = ClipId::new();
+    let canvas = empty_track_canvas().with_audio_recording_preview(TimelineClip {
+        clip_id: preview_id,
+        position: 0,
+        duration: 44_100,
+        name: "● RECORDING INPUT".into(),
+        peaks: Arc::new(vec![(-0.8, 0.6); 32]),
+        peak_span_frames: Some(64),
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 0,
+        warp_stale: false,
+    });
+
+    assert_eq!(
+        canvas.audio_recording_preview.as_ref().unwrap().clip_id,
         preview_id
     );
     assert!(canvas.hit_test(10.0).is_none());

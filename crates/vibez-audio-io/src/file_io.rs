@@ -348,6 +348,14 @@ pub fn write_wav_file(path: &Path, audio: &DecodedAudio) -> Result<(), FileIoErr
         }
     }
 
+    std::fs::write(path, encode_wav(audio))?;
+    Ok(())
+}
+
+/// Encode a [`DecodedAudio`] buffer as 16-bit PCM WAV bytes in memory.
+/// Completed recordings use this to stage the exact bytes directly without a
+/// temporary file and second filesystem read.
+pub fn encode_wav(audio: &DecodedAudio) -> Vec<u8> {
     let num_channels = audio.num_channels().max(1) as u16;
     let num_frames = audio.num_frames();
     let sample_rate = audio.sample_rate;
@@ -388,8 +396,7 @@ pub fn write_wav_file(path: &Path, audio: &DecodedAudio) -> Result<(), FileIoErr
         }
     }
 
-    std::fs::write(path, buf)?;
-    Ok(())
+    buf
 }
 
 // ---------------------------------------------------------------------------

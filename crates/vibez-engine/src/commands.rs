@@ -281,7 +281,10 @@ pub enum EngineCommand {
         state: DrumPadState,
     },
 
-    // -- Arrangement loop --
+    // -- Arrangement recording / loop --
+    /// Suspend ordinary end-of-content auto-stop while an Audio Track take
+    /// extends Arrange. Stop restores the canonical content boundary.
+    SetArrangementRecording(bool),
     SetArrangementLoop(bool),
     SetArrangementLoopRegion {
         start: u64,

@@ -6,7 +6,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::{ClipInfo, DrumPadState, MediaSourceRef};
+use vibez_core::track::{AudioInputRoute, ClipInfo, DrumPadState, InputMonitoring, MediaSourceRef};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
@@ -42,6 +42,7 @@ impl std::fmt::Debug for ResidentSection {
     }
 }
 
+use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
 use crate::state::{
     AuditionImportInput, AuditionMode, SampleBrowserEntry, SampleBrowserFolder, SettingsTab,
     UndoGestureId,
@@ -151,6 +152,17 @@ pub struct BounceOutcome {
     pub clip_name: String,
     pub insert_position_samples: u64,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioRecordingOutcome {
+    pub track_id: TrackId,
+    pub start_position_samples: u64,
+    pub clip_name: String,
+    pub audio: Arc<DecodedAudio>,
+    pub source: MediaSourceRef,
+    pub completion_label: String,
+    pub quality_warning: Option<String>,
 }
 
 /// OAuth flow success payload passed to the UI as `Message::DropboxConnected`.
@@ -448,6 +460,11 @@ pub enum Message {
     ClipDecodeError(TrackId, String),
 
     // Track controls
+    ToggleAudioTrackArm(TrackId),
+    SetAudioTrackInputRoute(TrackId, AudioInputRoute),
+    SetAudioTrackMonitoring(TrackId, InputMonitoring),
+    ToggleAudioRecording,
+    AudioRecordingFinalized(Result<AudioRecordingOutcome, String>),
 
     // Per-track metering
 
@@ -634,6 +651,11 @@ pub enum Message {
     CloseSettings,
     SelectSettingsTab(SettingsTab),
     SetBufferSize(u32),
+    SetAudioSampleRate(AudioSampleRate),
+    SelectAudioInput(AudioDeviceChoice),
+    SelectAudioOutput(AudioDeviceChoice),
+    RescanAudioDevices,
+    ReconnectAudioOutput,
 
     // Plugin scanning
     ScanPlugins,

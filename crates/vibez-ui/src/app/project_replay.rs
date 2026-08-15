@@ -195,6 +195,22 @@ impl App {
         // Reload plugin devices through the project-open pipeline;
         // they re-enter the chains at their recorded positions.
         self.spawn_project_plugin_loads(reloads.effects, reloads.instruments);
+        if self
+            .state
+            .audio_recording
+            .armed_track
+            .is_some_and(|id| self.state.find_track(id).is_none())
+        {
+            self.state.audio_recording.armed_track = None;
+        }
+        self.state.audio_recording.monitor_track = self
+            .state
+            .audio_recording
+            .armed_track
+            .or_else(|| self.persisted_monitor_on_track());
+        if let Err(error) = self.sync_audio_input_runtime() {
+            eprintln!("vibez: Audio Input could not follow project restore: {error}");
+        }
     }
 
     pub(super) fn replay_track_to_engine(&mut self, track: &ProjectTrack) {
