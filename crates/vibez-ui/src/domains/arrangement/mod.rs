@@ -772,6 +772,7 @@ impl TimelineEditorState {
                 self.marquee = None;
             }
             ArrangementMsg::SelectAllClips => {
+                self.clear_time_selection();
                 self.selected_clips =
                     self.timeline
                         .by_track
