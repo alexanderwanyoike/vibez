@@ -82,6 +82,8 @@ pub struct AudioEngine {
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
     arrangement_audio_length: Option<u64>,
+    /// Audio Track Recording may extend Arrange beyond existing content.
+    arrangement_recording: bool,
     /// Project Swing is engine state because generated-event consumers share
     /// it while existing playback remains untouched.
     project_swing: SwingAmount,
@@ -214,6 +216,7 @@ impl AudioEngine {
             active_section_record: None,
             section_advance_override: None,
             arrangement_audio_length: None,
+            arrangement_recording: false,
             project_swing: SwingAmount::default(),
             performance_position: 0,
             clock_domain: ClockDomain::Arrange,

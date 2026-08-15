@@ -319,6 +319,26 @@ fn auto_stop_at_end_of_audio() {
 }
 
 #[test]
+fn arrangement_recording_advances_past_the_existing_content_end() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    constant_clip_track(&mut cmd_tx, 16);
+    cmd_tx.push(EngineCommand::Seek(16)).unwrap();
+    cmd_tx
+        .push(EngineCommand::SetArrangementRecording(true))
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    engine.process(&mut [0.0; 32], 2);
+
+    assert_eq!(engine.transport().position(), 32);
+    assert!(engine.transport().is_playing());
+
+    cmd_tx.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 2], 2);
+    assert_eq!(engine.transport().audio_length(), Some(16));
+}
+
+#[test]
 fn multiple_process_calls_advance_position() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let audio = make_test_audio(1024);

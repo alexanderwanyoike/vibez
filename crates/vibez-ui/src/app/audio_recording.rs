@@ -219,6 +219,10 @@ impl App {
             self.discard_audio_recording_transaction();
             return Task::none();
         }
+        // A take is allowed to extend Arrange beyond the last existing Clip.
+        // This must precede Play in the ordered engine queue so the first
+        // output callback cannot immediately auto-stop at the old content end.
+        self.send_command(EngineCommand::SetArrangementRecording(true));
         self.input_bridge.begin_recording();
         self.sync_audio_input_target();
         let track_name = self
@@ -428,8 +432,15 @@ impl App {
         self.state.audio_recording.input_peak_l = peak_l;
         self.state.audio_recording.input_peak_r = peak_r;
         if self.state.audio_recording.is_capturing() {
+            let previous_len = self.state.audio_recording.captured_frames.len();
             self.input_bridge
                 .drain_recorded(&mut self.state.audio_recording.captured_frames);
+            self.state
+                .audio_recording
+                .captured_frames_appended(previous_len);
+            if let Some(position) = self.input_bridge.record_start_position() {
+                self.state.audio_recording.start_position_samples = position;
+            }
             if self.input_bridge.overflowed() {
                 self.state.audio_recording.mark_truncated();
                 if self.state.audio_recording.is_recording() {

@@ -93,6 +93,9 @@ pub struct TrackClipCanvas {
     /// Transient Section Record visualization. It is deliberately excluded
     /// from hit testing and edit messages.
     pub recording_preview: Option<TimelineNoteClip>,
+    /// Transient Audio Track Recording waveform. Like Section Record, it is
+    /// display-only until Stop commits one canonical Clip.
+    pub audio_recording_preview: Option<TimelineClip>,
     /// Primary edit cursor (or Arrange's shared transport/edit cursor).
     pub playhead_beats: f64,
     /// Section playback truth, rendered independently from the edit cursor.
@@ -230,6 +233,7 @@ impl TrackClipCanvas {
             clips,
             note_clips,
             recording_preview: None,
+            audio_recording_preview: None,
             playhead_beats,
             playback_playhead_beats: None,
             zoom_level,
@@ -270,6 +274,11 @@ impl TrackClipCanvas {
 
     pub fn with_recording_preview(mut self, preview: TimelineNoteClip) -> Self {
         self.recording_preview = Some(preview);
+        self
+    }
+
+    pub fn with_audio_recording_preview(mut self, preview: TimelineClip) -> Self {
+        self.audio_recording_preview = Some(preview);
         self
     }
 

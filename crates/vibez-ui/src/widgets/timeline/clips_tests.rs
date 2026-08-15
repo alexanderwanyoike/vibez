@@ -345,3 +345,25 @@ fn recording_preview_is_visible_but_not_hit_testable() {
     );
     assert!(canvas.hit_test(10.0).is_none());
 }
+
+#[test]
+fn audio_recording_waveform_is_visible_but_not_hit_testable() {
+    let preview_id = ClipId::new();
+    let canvas = empty_track_canvas().with_audio_recording_preview(TimelineClip {
+        clip_id: preview_id,
+        position: 0,
+        duration: 44_100,
+        name: "● RECORDING INPUT".into(),
+        peaks: Arc::new(vec![(-0.8, 0.6); 32]),
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 0,
+        warp_stale: false,
+    });
+
+    assert_eq!(
+        canvas.audio_recording_preview.as_ref().unwrap().clip_id,
+        preview_id
+    );
+    assert!(canvas.hit_test(10.0).is_none());
+}
