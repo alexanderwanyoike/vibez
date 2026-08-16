@@ -76,6 +76,11 @@ jobs:
       - name: Build
         run: cargo build --release -p vibez --bins
 
+      - name: Verify Windows executable resources
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check_windows_resources.ps1 target/release/vibez.exe
+
       # ---------- Linux: tar.gz + .deb + AppImage ----------
       - name: Package tarball (Linux)
         if: runner.os == 'Linux'
