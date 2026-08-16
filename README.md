@@ -107,6 +107,13 @@ Linux additionally needs:
 sudo apt install libasound2-dev libudev-dev libdbus-1-dev
 ```
 
+Windows ASIO builds use a checksum-pinned copy of Steinberg's SDK. Set it up
+in the same PowerShell session before running Cargo:
+
+```powershell
+./scripts/setup_asio_sdk.ps1
+```
+
 Then:
 
 ```sh
@@ -152,7 +159,10 @@ where a redundant-looking cast can be load-bearing on another target.
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
 
-ASIO is a trademark and software of Steinberg Media Technologies GmbH.
+Windows ASIO builds link Steinberg's ASIO SDK under its GPLv3 option, which is
+compatible with Vibez's GPL-3.0-or-later licence. The release build downloads
+one checksum-pinned copy from Steinberg's official SDK endpoint. ASIO is a
+trademark of Steinberg Media Technologies GmbH.
 
 ## For Mum
 

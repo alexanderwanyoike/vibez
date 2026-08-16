@@ -282,15 +282,6 @@ impl AudioHost {
     }
 }
 
-impl Default for AudioHost {
-    fn default() -> Self {
-        Self {
-            backend: AudioBackend::System,
-            host: cpal::default_host(),
-        }
-    }
-}
-
 /// Extract [`DeviceInfo`] from a cpal device.
 fn buffer_size_range(size: &cpal::SupportedBufferSize) -> Option<(u32, u32)> {
     match size {
@@ -307,7 +298,7 @@ enum StreamDirection {
 
 fn stream_config_info(config: cpal::SupportedStreamConfig) -> StreamConfigInfo {
     StreamConfigInfo {
-        sample_rate: config.sample_rate(),
+        sample_rate: config.sample_rate().0,
         channels: config.channels(),
         sample_format: format!("{:?}", config.sample_format()),
     }
@@ -316,8 +307,8 @@ fn stream_config_info(config: cpal::SupportedStreamConfig) -> StreamConfigInfo {
 fn supported_config_info(range: cpal::SupportedStreamConfigRange) -> SupportedConfigRange {
     SupportedConfigRange {
         channels: range.channels(),
-        min_sample_rate: range.min_sample_rate(),
-        max_sample_rate: range.max_sample_rate(),
+        min_sample_rate: range.min_sample_rate().0,
+        max_sample_rate: range.max_sample_rate().0,
         sample_format: format!("{:?}", range.sample_format()),
         buffer_size_range: buffer_size_range(range.buffer_size()),
     }
@@ -352,9 +343,7 @@ fn device_info(
 }
 
 pub(crate) fn cpal_device_name(device: &cpal::Device) -> Result<String, cpal::DeviceNameError> {
-    device
-        .description()
-        .map(|description| description.name().to_owned())
+    device.name()
 }
 
 fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {

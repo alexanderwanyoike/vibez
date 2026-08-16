@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, StreamConfig};
+use cpal::{FromSample, Sample, SampleFormat, SampleRate, StreamConfig};
 use vibez_core::id::TrackId;
 use vibez_core::track::AudioInputRoute;
 
@@ -454,7 +454,7 @@ impl AudioInputStream {
         let channels = selected.channels() as usize;
         let config = StreamConfig {
             channels: selected.channels(),
-            sample_rate,
+            sample_rate: SampleRate(sample_rate),
             buffer_size: buffer_size.map_or(cpal::BufferSize::Default, cpal::BufferSize::Fixed),
         };
         let (event_tx, events) = mpsc::sync_channel(8);

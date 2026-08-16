@@ -279,6 +279,7 @@ impl App {
             preferred_audio_input: self.state.audio_settings.preferred_input_name.clone(),
             audio_backend: self.state.audio_settings.backend,
             preferred_audio_output: self.state.audio_settings.preferred_output_name.clone(),
+            audio_device_preferences: self.state.audio_settings.backend_preferences.clone(),
             audio_sample_rate: Some(self.state.audio_settings.sample_rate),
             audio_buffer_size: self.state.audio_settings.buffer_size,
             theme: Some(self.state.current_theme_name.clone()),

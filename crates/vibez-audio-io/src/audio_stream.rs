@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{HostTrait, StreamTrait};
-use cpal::{DevicesError, PauseStreamError, StreamConfig};
+use cpal::{DevicesError, PauseStreamError, SampleRate, StreamConfig};
 
 use crate::audio_host::{cpal_device_name, AudioBackend, AudioHostError};
 use crate::audio_input::AudioInputBridge;
@@ -443,7 +443,7 @@ impl AudioOutputStream {
             buffer_size,
             Some(DEFAULT_CHANNELS as u16),
         )?;
-        let sample_rate = supported_config.sample_rate();
+        let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels() as usize;
 
         let buf_size = match buffer_size {
@@ -453,7 +453,7 @@ impl AudioOutputStream {
 
         let config = StreamConfig {
             channels: channels as u16,
-            sample_rate,
+            sample_rate: SampleRate(sample_rate),
             buffer_size: buf_size,
         };
 

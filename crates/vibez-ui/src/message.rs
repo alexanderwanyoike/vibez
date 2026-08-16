@@ -651,7 +651,6 @@ pub enum Message {
     SelectAudioOutput(AudioDeviceChoice),
     RescanAudioDevices,
     ReconnectAudioOutput,
-    ShowAsioHardwareSetup,
 
     // Plugin scanning
     ScanPlugins,

@@ -156,6 +156,7 @@ mod actions;
 mod async_helpers;
 mod audio_recording;
 mod audio_settings;
+mod audio_take_finalization;
 mod audio_tasks;
 mod bounce;
 mod capture;
@@ -236,7 +237,11 @@ impl App {
         } else {
             AudioBackend::System
         };
-        let preferred_audio_output = ui_settings.preferred_audio_output.clone();
+        let audio_backend_preferences = ui_settings.resolved_audio_device_preferences();
+        let preferred_audio_output = audio_backend_preferences
+            .for_backend(preferred_audio_backend)
+            .output_name
+            .clone();
         let requested_sample_rate = ui_settings.audio_sample_rate;
         let requested_buffer_size = ui_settings.audio_buffer_size;
         let audio_settings::InitialAudioOutput {
@@ -258,13 +263,9 @@ impl App {
         // that same active host instead of presenting one backend while the
         // engine silently runs another.
         let settings_audio_backend = active_backend.unwrap_or(preferred_audio_backend);
-        let stayed_on_preferred_backend = settings_audio_backend == preferred_audio_backend;
-        let preferred_audio_input = stayed_on_preferred_backend
-            .then(|| ui_settings.preferred_audio_input.clone())
-            .flatten();
-        let preferred_audio_output = stayed_on_preferred_backend
-            .then_some(preferred_audio_output)
-            .flatten();
+        let active_preferences = audio_backend_preferences.for_backend(settings_audio_backend);
+        let preferred_audio_input = active_preferences.input_name.clone();
+        let preferred_audio_output = active_preferences.output_name.clone();
         let (audio_catalog, catalog_error) =
             match AudioHost::new(settings_audio_backend).and_then(|host| host.catalog()) {
                 Ok(catalog) => (catalog, None),
@@ -308,6 +309,7 @@ impl App {
                 backend: settings_audio_backend,
                 active_backend,
                 catalog: audio_catalog,
+                backend_preferences: audio_backend_preferences,
                 preferred_input_name: preferred_audio_input,
                 preferred_output_name: preferred_audio_output,
                 active_output_name,

@@ -141,6 +141,24 @@ fn failed_initial_audio(error: impl std::fmt::Display) -> (AudioStreamHealth, Op
     )
 }
 
+fn rejected_output_status(
+    output_error: &str,
+    restored_output: Option<&str>,
+    input_error: Option<&str>,
+) -> String {
+    let output_status = match restored_output {
+        Some(active) => {
+            format!("Could not switch Audio Output — {output_error}. {active} restored")
+        }
+        None => format!("Audio Output failed and could not be restored — {output_error}"),
+    };
+
+    match input_error {
+        Some(error) => format!("{output_status}. Audio Input could not reopen — {error}"),
+        None => output_status,
+    }
+}
+
 fn live_output_requests(
     backend: AudioBackend,
     output_name: Option<String>,
@@ -189,13 +207,27 @@ impl App {
             }
         };
         let previous = self.state.audio_settings.clone();
+        self.state.audio_settings.remember_current_backend();
         self.state.audio_settings.backend = backend;
         self.state.audio_settings.catalog = catalog;
         self.state.audio_settings.catalog_error = None;
-        self.state.audio_settings.preferred_input_name = None;
-        self.state.audio_settings.preferred_output_name = None;
+        self.state
+            .audio_settings
+            .restore_backend_preferences(backend);
 
-        let choice = self.state.audio_settings.selected_output_choice();
+        let remembered_output = self.state.audio_settings.preferred_output_name.clone();
+        let remembered_choice = self.state.audio_settings.selected_output_choice();
+        let choice = if remembered_choice.available {
+            remembered_choice
+        } else {
+            AudioDeviceChoice::system_default(
+                self.state
+                    .audio_settings
+                    .catalog
+                    .default_output_name
+                    .is_some(),
+            )
+        };
         let Some((sample_rate, buffer_size)) = self
             .state
             .audio_settings
@@ -211,7 +243,12 @@ impl App {
             );
             return Task::none();
         };
-        if !self.apply_audio_output_configuration(None, sample_rate, buffer_size) {
+        if !self.apply_audio_output_configuration_with_preference(
+            choice.name,
+            remembered_output,
+            sample_rate,
+            buffer_size,
+        ) {
             self.state.audio_settings = previous;
         }
         Task::none()
@@ -301,6 +338,7 @@ impl App {
             return Task::none();
         }
         self.state.audio_settings.preferred_input_name = choice.name;
+        self.state.audio_settings.remember_current_backend();
         self.state.status_text = format!(
             "Audio Input selected — {}. Recording starts only when a track is armed",
             self.state.audio_settings.input_description()
@@ -351,6 +389,21 @@ impl App {
         sample_rate: u32,
         buffer_size: u32,
     ) -> bool {
+        self.apply_audio_output_configuration_with_preference(
+            preferred_output_name.clone(),
+            preferred_output_name,
+            sample_rate,
+            buffer_size,
+        )
+    }
+
+    fn apply_audio_output_configuration_with_preference(
+        &mut self,
+        requested_output_name: Option<String>,
+        preferred_output_name: Option<String>,
+        sample_rate: u32,
+        buffer_size: u32,
+    ) -> bool {
         if self.state.audio_recording.is_busy() {
             self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
             return false;
@@ -363,12 +416,8 @@ impl App {
             // the successful path reopens it through the new output device.
             self._input_stream = None;
         }
-        let requests = live_output_requests(
-            backend,
-            preferred_output_name.clone(),
-            sample_rate,
-            buffer_size,
-        );
+        let requests =
+            live_output_requests(backend, requested_output_name, sample_rate, buffer_size);
         let result = self
             ._stream
             .as_mut()
@@ -403,12 +452,13 @@ impl App {
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
                 self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                self.state.audio_settings.remember_current_backend();
+                self.persist_ui_settings();
                 if let Err(error) = self.sync_audio_input_runtime() {
                     self.state.status_text =
                         format!("Audio Output changed, but Audio Input could not reopen — {error}");
                     return true;
                 }
-                self.persist_ui_settings();
                 self.state.status_text = if applied_request == 0 {
                     format!(
                         "{backend} Audio Output running — {}, {} Hz, {buffer_size} frames",
@@ -425,6 +475,7 @@ impl App {
             }
             Err(error) => {
                 eprintln!("vibez: audio configuration rejected: {error}");
+                let mut restored_output = None;
                 if let Some(stream) = self._stream.as_ref() {
                     self.state.audio_settings.active_backend = stream.active_backend();
                     self.state.audio_settings.active_output_name =
@@ -433,19 +484,24 @@ impl App {
                         let active = stream
                             .active_device_name()
                             .unwrap_or("the previous Audio Output");
+                        restored_output = Some(active.to_string());
                         self.state.audio_stream_health = AudioStreamHealth::Running;
-                        self.state.status_text =
-                            format!("Could not switch Audio Output — {error}. {active} restored");
+                        self.state.status_text = rejected_output_status(&error, Some(active), None);
                     } else {
                         self.state.audio_stream_health = AudioStreamHealth::Error(error.clone());
-                        self.state.status_text =
-                            format!("Audio Output failed and could not be restored — {error}");
+                        self.state.status_text = rejected_output_status(&error, None, None);
                     }
                 }
                 if self._stream.is_none() {
                     self.state.status_text = format!("Audio configuration rejected: {error}");
                 }
-                let _ = self.sync_audio_input_runtime();
+                if let Err(input_error) = self.sync_audio_input_runtime() {
+                    self.state.status_text = rejected_output_status(
+                        &error,
+                        restored_output.as_deref(),
+                        Some(&input_error),
+                    );
+                }
                 false
             }
         }
@@ -454,7 +510,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{initial_output_requests, live_output_requests};
+    use super::{initial_output_requests, live_output_requests, rejected_output_status};
     use vibez_audio_io::audio_host::AudioBackend;
     use vibez_audio_io::audio_stream::OutputStreamConfig;
 
@@ -539,6 +595,18 @@ mod tests {
                     buffer_size: None,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn rejected_output_reports_when_restored_input_cannot_reopen() {
+        assert_eq!(
+            rejected_output_status(
+                "driver rejected the format",
+                Some("ASIO4ALL v2"),
+                Some("input driver is busy"),
+            ),
+            "Could not switch Audio Output — driver rejected the format. ASIO4ALL v2 restored. Audio Input could not reopen — input driver is busy"
         );
     }
 }

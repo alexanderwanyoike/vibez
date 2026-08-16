@@ -104,7 +104,7 @@ pub(crate) fn select_stream_config(
         Err(error) => return Err(error.into()),
     };
     let sample_rate = requested_sample_rate
-        .or_else(|| default.as_ref().map(|config| config.sample_rate()))
+        .or_else(|| default.as_ref().map(|config| config.sample_rate().0))
         .expect("a requested or default sample rate is required");
     let preferred_channels =
         preferred_channels.or_else(|| default.as_ref().map(|config| config.channels()));
@@ -113,7 +113,7 @@ pub(crate) fn select_stream_config(
         StreamDirection::Output => device.supported_output_configs()?.collect(),
     };
     candidates.retain(|range| {
-        (range.min_sample_rate()..=range.max_sample_rate()).contains(&sample_rate)
+        (range.min_sample_rate().0..=range.max_sample_rate().0).contains(&sample_rate)
             && buffer_size_supported(buffer_size, range.buffer_size())
     });
     candidates.sort_by_key(|range| {
@@ -126,7 +126,7 @@ pub(crate) fn select_stream_config(
     candidates
         .into_iter()
         .next()
-        .and_then(|range| range.try_with_sample_rate(sample_rate))
+        .and_then(|range| range.try_with_sample_rate(cpal::SampleRate(sample_rate)))
         .ok_or_else(|| {
             StreamOpenError::Unsupported(format!(
                 "audio {} does not support {sample_rate} Hz with {} buffer",

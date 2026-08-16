@@ -225,15 +225,17 @@ impl App {
         ]
         .spacing(18)
         .align_y(iced::Alignment::Center);
+        let backend_section = if vibez_audio_io::audio_host::AudioBackend::available().len() > 1 {
+            column![backend_row, settings_divider()]
+        } else {
+            column![]
+        };
 
         let device_rows = if self.state.audio_settings.backend
             == vibez_audio_io::audio_host::AudioBackend::Asio
         {
-            let hardware_setup =
-                settings_action_button("Hardware Setup", Message::ShowAsioHardwareSetup, false);
             column![
-                backend_row,
-                settings_divider(),
+                backend_section,
                 row![
                     column![
                         text("Audio Device").size(12).color(th::text()),
@@ -247,24 +249,18 @@ impl App {
                 .spacing(18)
                 .align_y(iced::Alignment::Center),
                 settings_divider(),
-                row![
-                    column![
-                        text("ASIO Routing").size(12).color(th::text()),
-                        text("Choose speakers and headphones in the driver's control panel")
-                            .size(9)
-                            .color(th::text_muted())
-                    ]
-                    .spacing(1)
-                    .width(Length::Fill),
-                    hardware_setup
+                column![
+                    text("ASIO Routing").size(12).color(th::text()),
+                    text("Choose speakers and headphones in the driver's control panel. ASIO4ALL exposes it from the Windows tray while running")
+                        .size(9)
+                        .color(th::text_muted())
                 ]
-                .spacing(18)
-                .align_y(iced::Alignment::Center)
+                .spacing(1)
+                .width(Length::Fill)
             ]
         } else {
             column![
-                backend_row,
-                settings_divider(),
+                backend_section,
                 row![
                     column![
                         text("Output Device").size(12).color(th::text()),

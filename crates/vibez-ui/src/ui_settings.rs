@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use vibez_audio_io::audio_host::AudioBackend;
 
+use crate::domains::audio_settings::AudioBackendPreferences;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     /// Most recently opened or successfully saved projects, newest first.
@@ -44,14 +46,18 @@ pub struct UiSettings {
     #[serde(default)]
     pub preferred_midi_input: Option<String>,
     /// `None` follows the platform's System Default Audio Input.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub preferred_audio_input: Option<String>,
     /// Native audio API used to enumerate and open both input and output.
     #[serde(default)]
     pub audio_backend: AudioBackend,
     /// `None` follows the platform's System Default Audio Output.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub preferred_audio_output: Option<String>,
+    /// Device targets are remembered separately because names from one host
+    /// (for example WASAPI) have no meaning to another host (ASIO).
+    #[serde(default)]
+    pub audio_device_preferences: AudioBackendPreferences,
     /// `None` uses the output device's default until the producer chooses one.
     #[serde(default)]
     pub audio_sample_rate: Option<u32>,
@@ -140,6 +146,7 @@ impl Default for UiSettings {
             preferred_audio_input: None,
             audio_backend: AudioBackend::default(),
             preferred_audio_output: None,
+            audio_device_preferences: AudioBackendPreferences::default(),
             audio_sample_rate: None,
             audio_buffer_size: default_audio_buffer_size(),
             theme: None,
@@ -182,6 +189,20 @@ pub fn forget_recent_project(paths: &mut Vec<PathBuf>, path: &Path) -> bool {
 }
 
 impl UiSettings {
+    pub fn resolved_audio_device_preferences(&self) -> AudioBackendPreferences {
+        let mut preferences = self.audio_device_preferences.clone();
+        let selected = preferences.for_backend_mut(self.audio_backend);
+        if selected.input_name.is_none() {
+            selected.input_name.clone_from(&self.preferred_audio_input);
+        }
+        if selected.output_name.is_none() {
+            selected
+                .output_name
+                .clone_from(&self.preferred_audio_output);
+        }
+        preferences
+    }
+
     pub fn settings_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -354,21 +375,49 @@ mod tests {
 
     #[test]
     fn audio_configuration_roundtrips_outside_project_state() {
+        let mut preferences = AudioBackendPreferences::default();
+        preferences.asio.input_name = Some("USB In".into());
+        preferences.asio.output_name = Some("USB Out".into());
         let settings = UiSettings {
-            preferred_audio_input: Some("USB In".into()),
             audio_backend: AudioBackend::Asio,
-            preferred_audio_output: Some("USB Out".into()),
+            audio_device_preferences: preferences,
             audio_sample_rate: Some(48_000),
             audio_buffer_size: 128,
             ..Default::default()
         };
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert_eq!(loaded.preferred_audio_input.as_deref(), Some("USB In"));
         assert_eq!(loaded.audio_backend, AudioBackend::Asio);
-        assert_eq!(loaded.preferred_audio_output.as_deref(), Some("USB Out"));
+        assert_eq!(
+            loaded.audio_device_preferences.asio.input_name.as_deref(),
+            Some("USB In")
+        );
+        assert_eq!(
+            loaded.audio_device_preferences.asio.output_name.as_deref(),
+            Some("USB Out")
+        );
         assert_eq!(loaded.audio_sample_rate, Some(48_000));
         assert_eq!(loaded.audio_buffer_size, 128);
+    }
+
+    #[test]
+    fn legacy_audio_device_names_migrate_into_their_saved_backend() {
+        let loaded: UiSettings = serde_json::from_str(
+            r#"{
+                "audio_backend": "asio",
+                "preferred_audio_input": "ASIO4ALL v2",
+                "preferred_audio_output": "ASIO4ALL v2"
+            }"#,
+        )
+        .unwrap();
+        let preferences = loaded.resolved_audio_device_preferences();
+
+        assert_eq!(preferences.asio.input_name.as_deref(), Some("ASIO4ALL v2"));
+        assert_eq!(preferences.asio.output_name.as_deref(), Some("ASIO4ALL v2"));
+        assert_eq!(
+            preferences.system,
+            crate::domains::audio_settings::AudioDevicePreferences::default()
+        );
     }
 
     #[test]
