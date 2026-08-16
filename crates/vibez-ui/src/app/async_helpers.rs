@@ -5,9 +5,21 @@ use super::*;
 
 pub(super) async fn decode_local_for_preview_async(
     path: PathBuf,
-) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
-    let audio = decode_file_async(path).await?;
-    Ok(Arc::new(audio))
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    tokio::task::spawn_blocking(move || {
+        let name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let audio = file_io::decode_audio_file(&path).map_err(|error| error.to_string())?;
+        let loop_fit = crate::warp::analyse_loop_tempo(&audio, &name);
+        Ok(crate::message::AnalysedBrowserAudio {
+            audio: Arc::new(audio),
+            loop_fit,
+        })
+    })
+    .await
+    .map_err(|error| format!("preview decode task failed: {error}"))?
 }
 
 pub(super) async fn decode_file_async(

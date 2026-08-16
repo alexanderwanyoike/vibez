@@ -41,28 +41,27 @@ pub struct AuditionImportInput {
 }
 
 impl AuditionImportInput {
-    /// Resolve Browser WARP from the same complete-loop grid fit used by
-    /// Audition. Sources with no plausible loop interpretation fall back to
-    /// RAW so one-shots are never stretched into arbitrary bar lengths.
+    /// Resolve Browser WARP from source evidence only. Project tempo is not an
+    /// input because it must never change the identified source tempo.
     pub fn resolve_for_audio(
         mut self,
         audio: &DecodedAudio,
-        project_bpm: f64,
+        source_name: &str,
     ) -> Result<Self, String> {
         if self.mode == AuditionMode::Raw {
             return Ok(self);
         }
-        if audio.num_frames() == 0
-            || audio.sample_rate == 0
-            || !project_bpm.is_finite()
-            || project_bpm <= 0.0
-        {
+        if audio.num_frames() == 0 || audio.sample_rate == 0 {
             return Err("Cannot prepare empty or invalid audio".into());
         }
-        let Some(fit) = crate::warp::fit_loop_to_project(
+        if self.source_bpm.is_some() {
+            return Ok(self);
+        }
+        let Some(fit) = crate::warp::fit_loop_tempo(
             audio.num_frames(),
             audio.sample_rate as f64,
-            project_bpm,
+            source_name,
+            None,
         ) else {
             self.mode = AuditionMode::Raw;
             self.source_bpm = None;

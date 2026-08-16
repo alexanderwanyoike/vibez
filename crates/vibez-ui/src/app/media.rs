@@ -307,11 +307,7 @@ impl App {
         source: MediaSourceRef,
         raw: Arc<DecodedAudio>,
     ) -> Task<Message> {
-        match self
-            .state
-            .browser
-            .audition_playback_plan(&raw, self.state.transport.bpm)
-        {
+        match self.state.browser.audition_playback_plan(&source) {
             crate::state::BrowserAuditionPlan::Raw => {
                 self.start_browser_audition(raw, AuditionMode::Raw);
                 Task::none()
@@ -444,7 +440,7 @@ impl App {
         source: MediaSourceRef,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
-        let treatment = match treatment.resolve_for_audio(&raw, project_bpm) {
+        let treatment = match treatment.resolve_for_audio(&raw, &name) {
             Ok(treatment) => treatment,
             Err(error) => {
                 self.state.status_text = format!("{error}: {name}");

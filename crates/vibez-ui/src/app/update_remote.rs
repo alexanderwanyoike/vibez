@@ -489,6 +489,12 @@ impl App {
         };
         match result {
             Ok(materialized) => {
+                let loop_fit = crate::warp::fit_loop_tempo(
+                    materialized.audio.num_frames(),
+                    materialized.audio.sample_rate as f64,
+                    &materialized.name,
+                    materialized.metadata.bpm,
+                );
                 self.state
                     .browser
                     .remote
@@ -507,6 +513,7 @@ impl App {
                         generation,
                         source.clone(),
                         Arc::clone(&materialized.audio),
+                        loop_fit,
                     ) {
                         self.play_browser_mode(source, materialized.audio)
                     } else {
@@ -515,7 +522,7 @@ impl App {
                 } else {
                     self.state
                         .browser
-                        .install_waveform(source, materialized.audio);
+                        .install_waveform(source, materialized.audio, loop_fit);
                     self.state.status_text = format!("Cached Remote media: {}", materialized.name);
                     Task::none()
                 };

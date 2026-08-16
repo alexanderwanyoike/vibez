@@ -63,9 +63,9 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let audition = decode_local_for_preview_async(source_path.clone())
             .await
             .unwrap();
-        assert_eq!(audition.num_channels(), channels, "{file_name}");
-        assert_eq!(audition.sample_rate, sample_rate, "{file_name}");
-        assert_audible(Arc::clone(&audition), file_name);
+        assert_eq!(audition.audio.num_channels(), channels, "{file_name}");
+        assert_eq!(audition.audio.sample_rate, sample_rate, "{file_name}");
+        assert_audible(Arc::clone(&audition.audio), file_name);
 
         let mut browser = crate::state::BrowserState {
             entries: catalog.entries,
@@ -76,7 +76,8 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         assert!(browser.install_audition(
             generation,
             browser.selected_source.clone().unwrap(),
-            Arc::clone(&audition)
+            Arc::clone(&audition.audio),
+            audition.loop_fit,
         ));
         let metadata = &browser.entries[0];
         assert_eq!(metadata.channels, Some(channels));
@@ -88,7 +89,11 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let (imported, staged) = decode_and_stage_local_async(source_path.clone())
             .await
             .unwrap();
-        assert_eq!(imported.num_frames(), audition.num_frames(), "{file_name}");
+        assert_eq!(
+            imported.num_frames(),
+            audition.audio.num_frames(),
+            "{file_name}"
+        );
         let track = TrackInfo::new("Audio");
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {

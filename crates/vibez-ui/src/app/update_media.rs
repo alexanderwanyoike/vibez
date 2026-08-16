@@ -480,12 +480,13 @@ impl App {
         &mut self,
         source: MediaSourceRef,
         generation: u64,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        analysed: crate::message::AnalysedBrowserAudio,
     ) -> Task<Message> {
+        let crate::message::AnalysedBrowserAudio { audio, loop_fit } = analysed;
         if self
             .state
             .browser
-            .install_audition(generation, source, Arc::clone(&audio))
+            .install_audition(generation, source, Arc::clone(&audio), loop_fit)
         {
             let source = self.state.browser.selected_source.clone().unwrap();
             return self.play_browser_mode(source, audio);
@@ -512,9 +513,13 @@ impl App {
     pub(super) fn on_browser_waveform_ready(
         &mut self,
         source: MediaSourceRef,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        analysed: crate::message::AnalysedBrowserAudio,
     ) -> Task<Message> {
-        if self.state.browser.install_waveform(source, audio) {
+        if self
+            .state
+            .browser
+            .install_waveform(source, analysed.audio, analysed.loop_fit)
+        {
             self.state.status_text = "Waveform ready".into();
         }
         Task::none()
