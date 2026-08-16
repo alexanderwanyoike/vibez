@@ -550,9 +550,7 @@ impl App {
                     SampleBrowserMode::Local,
                 ))
                 .height(Length::Fill)
-                .direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::default()
-                ))
+                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
             .padding(8)
