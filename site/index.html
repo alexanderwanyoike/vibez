@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vibez: Perform, Arrange, Mix</title>
-<meta name="description" content="vibez is an open source DAW for electronic music, written in Rust. Perform a track from a pad grid, arrange what you played on a timeline, and mix it on a real console.">
+<title>vibez: Make the first loop. Play the rest.</title>
+<meta name="description" content="vibez is a free and open source DAW for electronic music. Build ideas as Sections, play them from pads, and capture the performance as an arrangement.">
 <meta name="theme-color" content="#0c0d10">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://alexanderwanyoike.github.io/vibez/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://alexanderwanyoike.github.io/vibez/">
-<meta property="og:title" content="vibez: Perform, Arrange, Mix">
-<meta property="og:description" content="vibez is an open source DAW for electronic music, written in Rust. Perform a track from a pad grid, arrange what you played on a timeline, and mix it on a real console.">
+<meta property="og:title" content="vibez: Make the first loop. Play the rest.">
+<meta property="og:description" content="A free and open source DAW for electronic music. Build ideas as Sections, play them from pads, and capture the performance as an arrangement.">
 <meta property="og:image" content="https://alexanderwanyoike.github.io/vibez/images/og.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="vibez: Perform, Arrange, Mix">
-<meta name="twitter:description" content="vibez is an open source DAW for electronic music, written in Rust. Perform a track from a pad grid, arrange what you played on a timeline, and mix it on a real console.">
+<meta name="twitter:title" content="vibez: Make the first loop. Play the rest.">
+<meta name="twitter:description" content="A free and open source DAW for electronic music. Build ideas as Sections, play them from pads, and capture the performance as an arrangement.">
 <meta name="twitter:image" content="https://alexanderwanyoike.github.io/vibez/images/og.png">
 <style>
 /* ============================================================
@@ -92,27 +92,25 @@ body {
 .wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
 
 /* ---------- hero ---------- */
-.hero { padding: 88px 0 20px; }
+.hero { padding: 92px 0 44px; }
 .eyebrow {
   font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
   text-transform: uppercase; color: var(--blue); margin: 0 0 22px;
 }
+.hero-grid { display: grid; gap: 28px; align-items: end; }
+@media (min-width: 900px) {
+  .hero-grid { grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 56px; }
+}
 h1 {
-  font-size: clamp(38px, 6.4vw, 78px); line-height: 1.05;
-  letter-spacing: -.035em; font-weight: 700; margin: 0;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px;
+  font-size: clamp(48px, 7.4vw, 92px); line-height: .98;
+  letter-spacing: -.052em; font-weight: 700; margin: 0; max-width: 10.5ch;
 }
-h1 span { position: relative; padding-bottom: 12px; }
-h1 span::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
-  height: 3px; background: var(--c);
-}
-h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 12px; line-height: 1; }
-@media (max-width: 560px) { h1 { gap: 0 10px; } }
+h1 em { color: var(--blue); font-style: normal; font-weight: inherit; }
 
-.sub { margin: 26px 0 0; max-width: 62ch; color: var(--dim); font-size: 19px; }
+.hero-copy { padding-bottom: 5px; }
+.sub { margin: 0; max-width: 48ch; color: var(--dim); font-size: 19px; }
 .sub strong { color: var(--text); font-weight: 600; }
-.cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 34px; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 28px; }
 .btn {
   display: inline-block; text-decoration: none; background: var(--blue); color: #fff;
   font-weight: 600; padding: 12px 22px; border-radius: 4px; font-size: 15px;
@@ -123,7 +121,7 @@ h1 b { color: var(--blue); font-weight: 400; font-size: .58em; padding-bottom: 1
   color: var(--text); padding: 12px 22px; border-radius: 4px; font-size: 15px;
 }
 .btn-2:hover { border-color: var(--line-2); background: var(--panel); }
-.plat { font-family: var(--mono); font-size: 12px; color: var(--dimmer); }
+.plat { width: 100%; font-family: var(--mono); font-size: 11px; color: var(--dimmer); margin-top: 3px; }
 
 /* ---------- promotional film ---------- */
 .showreel { padding: 34px 0 52px; }
@@ -287,6 +285,17 @@ h3.sub2 em {
 /* ---------- shortcut tables ---------- */
 .keysets { display: grid; gap: 22px; margin-top: 40px; }
 @media (min-width: 900px) { .keysets { grid-template-columns: 1fr 1fr; } }
+.shortcut-details { margin-top: 34px; border-top: 1px solid var(--line); }
+.shortcut-details summary {
+  cursor: pointer; list-style: none; padding: 17px 0;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--dim);
+}
+.shortcut-details summary::-webkit-details-marker { display: none; }
+.shortcut-details summary::before { content: "+"; color: var(--blue); margin-right: 10px; }
+.shortcut-details[open] summary::before { content: "−"; }
+.shortcut-details summary:hover { color: var(--text); }
+.shortcut-details .keysets { margin-top: 16px; }
 .keyset { border: 1px solid var(--line); border-radius: 5px; overflow: hidden; align-self: start; }
 .keyset h3 {
   margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
@@ -372,10 +381,10 @@ footer a:hover { color: var(--text); }
     <span class="ver">__VERSION__</span>
     <nav>
       <a href="#watch">Watch</a>
-      <a href="#perform">Perform</a>
-      <a href="#arrange">Arrange</a>
+      <a href="#perform">Sections</a>
+      <a href="#keys">Pads</a>
+      <a href="#arrange">Capture</a>
       <a href="#mix">Mix</a>
-      <a href="#keys">Keys</a>
       <a href="#download">Download</a>
     </nav>
   </div>
@@ -385,49 +394,46 @@ footer a:hover { color: var(--text); }
 <main>
   <div class="wrap">
     <section class="hero">
-      <p class="eyebrow">Open source DAW &middot; written in Rust</p>
-      <h1>
-        <span style="--c: var(--kick)">Perform</span>
-        <b>&rarr;</b>
-        <span style="--c: var(--bass)">Arrange</span>
-        <b>&rarr;</b>
-        <span style="--c: var(--clap)">Mix</span>
-      </h1>
-      <p class="sub">
-        One track, three workspaces, in that order. You <strong>Perform</strong> it from a pad grid,
-        you <strong>Arrange</strong> what you played on a linear timeline, and you
-        <strong>Mix</strong> it on a real console. Capture is the hinge between the first two: it
-        turns a live performance into editable arrangement.
-      </p>
-      <div class="cta">
-        <a class="btn" href="#download">Download __VERSION__</a>
-        <a class="btn-2" href="#watch">Watch the film</a>
-        <a class="btn-2" href="https://github.com/alexanderwanyoike/vibez">Source on GitHub</a>
-        <span class="plat">Linux &middot; macOS &middot; Windows &middot; GPL-3.0</span>
+      <p class="eyebrow">Free and open source &middot; made for electronic music</p>
+      <div class="hero-grid">
+        <h1>Make the first loop. <em>Play the rest.</em></h1>
+        <div class="hero-copy">
+          <p class="sub">
+            Build ideas as <strong>Sections</strong>, play them from pads, and capture the
+            performance when it feels right. vibez brings a hardware-shaped workflow to your
+            computer, with no controller required.
+          </p>
+          <div class="cta">
+            <a class="btn" href="#download">Download __VERSION__</a>
+            <a class="btn-2" href="#watch">Watch it work</a>
+            <a class="btn-2" href="https://github.com/alexanderwanyoike/vibez">View source</a>
+            <span class="plat">Linux &middot; macOS &middot; Windows &middot; GPL-3.0-or-later</span>
+          </div>
+        </div>
       </div>
     </section>
 
     <section class="showreel" id="watch" aria-labelledby="showreel-title">
       <div class="showreel-head">
         <div>
-          <p class="hint"><i></i> Live techno workflow</p>
-          <h2 id="showreel-title">See the whole signal path in motion.</h2>
+          <p class="hint"><i></i> vibez in use</p>
+          <h2 id="showreel-title">One idea, played all the way through.</h2>
         </div>
         <p class="lede">
-          From launching Sections and shaping a live performance to Capture, Arrange and the final
-          mix: this is vibez used as one continuous instrument.
+          A live techno session moving from Sections to Track Mutes, Capture, Arrange and the final
+          mix. No feature reel&mdash;just the workflow doing its job.
         </p>
       </div>
       <div class="monitor">
         <div class="monitor-bar">
           <span class="monitor-light" aria-hidden="true"></span>
           <span>Now playing</span>
-          <span>Perform &rarr; Arrange &rarr; Mix</span>
+          <span>Sections &rarr; Capture &rarr; Arrange</span>
         </div>
         <div class="video-frame">
           <iframe
             src="https://www.youtube-nocookie.com/embed/pdNbG7v-OKk"
-            title="Vibez: Perform, Arrange, Mix | Live Techno Workflow"
+            title="vibez: Perform, Arrange, Mix | Live Techno Workflow"
             loading="lazy"
             referrerpolicy="strict-origin-when-cross-origin"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -436,7 +442,7 @@ footer a:hover { color: var(--text); }
         </div>
         <div class="monitor-foot">
           <a href="https://www.youtube.com/watch?v=pdNbG7v-OKk">A film by Osmosis &middot; Watch on YouTube &nearr;</a>
-          <span>Live performance &middot; capture &middot; arrangement &middot; mix</span>
+          <span>Made with vibez</span>
         </div>
       </div>
     </section>
@@ -444,10 +450,11 @@ footer a:hover { color: var(--text); }
     <section class="padhero">
       <div class="padhero-in">
         <div>
-          <p class="hint"><i></i> Press a key, or click a pad</p>
+          <p class="hint"><i></i> Sixteen pads, already under your fingers</p>
           <div class="padgrid" id="padgrid"></div>
           <p class="padlegend">
-            The real grid uses the same keys: 1234 / QWER / ASDF / ZXCV, rebindable in the app.
+            Press 1234 / QWER / ASDF / ZXCV. Give it five minutes and the layout starts to
+            disappear.
           </p>
         </div>
         <div class="padpanel">
@@ -472,19 +479,19 @@ footer a:hover { color: var(--text); }
     <section class="band" id="perform">
       <div class="band-head">
         <span class="stripe" style="background: var(--kick)"></span>
-        <h2>Perform</h2>
-        <span class="role">Workspace 01</span>
+        <h2>Build the seed.</h2>
+        <span class="role">Perform &middot; Sections</span>
       </div>
       <p class="lede">
-        Sections are reusable multitrack loops that share your project's tracks, instruments,
-        effects and mixer. You author one with the same editor you use in Arrange, then launch it
-        from the pad grid. The same 16 pads do three jobs, and F1 to F3 pick which.
+        Most tracks begin with one phrase. Put the drums, bass, chords and whatever else belongs
+        together into a Section. Make the next one euphoric, stripped back or twice as urgent. It
+        can be a variation or a different tune altogether.
       </p>
       <ul class="grid2">
-        <li><b>Sections mode</b><span>Launches on a musical boundary: immediate, 1 beat, 1 bar, or end of section. A Section triggered slightly late still lands where you meant it.</span></li>
-        <li><b>Instrument mode</b><span>The same 16 pads become a playable instrument for the selected track, with Full Level, 16 Levels and Note Repeat.</span></li>
-        <li><b>Track Mutes mode</b><span>Mute and unmute tracks on that grid, through an anti-click ramp so tails gate cleanly instead of clicking.</span></li>
-        <li><b>Swing</b><span>Modelled on the MPC2000XL. Set it per project, per track, or per clip, and automate it.</span></li>
+        <li><b>Sections <kbd>F1</kbd></b><span>Launch complete musical ideas from the grid. Quantized starts keep changes in time without taking the spontaneity out of them.</span></li>
+        <li><b>Track Mutes <kbd>F2</kbd></b><span>Bring parts in and out from the same pads. This is often all it takes to stretch one loop into a full arrangement.</span></li>
+        <li><b>Instrument <kbd>F3</kbd></b><span>Play the selected instrument with Full Level, 16 Levels and Note Repeat&mdash;closer to a drum machine than a piano roll.</span></li>
+        <li><b>Feel</b><span>Swing is modelled on the MPC2000XL and can live at project, track or clip level.</span></li>
       </ul>
       <figure class="shot">
         <img src="images/band-perform.webp" alt="The Perform workspace: a 16 pad grid of named Sections beside the Section editor" width="1100">
@@ -497,24 +504,28 @@ footer a:hover { color: var(--text); }
     <div class="wrap">
       <div class="band-head">
         <span class="stripe" style="background: var(--bass)"></span>
-        <h2>Arrange</h2>
-        <span class="role">Workspace 02 &middot; where the performance lands</span>
+        <h2>Play it into shape.</h2>
+        <span class="role">Capture &middot; Arrange</span>
       </div>
       <p class="lede">
-        Arrange is the linear timeline. Multi-track audio and MIDI, clip drag, resize, split and
-        join, time selection, looping, an overview minimap, warping with tempo follow, a piano
-        roll, and automation across tracks, devices, plugins, buses, sends and master.
+        Switch to Track Mutes and perform the structure while the track is running. When a change
+        lands, keep it. When it does not, try another pass. Capture writes the result into Arrange
+        as normal clips and automation you can edit afterwards.
       </p>
 
-      <h3 class="sub2">Capture is how a performance gets here <em>F5</em></h3>
+      <h3 class="sub2">From a jam to a timeline <em>F5</em></h3>
       <p class="lede">
-        Capture records an entire performance, Section launches, live playing, mutes and
-        automation gestures, and writes it into Arrange as ordinary clips and automation lanes you
-        can edit afterwards. It is timed against the audio engine's sample clock, not the UI frame
-        rate. Captured material keeps no reference back to its Sections, so editing a Section later
-        never rewrites a take you already recorded, and everything Capture writes is material you
-        could have drawn by hand.
+        Section launches, live notes, track mutes and automation gestures all come across. The take
+        is independent of the Sections that made it, so you can reshape it without changing the
+        original ideas. Prefer to record directly? Audio tracks can take soundcard inputs or the
+        output of an instrument track, with the waveform drawn as the take happens.
       </p>
+      <ul class="grid2">
+        <li><b>Audio in</b><span>Choose the soundcard, input and channel, arm the track, then record microphones, instruments or the output of a mixer.</span></li>
+        <li><b>Resample a track</b><span>Route an instrument track into an audio track and record it without leaving the project.</span></li>
+        <li><b>Warped samples</b><span>Audition loops against the playing track. Warp detects their tempo and follows the project BPM.</span></li>
+        <li><b>Autosave</b><span>Projects are saved to a versioned, self-contained file, with autosave working in the background.</span></li>
+      </ul>
       <figure class="shot">
         <img src="images/band-arrange.webp" alt="A captured performance written into the Arrangement, with Track Mute automation lanes" width="1100">
         <figcaption>Arrange &middot; a captured take &middot; Track Mute automation written alongside the clips</figcaption>
@@ -526,14 +537,13 @@ footer a:hover { color: var(--text); }
     <section class="band" id="mix">
       <div class="band-head">
         <span class="stripe" style="background: var(--clap)"></span>
-        <h2>Mix</h2>
-        <span class="role">Workspace 03</span>
+        <h2>Finish on a console.</h2>
+        <span class="role">Mix</span>
       </div>
       <p class="lede">
-        A real console rather than a row of faders. Every channel has its own four band EQ, pan,
-        fader, metering, mute and solo. There are buses, returns and sends, the master is an actual
-        channel, and the device rack below follows the selected one. It hosts the built-in synth,
-        sampler and drum rack alongside VST3 and CLAP plugins with their native interfaces.
+        The Mix workspace takes its shape from an analogue desk: a four-band EQ on every channel,
+        proper buses, returns and sends, and a master that behaves like a channel. The device rack
+        follows your selection and hosts vibez instruments alongside VST3 and CLAP plugins.
       </p>
       <figure class="shot">
         <img src="images/band-mix.webp" alt="The Mix workspace: channel strips with EQ curves, the master channel, and the device rack" width="1100">
@@ -544,12 +554,13 @@ footer a:hover { color: var(--text); }
     <section class="band" id="keys">
       <div class="band-head">
         <span class="stripe" style="background: var(--chat)"></span>
-        <h2>Keys</h2>
-        <span class="role">The whole keyboard</span>
+        <h2>Your keyboard is the controller.</h2>
+        <span class="role">No extra hardware required</span>
       </div>
       <p class="lede">
-        The pads are the four rows in the middle of the keyboard. Everything else is transport and
-        editing, and the app never steals a key from a text field you are typing in.
+        The four rows in the middle become a sixteen-pad grid. Learn the three modes, let the
+        layout become muscle memory, and before long you are listening to the music instead of
+        looking for keys. Connect MIDI gear if you have it; start without it if you do not.
       </p>
 
       <div class="boardwrap">
@@ -603,6 +614,8 @@ footer a:hover { color: var(--text); }
         <span><i class="swatch" style="background: var(--ink)"></i> Unused</span>
       </div>
 
+      <details class="shortcut-details">
+        <summary>Open the full keyboard reference</summary>
       <div class="keysets">
         <div class="keyset">
           <h3>Perform</h3>
@@ -664,32 +677,32 @@ footer a:hover { color: var(--text); }
         The app resolves a single command modifier per platform, so a shortcut never wants Cmd
         for one thing and Ctrl for another.
       </p>
+      </details>
     </section>
 
     <section class="band">
       <div class="band-head">
         <span class="stripe" style="background: var(--chords)"></span>
-        <h2>What it does not do yet</h2>
-        <span class="role">__VERSION__</span>
+        <h2>Open, useful and still early.</h2>
+        <span class="role">Alpha &middot; __VERSION__</span>
       </div>
       <p class="lede">
-        It is an alpha and worth saying so plainly. Linux is the primary development platform;
-        macOS and Windows build and pass CI on every change but get less hands-on testing. Projects
-        save to a self-contained versioned container, but breaking format changes are still
-        possible.
+        vibez is free software, released under the GPL and developed in public. It is already a
+        working music-making environment, but it is an alpha: projects can change between releases
+        and some familiar DAW tools are still on the way.
       </p>
       <div class="hgrid">
         <div class="hcell">
+          <span class="tag part">Today</span>
+          <p><b>Linux leads development.</b> macOS and Windows build and pass CI on every change, but receive less hands-on testing.</p>
+        </div>
+        <div class="hcell">
           <span class="tag part">Partial</span>
-          <p><b>MIDI input.</b> One port at a time, notes only, into the selected instrument track. The pads are computer keys today; controller mapping is the next milestone.</p>
+          <p><b>MIDI input.</b> Play notes into the selected instrument track from one port at a time. Full controller mapping is still to come.</p>
         </div>
         <div class="hcell">
-          <span class="tag miss">Missing</span>
-          <p><b>Recording.</b> No audio input, no MIDI recording, and no MIDI output. Section Record and Capture work on what the app itself plays.</p>
-        </div>
-        <div class="hcell">
-          <span class="tag miss">Missing</span>
-          <p><b>Safety nets.</b> No autosave or crash recovery yet, and no audio fades or crossfades.</p>
+          <span class="tag miss">Not yet</span>
+          <p><b>Some audio editing.</b> Fades, crossfades, reverse, slicing and transient editing are not in this release.</p>
         </div>
       </div>
     </section>
@@ -802,13 +815,13 @@ cd vibez &amp;&amp; cargo run --release</code>
      elise2 project, framed on the control the pad is about. */
   var PADS = [
     { k: '1', n: 'Sections',        m: 'Perform \u00b7 F1', s: 'images/sections.webp', c: 'Perform \u00b7 Sections mode \u00b7 bank 1',
-      d: 'Reusable multitrack loops that share the project\'s tracks, instruments, effects and mixer. Launch one from a pad and it lands on the next musical boundary.' },
+      d: 'Put a complete musical idea on a pad. The next Section can be a small variation, a burst of energy or a different tune altogether.' },
     { k: '2', n: 'Track Mutes',     m: 'Perform \u00b7 F2', s: 'images/trackmutes.webp', c: 'Perform \u00b7 Track Mutes \u00b7 one pad per project track',
-      d: 'The same grid mutes and unmutes tracks, through an anti-click ramp so tails gate cleanly instead of clicking. Pads keep their track across additions and deletions.' },
+      d: 'The same grid now controls the tracks. Bring drums, bass and chords in and out while the music keeps moving.' },
     { k: '3', n: 'Instrument',      m: 'Perform \u00b7 F3', s: 'images/instrument.webp', c: 'Perform \u00b7 Instrument mode \u00b7 the kit across 16 pads',
       d: 'The 16 pads become a playable instrument for the selected track, so you can play a part in rather than draw it. Hold Shift to see the targets.' },
     { k: '4', n: 'Capture',         m: 'Perform into Arrange \u00b7 F5', s: 'images/capture.webp', c: 'Perform \u00b7 Capture armed for Arrange',
-      d: 'Records the whole performance into Arrange as ordinary editable clips and automation, timed on the engine\'s sample clock rather than the UI frame rate.' },
+      d: 'Turn the jam into an arrangement. Section changes, live notes, mutes and automation land in Arrange as ordinary editable material.' },
     { k: 'Q', n: 'Section Record',  m: 'Perform \u00b7 F4', s: 'images/sectionrec.webp', c: 'Perform \u00b7 Section Record \u00b7 count-in and Overdub',
       d: 'Record into a Section with a count-in, in Overdub or Replace, timed against the audio engine.' },
     { k: 'W', n: 'Swing',           m: 'Perform \u00b7 per project, track or clip', s: 'images/swing.webp', c: 'Perform \u00b7 swing following the project',
@@ -820,7 +833,7 @@ cd vibez &amp;&amp; cargo run --release</code>
     { k: 'A', n: '16 Levels',       m: 'Perform \u00b7 Instrument mode', s: 'images/sixteenlevels.webp', c: 'Perform \u00b7 16 Levels spread across pitch',
       d: 'Spread one sound across all sixteen pads, so the grid becomes a controller for velocity or pitch across a chosen range.' },
     { k: 'S', n: 'Quantized launch', m: 'Perform \u00b7 per Section', s: 'images/quantize.webp', c: 'Perform \u00b7 launch quantize on the selected Section',
-      d: 'Immediate, 1 beat, 1 bar, or end of section. A pad hit slightly late still lands where you meant it.' },
+      d: 'Choose immediate, one beat, one bar or the end of the Section. A slightly late pad hit still lands where you meant it.' },
     { k: 'D', n: 'Banks',           m: 'Perform \u00b7 [ and ]', s: 'images/banks.webp', c: 'Perform \u00b7 bank 1, ordered top left',
       d: 'Square brackets move between banks of sixteen, so the grid is not a hard limit on how many Sections a set can hold.' },
     { k: 'F', n: 'Piano roll',      m: 'Arrange \u00b7 B', s: 'images/pianoroll.webp', c: 'Arrange \u00b7 piano roll on a captured clip',
@@ -828,7 +841,7 @@ cd vibez &amp;&amp; cargo run --release</code>
     { k: 'Z', n: 'Automation',      m: 'Arrange', s: 'images/automation.webp', c: 'Arrange \u00b7 picking an automation target, device parameters included',
       d: 'Automation lanes for track, mixer, device and plugin parameters, on tracks, buses, sends and master. The mute gestures from a performance arrive here as editable lanes.' },
     { k: 'X', n: 'Warping',         m: 'Browser and Arrange', s: 'images/warping.webp', c: 'Browser \u00b7 warp audition \u00b7 source 132.7 detected against project 128',
-      d: 'vibez detects a sample\'s tempo and time-stretches it to the project. Audition in RAW or WARP before you commit, and once a clip is warped, changing the project tempo re-warps it so the arrangement stays in sync.' },
+      d: 'Preview a loop against the playing track. Warp detects its tempo, fits it to the project BPM and keeps it there when the tempo changes.' },
     { k: 'C', n: 'Channel EQ',      m: 'Mix', s: 'images/channeleq.webp', c: 'Mix \u00b7 every channel with its own four band EQ',
       d: 'A four band EQ on every channel, plus buses, returns, sends, and a master that is a real channel rather than a summing shortcut.' },
     { k: 'V', n: 'Device rack',     m: 'Mix', s: 'images/devicerack.webp', c: 'Mix \u00b7 the rack following the selected channel',
