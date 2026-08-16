@@ -281,25 +281,6 @@ impl App {
         };
     }
 
-    /// Keep a truthful RAW voice underneath BPM editing and WARP preparation.
-    /// Repeated calls are idempotent so UI state changes do not restart a loop.
-    /// Returns whether a RAW voice is active or was successfully requested.
-    pub(super) fn ensure_raw_browser_audition(&mut self) -> bool {
-        if self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
-            && (self.state.browser.audition_playing || self.state.browser.audition_queued)
-        {
-            return true;
-        }
-        let Some(source) = self.state.browser.selected_source.clone() else {
-            return false;
-        };
-        let Some(raw) = self.state.browser.waveform_for_source(&source) else {
-            return false;
-        };
-        self.start_browser_audition(raw, AuditionMode::Raw);
-        true
-    }
-
     pub(super) fn prepare_browser_warp(
         &mut self,
         source: MediaSourceRef,
@@ -336,7 +317,6 @@ impl App {
                 Task::none()
             }
             crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
-                let _ = self.ensure_raw_browser_audition();
                 self.prepare_browser_warp(source, raw, source_bpm)
             }
         }

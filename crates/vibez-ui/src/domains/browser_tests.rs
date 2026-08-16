@@ -107,7 +107,7 @@ fn changing_selection_clears_waveform_and_rejects_stale_decode() {
     let generation = browser.begin_audition_load(&first);
     assert!(browser.install_audition(generation, first.clone(), std::sync::Arc::clone(&audio)));
     assert!(browser.waveform_audio.is_some());
-    assert!(browser.audition_playing);
+    assert!(!browser.audition_playing);
 
     browser.select_source(second);
     assert!(browser.waveform_audio.is_none());
@@ -140,7 +140,7 @@ fn stopping_or_superseding_an_audition_invalidates_in_flight_decodes() {
     let new = browser.begin_audition_load(&source);
     assert!(!browser.install_audition(old, source.clone(), std::sync::Arc::clone(&audio)));
     assert!(browser.install_audition(new, source, audio));
-    assert!(browser.audition_playing);
+    assert!(!browser.audition_playing);
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn selected_source_can_reuse_its_decoded_waveform_for_retriggering() {
 }
 
 #[test]
-fn warp_preparation_keeps_the_loaded_waveform_and_raw_voice_live() {
+fn warp_preparation_keeps_the_loaded_waveform_without_claiming_playback() {
     let source = MediaSourceRef::LocalFile {
         path: PathBuf::from("/samples/loop.wav"),
     };
@@ -232,21 +232,17 @@ fn warp_preparation_keeps_the_loaded_waveform_and_raw_voice_live() {
     let mut browser = BrowserState::default();
     browser.select_source(source.clone());
     assert!(browser.install_waveform(source.clone(), audio));
-    browser.mark_audition_requested(false, crate::state::AuditionMode::Raw);
 
     let preparation = browser.begin_audition_preparation(&source);
     assert!(browser.audition_loading);
     assert!(!browser.waveform_loading);
-    assert!(browser.audition_playing);
+    assert!(!browser.audition_playing);
 
     browser.cancel_audition_preparation();
     assert!(!browser.audition_request_is_current(preparation));
     assert!(!browser.audition_loading);
-    assert!(browser.audition_playing);
-    assert_eq!(
-        browser.audition_playback_mode,
-        Some(crate::state::AuditionMode::Raw)
-    );
+    assert!(!browser.audition_playing);
+    assert_eq!(browser.audition_playback_mode, None);
 }
 
 #[test]

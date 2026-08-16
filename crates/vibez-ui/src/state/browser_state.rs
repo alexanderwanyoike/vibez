@@ -446,7 +446,6 @@ impl BrowserState {
             return false;
         }
         self.audition_loading = false;
-        self.audition_playing = true;
         true
     }
 
