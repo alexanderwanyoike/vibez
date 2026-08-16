@@ -450,8 +450,11 @@ a background thread, stages it in Project Media, and only then inserts the
 canonical clip. Device loss abandons the open project transaction, leaving no
 partial clip; bounded-buffer overflow stops capture and offers the valid prefix
 as a visibly warned take. Input route and monitoring mode are project state;
-soundcard selection, sample rate, and buffer size remain global application
-settings.
+audio backend, soundcard selection, sample rate, and buffer size remain global
+application settings. The same selected backend opens input and output:
+CoreAudio on macOS, ALSA on Linux, and selectable WASAPI or ASIO on Windows.
+ASIO presents one driver choice for both directions rather than allowing an
+invalid pair of independent ASIO drivers.
 
 That exact position is the output-clock boundary, not calibrated acoustic
 alignment. V1 does not measure input/output round-trip latency or continuously

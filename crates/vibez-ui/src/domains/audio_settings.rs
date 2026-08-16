@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use vibez_audio_io::audio_host::{AudioDeviceCatalog, DeviceInfo, SupportedConfigRange};
+use vibez_audio_io::audio_host::{
+    AudioBackend, AudioDeviceCatalog, DeviceInfo, SupportedConfigRange,
+};
 
 pub const BUFFER_SIZE_CHOICES: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
@@ -55,6 +57,11 @@ impl fmt::Display for AudioSampleRate {
 
 #[derive(Debug, Clone)]
 pub struct AudioSettingsState {
+    /// Persisted backend whose devices are displayed in Settings.
+    pub backend: AudioBackend,
+    /// Backend currently driving the engine callback. This may remain the
+    /// previous backend when a requested driver is temporarily unavailable.
+    pub active_backend: Option<AudioBackend>,
     pub catalog: AudioDeviceCatalog,
     /// Persisted target. It remains named when that device is temporarily absent.
     pub preferred_input_name: Option<String>,
@@ -70,6 +77,8 @@ pub struct AudioSettingsState {
 impl Default for AudioSettingsState {
     fn default() -> Self {
         Self {
+            backend: AudioBackend::System,
+            active_backend: None,
             catalog: AudioDeviceCatalog::default(),
             preferred_input_name: None,
             preferred_output_name: None,

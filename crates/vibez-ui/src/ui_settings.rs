@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use vibez_audio_io::audio_host::AudioBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
@@ -45,6 +46,9 @@ pub struct UiSettings {
     /// `None` follows the platform's System Default Audio Input.
     #[serde(default)]
     pub preferred_audio_input: Option<String>,
+    /// Native audio API used to enumerate and open both input and output.
+    #[serde(default)]
+    pub audio_backend: AudioBackend,
     /// `None` follows the platform's System Default Audio Output.
     #[serde(default)]
     pub preferred_audio_output: Option<String>,
@@ -134,6 +138,7 @@ impl Default for UiSettings {
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
             preferred_audio_input: None,
+            audio_backend: AudioBackend::default(),
             preferred_audio_output: None,
             audio_sample_rate: None,
             audio_buffer_size: default_audio_buffer_size(),
@@ -344,12 +349,14 @@ mod tests {
         assert_eq!(loaded.audio_sample_rate, None);
         assert_eq!(loaded.preferred_audio_input, None);
         assert_eq!(loaded.preferred_audio_output, None);
+        assert_eq!(loaded.audio_backend, AudioBackend::System);
     }
 
     #[test]
     fn audio_configuration_roundtrips_outside_project_state() {
         let settings = UiSettings {
             preferred_audio_input: Some("USB In".into()),
+            audio_backend: AudioBackend::Asio,
             preferred_audio_output: Some("USB Out".into()),
             audio_sample_rate: Some(48_000),
             audio_buffer_size: 128,
@@ -358,6 +365,7 @@ mod tests {
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(loaded.preferred_audio_input.as_deref(), Some("USB In"));
+        assert_eq!(loaded.audio_backend, AudioBackend::Asio);
         assert_eq!(loaded.preferred_audio_output.as_deref(), Some("USB Out"));
         assert_eq!(loaded.audio_sample_rate, Some(48_000));
         assert_eq!(loaded.audio_buffer_size, 128);

@@ -7,7 +7,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
 use rtrb::Consumer;
-use vibez_audio_io::audio_host::AudioHost;
+use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
@@ -231,14 +231,11 @@ impl App {
         let recent_project_paths =
             crate::ui_settings::normalize_recent_projects(ui_settings.recent_project_paths.clone());
 
-        let (audio_catalog, catalog_error) = match AudioHost::new().catalog() {
-            Ok(catalog) => (catalog, None),
-            Err(error) => {
-                eprintln!("vibez: failed to scan audio devices: {error}");
-                (Default::default(), Some(error.to_string()))
-            }
+        let preferred_audio_backend = if ui_settings.audio_backend.is_available() {
+            ui_settings.audio_backend
+        } else {
+            AudioBackend::System
         };
-        let preferred_audio_input = ui_settings.preferred_audio_input.clone();
         let preferred_audio_output = ui_settings.preferred_audio_output.clone();
         let requested_sample_rate = ui_settings.audio_sample_rate;
         let requested_buffer_size = ui_settings.audio_buffer_size;
@@ -246,14 +243,36 @@ impl App {
             stream: output_stream,
             sample_rate,
             active_output_name,
+            active_backend,
             health: audio_stream_health,
             status: initial_audio_status,
         } = audio_settings::initialize_audio_output(
             engine,
+            preferred_audio_backend,
             preferred_audio_output.clone(),
             requested_sample_rate,
             requested_buffer_size,
         );
+        // If a saved backend cannot open any output, startup deliberately
+        // falls back to the native host. Keep Settings and on-demand input on
+        // that same active host instead of presenting one backend while the
+        // engine silently runs another.
+        let settings_audio_backend = active_backend.unwrap_or(preferred_audio_backend);
+        let stayed_on_preferred_backend = settings_audio_backend == preferred_audio_backend;
+        let preferred_audio_input = stayed_on_preferred_backend
+            .then(|| ui_settings.preferred_audio_input.clone())
+            .flatten();
+        let preferred_audio_output = stayed_on_preferred_backend
+            .then_some(preferred_audio_output)
+            .flatten();
+        let (audio_catalog, catalog_error) =
+            match AudioHost::new(settings_audio_backend).and_then(|host| host.catalog()) {
+                Ok(catalog) => (catalog, None),
+                Err(error) => {
+                    eprintln!("vibez: failed to scan audio devices: {error}");
+                    (Default::default(), Some(error.to_string()))
+                }
+            };
         let input_bridge = output_stream.input_bridge();
 
         let dropbox_settings = DropboxSettings::load();
@@ -286,6 +305,8 @@ impl App {
             },
             audio_stream_health,
             audio_settings: AudioSettingsState {
+                backend: settings_audio_backend,
+                active_backend,
                 catalog: audio_catalog,
                 preferred_input_name: preferred_audio_input,
                 preferred_output_name: preferred_audio_output,

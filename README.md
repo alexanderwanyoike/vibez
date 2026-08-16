@@ -50,8 +50,9 @@ of Arrange applies to it unchanged:
   drag/resize/split/join, time selection, looping, and an overview minimap
 - **Audio recording** from a soundcard input or the output of an instrument
   track, with the waveform drawn while the take is recorded
-- **Soundcard settings** for choosing the input device, output device, sample
-  rate and buffer size
+- **Soundcard settings** for choosing the audio backend, input/output device,
+  sample rate and buffer size. Windows builds support WASAPI and ASIO;
+  macOS uses CoreAudio and Linux uses ALSA
 - **Warping** with automatic BPM detection and high-quality time stretching
   through Signalsmith Stretch. Warped clips follow the project BPM
 - **Piano roll** with draw and select modes, multi-note editing, velocity,
@@ -150,6 +151,8 @@ where a redundant-looking cast can be load-bearing on another target.
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+ASIO is a trademark and software of Steinberg Media Technologies GmbH.
 
 ## For Mum
 

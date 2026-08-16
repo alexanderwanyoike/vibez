@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::Task;
+use vibez_audio_io::audio_host::AudioBackend;
 use vibez_audio_io::audio_input::{AudioInputEvent, AudioInputStream};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
@@ -517,20 +518,42 @@ impl App {
             .selected_input_name()
             .map(str::to_owned);
         let must_reopen = input_stream_must_reopen(
-            self._input_stream
-                .as_ref()
-                .map(|stream| (stream.device_name.as_str(), stream.sample_rate)),
+            self._input_stream.as_ref().map(|stream| {
+                (
+                    stream.backend,
+                    stream.device_name.as_str(),
+                    stream.sample_rate,
+                )
+            }),
+            self.state.audio_settings.backend,
             expected_device_name.as_deref(),
             self.state.transport.sample_rate,
         );
         if must_reopen {
             self._input_stream = None;
-            let stream = AudioInputStream::open(
-                requested_name,
-                self.state.transport.sample_rate,
-                Some(self.state.audio_settings.buffer_size),
-                Arc::clone(&self.input_bridge),
-            )
+            let backend = self.state.audio_settings.backend;
+            let stream = if backend == AudioBackend::Asio {
+                let device = self
+                    ._stream
+                    .as_ref()
+                    .and_then(|output| output.active_device())
+                    .ok_or_else(|| "ASIO Audio Output is unavailable".to_string())?;
+                AudioInputStream::open_on_device(
+                    backend,
+                    device,
+                    self.state.transport.sample_rate,
+                    Some(self.state.audio_settings.buffer_size),
+                    Arc::clone(&self.input_bridge),
+                )
+            } else {
+                AudioInputStream::open(
+                    backend,
+                    requested_name,
+                    self.state.transport.sample_rate,
+                    Some(self.state.audio_settings.buffer_size),
+                    Arc::clone(&self.input_bridge),
+                )
+            }
             .map_err(|error| error.to_string())?;
             if !route_fits_channels(self.input_bridge.route(), stream.channels as u16) {
                 return Err(format!(
@@ -663,12 +686,14 @@ fn track_recording_source_label(
 }
 
 fn input_stream_must_reopen(
-    current: Option<(&str, u32)>,
+    current: Option<(AudioBackend, &str, u32)>,
+    expected_backend: AudioBackend,
     expected_device_name: Option<&str>,
     expected_sample_rate: u32,
 ) -> bool {
-    current.is_none_or(|(device_name, sample_rate)| {
-        sample_rate != expected_sample_rate
+    current.is_none_or(|(backend, device_name, sample_rate)| {
+        backend != expected_backend
+            || sample_rate != expected_sample_rate
             || expected_device_name.is_none_or(|expected| device_name != expected)
     })
 }
@@ -788,12 +813,20 @@ mod tests {
     #[test]
     fn switching_from_a_named_input_to_a_different_system_default_reopens() {
         assert!(input_stream_must_reopen(
-            Some(("USB Interface", 48_000)),
+            Some((AudioBackend::System, "USB Interface", 48_000)),
+            AudioBackend::System,
             Some("Built-in Audio"),
             48_000,
         ));
         assert!(!input_stream_must_reopen(
-            Some(("Built-in Audio", 48_000)),
+            Some((AudioBackend::System, "Built-in Audio", 48_000)),
+            AudioBackend::System,
+            Some("Built-in Audio"),
+            48_000,
+        ));
+        assert!(input_stream_must_reopen(
+            Some((AudioBackend::System, "Built-in Audio", 48_000)),
+            AudioBackend::Asio,
             Some("Built-in Audio"),
             48_000,
         ));

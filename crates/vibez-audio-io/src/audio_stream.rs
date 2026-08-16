@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{DevicesError, PauseStreamError, SampleRate, StreamConfig};
 
+use crate::audio_host::{AudioBackend, AudioHostError};
 use crate::audio_input::AudioInputBridge;
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 use vibez_core::constants::DEFAULT_CHANNELS;
@@ -57,6 +58,8 @@ impl StreamEventReporter {
 /// Errors from [`AudioOutputStream`].
 #[derive(Debug)]
 pub enum AudioStreamError {
+    /// The selected audio backend could not be created.
+    AudioHost(AudioHostError),
     /// No default output device found.
     NoOutputDevice,
     /// A persisted named output is not currently visible.
@@ -74,6 +77,7 @@ pub enum AudioStreamError {
 impl fmt::Display for AudioStreamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AudioHost(error) => error.fmt(f),
             Self::NoOutputDevice => write!(f, "no default audio output device available"),
             Self::OutputDeviceNotFound(name) => {
                 write!(f, "audio output device is unavailable: {name}")
@@ -89,6 +93,7 @@ impl fmt::Display for AudioStreamError {
 impl std::error::Error for AudioStreamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::AudioHost(error) => Some(error),
             Self::NoOutputDevice | Self::OutputDeviceNotFound(_) | Self::NoActiveStream => None,
             Self::DevicesError(e) => Some(e),
             Self::StreamOpen(error) => Some(error),
@@ -100,6 +105,12 @@ impl std::error::Error for AudioStreamError {
 impl From<DevicesError> for AudioStreamError {
     fn from(e: DevicesError) -> Self {
         Self::DevicesError(e)
+    }
+}
+
+impl From<AudioHostError> for AudioStreamError {
+    fn from(error: AudioHostError) -> Self {
+        Self::AudioHost(error)
     }
 }
 
@@ -137,6 +148,8 @@ pub struct StreamParams {
 /// The complete hardware request used to build an output stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputStreamConfig {
+    /// Audio API used to enumerate and open the requested device.
+    pub backend: AudioBackend,
     /// `None` follows the platform's System Default output.
     pub device_name: Option<String>,
     /// `None` uses the selected device's default sample rate.
@@ -148,6 +161,7 @@ pub struct OutputStreamConfig {
 impl Default for OutputStreamConfig {
     fn default() -> Self {
         Self {
+            backend: AudioBackend::System,
             device_name: None,
             sample_rate: None,
             buffer_size: Some(512),
@@ -176,7 +190,9 @@ impl Default for OutputStreamConfig {
 pub struct AudioOutputStream {
     stream: Option<cpal::Stream>,
     params: Option<StreamParams>,
+    active_device: Option<cpal::Device>,
     active_device_name: Option<String>,
+    active_backend: Option<AudioBackend>,
     /// Shared engine slot.  The audio callback `try_lock`s this each
     /// invocation and calls `engine.process_block()` if the lock is obtained.
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
@@ -193,7 +209,9 @@ impl AudioOutputStream {
         Self {
             stream: None,
             params: None,
+            active_device: None,
             active_device_name: None,
+            active_backend: None,
             engine_slot: Arc::new(Mutex::new(Some(engine))),
             event_reporter,
             event_rx,
@@ -240,7 +258,9 @@ impl AudioOutputStream {
         stream.play()?;
         output.stream = Some(stream);
         output.params = Some(params);
+        output.active_device = Some(device.clone());
         output.active_device_name = device_name;
+        output.active_backend = Some(AudioBackend::System);
         output.event_reporter.report(AudioStreamEvent::Running);
         Ok(output)
     }
@@ -254,8 +274,21 @@ impl AudioOutputStream {
     pub fn reconfigure(&mut self, request: OutputStreamConfig) -> Result<(), AudioStreamError> {
         self.event_reporter.report(AudioStreamEvent::Rebuilding);
         let mut previous_stream_running = self.stream.is_some();
+        // Most native hosts allow a replacement stream to be prepared while
+        // the old one remains live. ASIO drivers commonly own one exclusive
+        // buffer set, so attempting to load the same driver twice fails. Drop
+        // that driver before rebuilding while the engine remains safely held
+        // in `engine_slot`.
+        if requires_exclusive_reopen(self.active_backend, request.backend) {
+            self.stream = None;
+            self.active_device = None;
+            self.params = None;
+            self.active_device_name = None;
+            self.active_backend = None;
+            previous_stream_running = false;
+        }
         let result: Result<(), AudioStreamError> = (|| {
-            let host = cpal::default_host();
+            let host = request.backend.create_host()?;
             let device = resolve_output_device(&host, request.device_name.as_deref())?;
             let device_name = device.name().unwrap_or_else(|_| {
                 request
@@ -289,7 +322,9 @@ impl AudioOutputStream {
 
             self.stream = Some(stream);
             self.params = Some(params);
+            self.active_device = Some(device);
             self.active_device_name = Some(device_name);
+            self.active_backend = Some(request.backend);
             Ok(())
         })();
 
@@ -417,6 +452,20 @@ impl AudioOutputStream {
         self.active_device_name.as_deref()
     }
 
+    /// Clone the concrete device which owns the active output stream.
+    ///
+    /// ASIO requires input and output buffers to be prepared through clones of
+    /// the same CPAL device object. Re-enumerating a matching driver name can
+    /// create an independent driver state which cannot join the live stream.
+    pub fn active_device(&self) -> Option<cpal::Device> {
+        self.active_device.clone()
+    }
+
+    /// Backend currently driving the output callback.
+    pub fn active_backend(&self) -> Option<AudioBackend> {
+        self.active_backend
+    }
+
     pub fn is_running(&self) -> bool {
         self.stream.is_some()
     }
@@ -436,6 +485,13 @@ impl AudioOutputStream {
     pub fn input_bridge(&self) -> Arc<AudioInputBridge> {
         Arc::clone(&self.input_bridge)
     }
+}
+
+fn requires_exclusive_reopen(
+    active_backend: Option<AudioBackend>,
+    requested_backend: AudioBackend,
+) -> bool {
+    active_backend == Some(AudioBackend::Asio) && requested_backend == AudioBackend::Asio
 }
 
 fn resolve_output_device(
@@ -496,6 +552,22 @@ mod tests {
             None => cpal::BufferSize::Default,
         };
         assert!(matches!(buf, cpal::BufferSize::Fixed(1024)));
+    }
+
+    #[test]
+    fn asio_releases_its_exclusive_driver_before_reconfiguration() {
+        assert!(requires_exclusive_reopen(
+            Some(AudioBackend::Asio),
+            AudioBackend::Asio
+        ));
+        assert!(!requires_exclusive_reopen(
+            Some(AudioBackend::System),
+            AudioBackend::Asio
+        ));
+        assert!(!requires_exclusive_reopen(
+            Some(AudioBackend::Asio),
+            AudioBackend::System
+        ));
     }
 
     #[test]

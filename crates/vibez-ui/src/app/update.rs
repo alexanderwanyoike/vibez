@@ -361,6 +361,9 @@ impl App {
             Message::SelectSettingsTab(tab) => {
                 self.state.settings_tab = tab;
             }
+            Message::SelectAudioBackend(backend) => {
+                return self.handle_select_audio_backend(backend);
+            }
             Message::SetBufferSize(size) => {
                 return self.handle_set_buffer_size(size);
             }
