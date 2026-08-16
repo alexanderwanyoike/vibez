@@ -10,10 +10,10 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
-use vibez_engine::commands::{AuditionSync, EngineCommand};
+use vibez_engine::commands::{AuditionStart, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message};
-use crate::state::{AuditionMode, UiClip};
+use crate::state::UiClip;
 
 use super::*;
 
@@ -36,18 +36,7 @@ impl App {
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
-        let Some(treatment) = self.state.browser.audition_import_input() else {
-            self.state.status_text =
-                "Confirm a positive source BPM before importing in WARP mode".into();
-            return Task::none();
-        };
-        if treatment.mode == AuditionMode::Warp
-            && self.state.browser.selected_source.as_ref() != Some(&source)
-        {
-            self.state.status_text =
-                "Select this source and confirm its BPM before WARP import".into();
-            return Task::none();
-        }
+        let treatment = self.state.browser.audition_import_input();
         match source {
             MediaSourceRef::LocalFile { path } => {
                 let name = path
@@ -627,7 +616,7 @@ impl App {
                 if let Some((audio, name)) = audition {
                     self.send_command(EngineCommand::StartAudition {
                         audio,
-                        sync: AuditionSync::Off,
+                        start: AuditionStart::Immediate,
                         looped: false,
                     });
                     self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);

@@ -9,7 +9,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::{AuditionSync, EngineCommand};
+use vibez_engine::commands::{AuditionStart, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
 use crate::state::{AuditionMode, ProjectTrack, SampleBrowserEntry, UiClip, UiDrumPad};
@@ -241,8 +241,8 @@ impl App {
         audio: Arc<DecodedAudio>,
         playback_mode: AuditionMode,
     ) {
-        let queued =
-            self.state.transport.playing && self.state.browser.audition_sync != AuditionSync::Off;
+        let warped = playback_mode == AuditionMode::Warp;
+        let queued = self.state.transport.playing && warped;
         // Retain a UI-side clone (never cleared on stop) so the engine
         // voice can never drop the final Arc inside the RT callback.
         // A superseded buffer moves into the retired ring rather than
@@ -260,8 +260,12 @@ impl App {
         }
         self.send_command(EngineCommand::StartAudition {
             audio,
-            sync: self.state.browser.audition_sync,
-            looped: self.state.browser.audition_loop,
+            start: if warped {
+                AuditionStart::NextBar
+            } else {
+                AuditionStart::Immediate
+            },
+            looped: warped,
         });
         self.state
             .browser
@@ -269,52 +273,12 @@ impl App {
         let mode = playback_mode.label();
         self.state.status_text = if queued {
             format!("{mode} Audition queued")
-        } else if playback_mode == AuditionMode::Raw
-            && self.state.browser.audition_mode == AuditionMode::Warp
-        {
-            RAW_AUDITION_AWAITING_BPM.into()
         } else {
             match playback_mode {
                 AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
                 AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
             }
         };
-    }
-
-    /// Keep a truthful RAW voice underneath BPM editing and WARP preparation.
-    /// Repeated calls are idempotent so UI state changes do not restart a loop.
-    /// Returns whether a RAW voice is active or was successfully requested.
-    pub(super) fn ensure_raw_browser_audition(&mut self) -> bool {
-        if self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
-            && (self.state.browser.audition_playing || self.state.browser.audition_queued)
-        {
-            return true;
-        }
-        let Some(source) = self.state.browser.selected_source.clone() else {
-            return false;
-        };
-        let Some(raw) = self.state.browser.waveform_for_source(&source) else {
-            return false;
-        };
-        self.start_browser_audition(raw, AuditionMode::Raw);
-        true
-    }
-
-    pub(super) fn schedule_browser_bpm_detection(
-        &mut self,
-        source: MediaSourceRef,
-        audio: Arc<DecodedAudio>,
-    ) -> Task<Message> {
-        if !self.state.browser.begin_bpm_detection(&source) {
-            return Task::none();
-        }
-        let sample_rate = audio.sample_rate;
-        Task::perform(detect_clip_bpm_async(audio, sample_rate), move |estimate| {
-            Message::BrowserBpmDetected(
-                source.clone(),
-                estimate.map(|value| (value.bpm, value.confidence)),
-            )
-        })
     }
 
     pub(super) fn prepare_browser_warp(
@@ -325,13 +289,13 @@ impl App {
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
         let generation = self.state.browser.begin_audition_preparation(&source);
-        self.state.status_text = format!("Preparing WARP at {source_bpm:.1} BPM...");
+        self.state.status_text =
+            format!("Fitting {source_bpm:.1} BPM loop to project {project_bpm:.1} BPM...");
         Task::perform(
             warp_browser_audition_async(raw, source_bpm, project_bpm),
             move |result| Message::BrowserAuditionWarpReady {
                 source: source.clone(),
                 generation,
-                source_bpm,
                 project_bpm,
                 result,
             },
@@ -343,18 +307,17 @@ impl App {
         source: MediaSourceRef,
         raw: Arc<DecodedAudio>,
     ) -> Task<Message> {
-        let detection = self.schedule_browser_bpm_detection(source.clone(), Arc::clone(&raw));
-        match self.state.browser.audition_playback_plan() {
+        match self
+            .state
+            .browser
+            .audition_playback_plan(&raw, self.state.transport.bpm)
+        {
             crate::state::BrowserAuditionPlan::Raw => {
                 self.start_browser_audition(raw, AuditionMode::Raw);
-                detection
+                Task::none()
             }
             crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
-                let _ = self.ensure_raw_browser_audition();
-                Task::batch([
-                    detection,
-                    self.prepare_browser_warp(source, raw, source_bpm),
-                ])
+                self.prepare_browser_warp(source, raw, source_bpm)
             }
         }
     }
@@ -481,6 +444,13 @@ impl App {
         source: MediaSourceRef,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
+        let treatment = match treatment.resolve_for_audio(&raw, project_bpm) {
+            Ok(treatment) => treatment,
+            Err(error) => {
+                self.state.status_text = format!("{error}: {name}");
+                return Task::none();
+            }
+        };
         self.state.status_text = match treatment.mode {
             AuditionMode::Raw => format!("Preparing RAW import: {name}"),
             AuditionMode::Warp => format!("Preparing WARP import: {name}"),

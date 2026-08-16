@@ -265,9 +265,8 @@ impl App {
         );
 
         container(
-            scrollable(container(places.padding(9)).width(Length::Fill)).direction(
-                scrollable::Direction::Vertical(scrollable::Scrollbar::default()),
-            ),
+            scrollable(container(places.padding(9)).width(Length::Fill))
+                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar())),
         )
         .width(Length::Fill)
         .height(Length::Fill)

@@ -10,6 +10,8 @@ use vibez_core::audio_buffer::DecodedAudio;
 use crate::domains::transport::TransportMsg;
 use crate::theme;
 
+use super::playhead::playhead_geometry;
+
 pub struct WaveformWidget {
     pub audio: Option<Arc<DecodedAudio>>,
     pub playhead_position: f64, // 0.0..1.0
@@ -130,26 +132,13 @@ impl canvas::Program<crate::message::Message> for WaveformWidget {
             }
         });
 
-        // Playhead (drawn every frame, not cached)
-        let playhead = {
-            let mut frame = canvas::Frame::new(renderer, bounds.size());
-            if self.audio.is_some() {
-                let x = (self.playhead_position as f32) * bounds.width;
-                let playhead_line = canvas::Path::line(
-                    iced::Point::new(x, 0.0),
-                    iced::Point::new(x, bounds.height),
-                );
-                frame.stroke(
-                    &playhead_line,
-                    canvas::Stroke::default()
-                        .with_color(theme::playhead())
-                        .with_width(1.5),
-                );
-            }
-            frame.into_geometry()
-        };
-
-        vec![waveform, playhead]
+        let playhead_x = self
+            .audio
+            .as_ref()
+            .map(|_| self.playhead_position.clamp(0.0, 1.0) as f32 * bounds.width);
+        let mut geometry = vec![waveform];
+        geometry.extend(playhead_geometry(renderer, bounds, playhead_x));
+        geometry
     }
 
     fn mouse_interaction(

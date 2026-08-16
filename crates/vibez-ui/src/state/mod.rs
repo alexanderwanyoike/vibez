@@ -17,13 +17,12 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuditionMode {
-    #[default]
     Raw,
+    #[default]
     Warp,
 }
 
@@ -40,6 +39,40 @@ pub struct AuditionImportInput {
     pub mode: AuditionMode,
     pub source_bpm: Option<f64>,
 }
+
+impl AuditionImportInput {
+    /// Resolve Browser WARP from the same complete-loop grid fit used by
+    /// Audition. Sources with no plausible loop interpretation fall back to
+    /// RAW so one-shots are never stretched into arbitrary bar lengths.
+    pub fn resolve_for_audio(
+        mut self,
+        audio: &DecodedAudio,
+        project_bpm: f64,
+    ) -> Result<Self, String> {
+        if self.mode == AuditionMode::Raw {
+            return Ok(self);
+        }
+        if audio.num_frames() == 0
+            || audio.sample_rate == 0
+            || !project_bpm.is_finite()
+            || project_bpm <= 0.0
+        {
+            return Err("Cannot prepare empty or invalid audio".into());
+        }
+        let Some(fit) = crate::warp::fit_loop_to_project(
+            audio.num_frames(),
+            audio.sample_rate as f64,
+            project_bpm,
+        ) else {
+            self.mode = AuditionMode::Raw;
+            self.source_bpm = None;
+            return Ok(self);
+        };
+        self.source_bpm = Some(fit.source_bpm);
+        Ok(self)
+    }
+}
+
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
 pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
 pub const DETAIL_PANEL_DEFAULT_HEIGHT: f32 = 280.0;

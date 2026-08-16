@@ -5085,7 +5085,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibez"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "iced",
  "libloading 0.8.9",
@@ -5095,7 +5095,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-audio-io"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "audio_thread_priority",
  "cpal",
@@ -5109,7 +5109,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-core"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -5117,7 +5117,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-dropbox"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64",
  "dirs 5.0.1",
@@ -5136,7 +5136,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-dsp"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "signalsmith-stretch",
  "vibez-core",
@@ -5144,7 +5144,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-engine"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "rtrb",
  "vibez-core",
@@ -5154,14 +5154,14 @@ dependencies = [
 
 [[package]]
 name = "vibez-instruments"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "vibez-core",
 ]
 
 [[package]]
 name = "vibez-plugin-host"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "clap-sys",
  "dirs 5.0.1",
@@ -5178,7 +5178,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-project"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "rusqlite",
  "serde",
@@ -5190,7 +5190,7 @@ dependencies = [
 
 [[package]]
 name = "vibez-ui"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64",
  "dirs 5.0.1",

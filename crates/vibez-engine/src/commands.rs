@@ -13,12 +13,11 @@ use vibez_instruments::Instrument;
 
 use crate::playback_source::PreparedSectionPlaybackSource;
 
-/// Quantization policy for the next Browser Audition start.
+/// Automatic start policy selected by the Browser audition treatment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuditionSync {
-    Off,
-    Beat,
-    Bar,
+pub enum AuditionStart {
+    Immediate,
+    NextBar,
 }
 
 /// Commands sent from the UI thread to the audio engine (via rtrb).
@@ -309,18 +308,16 @@ pub enum EngineCommand {
 
     // -- Dedicated Audition Bus --
     /// Request Browser Audition playback after project master processing.
-    /// Beat/Bar quantization applies only while transport is already running.
+    /// Next-bar scheduling applies only while transport is already running.
     StartAudition {
         audio: Arc<DecodedAudio>,
-        sync: AuditionSync,
+        start: AuditionStart,
         looped: bool,
     },
     /// Stop the Audition Bus with a short click-safe fade.
     StopAudition,
     /// Set Audition Bus gain independently from project mixer state.
     SetAuditionGain(f32),
-    /// Change looping for the active or queued Browser Audition.
-    SetAuditionLoop(bool),
 
     // -- External MIDI input --
     /// Route a live note-on from an external MIDI source (hardware

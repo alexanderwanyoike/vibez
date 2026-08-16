@@ -12,7 +12,6 @@ use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::EngineCommand;
 
 use crate::message::{BrowserImportTarget, Message};
 
@@ -376,7 +375,10 @@ impl App {
         if self.state.browser.audition_mode == mode {
             return Task::none();
         }
-        self.stop_browser_audition();
+        // A mode switch supersedes only in-flight preparation. The current
+        // voice keeps playing until the Audition Bus crossfades the requested
+        // treatment, so RAW/WARP never introduces a needless gap.
+        self.state.browser.cancel_audition_preparation();
         self.state.browser.audition_mode = mode;
         let Some(source) = self.state.browser.selected_source.clone() else {
             return Task::none();
@@ -386,76 +388,6 @@ impl App {
             return Task::none();
         };
         self.play_browser_mode(source, raw)
-    }
-
-    pub(super) fn on_set_audition_sync(
-        &mut self,
-        sync: vibez_engine::commands::AuditionSync,
-    ) -> Task<Message> {
-        self.state.browser.audition_sync = sync;
-        self.state.status_text = match sync {
-            vibez_engine::commands::AuditionSync::Off => {
-                "Audition Sync Off: starts immediately".into()
-            }
-            vibez_engine::commands::AuditionSync::Beat => {
-                "Audition Sync Beat: queues only while transport runs".into()
-            }
-            vibez_engine::commands::AuditionSync::Bar => {
-                "Audition Sync Bar: queues only while transport runs".into()
-            }
-        };
-        Task::none()
-    }
-
-    pub(super) fn on_toggle_audition_loop(&mut self) -> Task<Message> {
-        self.state.browser.audition_loop = !self.state.browser.audition_loop;
-        self.send_command(EngineCommand::SetAuditionLoop(
-            self.state.browser.audition_loop,
-        ));
-        self.persist_ui_settings();
-        self.state.status_text = if self.state.browser.audition_loop {
-            "Audition Loop enabled".into()
-        } else {
-            "Audition Loop disabled".into()
-        };
-        Task::none()
-    }
-
-    pub(super) fn on_audition_bpm_edit_changed(&mut self, value: String) -> Task<Message> {
-        self.state.browser.audition_bpm_edit = value;
-        self.state.browser.audition_bpm_confirmed = None;
-        if self.state.browser.audition_mode == crate::state::AuditionMode::Warp {
-            self.state.browser.cancel_audition_preparation();
-            let raw_audition_active =
-                self.state.browser.audition_enabled && self.ensure_raw_browser_audition();
-            self.state.status_text = if raw_audition_active {
-                RAW_AUDITION_CONTINUES_FOR_BPM_EDIT.into()
-            } else {
-                WARP_BPM_EDIT_NEEDS_CONFIRMATION.into()
-            };
-        }
-        Task::none()
-    }
-
-    pub(super) fn on_confirm_audition_bpm(&mut self) -> Task<Message> {
-        let source_bpm = match self.state.browser.confirm_audition_bpm() {
-            Ok(value) => value,
-            Err(error) => {
-                self.state.status_text = error.into();
-                return Task::none();
-            }
-        };
-        self.state.status_text = format!("Confirmed {source_bpm:.1} source BPM");
-        if self.state.browser.audition_mode == crate::state::AuditionMode::Warp {
-            let Some(source) = self.state.browser.selected_source.clone() else {
-                return Task::none();
-            };
-            let Some(raw) = self.state.browser.waveform_audio.clone() else {
-                return Task::none();
-            };
-            return self.prepare_browser_warp(source, raw, source_bpm);
-        }
-        Task::none()
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
@@ -582,56 +514,8 @@ impl App {
         source: MediaSourceRef,
         audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     ) -> Task<Message> {
-        if self
-            .state
-            .browser
-            .install_waveform(source.clone(), Arc::clone(&audio))
-        {
-            return self.schedule_browser_bpm_detection(source, audio);
-        }
-        Task::none()
-    }
-
-    pub(super) fn on_browser_bpm_detected(
-        &mut self,
-        source: MediaSourceRef,
-        estimate: Option<(f64, f32)>,
-    ) -> Task<Message> {
-        let source_for_warp = source.clone();
-        // A BPM the user confirmed while detection was running
-        // already drives the audition; the late estimate must
-        // not restart it or rewrite the status line.
-        let already_confirmed = self.state.browser.audition_bpm_confirmed.is_some();
-        if self.state.browser.install_bpm_suggestion(
-            source,
-            estimate,
-            self.state.warp_confidence_threshold,
-        ) && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
-            && !already_confirmed
-        {
-            if let Some(source_bpm) = self.state.browser.audition_bpm_confirmed {
-                let project_bpm = self.state.transport.bpm;
-                self.state.status_text = format!(
-                    "Detected {source_bpm:.1} source BPM; WARP targets project {project_bpm:.1} BPM"
-                );
-                if self.state.browser.audition_enabled {
-                    if let Some(raw) = self.state.browser.waveform_audio.clone() {
-                        return self.prepare_browser_warp(source_for_warp, raw, source_bpm);
-                    }
-                }
-            } else {
-                self.state.status_text = match estimate {
-                    Some((bpm, confidence))
-                        if confidence < self.state.warp_confidence_threshold =>
-                    {
-                        format!("Low-confidence suggestion {bpm:.1} BPM; confirm or edit for WARP")
-                    }
-                    Some((bpm, _)) => {
-                        format!("Suggested {bpm:.1} BPM; confirm for WARP")
-                    }
-                    None => "No BPM detected; enter a positive source BPM for WARP".into(),
-                };
-            }
+        if self.state.browser.install_waveform(source, audio) {
+            self.state.status_text = "Waveform ready".into();
         }
         Task::none()
     }
@@ -640,14 +524,12 @@ impl App {
         &mut self,
         source: MediaSourceRef,
         generation: u64,
-        source_bpm: f64,
         project_bpm: f64,
         result: Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String>,
     ) -> Task<Message> {
         let current = self.state.browser.audition_request_is_current(generation)
             && self.state.browser.selected_source.as_ref() == Some(&source)
             && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
-            && self.state.browser.audition_bpm_confirmed == Some(source_bpm)
             && (self.state.transport.bpm - project_bpm).abs() < f64::EPSILON;
         if !current {
             return Task::none();

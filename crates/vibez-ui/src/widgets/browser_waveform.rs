@@ -11,8 +11,11 @@ use vibez_core::audio_buffer::DecodedAudio;
 use crate::message::Message;
 use crate::theme;
 
+use super::playhead::playhead_geometry;
+
 pub struct BrowserWaveform {
     pub audio: Option<Arc<DecodedAudio>>,
+    pub playhead_fraction: Option<f32>,
 }
 
 pub struct BrowserWaveformState {
@@ -91,7 +94,12 @@ impl canvas::Program<Message> for BrowserWaveform {
             }
         });
 
-        vec![geometry]
+        let playhead_x = self
+            .playhead_fraction
+            .map(|fraction| fraction.clamp(0.0, 1.0) * bounds.width);
+        let mut geometry = vec![geometry];
+        geometry.extend(playhead_geometry(renderer, bounds, playhead_x));
+        geometry
     }
 }
 

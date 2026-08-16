@@ -5,7 +5,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::{InstrumentStateInfo, TrackInfo};
-use vibez_engine::commands::{AuditionSync, EngineCommand};
+use vibez_engine::commands::{AuditionStart, EngineCommand};
 use vibez_engine::engine::AudioProcessBlock;
 
 fn one_second_audio() -> Arc<DecodedAudio> {
@@ -26,7 +26,7 @@ fn assert_audible(audio: Arc<DecodedAudio>, label: &str) {
     commands
         .push(EngineCommand::StartAudition {
             audio,
-            sync: AuditionSync::Off,
+            start: AuditionStart::Immediate,
             looped: false,
         })
         .unwrap();
