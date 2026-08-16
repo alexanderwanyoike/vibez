@@ -183,6 +183,9 @@ impl AuditionBus {
         }) {
             self.active = None;
         }
+        if let Some(active) = self.active.as_ref() {
+            let _ = event_tx.push(EngineEvent::AuditionPosition(active.position));
+        }
         if had_voice && self.active.is_none() && !self.has_outgoing() && self.queued.is_none() {
             let _ = event_tx.push(EngineEvent::AuditionStopped);
         }
