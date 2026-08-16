@@ -17,10 +17,6 @@ pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
 pub const BROWSER_PLACES_MIN_WIDTH: f32 = 124.0;
 pub const BROWSER_PLACES_MAX_WIDTH: f32 = 176.0;
 pub const BROWSER_RESULTS_PAGE_SIZE: usize = 200;
-/// Sane DAW range for a manually confirmed audition source BPM.
-pub const AUDITION_BPM_MIN: f64 = 20.0;
-pub const AUDITION_BPM_MAX: f64 = 999.0;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BrowserAuditionPlan {
     Raw,
@@ -119,14 +115,6 @@ pub struct BrowserState {
     /// with the final reference either.
     pub audition_audio_retired: [Option<Arc<DecodedAudio>>; 4],
     pub audition_mode: AuditionMode,
-    pub audition_sync: AuditionSync,
-    pub audition_loop: bool,
-    pub audition_bpm_source: Option<MediaSourceRef>,
-    pub audition_bpm_suggestion: Option<f64>,
-    pub audition_bpm_confidence: Option<f32>,
-    pub audition_bpm_confirmed: Option<f64>,
-    pub audition_bpm_edit: String,
-    pub audition_bpm_detecting: bool,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
     pub remote: RemoteUiState,
@@ -172,14 +160,6 @@ impl Default for BrowserState {
             audition_audio: None,
             audition_audio_retired: [None, None, None, None],
             audition_mode: AuditionMode::default(),
-            audition_sync: AuditionSync::Off,
-            audition_loop: false,
-            audition_bpm_source: None,
-            audition_bpm_suggestion: None,
-            audition_bpm_confidence: None,
-            audition_bpm_confirmed: None,
-            audition_bpm_edit: String::new(),
-            audition_bpm_detecting: false,
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
             remote: RemoteUiState::default(),
@@ -398,7 +378,6 @@ impl BrowserState {
         self.selected_source = Some(source);
         if changed {
             self.clear_waveform();
-            self.clear_audition_bpm();
         }
         changed
     }
@@ -406,7 +385,6 @@ impl BrowserState {
     pub fn clear_selection(&mut self) {
         self.selected_source = None;
         self.clear_waveform();
-        self.clear_audition_bpm();
     }
 
     pub fn begin_waveform_load(&mut self, source: &MediaSourceRef) {
@@ -468,7 +446,6 @@ impl BrowserState {
             return false;
         }
         self.audition_loading = false;
-        self.audition_playing = true;
         true
     }
 
@@ -495,97 +472,31 @@ impl BrowserState {
         self.audition_playback_mode = Some(mode);
     }
 
-    pub fn begin_bpm_detection(&mut self, source: &MediaSourceRef) -> bool {
-        if self.selected_source.as_ref() != Some(source)
-            || self.audition_bpm_source.as_ref() == Some(source)
-            || self.audition_bpm_detecting
-        {
-            return false;
+    pub fn audition_import_input(&self) -> AuditionImportInput {
+        AuditionImportInput {
+            mode: self.audition_mode,
+            // WARP resolves this from the decoded loop boundary and Project
+            // tempo immediately before rendering the import.
+            source_bpm: None,
         }
-        self.audition_bpm_detecting = true;
-        true
     }
 
-    pub fn install_bpm_suggestion(
-        &mut self,
-        source: MediaSourceRef,
-        estimate: Option<(f64, f32)>,
-        auto_confirm_threshold: f32,
-    ) -> bool {
-        if self.selected_source.as_ref() != Some(&source) {
-            return false;
-        }
-        self.audition_bpm_source = Some(source);
-        self.audition_bpm_detecting = false;
-        self.audition_bpm_suggestion = estimate.map(|value| value.0);
-        self.audition_bpm_confidence = estimate.map(|value| value.1);
-        // A BPM the user confirmed while detection was in flight wins
-        // over the late estimate; only auto-confirm into an empty slot.
-        if self.audition_bpm_confirmed.is_none() {
-            self.audition_bpm_confirmed = estimate
-                .filter(|(bpm, confidence)| {
-                    bpm.is_finite()
-                        && *bpm > 0.0
-                        && *confidence >= auto_confirm_threshold.clamp(0.0, 1.0)
-                })
-                .map(|(bpm, _)| bpm);
-        }
-        if self.audition_bpm_edit.is_empty() {
-            self.audition_bpm_edit = estimate
-                .map(|value| format!("{:.1}", value.0))
-                .unwrap_or_default();
-        }
-        true
-    }
-
-    pub fn confirm_audition_bpm(&mut self) -> Result<f64, &'static str> {
-        let bpm = self
-            .audition_bpm_edit
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| "Enter a source BPM between 20 and 999")?;
-        // An unbounded BPM would request an effectively unbounded WARP
-        // allocation; keep manual entry inside a sane DAW range.
-        if !bpm.is_finite() || !(AUDITION_BPM_MIN..=AUDITION_BPM_MAX).contains(&bpm) {
-            return Err("Enter a source BPM between 20 and 999");
-        }
-        self.audition_bpm_confirmed = Some(bpm);
-        Ok(bpm)
-    }
-
-    pub fn clear_audition_bpm(&mut self) {
-        self.audition_bpm_source = None;
-        self.audition_bpm_suggestion = None;
-        self.audition_bpm_confidence = None;
-        self.audition_bpm_confirmed = None;
-        self.audition_bpm_edit.clear();
-        self.audition_bpm_detecting = false;
-    }
-
-    pub fn audition_import_input(&self) -> Option<AuditionImportInput> {
+    pub fn audition_playback_plan(
+        &self,
+        audio: &DecodedAudio,
+        project_bpm: f64,
+    ) -> BrowserAuditionPlan {
         match self.audition_mode {
-            AuditionMode::Raw => Some(AuditionImportInput {
-                mode: AuditionMode::Raw,
-                source_bpm: None,
-            }),
-            AuditionMode::Warp => {
-                self.audition_bpm_confirmed
-                    .map(|source_bpm| AuditionImportInput {
-                        mode: AuditionMode::Warp,
-                        source_bpm: Some(source_bpm),
-                    })
-            }
-        }
-    }
-
-    /// Choose a safe Audition plan without weakening WARP's confirmed-BPM
-    /// requirement. An unconfirmed WARP selection remains a WARP import
-    /// intent, but Audition falls back to the truthful RAW source instead of
-    /// going silent.
-    pub fn audition_playback_plan(&self) -> BrowserAuditionPlan {
-        match (self.audition_mode, self.audition_bpm_confirmed) {
-            (AuditionMode::Warp, Some(source_bpm)) => BrowserAuditionPlan::Warp { source_bpm },
-            _ => BrowserAuditionPlan::Raw,
+            AuditionMode::Raw => BrowserAuditionPlan::Raw,
+            AuditionMode::Warp => crate::warp::fit_loop_to_project(
+                audio.num_frames(),
+                audio.sample_rate as f64,
+                project_bpm,
+            )
+            .map(|fit| BrowserAuditionPlan::Warp {
+                source_bpm: fit.source_bpm,
+            })
+            .unwrap_or(BrowserAuditionPlan::Raw),
         }
     }
 
@@ -649,24 +560,15 @@ impl BrowserState {
             return None;
         }
         let seconds = audio.num_frames() as f64 / audio.sample_rate as f64;
-        match self.audition_import_input()? {
-            AuditionImportInput {
-                mode: AuditionMode::Raw,
-                ..
-            } => (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0),
-            AuditionImportInput {
-                mode: AuditionMode::Warp,
-                source_bpm: Some(source_bpm),
-            } if project_bpm > 0.0 => {
-                let target_frames = crate::warp::warp_target_frames(
-                    audio.num_frames(),
-                    audio.sample_rate as f64,
-                    source_bpm,
-                    project_bpm,
-                );
-                Some(target_frames as f64 * project_bpm / (audio.sample_rate as f64 * 60.0))
-            }
-            _ => None,
+        match self.audition_mode {
+            AuditionMode::Raw => (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0),
+            AuditionMode::Warp => crate::warp::fit_loop_to_project(
+                audio.num_frames(),
+                audio.sample_rate as f64,
+                project_bpm,
+            )
+            .map(|fit| fit.bars as f64 * 4.0)
+            .or_else(|| (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0)),
         }
     }
 

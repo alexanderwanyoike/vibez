@@ -10,7 +10,7 @@ use vibez_core::time::TempoMap;
 use vibez_dsp::factory::create_effect;
 use vibez_instruments::create_instrument;
 
-use crate::commands::{AuditionSync, EngineCommand};
+use crate::commands::{AuditionStart, EngineCommand};
 use crate::engine_audition::{audition_fade_frames, next_audition_boundary, AuditionBus};
 use crate::events::EngineEvent;
 use crate::metering;

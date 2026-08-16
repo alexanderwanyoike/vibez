@@ -27,12 +27,14 @@ pub(super) struct AuditionVoice {
     fade_in_frames: usize,
     fade_out_remaining: Option<usize>,
     looped: bool,
+    synchronized: bool,
 }
 
 pub(super) struct QueuedAudition {
     audio: Arc<DecodedAudio>,
-    target_position: u64,
+    frames_until_start: u64,
     looped: bool,
+    synchronized: bool,
 }
 
 impl AuditionBus {
@@ -45,7 +47,13 @@ impl AuditionBus {
         }
     }
 
-    pub(super) fn start(&mut self, audio: Arc<DecodedAudio>, fade_frames: usize, looped: bool) {
+    pub(super) fn start(
+        &mut self,
+        audio: Arc<DecodedAudio>,
+        fade_frames: usize,
+        looped: bool,
+        synchronized: bool,
+    ) {
         self.queued = None;
         self.stop_active(fade_frames);
         self.active = Some(AuditionVoice {
@@ -54,22 +62,48 @@ impl AuditionBus {
             fade_in_frames: fade_frames,
             fade_out_remaining: None,
             looped,
+            synchronized,
         });
     }
 
     pub(super) fn queue(
         &mut self,
         audio: Arc<DecodedAudio>,
-        target_position: u64,
+        frames_until_start: u64,
         fade_frames: usize,
         looped: bool,
+        synchronized: bool,
     ) {
         self.stop_active(fade_frames);
         self.queued = Some(QueuedAudition {
             audio,
-            target_position,
+            frames_until_start,
             looped,
+            synchronized,
         });
+    }
+
+    /// A synchronized preview may begin while the Project is stopped. When
+    /// playback later starts, restart it on the current bar boundary or queue
+    /// it to the next one so it cannot remain free-running beside the Project.
+    pub(super) fn resync_on_transport_start(
+        &mut self,
+        position: u64,
+        bpm: f64,
+        sample_rate: u32,
+        fade_frames: usize,
+    ) -> Option<bool> {
+        let active = self.active.as_ref().filter(|voice| voice.synchronized)?;
+        let audio = Arc::clone(&active.audio);
+        let looped = active.looped;
+        let frames_until_start = frames_until_audition_boundary(position, bpm, sample_rate, 4);
+        if frames_until_start == 0 {
+            self.start(audio, fade_frames, looped, true);
+            Some(false)
+        } else {
+            self.queue(audio, frames_until_start, fade_frames, looped, true);
+            Some(true)
+        }
     }
 
     pub(super) fn stop(&mut self, fade_frames: usize) {
@@ -101,15 +135,6 @@ impl AuditionBus {
         self.outgoing.iter().any(Option::is_some)
     }
 
-    pub(super) fn set_looped(&mut self, looped: bool) {
-        if let Some(active) = self.active.as_mut() {
-            active.looped = looped;
-        }
-        if let Some(queued) = self.queued.as_mut() {
-            queued.looped = looped;
-        }
-    }
-
     pub(super) fn process(
         &mut self,
         output: &mut [f32],
@@ -125,24 +150,25 @@ impl AuditionBus {
             if !transport.is_playing() {
                 return true;
             }
-            let block_start = transport.position();
-            queued.target_position < block_start.saturating_add(frames as u64)
+            queued.frames_until_start < frames as u64
         });
         if queued_ready {
             let queued = self.queued.take().expect("queued audition exists");
             if transport.is_playing() {
-                start_offset = queued
-                    .target_position
-                    .saturating_sub(transport.position())
-                    .min(frames as u64) as usize;
+                start_offset = queued.frames_until_start.min(frames as u64) as usize;
             }
             self.start(
                 queued.audio,
                 audition_fade_frames(sample_rate),
                 queued.looped,
+                queued.synchronized,
             );
             had_voice = true;
             let _ = event_tx.push(EngineEvent::AuditionStarted);
+        } else if transport.is_playing() {
+            if let Some(queued) = self.queued.as_mut() {
+                queued.frames_until_start = queued.frames_until_start.saturating_sub(frames as u64);
+            }
         }
         let gain = self.gain;
         for slot in self.outgoing.iter_mut() {
@@ -176,7 +202,20 @@ pub(super) fn next_audition_boundary(position: u64, bpm: f64, sample_rate: u32, 
     (boundary_index * boundary_frames).round() as u64
 }
 
-/// Mix one RAW audition voice. Returns true once its source or fade is done.
+fn frames_until_audition_boundary(position: u64, bpm: f64, sample_rate: u32, beats: u64) -> u64 {
+    if bpm <= 0.0 || sample_rate == 0 {
+        return 0;
+    }
+    let boundary_frames = sample_rate as f64 * 60.0 / bpm * beats.max(1) as f64;
+    let nearest = ((position as f64 / boundary_frames).round() * boundary_frames).round() as u64;
+    if nearest == position {
+        0
+    } else {
+        next_audition_boundary(position, bpm, sample_rate, beats).saturating_sub(position)
+    }
+}
+
+/// Mix one audition voice. Returns true once its source or fade is done.
 fn render_audition_voice(
     voice: &mut AuditionVoice,
     output: &mut [f32],
@@ -198,9 +237,11 @@ fn render_audition_voice(
             if !voice.looped {
                 return true;
             }
-            let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
-            source = crossfade_frames;
-            voice.position = source as u64;
+            // A loop voice must consume exactly one source-length of output
+            // per wrap or it will drift ahead of the Project transport. Fade
+            // the boundary in place instead of overlap-skipping head frames.
+            source = 0;
+            voice.position = 0;
         }
         let attack = if source < voice.fade_in_frames {
             (source + 1) as f32 / voice.fade_in_frames as f32
@@ -208,11 +249,8 @@ fn render_audition_voice(
             1.0
         };
         let remaining_source = audio_frames.saturating_sub(source + 1);
-        let natural_release = if voice.looped {
-            1.0
-        } else {
-            (remaining_source as f32 / voice.fade_in_frames as f32).clamp(0.0, 1.0)
-        };
+        let natural_release =
+            (remaining_source as f32 / voice.fade_in_frames as f32).clamp(0.0, 1.0);
         let commanded_release = match voice.fade_out_remaining {
             Some(remaining) => {
                 let envelope = remaining.saturating_sub(1) as f32 / voice.fade_in_frames as f32;
@@ -222,21 +260,9 @@ fn render_audition_voice(
             None => 1.0,
         };
         let envelope = attack.min(natural_release) * commanded_release * bus_gain;
-        let crossfade_frames = voice.fade_in_frames.min(audio_frames / 2);
-        let crossfade_offset = source.saturating_sub(audio_frames - crossfade_frames);
         for ch in 0..channels {
             let source_channel = ch.min(audio_channels - 1);
-            let sample = if voice.looped
-                && crossfade_frames > 0
-                && source >= audio_frames - crossfade_frames
-            {
-                let head_gain = crossfade_offset as f32 / crossfade_frames as f32;
-                let tail_gain = 1.0 - head_gain;
-                voice.audio.sample(source_channel, source) * tail_gain
-                    + voice.audio.sample(source_channel, crossfade_offset) * head_gain
-            } else {
-                voice.audio.sample(source_channel, source)
-            };
+            let sample = voice.audio.sample(source_channel, source);
             output[(output_frame_offset + frame) * channels + ch] += sample * envelope;
         }
         voice.position = voice.position.saturating_add(1);

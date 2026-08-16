@@ -848,12 +848,6 @@ impl App {
                 self.persist_ui_settings();
             }
             Message::SetAuditionMode(mode) => return self.on_set_audition_mode(mode),
-            Message::SetAuditionSync(sync) => return self.on_set_audition_sync(sync),
-            Message::ToggleAuditionLoop => return self.on_toggle_audition_loop(),
-            Message::AuditionBpmEditChanged(value) => {
-                return self.on_audition_bpm_edit_changed(value)
-            }
-            Message::ConfirmAuditionBpm => return self.on_confirm_audition_bpm(),
             Message::EscapePressed => return self.on_escape_pressed(),
 
             // -- Drag-and-drop from sample browser --
@@ -885,23 +879,13 @@ impl App {
             Message::BrowserWaveformReady(source, Err(err)) => {
                 self.state.browser.fail_waveform_load(&source, err);
             }
-            Message::BrowserBpmDetected(source, estimate) => {
-                return self.on_browser_bpm_detected(source, estimate)
-            }
             Message::BrowserAuditionWarpReady {
                 source,
                 generation,
-                source_bpm,
                 project_bpm,
                 result,
             } => {
-                return self.on_browser_audition_warp_ready(
-                    source,
-                    generation,
-                    source_bpm,
-                    project_bpm,
-                    result,
-                )
+                return self.on_browser_audition_warp_ready(source, generation, project_bpm, result)
             }
             Message::ImportSelectedBrowserSampleToArrangement => {
                 return self.handle_import_selected_browser_sample_to_arrangement();

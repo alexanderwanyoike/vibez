@@ -494,10 +494,7 @@ impl App {
         entry: DropboxEntry,
     ) -> Task<Message> {
         let target = BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
-        let Some(treatment) = self.state.browser.audition_import_input() else {
-            self.state.status_text = "Confirm source BPM before WARP import".into();
-            return Task::none();
-        };
+        let treatment = self.state.browser.audition_import_input();
         self.start_remote_import(entry, target, treatment)
     }
 
@@ -506,10 +503,7 @@ impl App {
             self.state.status_text = "Select a Sampler or Drum Pad track first".into();
             return Task::none();
         };
-        let Some(treatment) = self.state.browser.audition_import_input() else {
-            self.state.status_text = "Confirm source BPM before WARP import".into();
-            return Task::none();
-        };
+        let treatment = self.state.browser.audition_import_input();
         self.start_remote_import(entry, target, treatment)
     }
 }

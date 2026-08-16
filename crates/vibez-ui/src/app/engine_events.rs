@@ -30,10 +30,7 @@ fn apply_track_mute_event(
 fn active_audition_status(status: &str) -> bool {
     matches!(
         status,
-        RAW_AUDITION_PLAYING
-            | WARP_AUDITION_PLAYING
-            | RAW_AUDITION_AWAITING_BPM
-            | RAW_AUDITION_CONTINUES_FOR_BPM_EDIT
+        RAW_AUDITION_PLAYING | WARP_AUDITION_PLAYING | WARP_AUDITION_PREPARING
     )
 }
 
@@ -85,7 +82,6 @@ impl App {
                         self.state.browser.audition_queued = true;
                     }
                     EngineEvent::AuditionStarted => {
-                        self.state.browser.audition_loading = false;
                         self.state.browser.audition_queued = false;
                         self.state.browser.audition_playing = true;
                         let playback_mode = self
@@ -93,12 +89,13 @@ impl App {
                             .browser
                             .audition_playback_mode
                             .unwrap_or(self.state.browser.audition_mode);
+                        let preparing_warp = playback_mode == AuditionMode::Raw
+                            && self.state.browser.audition_mode == AuditionMode::Warp;
+                        if !preparing_warp {
+                            self.state.browser.audition_loading = false;
+                        }
                         self.state.status_text = match playback_mode {
-                            AuditionMode::Raw
-                                if self.state.browser.audition_mode == AuditionMode::Warp =>
-                            {
-                                RAW_AUDITION_AWAITING_BPM.into()
-                            }
+                            AuditionMode::Raw if preparing_warp => WARP_AUDITION_PREPARING.into(),
                             AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
                             AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
                         };
@@ -403,12 +400,11 @@ mod tests {
         for status in [
             RAW_AUDITION_PLAYING,
             WARP_AUDITION_PLAYING,
-            RAW_AUDITION_AWAITING_BPM,
-            RAW_AUDITION_CONTINUES_FOR_BPM_EDIT,
+            WARP_AUDITION_PREPARING,
         ] {
             assert!(active_audition_status(status));
         }
-        assert!(!active_audition_status(WARP_BPM_EDIT_NEEDS_CONFIRMATION));
+        assert!(!active_audition_status("Audition unavailable"));
     }
 
     #[test]

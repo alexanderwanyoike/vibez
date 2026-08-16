@@ -170,24 +170,6 @@ pub(super) fn browser_utility_action_style(
     }
 }
 
-pub(super) fn browser_compact_input_style(
-    _theme: &Theme,
-    _status: iced::widget::text_input::Status,
-) -> iced::widget::text_input::Style {
-    iced::widget::text_input::Style {
-        background: th::bg_dark().into(),
-        border: iced::Border {
-            color: th::border(),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        icon: th::text_dim(),
-        placeholder: th::text_dim(),
-        value: th::text(),
-        selection: th::accent(),
-    }
-}
-
 pub(super) fn browser_transport_button_style(
     _theme: &Theme,
     status: button::Status,
