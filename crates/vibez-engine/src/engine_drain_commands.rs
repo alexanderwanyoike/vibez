@@ -11,6 +11,20 @@ impl AudioEngine {
                 EngineCommand::Play => {
                     self.clock_domain = ClockDomain::Arrange;
                     self.transport.play();
+                    let audition_queued = self.audition.resync_on_transport_start(
+                        self.transport.position(),
+                        self.transport.bpm(),
+                        self.sample_rate,
+                        audition_fade_frames(self.sample_rate),
+                    );
+                    if let Some(queued) = audition_queued {
+                        let event = if queued {
+                            EngineEvent::AuditionQueued
+                        } else {
+                            EngineEvent::AuditionStarted
+                        };
+                        let _ = self.event_tx.push(event);
+                    }
                     self.performance_position = self.transport.position();
                     self.stopped_note_repeat_anchor = None;
                     let anchor = self.playing_note_repeat_anchor();
@@ -748,16 +762,24 @@ impl AudioEngine {
                 } => {
                     let fade_frames = audition_fade_frames(self.sample_rate);
                     if self.transport.is_playing() && start == AuditionStart::NextBar {
+                        let clock_position = self.effective_position();
                         let target = next_audition_boundary(
-                            self.transport.position(),
+                            clock_position,
                             self.transport.bpm(),
                             self.sample_rate,
                             4,
                         );
-                        self.audition.queue(audio, target, fade_frames, looped);
+                        let frames_until_start = target.saturating_sub(clock_position);
+                        self.audition
+                            .queue(audio, frames_until_start, fade_frames, looped, true);
                         let _ = self.event_tx.push(EngineEvent::AuditionQueued);
                     } else {
-                        self.audition.start(audio, fade_frames, looped);
+                        self.audition.start(
+                            audio,
+                            fade_frames,
+                            looped,
+                            start == AuditionStart::NextBar,
+                        );
                         let _ = self.event_tx.push(EngineEvent::AuditionStarted);
                     }
                 }

@@ -148,7 +148,7 @@ fn audition_defaults_on_and_remembers_clamped_gain_state() {
     let mut browser = BrowserState::default();
     assert!(browser.audition_enabled);
     assert_eq!(browser.audition_gain, 1.0);
-    assert_eq!(browser.audition_mode, crate::state::AuditionMode::Raw);
+    assert_eq!(browser.audition_mode, crate::state::AuditionMode::Warp);
 
     assert!(!browser.toggle_audition_enabled());
     browser.set_audition_gain(3.0);

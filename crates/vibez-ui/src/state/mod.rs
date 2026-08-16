@@ -21,8 +21,8 @@ use vibez_plugin_host::PluginSettings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuditionMode {
-    #[default]
     Raw,
+    #[default]
     Warp,
 }
 
