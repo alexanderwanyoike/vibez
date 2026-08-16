@@ -1341,6 +1341,24 @@ fn audition_loop_fades_the_source_boundary_without_silence_or_a_click() {
 }
 
 #[test]
+fn audition_reports_the_active_source_position_after_rendering() {
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            start: AuditionStart::Immediate,
+            looped: true,
+        })
+        .unwrap();
+
+    let mut output = vec![0.0; 1_024 * 2];
+    engine.process(&mut output, 2);
+
+    assert!(std::iter::from_fn(|| event_rx.pop().ok())
+        .any(|event| event == EngineEvent::AuditionPosition(1_024)));
+}
+
+#[test]
 fn note_clip_loop_renders() {
     use vibez_core::midi::{InstrumentKind, MidiNote};
 

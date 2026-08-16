@@ -13,6 +13,7 @@ use crate::theme;
 
 pub struct BrowserWaveform {
     pub audio: Option<Arc<DecodedAudio>>,
+    pub playhead_fraction: Option<f32>,
 }
 
 pub struct BrowserWaveformState {
@@ -91,7 +92,25 @@ impl canvas::Program<Message> for BrowserWaveform {
             }
         });
 
-        vec![geometry]
+        let playhead = {
+            let mut frame = canvas::Frame::new(renderer, bounds.size());
+            if let Some(fraction) = self.playhead_fraction {
+                let x = fraction.clamp(0.0, 1.0) * bounds.width;
+                let line = canvas::Path::line(
+                    iced::Point::new(x, 0.0),
+                    iced::Point::new(x, bounds.height),
+                );
+                frame.stroke(
+                    &line,
+                    canvas::Stroke::default()
+                        .with_color(theme::playhead())
+                        .with_width(1.5),
+                );
+            }
+            frame.into_geometry()
+        };
+
+        vec![geometry, playhead]
     }
 }
 

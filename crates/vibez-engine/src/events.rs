@@ -231,6 +231,8 @@ pub enum EngineEvent {
     AuditionQueued,
     /// Audition crossed its requested boundary and began rendering.
     AuditionStarted,
+    /// Current frame inside the active Browser Audition source.
+    AuditionPosition(u64),
 }
 
 impl PartialEq for EngineEvent {
@@ -541,6 +543,7 @@ impl PartialEq for EngineEvent {
             | (Self::AuditionStopped, Self::AuditionStopped)
             | (Self::AuditionQueued, Self::AuditionQueued)
             | (Self::AuditionStarted, Self::AuditionStarted) => true,
+            (Self::AuditionPosition(left), Self::AuditionPosition(right)) => left == right,
             _ => false,
         }
     }
@@ -587,6 +590,7 @@ mod tests {
         let _audition_stopped = EngineEvent::AuditionStopped;
         let _audition_queued = EngineEvent::AuditionQueued;
         let _audition_started = EngineEvent::AuditionStarted;
+        let _audition_position = EngineEvent::AuditionPosition(256);
     }
 
     #[test]

@@ -158,6 +158,24 @@ fn audition_defaults_on_and_remembers_clamped_gain_state() {
 }
 
 #[test]
+fn audition_playhead_tracks_the_active_buffer_and_hides_when_stopped() {
+    let audio = std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 1_000]],
+        sample_rate: 44_100,
+    });
+    let mut browser = BrowserState {
+        audition_audio: Some(audio),
+        audition_playing: true,
+        audition_position_frames: 250,
+        ..BrowserState::default()
+    };
+
+    assert_eq!(browser.audition_playhead_fraction(), Some(0.25));
+    browser.stop_audition_state();
+    assert_eq!(browser.audition_playhead_fraction(), None);
+}
+
+#[test]
 fn warp_import_resolves_the_same_grid_fit_without_confirmation() {
     let browser = BrowserState {
         audition_mode: crate::state::AuditionMode::Warp,

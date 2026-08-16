@@ -72,6 +72,7 @@ impl App {
         let waveform: Element<'_, Message> = container(
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
                 audio: self.state.browser.waveform_audio.clone(),
+                playhead_fraction: self.state.browser.audition_playhead_fraction(),
             })
             .width(Length::Fill)
             .height(Length::Fixed(26.0)),

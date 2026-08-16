@@ -95,6 +95,7 @@ pub struct BrowserState {
     pub audition_loading: bool,
     pub audition_playing: bool,
     pub audition_queued: bool,
+    pub audition_position_frames: u64,
     /// Treatment currently handed to the Audition Bus. This can be RAW while
     /// the selected intent remains WARP and its source BPM is unresolved.
     pub audition_playback_mode: Option<AuditionMode>,
@@ -155,6 +156,7 @@ impl Default for BrowserState {
             audition_loading: false,
             audition_playing: false,
             audition_queued: false,
+            audition_position_frames: 0,
             audition_playback_mode: None,
             audition_generation: 0,
             audition_audio: None,
@@ -453,6 +455,7 @@ impl BrowserState {
         self.audition_loading = false;
         self.audition_playing = false;
         self.audition_queued = false;
+        self.audition_position_frames = 0;
         self.audition_playback_mode = None;
     }
 
@@ -469,7 +472,14 @@ impl BrowserState {
         self.audition_loading = false;
         self.audition_queued = queued;
         self.audition_playing = !queued;
+        self.audition_position_frames = 0;
         self.audition_playback_mode = Some(mode);
+    }
+
+    pub fn audition_playhead_fraction(&self) -> Option<f32> {
+        let frames = self.audition_audio.as_ref()?.num_frames();
+        (self.audition_playing && frames > 0)
+            .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
     }
 
     pub fn audition_import_input(&self) -> AuditionImportInput {

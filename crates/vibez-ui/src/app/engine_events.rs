@@ -82,6 +82,7 @@ impl App {
                         self.state.browser.audition_queued = true;
                     }
                     EngineEvent::AuditionStarted => {
+                        self.state.browser.audition_position_frames = 0;
                         self.state.browser.audition_queued = false;
                         self.state.browser.audition_playing = true;
                         let playback_mode = self
@@ -99,6 +100,9 @@ impl App {
                             AuditionMode::Raw => RAW_AUDITION_PLAYING.into(),
                             AuditionMode::Warp => WARP_AUDITION_PLAYING.into(),
                         };
+                    }
+                    EngineEvent::AuditionPosition(position_frames) => {
+                        self.state.browser.audition_position_frames = position_frames;
                     }
                     EngineEvent::TrackMeter {
                         track_id,
