@@ -20,13 +20,17 @@ impl App {
         let place_button = |label: &'static str, active: bool, mode| {
             button(
                 row![
-                    text(if active { "●" } else { "○" })
-                        .size(9)
-                        .color(if active {
-                            th::accent()
-                        } else {
-                            th::text_muted()
-                        }),
+                    icons::icon(if active {
+                        icons::CIRCLE_DOT
+                    } else {
+                        icons::CIRCLE
+                    })
+                    .size(9)
+                    .color(if active {
+                        th::accent()
+                    } else {
+                        th::text_muted()
+                    }),
                     text(label)
                         .size(11)
                         .color(if active { th::text() } else { th::text_dim() })
@@ -83,9 +87,13 @@ impl App {
                 .unwrap_or_else(|| root.display().to_string());
             let toggle: Element<'_, Message> = if has_children {
                 button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                    icons::icon(if expanded {
+                        icons::CHEVRON_DOWN
+                    } else {
+                        icons::CHEVRON_RIGHT
+                    })
+                    .size(10)
+                    .color(th::text_muted()),
                 )
                 .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
                     root.clone(),
@@ -94,7 +102,7 @@ impl App {
                 .style(browser_utility_action_style)
                 .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
+                container(icons::icon(icons::DOT).size(9).color(th::text_muted()))
                     .padding([4, 3])
                     .into()
             };
@@ -117,18 +125,20 @@ impl App {
                 .padding([4, 2])
                 .style(browser_utility_action_style);
             let root_state = self.state.browser.root_catalog_label(root);
-            let state_marker = text(match root_state {
-                "INDEXING" | "UPDATING" => "↻",
-                "STALE" | "WATCH ERR" => "!",
-                "WARN" => "!",
-                _ => "·",
-            })
-            .size(9)
-            .color(if matches!(root_state, "STALE" | "WATCH ERR" | "WARN") {
-                th::danger()
-            } else {
-                th::text_muted()
-            });
+            let state_marker: Element<'_, Message> =
+                if matches!(root_state, "INDEXING" | "UPDATING") {
+                    icons::icon(icons::REFRESH_CW)
+                        .size(9)
+                        .color(th::text_muted())
+                        .into()
+                } else if matches!(root_state, "STALE" | "WATCH ERR" | "WARN") {
+                    text("!").size(9).color(th::danger()).into()
+                } else {
+                    icons::icon(icons::DOT)
+                        .size(9)
+                        .color(th::text_muted())
+                        .into()
+                };
             local_tree_rows.push(
                 row![toggle, root_button, state_marker, remove]
                     .spacing(1)
@@ -145,9 +155,13 @@ impl App {
 
         let remote = &self.state.browser.remote;
         let remote_toggle = button(
-            text(if remote.place_expanded { "▾" } else { "▸" })
-                .size(10)
-                .color(th::text_muted()),
+            icons::icon(if remote.place_expanded {
+                icons::CHEVRON_DOWN
+            } else {
+                icons::CHEVRON_RIGHT
+            })
+            .size(10)
+            .color(th::text_muted()),
         )
         .on_press(Message::Browser(BrowserMsg::ToggleRemotePlace))
         .padding([3, 2])
@@ -181,10 +195,10 @@ impl App {
         if remote.place_expanded {
             let connection_active = remote_active && remote.current_path.is_empty();
             let connection_toggle = button(
-                text(if remote.connection_expanded {
-                    "▾"
+                icons::icon(if remote.connection_expanded {
+                    icons::CHEVRON_DOWN
                 } else {
-                    "▸"
+                    icons::CHEVRON_RIGHT
                 })
                 .size(10)
                 .color(th::text_muted()),
@@ -303,9 +317,13 @@ impl App {
                 });
             let toggle: Element<'a, Message> = if has_children {
                 button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                    icons::icon(if expanded {
+                        icons::CHEVRON_DOWN
+                    } else {
+                        icons::CHEVRON_RIGHT
+                    })
+                    .size(10)
+                    .color(th::text_muted()),
                 )
                 .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
                     folder.path.clone(),
@@ -314,7 +332,7 @@ impl App {
                 .style(browser_utility_action_style)
                 .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
+                container(icons::icon(icons::DOT).size(9).color(th::text_muted()))
                     .padding([3, 3])
                     .into()
             };
@@ -373,9 +391,13 @@ impl App {
                 .any(|&child| remote.catalog.entries[child].is_folder);
             let toggle: Element<'a, Message> = if has_children {
                 button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                    icons::icon(if expanded {
+                        icons::CHEVRON_DOWN
+                    } else {
+                        icons::CHEVRON_RIGHT
+                    })
+                    .size(10)
+                    .color(th::text_muted()),
                 )
                 .on_press(Message::Browser(BrowserMsg::ToggleRemoteFolder(
                     folder.provider_item_id.clone(),
@@ -384,7 +406,7 @@ impl App {
                 .style(browser_utility_action_style)
                 .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
+                container(icons::icon(icons::DOT).size(9).color(th::text_muted()))
                     .padding([3, 3])
                     .into()
             };
