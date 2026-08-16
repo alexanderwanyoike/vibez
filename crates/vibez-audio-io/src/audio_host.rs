@@ -262,11 +262,11 @@ impl AudioHost {
         let default_input_name = self
             .host
             .default_input_device()
-            .and_then(|device| device.name().ok());
+            .and_then(|device| cpal_device_name(&device).ok());
         let default_output_name = self
             .host
             .default_output_device()
-            .and_then(|device| device.name().ok());
+            .and_then(|device| cpal_device_name(&device).ok());
         Ok(AudioDeviceCatalog {
             default_input_name,
             default_output_name,
@@ -307,7 +307,7 @@ enum StreamDirection {
 
 fn stream_config_info(config: cpal::SupportedStreamConfig) -> StreamConfigInfo {
     StreamConfigInfo {
-        sample_rate: config.sample_rate().0,
+        sample_rate: config.sample_rate(),
         channels: config.channels(),
         sample_format: format!("{:?}", config.sample_format()),
     }
@@ -316,8 +316,8 @@ fn stream_config_info(config: cpal::SupportedStreamConfig) -> StreamConfigInfo {
 fn supported_config_info(range: cpal::SupportedStreamConfigRange) -> SupportedConfigRange {
     SupportedConfigRange {
         channels: range.channels(),
-        min_sample_rate: range.min_sample_rate().0,
-        max_sample_rate: range.max_sample_rate().0,
+        min_sample_rate: range.min_sample_rate(),
+        max_sample_rate: range.max_sample_rate(),
         sample_format: format!("{:?}", range.sample_format()),
         buffer_size_range: buffer_size_range(range.buffer_size()),
     }
@@ -327,7 +327,7 @@ fn device_info(
     device: &cpal::Device,
     direction: StreamDirection,
 ) -> Result<DeviceInfo, AudioHostError> {
-    let name = device.name()?;
+    let name = cpal_device_name(device)?;
     let default_config = match direction {
         StreamDirection::Input => device.default_input_config(),
         StreamDirection::Output => device.default_output_config(),
@@ -349,6 +349,12 @@ fn device_info(
         default_config,
         supported_configs,
     })
+}
+
+pub(crate) fn cpal_device_name(device: &cpal::Device) -> Result<String, cpal::DeviceNameError> {
+    device
+        .description()
+        .map(|description| description.name().to_owned())
 }
 
 fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {

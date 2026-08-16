@@ -7,11 +7,11 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, SampleRate, StreamConfig};
+use cpal::{FromSample, Sample, SampleFormat, StreamConfig};
 use vibez_core::id::TrackId;
 use vibez_core::track::AudioInputRoute;
 
-use crate::audio_host::{AudioBackend, AudioHostError};
+use crate::audio_host::{cpal_device_name, AudioBackend, AudioHostError};
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 
 const DEFAULT_BRIDGE_FRAMES: usize = 262_144;
@@ -426,7 +426,7 @@ impl AudioInputStream {
         let device = match device_name {
             Some(name) => host
                 .input_devices()?
-                .find(|device| device.name().is_ok_and(|candidate| candidate == name))
+                .find(|device| cpal_device_name(device).is_ok_and(|candidate| candidate == name))
                 .ok_or_else(|| AudioInputError::InputDeviceNotFound(name.to_string()))?,
             None => host
                 .default_input_device()
@@ -454,7 +454,7 @@ impl AudioInputStream {
         let channels = selected.channels() as usize;
         let config = StreamConfig {
             channels: selected.channels(),
-            sample_rate: SampleRate(sample_rate),
+            sample_rate,
             buffer_size: buffer_size.map_or(cpal::BufferSize::Default, cpal::BufferSize::Fixed),
         };
         let (event_tx, events) = mpsc::sync_channel(8);
@@ -470,9 +470,7 @@ impl AudioInputStream {
         Ok(Self {
             stream,
             events,
-            device_name: device
-                .name()
-                .unwrap_or_else(|_| "System Default".to_string()),
+            device_name: cpal_device_name(&device).unwrap_or_else(|_| "System Default".to_string()),
             channels,
             sample_rate,
             backend,

@@ -454,7 +454,11 @@ audio backend, soundcard selection, sample rate, and buffer size remain global
 application settings. The same selected backend opens input and output:
 CoreAudio on macOS, ALSA on Linux, and selectable WASAPI or ASIO on Windows.
 ASIO presents one driver choice for both directions rather than allowing an
-invalid pair of independent ASIO drivers.
+invalid pair of independent ASIO drivers. Because ASIO permits only one loaded
+driver, a driver-to-driver switch releases the live stream, tries the requested
+configuration and its driver defaults, then reopens the exact previous
+configuration if both attempts fail. Settings always report the stream which
+is actually running.
 
 That exact position is the output-clock boundary, not calibrated acoustic
 alignment. V1 does not measure input/output round-trip latency or continuously

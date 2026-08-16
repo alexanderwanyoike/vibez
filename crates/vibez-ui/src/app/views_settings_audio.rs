@@ -229,6 +229,8 @@ impl App {
         let device_rows = if self.state.audio_settings.backend
             == vibez_audio_io::audio_host::AudioBackend::Asio
         {
+            let hardware_setup =
+                settings_action_button("Hardware Setup", Message::ShowAsioHardwareSetup, false);
             column![
                 backend_row,
                 settings_divider(),
@@ -241,6 +243,20 @@ impl App {
                     .spacing(3)
                     .width(Length::Fill),
                     output_picker
+                ]
+                .spacing(18)
+                .align_y(iced::Alignment::Center),
+                settings_divider(),
+                row![
+                    column![
+                        text("ASIO Routing").size(12).color(th::text()),
+                        text("Choose speakers and headphones in the driver's control panel")
+                            .size(9)
+                            .color(th::text_muted())
+                    ]
+                    .spacing(1)
+                    .width(Length::Fill),
+                    hardware_setup
                 ]
                 .spacing(18)
                 .align_y(iced::Alignment::Center)

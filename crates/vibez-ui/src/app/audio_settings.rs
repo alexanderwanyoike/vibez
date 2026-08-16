@@ -141,6 +141,33 @@ fn failed_initial_audio(error: impl std::fmt::Display) -> (AudioStreamHealth, Op
     )
 }
 
+fn live_output_requests(
+    backend: AudioBackend,
+    output_name: Option<String>,
+    sample_rate: u32,
+    buffer_size: u32,
+) -> Vec<OutputStreamConfig> {
+    let preferred = OutputStreamConfig {
+        backend,
+        device_name: output_name.clone(),
+        sample_rate: Some(sample_rate),
+        buffer_size: Some(buffer_size),
+    };
+    if backend == AudioBackend::Asio {
+        vec![
+            preferred,
+            OutputStreamConfig {
+                backend,
+                device_name: output_name,
+                sample_rate: None,
+                buffer_size: None,
+            },
+        ]
+    } else {
+        vec![preferred]
+    }
+}
+
 impl App {
     pub(super) fn handle_select_audio_backend(&mut self, backend: AudioBackend) -> Task<Message> {
         if self.state.audio_recording.is_busy() {
@@ -336,23 +363,24 @@ impl App {
             // the successful path reopens it through the new output device.
             self._input_stream = None;
         }
-        let request = OutputStreamConfig {
+        let requests = live_output_requests(
             backend,
-            device_name: preferred_output_name.clone(),
-            sample_rate: Some(sample_rate),
-            buffer_size: Some(buffer_size),
-        };
+            preferred_output_name.clone(),
+            sample_rate,
+            buffer_size,
+        );
         let result = self
             ._stream
             .as_mut()
             .ok_or_else(|| "audio engine is unavailable".to_string())
             .and_then(|stream| {
-                stream
-                    .reconfigure(request)
+                let applied_request = stream
+                    .reconfigure_candidates(&requests)
                     .map_err(|error| error.to_string())?;
                 Ok((
                     stream.sample_rate().unwrap_or(sample_rate),
                     stream.active_device_name().map(str::to_owned),
+                    applied_request,
                 ))
             });
         // Reconfiguration reports synchronously through the stream's lifecycle
@@ -361,7 +389,7 @@ impl App {
         // copy.
         self.poll_audio_stream_events();
         match result {
-            Ok((actual_sample_rate, active_output_name)) => {
+            Ok((actual_sample_rate, active_output_name, applied_request)) => {
                 self.state.audio_settings.preferred_output_name = preferred_output_name;
                 self.state.audio_settings.preferred_input_name = if backend == AudioBackend::Asio {
                     self.state.audio_settings.preferred_output_name.clone()
@@ -381,11 +409,18 @@ impl App {
                     return true;
                 }
                 self.persist_ui_settings();
-                self.state.status_text = format!(
-                    "{backend} Audio Output running — {}, {} Hz, {buffer_size} frames",
-                    active_output_name.as_deref().unwrap_or("System Default"),
-                    actual_sample_rate
-                );
+                self.state.status_text = if applied_request == 0 {
+                    format!(
+                        "{backend} Audio Output running — {}, {} Hz, {buffer_size} frames",
+                        active_output_name.as_deref().unwrap_or("System Default"),
+                        actual_sample_rate
+                    )
+                } else {
+                    format!(
+                        "{backend} Audio Output running — {} with driver defaults",
+                        active_output_name.as_deref().unwrap_or("System Default")
+                    )
+                };
                 true
             }
             Err(error) => {
@@ -394,10 +429,23 @@ impl App {
                     self.state.audio_settings.active_backend = stream.active_backend();
                     self.state.audio_settings.active_output_name =
                         stream.active_device_name().map(str::to_owned);
+                    if stream.is_running() {
+                        let active = stream
+                            .active_device_name()
+                            .unwrap_or("the previous Audio Output");
+                        self.state.audio_stream_health = AudioStreamHealth::Running;
+                        self.state.status_text =
+                            format!("Could not switch Audio Output — {error}. {active} restored");
+                    } else {
+                        self.state.audio_stream_health = AudioStreamHealth::Error(error.clone());
+                        self.state.status_text =
+                            format!("Audio Output failed and could not be restored — {error}");
+                    }
                 }
                 if self._stream.is_none() {
                     self.state.status_text = format!("Audio configuration rejected: {error}");
                 }
+                let _ = self.sync_audio_input_runtime();
                 false
             }
         }
@@ -406,7 +454,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::initial_output_requests;
+    use super::{initial_output_requests, live_output_requests};
     use vibez_audio_io::audio_host::AudioBackend;
     use vibez_audio_io::audio_stream::OutputStreamConfig;
 
@@ -471,5 +519,26 @@ mod tests {
         assert_eq!(requests.last().unwrap().device_name, None);
         assert_eq!(requests.last().unwrap().sample_rate, None);
         assert_eq!(requests.last().unwrap().buffer_size, None);
+    }
+
+    #[test]
+    fn asio_live_switch_retries_the_same_driver_with_its_defaults() {
+        assert_eq!(
+            live_output_requests(AudioBackend::Asio, Some("Realtek ASIO".into()), 48_000, 128,),
+            vec![
+                OutputStreamConfig {
+                    backend: AudioBackend::Asio,
+                    device_name: Some("Realtek ASIO".into()),
+                    sample_rate: Some(48_000),
+                    buffer_size: Some(128),
+                },
+                OutputStreamConfig {
+                    backend: AudioBackend::Asio,
+                    device_name: Some("Realtek ASIO".into()),
+                    sample_rate: None,
+                    buffer_size: None,
+                },
+            ]
+        );
     }
 }

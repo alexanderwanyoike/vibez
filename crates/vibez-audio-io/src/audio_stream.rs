@@ -8,10 +8,10 @@ use std::fmt;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{DevicesError, PauseStreamError, SampleRate, StreamConfig};
+use cpal::traits::{HostTrait, StreamTrait};
+use cpal::{DevicesError, PauseStreamError, StreamConfig};
 
-use crate::audio_host::{AudioBackend, AudioHostError};
+use crate::audio_host::{cpal_device_name, AudioBackend, AudioHostError};
 use crate::audio_input::AudioInputBridge;
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 use vibez_core::constants::DEFAULT_CHANNELS;
@@ -72,6 +72,12 @@ pub enum AudioStreamError {
     PauseError(PauseStreamError),
     /// There is no connected stream to start or pause.
     NoActiveStream,
+    /// An exclusive driver switch failed and the last working stream could
+    /// not be reopened either.
+    RollbackFailed {
+        requested: Box<AudioStreamError>,
+        rollback: Box<AudioStreamError>,
+    },
 }
 
 impl fmt::Display for AudioStreamError {
@@ -86,6 +92,13 @@ impl fmt::Display for AudioStreamError {
             Self::StreamOpen(error) => error.fmt(f),
             Self::PauseError(e) => write!(f, "failed to pause audio stream: {e}"),
             Self::NoActiveStream => write!(f, "no active audio output stream"),
+            Self::RollbackFailed {
+                requested,
+                rollback,
+            } => write!(
+                f,
+                "requested output failed: {requested}; restoring the previous output also failed: {rollback}"
+            ),
         }
     }
 }
@@ -98,6 +111,7 @@ impl std::error::Error for AudioStreamError {
             Self::DevicesError(e) => Some(e),
             Self::StreamOpen(error) => Some(error),
             Self::PauseError(e) => Some(e),
+            Self::RollbackFailed { requested, .. } => Some(requested),
         }
     }
 }
@@ -193,6 +207,7 @@ pub struct AudioOutputStream {
     active_device: Option<cpal::Device>,
     active_device_name: Option<String>,
     active_backend: Option<AudioBackend>,
+    active_config: Option<OutputStreamConfig>,
     /// Shared engine slot.  The audio callback `try_lock`s this each
     /// invocation and calls `engine.process_block()` if the lock is obtained.
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
@@ -212,6 +227,7 @@ impl AudioOutputStream {
             active_device: None,
             active_device_name: None,
             active_backend: None,
+            active_config: None,
             engine_slot: Arc::new(Mutex::new(Some(engine))),
             event_reporter,
             event_rx,
@@ -245,7 +261,7 @@ impl AudioOutputStream {
         buffer_size: Option<u32>,
     ) -> Result<Self, AudioStreamError> {
         let mut output = Self::idle(engine);
-        let device_name = device.name().ok();
+        let device_name = cpal_device_name(device).ok();
         let (stream, params) = Self::build_stream(
             Arc::clone(&output.engine_slot),
             device,
@@ -261,6 +277,12 @@ impl AudioOutputStream {
         output.active_device = Some(device.clone());
         output.active_device_name = device_name;
         output.active_backend = Some(AudioBackend::System);
+        output.active_config = Some(OutputStreamConfig {
+            backend: AudioBackend::System,
+            device_name: output.active_device_name.clone(),
+            sample_rate: output.sample_rate(),
+            buffer_size,
+        });
         output.event_reporter.report(AudioStreamEvent::Running);
         Ok(output)
     }
@@ -272,25 +294,84 @@ impl AudioOutputStream {
     /// or start fails, the previous stream remains (or is resumed) instead of
     /// leaving the session silent.
     pub fn reconfigure(&mut self, request: OutputStreamConfig) -> Result<(), AudioStreamError> {
+        self.reconfigure_candidates(&[request]).map(|_| ())
+    }
+
+    /// Try a preferred configuration followed by compatible fallbacks as one
+    /// transaction. If an exclusive ASIO driver must be released and every
+    /// candidate fails, Vibez reopens the exact configuration which was live
+    /// before the attempt.
+    ///
+    /// The returned index identifies the candidate that became active.
+    pub fn reconfigure_candidates(
+        &mut self,
+        requests: &[OutputStreamConfig],
+    ) -> Result<usize, AudioStreamError> {
+        assert!(
+            !requests.is_empty(),
+            "at least one output request is required"
+        );
         self.event_reporter.report(AudioStreamEvent::Rebuilding);
         let mut previous_stream_running = self.stream.is_some();
+        let previous_config = self.active_config.clone();
+        let requested_backend = requests[0].backend;
         // Most native hosts allow a replacement stream to be prepared while
         // the old one remains live. ASIO drivers commonly own one exclusive
         // buffer set, so attempting to load the same driver twice fails. Drop
         // that driver before rebuilding while the engine remains safely held
         // in `engine_slot`.
-        if requires_exclusive_reopen(self.active_backend, request.backend) {
-            self.stream = None;
-            self.active_device = None;
-            self.params = None;
-            self.active_device_name = None;
-            self.active_backend = None;
+        let exclusive_stream_released =
+            requires_exclusive_reopen(self.active_backend, requested_backend);
+        if exclusive_stream_released {
+            self.clear_active_stream();
             previous_stream_running = false;
         }
+        let mut last_error = None;
+        for (index, request) in requests.iter().enumerate() {
+            match self.try_reconfigure(request, &mut previous_stream_running) {
+                Ok(()) => {
+                    self.event_reporter.report(AudioStreamEvent::Recovered);
+                    return Ok(index);
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+
+        let mut error = last_error.expect("a non-empty request list always produces a result");
+        if exclusive_stream_released {
+            let mut rollback_stream_running = false;
+            match previous_config.as_ref() {
+                Some(config) => match self.try_reconfigure(config, &mut rollback_stream_running) {
+                    Ok(()) => previous_stream_running = true,
+                    Err(rollback) => {
+                        error = AudioStreamError::RollbackFailed {
+                            requested: Box::new(error),
+                            rollback: Box::new(rollback),
+                        };
+                    }
+                },
+                None => previous_stream_running = false,
+            }
+        }
+
+        let event = if previous_stream_running {
+            AudioStreamEvent::ConfigurationRejected(error.to_string())
+        } else {
+            AudioStreamEvent::Error(error.to_string())
+        };
+        self.event_reporter.report(event);
+        Err(error)
+    }
+
+    fn try_reconfigure(
+        &mut self,
+        request: &OutputStreamConfig,
+        previous_stream_running: &mut bool,
+    ) -> Result<(), AudioStreamError> {
         let result: Result<(), AudioStreamError> = (|| {
             let host = request.backend.create_host()?;
             let device = resolve_output_device(&host, request.device_name.as_deref())?;
-            let device_name = device.name().unwrap_or_else(|_| {
+            let device_name = cpal_device_name(&device).unwrap_or_else(|_| {
                 request
                     .device_name
                     .clone()
@@ -311,11 +392,11 @@ impl AudioOutputStream {
 
             if let Some(current) = self.stream.as_ref() {
                 current.pause()?;
-                previous_stream_running = false;
+                *previous_stream_running = false;
             }
             if let Err(error) = stream.play() {
                 if let Some(current) = self.stream.as_ref() {
-                    previous_stream_running = current.play().is_ok();
+                    *previous_stream_running = current.play().is_ok();
                 }
                 return Err(error.into());
             }
@@ -325,24 +406,24 @@ impl AudioOutputStream {
             self.active_device = Some(device);
             self.active_device_name = Some(device_name);
             self.active_backend = Some(request.backend);
+            self.active_config = Some(OutputStreamConfig {
+                backend: request.backend,
+                device_name: self.active_device_name.clone(),
+                sample_rate: self.sample_rate(),
+                buffer_size: request.buffer_size,
+            });
             Ok(())
         })();
+        result
+    }
 
-        match result {
-            Ok(()) => {
-                self.event_reporter.report(AudioStreamEvent::Recovered);
-                Ok(())
-            }
-            Err(error) => {
-                let event = if previous_stream_running {
-                    AudioStreamEvent::ConfigurationRejected(error.to_string())
-                } else {
-                    AudioStreamEvent::Error(error.to_string())
-                };
-                self.event_reporter.report(event);
-                Err(error)
-            }
-        }
+    fn clear_active_stream(&mut self) {
+        self.stream = None;
+        self.params = None;
+        self.active_device = None;
+        self.active_device_name = None;
+        self.active_backend = None;
+        self.active_config = None;
     }
 
     /// Internal: build a cpal stream around an existing engine slot.
@@ -362,7 +443,7 @@ impl AudioOutputStream {
             buffer_size,
             Some(DEFAULT_CHANNELS as u16),
         )?;
-        let sample_rate = supported_config.sample_rate().0;
+        let sample_rate = supported_config.sample_rate();
         let channels = supported_config.channels() as usize;
 
         let buf_size = match buffer_size {
@@ -372,7 +453,7 @@ impl AudioOutputStream {
 
         let config = StreamConfig {
             channels: channels as u16,
-            sample_rate: SampleRate(sample_rate),
+            sample_rate,
             buffer_size: buf_size,
         };
 
@@ -504,7 +585,7 @@ fn resolve_output_device(
             .ok_or(AudioStreamError::NoOutputDevice);
     };
     host.output_devices()?
-        .find(|device| device.name().is_ok_and(|name| name == requested_name))
+        .find(|device| cpal_device_name(device).is_ok_and(|name| name == requested_name))
         .ok_or_else(|| AudioStreamError::OutputDeviceNotFound(requested_name.to_string()))
 }
 

@@ -382,6 +382,9 @@ impl App {
             Message::ReconnectAudioOutput => {
                 return self.handle_reconnect_audio_output();
             }
+            Message::ShowAsioHardwareSetup => {
+                self.state.status_text = "Open the active ASIO driver's control panel to choose its hardware channels. ASIO4ALL exposes it from the Windows tray while the driver is running".into();
+            }
 
             // -- Plugin scanning --
             Message::ScanPlugins => {
