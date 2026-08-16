@@ -149,11 +149,6 @@ fn audition_defaults_on_and_remembers_clamped_gain_state() {
     assert!(browser.audition_enabled);
     assert_eq!(browser.audition_gain, 1.0);
     assert_eq!(browser.audition_mode, crate::state::AuditionMode::Raw);
-    assert_eq!(
-        browser.audition_sync,
-        vibez_engine::commands::AuditionSync::Off
-    );
-    assert!(!browser.audition_loop);
 
     assert!(!browser.toggle_audition_enabled());
     browser.set_audition_gain(3.0);
@@ -163,67 +158,41 @@ fn audition_defaults_on_and_remembers_clamped_gain_state() {
 }
 
 #[test]
-fn warp_import_input_requires_positive_confirmed_bpm_for_the_current_source() {
-    let first = MediaSourceRef::LocalFile {
-        path: PathBuf::from("/samples/loop.wav"),
-    };
-    let second = MediaSourceRef::LocalFile {
-        path: PathBuf::from("/samples/other.wav"),
-    };
-    let mut browser = BrowserState::default();
-    browser.select_source(first.clone());
-    browser.audition_mode = crate::state::AuditionMode::Warp;
-    assert!(browser.audition_import_input().is_none());
-
-    assert!(browser.install_bpm_suggestion(first, Some((127.8, 0.42)), 0.6));
-    assert_eq!(browser.audition_bpm_edit, "127.8");
-    assert!(browser.audition_bpm_confirmed.is_none());
-    assert_eq!(browser.confirm_audition_bpm().unwrap(), 127.8);
-    let input = browser.audition_import_input().unwrap();
-    assert_eq!(input.mode, crate::state::AuditionMode::Warp);
-    assert_eq!(input.source_bpm, Some(127.8));
-
-    browser.select_source(second);
-    assert!(browser.audition_bpm_confirmed.is_none());
-    assert!(browser.audition_import_input().is_none());
-    browser.audition_bpm_edit = "0".into();
-    assert!(browser.confirm_audition_bpm().is_err());
-}
-
-#[test]
-fn trustworthy_detected_source_bpm_is_ready_without_manual_entry() {
-    let source = MediaSourceRef::LocalFile {
-        path: PathBuf::from("/samples/loop.wav"),
-    };
-    let mut browser = BrowserState::default();
-    browser.select_source(source.clone());
-    browser.audition_mode = crate::state::AuditionMode::Warp;
-
-    assert!(browser.install_bpm_suggestion(source, Some((124.0, 0.91)), 0.6));
-    assert_eq!(browser.audition_bpm_confirmed, Some(124.0));
-    assert_eq!(
-        browser.audition_import_input().unwrap().source_bpm,
-        Some(124.0)
-    );
-}
-
-#[test]
-fn warp_intent_without_confirmed_bpm_falls_back_to_raw_audition() {
-    let mut browser = BrowserState {
+fn warp_import_resolves_the_same_grid_fit_without_confirmation() {
+    let browser = BrowserState {
         audition_mode: crate::state::AuditionMode::Warp,
         ..BrowserState::default()
     };
 
-    assert_eq!(
-        browser.audition_playback_plan(),
-        crate::state::BrowserAuditionPlan::Raw
-    );
-    assert!(browser.audition_import_input().is_none());
+    let frames = (4.0 * 4.0 * 60.0 / 128.0 * 44_100.0) as usize;
+    let audio = vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; frames]],
+        sample_rate: 44_100,
+    };
 
-    browser.audition_bpm_edit = "128".into();
-    browser.confirm_audition_bpm().unwrap();
+    let input = browser.audition_import_input();
+    assert_eq!(input.mode, crate::state::AuditionMode::Warp);
+    assert_eq!(input.source_bpm, None);
     assert_eq!(
-        browser.audition_playback_plan(),
+        input.resolve_for_audio(&audio, 120.0).unwrap().source_bpm,
+        Some(128.0)
+    );
+}
+
+#[test]
+fn warp_audition_plan_always_grid_fits_valid_audio() {
+    let browser = BrowserState {
+        audition_mode: crate::state::AuditionMode::Warp,
+        ..BrowserState::default()
+    };
+    let frames = (4.0 * 4.0 * 60.0 / 128.0 * 44_100.0) as usize;
+    let audio = vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; frames]],
+        sample_rate: 44_100,
+    };
+
+    assert_eq!(
+        browser.audition_playback_plan(&audio, 120.0),
         crate::state::BrowserAuditionPlan::Warp { source_bpm: 128.0 }
     );
 }
@@ -278,51 +247,6 @@ fn warp_preparation_keeps_the_loaded_waveform_and_raw_voice_live() {
         browser.audition_playback_mode,
         Some(crate::state::AuditionMode::Raw)
     );
-}
-
-#[test]
-fn manual_confirmation_during_detection_wins_over_late_estimate() {
-    let source = MediaSourceRef::LocalFile {
-        path: PathBuf::from("/samples/loop.wav"),
-    };
-    let mut browser = BrowserState::default();
-    browser.select_source(source.clone());
-    browser.audition_mode = crate::state::AuditionMode::Warp;
-    assert!(browser.begin_bpm_detection(&source));
-
-    // The user types and confirms a known BPM while the detector
-    // is still running; the late estimate must not clobber it.
-    browser.audition_bpm_edit = "140".into();
-    assert_eq!(browser.confirm_audition_bpm().unwrap(), 140.0);
-
-    assert!(browser.install_bpm_suggestion(source.clone(), Some((124.0, 0.91)), 0.6));
-    assert_eq!(browser.audition_bpm_confirmed, Some(140.0));
-    assert_eq!(browser.audition_bpm_suggestion, Some(124.0));
-
-    // A late low-confidence estimate must not clear it either.
-    browser.audition_bpm_source = None;
-    assert!(browser.install_bpm_suggestion(source, Some((99.0, 0.1)), 0.6));
-    assert_eq!(browser.audition_bpm_confirmed, Some(140.0));
-}
-
-#[test]
-fn confirmed_audition_bpm_is_bounded_to_a_sane_daw_range() {
-    let mut browser = BrowserState::default();
-    for rejected in ["0", "-120", "19.9", "1000", "1e8", "1e308", "inf", "nan"] {
-        browser.audition_bpm_edit = rejected.into();
-        assert!(
-            browser.confirm_audition_bpm().is_err(),
-            "{rejected} must be rejected"
-        );
-        assert!(browser.audition_bpm_confirmed.is_none());
-    }
-    for accepted in ["20", "174", "999"] {
-        browser.audition_bpm_edit = accepted.into();
-        assert!(
-            browser.confirm_audition_bpm().is_ok(),
-            "{accepted} must be accepted"
-        );
-    }
 }
 
 #[test]
@@ -387,18 +311,17 @@ fn drag_preview_reports_exact_raw_and_warp_musical_lengths() {
         waveform_source: Some(source.clone()),
         waveform_audio: Some(std::sync::Arc::new(
             vibez_core::audio_buffer::DecodedAudio {
-                channels: vec![vec![0.25; 44_100]],
+                channels: vec![vec![0.25; 88_200]],
                 sample_rate: 44_100,
             },
         )),
         ..BrowserState::default()
     };
-    assert_eq!(browser.drag_preview_beats(120.0), Some(2.0));
+    assert_eq!(browser.drag_preview_beats(120.0), Some(4.0));
 
     browser.selected_source = Some(source);
     browser.audition_mode = crate::state::AuditionMode::Warp;
-    browser.audition_bpm_confirmed = Some(120.0);
-    assert_eq!(browser.drag_preview_beats(60.0), Some(2.0));
+    assert_eq!(browser.drag_preview_beats(60.0), Some(4.0));
 }
 
 #[test]

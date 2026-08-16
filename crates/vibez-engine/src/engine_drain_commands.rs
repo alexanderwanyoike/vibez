@@ -743,17 +743,16 @@ impl AudioEngine {
                 // -- Dedicated Audition Bus --
                 EngineCommand::StartAudition {
                     audio,
-                    sync,
+                    start,
                     looped,
                 } => {
                     let fade_frames = audition_fade_frames(self.sample_rate);
-                    if self.transport.is_playing() && sync != AuditionSync::Off {
-                        let beats = if sync == AuditionSync::Bar { 4 } else { 1 };
+                    if self.transport.is_playing() && start == AuditionStart::NextBar {
                         let target = next_audition_boundary(
                             self.transport.position(),
                             self.transport.bpm(),
                             self.sample_rate,
-                            beats,
+                            4,
                         );
                         self.audition.queue(audio, target, fade_frames, looped);
                         let _ = self.event_tx.push(EngineEvent::AuditionQueued);
@@ -777,9 +776,6 @@ impl AudioEngine {
                 }
                 EngineCommand::SetAuditionGain(gain) => {
                     self.audition.gain = gain.clamp(0.0, 2.0);
-                }
-                EngineCommand::SetAuditionLoop(looped) => {
-                    self.audition.set_looped(looped);
                 }
 
                 // -- External MIDI input --

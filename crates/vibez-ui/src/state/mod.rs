@@ -17,7 +17,6 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::constants::DEFAULT_BPM;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::AuditionSync;
 use vibez_plugin_host::PluginSettings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,6 +39,29 @@ pub struct AuditionImportInput {
     pub mode: AuditionMode,
     pub source_bpm: Option<f64>,
 }
+
+impl AuditionImportInput {
+    /// Resolve Browser WARP from the same complete-loop grid fit used by
+    /// Audition. RAW remains untouched.
+    pub fn resolve_for_audio(
+        mut self,
+        audio: &DecodedAudio,
+        project_bpm: f64,
+    ) -> Result<Self, String> {
+        if self.mode == AuditionMode::Raw {
+            return Ok(self);
+        }
+        let fit = crate::warp::fit_loop_to_project(
+            audio.num_frames(),
+            audio.sample_rate as f64,
+            project_bpm,
+        )
+        .ok_or_else(|| "Cannot grid-fit empty or invalid audio".to_string())?;
+        self.source_bpm = Some(fit.source_bpm);
+        Ok(self)
+    }
+}
+
 pub const MEDIA_DRAG_THRESHOLD_PX: f32 = 6.0;
 pub const PERFORM_SURFACE_DEFAULT_WIDTH: f32 = 560.0;
 pub const DETAIL_PANEL_DEFAULT_HEIGHT: f32 = 280.0;

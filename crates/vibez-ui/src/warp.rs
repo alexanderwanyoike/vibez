@@ -43,6 +43,76 @@ pub struct WarpClipInput {
     pub project_bpm: f64,
 }
 
+/// Deterministic mapping from a clean production loop to the Project grid.
+///
+/// Browser WARP treats the complete source boundary as musical truth: the
+/// loop is assumed to span one of the conventional 1/2/4/8/16 bar lengths,
+/// and the source BPM is derived from that span. This avoids asking a generic
+/// beat detector to choose between rhythmic subdivisions before the producer
+/// can hear or import the loop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoopGridFit {
+    pub bars: u32,
+    pub source_bpm: f64,
+    pub target_frames: usize,
+}
+
+const LOOP_GRID_BARS: [u32; 5] = [1, 2, 4, 8, 16];
+const PLAUSIBLE_LOOP_BPM_MIN: f64 = 60.0;
+const PLAUSIBLE_LOOP_BPM_MAX: f64 = 200.0;
+
+/// Fit a complete source loop to the conventional Project bar span that
+/// requires the least time stretching. Candidates in a practical production
+/// tempo range win over half/double-time interpretations outside that range.
+/// If every interpretation is outside the range, the least-stretched result
+/// still wins: selecting WARP must always produce a deterministic treatment.
+pub fn fit_loop_to_project(
+    source_frames: usize,
+    sample_rate: f64,
+    project_bpm: f64,
+) -> Option<LoopGridFit> {
+    if source_frames == 0
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !project_bpm.is_finite()
+        || project_bpm <= 0.0
+    {
+        return None;
+    }
+
+    let source_seconds = source_frames as f64 / sample_rate;
+    let candidates = LOOP_GRID_BARS.map(|bars| {
+        let beats = bars as f64 * 4.0;
+        let source_bpm = beats * 60.0 / source_seconds;
+        let target_frames = (beats * 60.0 / project_bpm * sample_rate).round() as usize;
+        let stretch_distance = (target_frames as f64 / source_frames as f64).ln().abs();
+        (
+            LoopGridFit {
+                bars,
+                source_bpm,
+                target_frames,
+            },
+            stretch_distance,
+        )
+    });
+    let has_plausible = candidates.iter().any(|(fit, _)| {
+        (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
+    });
+
+    candidates
+        .into_iter()
+        .filter(|(fit, _)| {
+            !has_plausible
+                || (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
+        })
+        .min_by(|left, right| {
+            left.1
+                .partial_cmp(&right.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(fit, _)| fit)
+}
+
 /// Deterministic warped length for a clip: the naive proportional
 /// length snapped to the nearest whole bar at the project tempo when
 /// the naive result lands close to an integer bar count.
@@ -178,6 +248,47 @@ mod tests {
             channels: vec![vec![0.25; frames]],
             sample_rate: SR,
         })
+    }
+
+    #[test]
+    fn grid_fit_derives_clean_loop_tempo_from_its_project_bar_span() {
+        let cases = [
+            (2.0, 120.0, 120.0),
+            (1.0, 122.0, 122.0),
+            (4.0, 128.0, 128.0),
+            (2.0, 130.0, 130.0),
+            (1.0, 133.0, 133.0),
+            (1.0, 140.0, 140.0),
+            (8.0, 150.0, 150.0),
+        ];
+
+        for (bars, source_bpm, expected_bpm) in cases {
+            let audio = exact_loop(bars, source_bpm);
+            let fit = fit_loop_to_project(audio.num_frames(), audio.sample_rate as f64, 120.0)
+                .expect("valid audio and project tempo must always produce a grid fit");
+
+            assert_eq!(fit.bars, bars as u32);
+            assert!((fit.source_bpm - expected_bpm).abs() < 0.01);
+            let expected_frames = (bars * 4.0 * 60.0 / 120.0 * SR as f64).round() as usize;
+            assert_eq!(fit.target_frames, expected_frames);
+        }
+    }
+
+    #[test]
+    fn grid_fit_uses_a_plausible_source_octave_when_project_tempo_is_far_away() {
+        let audio = exact_loop(4.0, 120.0);
+        let fit = fit_loop_to_project(audio.num_frames(), audio.sample_rate as f64, 174.0).unwrap();
+
+        assert_eq!(fit.bars, 4);
+        assert!((fit.source_bpm - 120.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn grid_fit_still_returns_a_deterministic_result_outside_the_plausible_range() {
+        let fit = fit_loop_to_project(SR as usize / 20, SR as f64, 120.0).unwrap();
+        assert!(fit.source_bpm.is_finite());
+        assert!(fit.source_bpm > 0.0);
+        assert!(fit.target_frames > 0);
     }
 
     fn first_warp_input(

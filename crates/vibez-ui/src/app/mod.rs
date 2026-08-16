@@ -36,12 +36,7 @@ use crate::ui_settings::UiSettings;
 
 pub(super) const RAW_AUDITION_PLAYING: &str = "RAW Audition playing";
 pub(super) const WARP_AUDITION_PLAYING: &str = "WARP Audition playing";
-pub(super) const RAW_AUDITION_AWAITING_BPM: &str =
-    "RAW Audition playing while WARP awaits source BPM";
-pub(super) const RAW_AUDITION_CONTINUES_FOR_BPM_EDIT: &str =
-    "RAW Audition continues; confirm the edited BPM to hear WARP";
-pub(super) const WARP_BPM_EDIT_NEEDS_CONFIRMATION: &str =
-    "Confirm the edited BPM before preparing WARP Audition";
+pub(super) const WARP_AUDITION_PREPARING: &str = "Preparing WARP Audition";
 
 struct App {
     state: AppState,
@@ -325,7 +320,6 @@ impl App {
                 ),
                 audition_enabled: ui_settings.audition_enabled,
                 audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
-                audition_loop: ui_settings.audition_loop,
                 roots: ui_settings.sample_library_roots,
                 remote: remote_ui_state,
                 ..Default::default()
@@ -423,9 +417,6 @@ impl App {
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,
-        ));
-        app.send_command(EngineCommand::SetAuditionLoop(
-            app.state.browser.audition_loop,
         ));
 
         // Console model: the master bus carries its channel EQ from

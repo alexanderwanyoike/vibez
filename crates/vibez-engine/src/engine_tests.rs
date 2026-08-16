@@ -26,7 +26,7 @@ fn make_constant_audio(frames: usize, value: f32) -> Arc<DecodedAudio> {
 fn start_audition(audio: Arc<DecodedAudio>) -> EngineCommand {
     EngineCommand::StartAudition {
         audio,
-        sync: AuditionSync::Off,
+        start: AuditionStart::Immediate,
         looped: false,
     }
 }
@@ -1078,7 +1078,7 @@ fn synced_audition_starts_immediately_when_transport_is_stopped() {
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
-            sync: AuditionSync::Bar,
+            start: AuditionStart::NextBar,
             looped: false,
         })
         .unwrap();
@@ -1091,7 +1091,7 @@ fn synced_audition_starts_immediately_when_transport_is_stopped() {
 }
 
 #[test]
-fn beat_synced_audition_queues_to_the_next_running_transport_boundary() {
+fn next_bar_audition_queues_to_the_next_running_transport_boundary() {
     let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
     cmd_tx.push(EngineCommand::SetBpm(120.0)).unwrap();
     cmd_tx.push(EngineCommand::Seek(10_000)).unwrap();
@@ -1099,15 +1099,15 @@ fn beat_synced_audition_queues_to_the_next_running_transport_boundary() {
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
-            sync: AuditionSync::Beat,
+            start: AuditionStart::NextBar,
             looped: false,
         })
         .unwrap();
 
-    let mut buf = vec![0.0f32; 28_000];
+    let boundary_offset = 88_200 - 10_000;
+    let mut buf = vec![0.0f32; (boundary_offset + 4_096) * 2];
     engine.process(&mut buf, 2);
 
-    let boundary_offset = 22_050 - 10_000;
     assert!(buf[..boundary_offset * 2]
         .iter()
         .all(|sample| sample.abs() < f32::EPSILON));
@@ -1132,7 +1132,7 @@ fn queued_audition_starts_immediately_if_transport_stops_before_boundary() {
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
-            sync: AuditionSync::Bar,
+            start: AuditionStart::NextBar,
             looped: false,
         })
         .unwrap();
@@ -1158,7 +1158,7 @@ fn stopping_a_queued_only_audition_emits_a_terminal_event() {
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio: make_constant_audio(4_096, 0.4),
-            sync: AuditionSync::Bar,
+            start: AuditionStart::NextBar,
             looped: false,
         })
         .unwrap();
@@ -1213,7 +1213,7 @@ fn audition_loop_crossfades_the_source_boundary_without_silence_or_a_click() {
     cmd_tx
         .push(EngineCommand::StartAudition {
             audio,
-            sync: AuditionSync::Off,
+            start: AuditionStart::Immediate,
             looped: true,
         })
         .unwrap();

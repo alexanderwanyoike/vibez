@@ -589,21 +589,15 @@ pub enum Message {
     ToggleAuditionEnabled,
     SetAuditionGain(f32),
     SetAuditionMode(AuditionMode),
-    SetAuditionSync(vibez_engine::commands::AuditionSync),
-    ToggleAuditionLoop,
-    AuditionBpmEditChanged(String),
-    ConfirmAuditionBpm,
     EscapePressed,
     /// The `u64` is the audition request generation minted at spawn
     /// time; stale completions (stopped or superseded requests) are
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<Arc<DecodedAudio>, String>),
     BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
-    BrowserBpmDetected(MediaSourceRef, Option<(f64, f32)>),
     BrowserAuditionWarpReady {
         source: MediaSourceRef,
         generation: u64,
-        source_bpm: f64,
         project_bpm: f64,
         result: Result<Arc<DecodedAudio>, String>,
     },

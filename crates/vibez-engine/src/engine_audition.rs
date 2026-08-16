@@ -101,15 +101,6 @@ impl AuditionBus {
         self.outgoing.iter().any(Option::is_some)
     }
 
-    pub(super) fn set_looped(&mut self, looped: bool) {
-        if let Some(active) = self.active.as_mut() {
-            active.looped = looped;
-        }
-        if let Some(queued) = self.queued.as_mut() {
-            queued.looped = looped;
-        }
-    }
-
     pub(super) fn process(
         &mut self,
         output: &mut [f32],
