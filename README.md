@@ -1,11 +1,12 @@
 # vibez
 
-An open-source DAW for electronic music, written in Rust.
+A free and open source DAW for electronic music, written in Rust.
 
-vibez is three workspaces and a track moves through them in order. You
-**Perform** it from a pad grid, you **Arrange** what you played on a linear
-timeline, and you **Mix** it on a real console. Capture is the hinge: it turns
-a live performance into editable arrangement.
+[Website](https://alexanderwanyoike.github.io/vibez/) · [Download the latest release](https://github.com/alexanderwanyoike/vibez/releases/latest)
+
+vibez is built around **Perform**, **Arrange** and **Mix**. Jam out a tune in
+Perform, polish the arrangement in Arrange, then focus on the mix. Capture
+records a live performance into the arrangement so you can edit it afterwards.
 
 ![Perform: launching Sections from the pad grid](docs/perform-sections.png)
 
@@ -26,8 +27,10 @@ same editor you use in Arrange, then launch it from a pad grid.
 - **Section Record** with count-in, overdub and replace, timed against the audio
   engine's sample clock rather than the UI frame rate
 
-Pads are computer keys today. Multiple MIDI input ports and generic `.vdc`
-controller mapping are the next milestone.
+The pad grid works from the computer keyboard, so you do not need a MIDI
+controller to start. MIDI input can play notes into the selected instrument
+track from one port at a time. Multiple ports and generic `.vdc` controller
+mapping are still to come.
 
 ## Arrange
 
@@ -45,9 +48,12 @@ of Arrange applies to it unchanged:
 
 - **Multi-track editing** for audio and MIDI, with clip
   drag/resize/split/join, time selection, looping, and an overview minimap
-- **Warping**: automatic BPM detection and high-quality time-stretching
-  (Signalsmith Stretch), Ableton-style tempo follow: change the project BPM and
-  warped clips stay in sync
+- **Audio recording** from a soundcard input or the output of an instrument
+  track, with the waveform drawn while the take is recorded
+- **Soundcard settings** for choosing the input device, output device, sample
+  rate and buffer size
+- **Warping** with automatic BPM detection and high-quality time stretching
+  through Signalsmith Stretch. Warped clips follow the project BPM
 - **Piano roll** with draw and select modes, multi-note editing, velocity,
   quantize, and adaptive snap grids
 - **Automation** for track, device and plugin parameters, on tracks, buses,
@@ -72,8 +78,10 @@ selected one.
 
 ## Everything else
 
-- **Sample browser** with local library indexing, audition, and Dropbox
-- **Project save/load, undo/redo, and WAV export** from the master bus
+- **Sample browser** with local library indexing, Dropbox, RAW and WARP
+  audition, automatic tempo sync, looping and a waveform playhead
+- **Project save/load and autosave**, with undo, redo and WAV export from the
+  master bus
 - **Partial MIDI support**: one input port at a time, notes only, into the
   selected instrument track. More is planned for later versions
 - Real-time safe audio engine: lock-free and allocation-free in the audio
@@ -81,7 +89,7 @@ selected one.
 
 ## Status
 
-v0.1.0, and still early. Linux is the primary development platform; macOS and
+v0.1.10, and still early. Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
 format changes are still possible: treat this as a working alpha rather than a
@@ -143,6 +151,9 @@ where a redundant-looking cast can be load-bearing on another target.
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
 
----
+## For Mum
 
-This one's for you Mum 🥲 I miss you
+This one's for you Mum 🥲 I miss you.
+
+If you'd like to help my family give Mum a good send-off, you can
+[donate to her GoFundMe](https://gofund.me/52cc80b1b).

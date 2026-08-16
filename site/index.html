@@ -368,6 +368,23 @@ kbd {
 .build { margin-top: 34px; border-top: 1px solid var(--line); padding-top: 26px; }
 .build p { color: var(--dim); max-width: 70ch; }
 
+.memorial {
+  border-top: 1px solid var(--line); padding: 54px 0;
+  display: grid; gap: 20px; align-items: end;
+}
+@media (min-width: 760px) {
+  .memorial { grid-template-columns: minmax(0, 1fr) minmax(320px, .72fr); gap: 56px; }
+}
+.memorial .hint { color: var(--kick); }
+.memorial .hint i { background: var(--kick); }
+.memorial h2 { max-width: 18ch; }
+.memorial-copy { color: var(--dim); max-width: 48ch; }
+.memorial-copy p { margin: 0 0 14px; }
+.memorial-link {
+  color: var(--text); text-underline-offset: 4px; text-decoration-color: var(--kick);
+}
+.memorial-link:hover { color: var(--kick); }
+
 footer {
   border-top: 1px solid var(--line); padding: 26px 0 70px;
   font-family: var(--mono); font-size: 12px; color: var(--dimmer);
@@ -810,6 +827,20 @@ cd vibez &amp;&amp; cargo run --release</code>
         <p class="dlnote">
           Then open <code>assets/demo.vibez</code> from the File menu to hear something
           immediately.
+        </p>
+      </div>
+    </section>
+
+    <section class="memorial" aria-labelledby="memorial-title">
+      <div>
+        <p class="hint"><i></i> In memory</p>
+        <h2 id="memorial-title">This one's for you Mum 🥲</h2>
+      </div>
+      <div class="memorial-copy">
+        <p>I miss you.</p>
+        <p>
+          If you'd like to help my family give Mum a good send-off, you can
+          <a class="memorial-link" href="https://gofund.me/52cc80b1b">donate to her GoFundMe</a>.
         </p>
       </div>
     </section>
