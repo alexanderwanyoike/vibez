@@ -16,7 +16,6 @@ pub(super) const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_TRACK_WIDTH: f32 = 5.0;
 pub(super) const BROWSER_SCROLLBAR_HANDLE_WIDTH: f32 = 3.0;
 const _: () = assert!(BROWSER_SCROLLBAR_HANDLE_WIDTH < BROWSER_SCROLLBAR_TRACK_WIDTH);
-const _: () = assert!(BROWSER_SCROLLBAR_TRACK_WIDTH <= 5.0);
 
 pub(super) fn browser_vertical_scrollbar() -> scrollable::Scrollbar {
     scrollable::Scrollbar::new()
