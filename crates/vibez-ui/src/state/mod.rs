@@ -42,7 +42,8 @@ pub struct AuditionImportInput {
 
 impl AuditionImportInput {
     /// Resolve Browser WARP from the same complete-loop grid fit used by
-    /// Audition. RAW remains untouched.
+    /// Audition. Sources with no plausible loop interpretation fall back to
+    /// RAW so one-shots are never stretched into arbitrary bar lengths.
     pub fn resolve_for_audio(
         mut self,
         audio: &DecodedAudio,
@@ -51,12 +52,22 @@ impl AuditionImportInput {
         if self.mode == AuditionMode::Raw {
             return Ok(self);
         }
-        let fit = crate::warp::fit_loop_to_project(
+        if audio.num_frames() == 0
+            || audio.sample_rate == 0
+            || !project_bpm.is_finite()
+            || project_bpm <= 0.0
+        {
+            return Err("Cannot prepare empty or invalid audio".into());
+        }
+        let Some(fit) = crate::warp::fit_loop_to_project(
             audio.num_frames(),
             audio.sample_rate as f64,
             project_bpm,
-        )
-        .ok_or_else(|| "Cannot grid-fit empty or invalid audio".to_string())?;
+        ) else {
+            self.mode = AuditionMode::Raw;
+            self.source_bpm = None;
+            return Ok(self);
+        };
         self.source_bpm = Some(fit.source_bpm);
         Ok(self)
     }

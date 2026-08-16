@@ -198,6 +198,33 @@ fn warp_audition_plan_always_grid_fits_valid_audio() {
 }
 
 #[test]
+fn warp_audition_and_import_keep_one_shots_raw() {
+    let browser = BrowserState {
+        audition_mode: crate::state::AuditionMode::Warp,
+        ..BrowserState::default()
+    };
+    let audio = vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 2_205]],
+        sample_rate: 44_100,
+    };
+
+    assert_eq!(
+        browser.audition_playback_plan(&audio, 120.0),
+        crate::state::BrowserAuditionPlan::Raw
+    );
+    assert_eq!(
+        browser
+            .audition_import_input()
+            .resolve_for_audio(&audio, 120.0)
+            .unwrap(),
+        crate::state::AuditionImportInput {
+            mode: crate::state::AuditionMode::Raw,
+            source_bpm: None,
+        }
+    );
+}
+
+#[test]
 fn selected_source_can_reuse_its_decoded_waveform_for_retriggering() {
     let source = MediaSourceRef::LocalFile {
         path: PathBuf::from("/samples/loop.wav"),

@@ -567,7 +567,8 @@ impl BrowserState {
                 audio.sample_rate as f64,
                 project_bpm,
             )
-            .map(|fit| fit.bars as f64 * 4.0),
+            .map(|fit| fit.bars as f64 * 4.0)
+            .or_else(|| (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0)),
         }
     }
 

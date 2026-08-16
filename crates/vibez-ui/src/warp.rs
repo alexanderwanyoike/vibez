@@ -64,8 +64,8 @@ const PLAUSIBLE_LOOP_BPM_MAX: f64 = 200.0;
 /// Fit a complete source loop to the conventional Project bar span that
 /// requires the least time stretching. Candidates in a practical production
 /// tempo range win over half/double-time interpretations outside that range.
-/// If every interpretation is outside the range, the least-stretched result
-/// still wins: selecting WARP must always produce a deterministic treatment.
+/// Audio with no plausible interpretation is treated as a one-shot rather
+/// than being stretched into an arbitrary bar length.
 pub fn fit_loop_to_project(
     source_frames: usize,
     sample_rate: f64,
@@ -95,15 +95,10 @@ pub fn fit_loop_to_project(
             stretch_distance,
         )
     });
-    let has_plausible = candidates.iter().any(|(fit, _)| {
-        (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
-    });
-
     candidates
         .into_iter()
         .filter(|(fit, _)| {
-            !has_plausible
-                || (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
+            (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
         })
         .min_by(|left, right| {
             left.1
@@ -284,11 +279,11 @@ mod tests {
     }
 
     #[test]
-    fn grid_fit_still_returns_a_deterministic_result_outside_the_plausible_range() {
-        let fit = fit_loop_to_project(SR as usize / 20, SR as f64, 120.0).unwrap();
-        assert!(fit.source_bpm.is_finite());
-        assert!(fit.source_bpm > 0.0);
-        assert!(fit.target_frames > 0);
+    fn grid_fit_rejects_a_one_shot_with_no_plausible_loop_tempo() {
+        assert_eq!(
+            fit_loop_to_project(SR as usize / 20, SR as f64, 120.0),
+            None
+        );
     }
 
     fn first_warp_input(
