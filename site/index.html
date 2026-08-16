@@ -102,8 +102,12 @@ body {
   .hero-grid { grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 56px; }
 }
 h1 {
-  font-size: clamp(46px, 6.4vw, 80px); line-height: 1;
-  letter-spacing: -.048em; font-weight: 700; margin: 0; max-width: 12.5ch;
+  font-size: clamp(64px, 9vw, 112px); line-height: .9;
+  letter-spacing: -.06em; font-weight: 700; margin: 0;
+}
+.strap {
+  margin: 22px 0 0; color: var(--blue); font-size: clamp(22px, 2.7vw, 34px);
+  line-height: 1.1; letter-spacing: -.035em; font-weight: 600;
 }
 
 .hero-copy { padding-bottom: 5px; }
@@ -393,13 +397,17 @@ footer a:hover { color: var(--text); }
 <main>
   <div class="wrap">
     <section class="hero">
-      <p class="eyebrow">vibez</p>
+      <p class="eyebrow">Free and open source</p>
       <div class="hero-grid">
-        <h1>A free and open source DAW for electronic music.</h1>
+        <div>
+          <h1>vibez</h1>
+          <p class="strap">Jam. Arrange. Mix.</p>
+        </div>
         <div class="hero-copy">
           <p class="sub">
-            Create with MIDI and audio. Build and perform tracks with Sections, instruments and
-            track mutes on a sixteen-pad grid. Capture the performance into Arrange, then mix it.
+            vibez is a free and open source DAW for making and performing electronic music. Build
+            tracks in Sections, play instruments and track mutes from the pads, then capture the
+            performance into Arrange.
           </p>
           <div class="cta">
             <a class="btn" href="#download">Download __VERSION__</a>
@@ -415,7 +423,7 @@ footer a:hover { color: var(--text); }
       <div class="showreel-head">
         <div>
           <p class="hint"><i></i> vibez in use</p>
-          <h2 id="showreel-title">One idea, played all the way through.</h2>
+          <h2 id="showreel-title">Watch vibez at work.</h2>
         </div>
         <p class="lede">
           A live techno session moving from Sections to Track Mutes, Capture, Arrange and the final
@@ -477,7 +485,7 @@ footer a:hover { color: var(--text); }
     <section class="band" id="perform">
       <div class="band-head">
         <span class="stripe" style="background: var(--kick)"></span>
-        <h2>Build the seed.</h2>
+        <h2>Make music in Sections.</h2>
         <span class="role">Perform &middot; Sections</span>
       </div>
       <p class="lede">
@@ -502,7 +510,7 @@ footer a:hover { color: var(--text); }
     <div class="wrap">
       <div class="band-head">
         <span class="stripe" style="background: var(--bass)"></span>
-        <h2>Play it into shape.</h2>
+        <h2>Perform into Arrange.</h2>
         <span class="role">Capture &middot; Arrange</span>
       </div>
       <p class="lede">
@@ -511,7 +519,7 @@ footer a:hover { color: var(--text); }
         as normal clips and automation you can edit afterwards.
       </p>
 
-      <h3 class="sub2">From a jam to a timeline <em>F5</em></h3>
+      <h3 class="sub2">Capture the performance <em>F5</em></h3>
       <p class="lede">
         Section launches, live notes, track mutes and automation gestures all come across. The take
         is independent of the Sections that made it, so you can reshape it without changing the
@@ -535,7 +543,7 @@ footer a:hover { color: var(--text); }
     <section class="band" id="mix">
       <div class="band-head">
         <span class="stripe" style="background: var(--clap)"></span>
-        <h2>Finish on a console.</h2>
+        <h2>Mix on a full console.</h2>
         <span class="role">Mix</span>
       </div>
       <p class="lede">
@@ -552,7 +560,7 @@ footer a:hover { color: var(--text); }
     <section class="band" id="keys">
       <div class="band-head">
         <span class="stripe" style="background: var(--chat)"></span>
-        <h2>Your keyboard is the controller.</h2>
+        <h2>Play from your keyboard.</h2>
         <span class="role">No extra hardware required</span>
       </div>
       <p class="lede">
@@ -681,7 +689,7 @@ footer a:hover { color: var(--text); }
     <section class="band">
       <div class="band-head">
         <span class="stripe" style="background: var(--chords)"></span>
-        <h2>Open, useful and still early.</h2>
+        <h2>vibez is in alpha.</h2>
         <span class="role">Alpha &middot; __VERSION__</span>
       </div>
       <p class="lede">
