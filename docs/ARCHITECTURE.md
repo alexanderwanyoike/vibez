@@ -462,7 +462,9 @@ configuration and its driver defaults, then reopens the exact previous
 configuration if both attempts fail. Settings always report the stream which
 is actually running. Windows CI and release builds set `CPAL_ASIO_DIR` to a
 checksum-verified SDK cache before Cargo runs, so `asio-sys` never performs its
-own mutable build-time download.
+own mutable build-time download in distributed builds. Local Windows builds
+must run `scripts/setup_asio_sdk.ps1` in the same PowerShell session before
+Cargo, as documented in the README.
 
 That exact position is the output-clock boundary, not calibrated acoustic
 alignment. V1 does not measure input/output round-trip latency or continuously

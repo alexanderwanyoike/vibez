@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$SdkUrl = "https://www.steinberg.net/asiosdk"
+$SdkUrl = "https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip"
 $SdkSha256 = "d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca"
 $Marker = Join-Path $Destination ".vibez-source-sha256"
 

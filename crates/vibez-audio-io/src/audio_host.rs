@@ -262,11 +262,11 @@ impl AudioHost {
         let default_input_name = self
             .host
             .default_input_device()
-            .and_then(|device| cpal_device_name(&device).ok());
+            .and_then(|device| device.name().ok());
         let default_output_name = self
             .host
             .default_output_device()
-            .and_then(|device| cpal_device_name(&device).ok());
+            .and_then(|device| device.name().ok());
         Ok(AudioDeviceCatalog {
             default_input_name,
             default_output_name,
@@ -318,7 +318,7 @@ fn device_info(
     device: &cpal::Device,
     direction: StreamDirection,
 ) -> Result<DeviceInfo, AudioHostError> {
-    let name = cpal_device_name(device)?;
+    let name = device.name()?;
     let default_config = match direction {
         StreamDirection::Input => device.default_input_config(),
         StreamDirection::Output => device.default_output_config(),
@@ -340,10 +340,6 @@ fn device_info(
         default_config,
         supported_configs,
     })
-}
-
-pub(crate) fn cpal_device_name(device: &cpal::Device) -> Result<String, cpal::DeviceNameError> {
-    device.name()
 }
 
 fn output_device_info(device: &cpal::Device) -> Result<DeviceInfo, AudioHostError> {

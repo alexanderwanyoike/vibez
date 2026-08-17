@@ -206,8 +206,10 @@ impl App {
                 return Task::none();
             }
         };
-        let previous = self.state.audio_settings.clone();
         self.state.audio_settings.remember_current_backend();
+        // Rollback must retain the current backend choices just captured
+        // above, including any unsaved in-memory selection.
+        let previous = self.state.audio_settings.clone();
         self.state.audio_settings.backend = backend;
         self.state.audio_settings.catalog = catalog;
         self.state.audio_settings.catalog_error = None;

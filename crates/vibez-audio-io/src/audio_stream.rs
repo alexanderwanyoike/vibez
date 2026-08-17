@@ -8,10 +8,10 @@ use std::fmt;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
-use cpal::traits::{HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{DevicesError, PauseStreamError, SampleRate, StreamConfig};
 
-use crate::audio_host::{cpal_device_name, AudioBackend, AudioHostError};
+use crate::audio_host::{AudioBackend, AudioHostError};
 use crate::audio_input::AudioInputBridge;
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 use vibez_core::constants::DEFAULT_CHANNELS;
@@ -261,7 +261,7 @@ impl AudioOutputStream {
         buffer_size: Option<u32>,
     ) -> Result<Self, AudioStreamError> {
         let mut output = Self::idle(engine);
-        let device_name = cpal_device_name(device).ok();
+        let device_name = device.name().ok();
         let (stream, params) = Self::build_stream(
             Arc::clone(&output.engine_slot),
             device,
@@ -371,7 +371,7 @@ impl AudioOutputStream {
         let result: Result<(), AudioStreamError> = (|| {
             let host = request.backend.create_host()?;
             let device = resolve_output_device(&host, request.device_name.as_deref())?;
-            let device_name = cpal_device_name(&device).unwrap_or_else(|_| {
+            let device_name = device.name().unwrap_or_else(|_| {
                 request
                     .device_name
                     .clone()
@@ -585,7 +585,7 @@ fn resolve_output_device(
             .ok_or(AudioStreamError::NoOutputDevice);
     };
     host.output_devices()?
-        .find(|device| cpal_device_name(device).is_ok_and(|name| name == requested_name))
+        .find(|device| device.name().is_ok_and(|name| name == requested_name))
         .ok_or_else(|| AudioStreamError::OutputDeviceNotFound(requested_name.to_string()))
 }
 

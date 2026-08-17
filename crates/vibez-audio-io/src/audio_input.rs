@@ -11,7 +11,7 @@ use cpal::{FromSample, Sample, SampleFormat, SampleRate, StreamConfig};
 use vibez_core::id::TrackId;
 use vibez_core::track::AudioInputRoute;
 
-use crate::audio_host::{cpal_device_name, AudioBackend, AudioHostError};
+use crate::audio_host::{AudioBackend, AudioHostError};
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 
 const DEFAULT_BRIDGE_FRAMES: usize = 262_144;
@@ -426,7 +426,7 @@ impl AudioInputStream {
         let device = match device_name {
             Some(name) => host
                 .input_devices()?
-                .find(|device| cpal_device_name(device).is_ok_and(|candidate| candidate == name))
+                .find(|device| device.name().is_ok_and(|candidate| candidate == name))
                 .ok_or_else(|| AudioInputError::InputDeviceNotFound(name.to_string()))?,
             None => host
                 .default_input_device()
@@ -470,7 +470,9 @@ impl AudioInputStream {
         Ok(Self {
             stream,
             events,
-            device_name: cpal_device_name(&device).unwrap_or_else(|_| "System Default".to_string()),
+            device_name: device
+                .name()
+                .unwrap_or_else(|_| "System Default".to_string()),
             channels,
             sample_rate,
             backend,

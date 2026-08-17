@@ -8,7 +8,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: .asio-sdk
-        key: asio-sdk-d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca
+        key: asio-sdk-${{ hashFiles('scripts/setup_asio_sdk.ps1') }}
     - name: Download and verify ASIO SDK
       shell: pwsh
       run: ./scripts/setup_asio_sdk.ps1
