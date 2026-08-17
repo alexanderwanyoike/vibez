@@ -31,6 +31,7 @@ pub const CIRCLE: char = '\u{E076}';
 pub const CIRCLE_DOT: char = '\u{E345}';
 pub const DOT: char = '\u{E44F}';
 pub const REFRESH_CW: char = '\u{E145}';
+pub const TRIANGLE_ALERT: char = '\u{E193}';
 pub const COPY: char = '\u{E09E}';
 pub const SCISSORS: char = '\u{E152}';
 pub const REPEAT: char = '\u{E146}';
