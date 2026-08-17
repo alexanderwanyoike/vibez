@@ -13,8 +13,7 @@ use crate::theme as th;
 use super::views_browser_style::*;
 use super::*;
 
-const PLACE_STATE_ICON_SIZE: f32 = 12.0;
-const TREE_MARKER_SIZE: f32 = 12.0;
+const TREE_ICON_SIZE: f32 = 12.0;
 
 fn place_mode_marker(active: bool) -> iced::widget::Text<'static> {
     icons::icon(if active {
@@ -22,7 +21,7 @@ fn place_mode_marker(active: bool) -> iced::widget::Text<'static> {
     } else {
         icons::CIRCLE
     })
-    .size(PLACE_STATE_ICON_SIZE)
+    .size(TREE_ICON_SIZE)
     .color(if active {
         th::accent()
     } else {
@@ -37,11 +36,11 @@ fn tree_toggle(expanded: bool, message: Message) -> Element<'static, Message> {
         } else {
             icons::CHEVRON_RIGHT
         })
-        .size(TREE_MARKER_SIZE)
+        .size(TREE_ICON_SIZE)
         .color(th::text_muted()),
     )
     .on_press(message)
-    .padding([3, 2])
+    .padding([4, 2])
     .style(browser_utility_action_style)
     .into()
 }
@@ -49,10 +48,10 @@ fn tree_toggle(expanded: bool, message: Message) -> Element<'static, Message> {
 fn tree_leaf_marker() -> Element<'static, Message> {
     container(
         icons::icon(icons::DOT)
-            .size(TREE_MARKER_SIZE)
+            .size(TREE_ICON_SIZE)
             .color(th::text_muted()),
     )
-    .padding([3, 3])
+    .padding([4, 3])
     .into()
 }
 
@@ -62,10 +61,7 @@ fn catalog_state_marker(state: &str) -> Element<'static, Message> {
         "STALE" | "WATCH ERR" | "WARN" => (icons::TRIANGLE_ALERT, th::danger()),
         _ => (icons::DOT, th::text_muted()),
     };
-    icons::icon(icon)
-        .size(PLACE_STATE_ICON_SIZE)
-        .color(color)
-        .into()
+    icons::icon(icon).size(TREE_ICON_SIZE).color(color).into()
 }
 
 impl App {

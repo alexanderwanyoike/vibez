@@ -149,7 +149,6 @@ pub fn run() -> iced::Result {
         .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
         .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
         .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
-        .default_font(crate::typography::PERFORM_DISPLAY)
         .run_with(App::new)
 }
 
