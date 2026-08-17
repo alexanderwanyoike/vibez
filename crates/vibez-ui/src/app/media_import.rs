@@ -36,7 +36,7 @@ impl App {
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
-        let treatment = self.state.browser.audition_import_input();
+        let treatment = self.state.browser.import_input_for_source(&source);
         match source {
             MediaSourceRef::LocalFile { path } => {
                 let name = path
@@ -45,12 +45,12 @@ impl App {
                     .unwrap_or_default();
                 self.state.status_text = format!("Dropping {name}...");
                 Task::perform(
-                    decode_and_stage_local_async(path),
+                    decode_analyse_and_stage_local_async(path),
                     move |result| match result {
-                        Ok((audio, source)) => Message::BrowserSampleDecoded(
+                        Ok((analysed, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
                             treatment,
-                            Arc::new(audio),
+                            analysed,
                             name.clone(),
                             source,
                         ),
@@ -71,13 +71,14 @@ impl App {
                     staging_path: staging_path.clone(),
                     source_path,
                 };
+                let analysis_name = name.clone();
                 Task::perform(
-                    decode_file_async(staging_path),
+                    decode_and_analyse_async(staging_path, analysis_name),
                     move |result| match result {
-                        Ok(audio) => Message::BrowserSampleDecoded(
+                        Ok(analysed) => Message::BrowserSampleDecoded(
                             target.clone(),
                             treatment,
-                            Arc::new(audio),
+                            analysed,
                             name.clone(),
                             retained_source.clone(),
                         ),
@@ -98,13 +99,14 @@ impl App {
                     staging_path: staging_path.clone(),
                     provenance,
                 };
+                let analysis_name = name.clone();
                 Task::perform(
-                    decode_file_async(staging_path),
+                    decode_and_analyse_async(staging_path, analysis_name),
                     move |result| match result {
-                        Ok(audio) => Message::BrowserSampleDecoded(
+                        Ok(analysed) => Message::BrowserSampleDecoded(
                             target.clone(),
                             treatment,
-                            Arc::new(audio),
+                            analysed,
                             name.clone(),
                             retained_source.clone(),
                         ),
@@ -126,15 +128,21 @@ impl App {
                 let container_path = self.state.project.current_path.clone();
                 Task::perform(
                     async move {
-                        hydrate_saved_source(container_path.as_ref(), None, &retained_source, &name)
-                            .await
-                            .map(|audio| (audio, retained_source, name))
+                        let audio = hydrate_saved_source(
+                            container_path.as_ref(),
+                            None,
+                            &retained_source,
+                            &name,
+                        )
+                        .await?;
+                        let analysed = analyse_browser_audio_async(audio, name.clone()).await?;
+                        Ok((analysed, retained_source, name))
                     },
                     move |result| match result {
-                        Ok((audio, source, name)) => Message::BrowserSampleDecoded(
+                        Ok((analysed, source, name)) => Message::BrowserSampleDecoded(
                             target.clone(),
                             treatment,
-                            Arc::new(audio),
+                            analysed,
                             name,
                             source,
                         ),

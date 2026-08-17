@@ -4,6 +4,13 @@ use std::sync::Arc;
 
 use super::*;
 
+fn analysed(
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    loop_fit: Option<crate::warp::LoopGridFit>,
+) -> crate::message::AnalysedBrowserAudio {
+    crate::message::AnalysedBrowserAudio { audio, loop_fit }
+}
+
 #[test]
 fn toggle_persists_settings() {
     let mut b = BrowserState::default();
@@ -105,13 +112,17 @@ fn changing_selection_clears_waveform_and_rejects_stale_decode() {
 
     browser.select_source(first.clone());
     let generation = browser.begin_audition_load(&first);
-    assert!(browser.install_audition(generation, first.clone(), std::sync::Arc::clone(&audio)));
+    assert!(browser.install_audition(
+        generation,
+        first.clone(),
+        analysed(std::sync::Arc::clone(&audio), None)
+    ));
     assert!(browser.waveform_audio.is_some());
     assert!(!browser.audition_playing);
 
     browser.select_source(second);
     assert!(browser.waveform_audio.is_none());
-    assert!(!browser.install_audition(generation, first, audio));
+    assert!(!browser.install_audition(generation, first, analysed(audio, None)));
     assert!(browser.waveform_audio.is_none());
 }
 
@@ -132,14 +143,22 @@ fn stopping_or_superseding_an_audition_invalidates_in_flight_decodes() {
     let stopped = browser.begin_audition_load(&source);
     browser.cancel_audition_requests();
     assert!(!browser.audition_request_is_current(stopped));
-    assert!(!browser.install_audition(stopped, source.clone(), std::sync::Arc::clone(&audio)));
+    assert!(!browser.install_audition(
+        stopped,
+        source.clone(),
+        analysed(std::sync::Arc::clone(&audio), None)
+    ));
     assert!(!browser.audition_playing);
 
     // A newer request supersedes an older one for the same source.
     let old = browser.begin_audition_load(&source);
     let new = browser.begin_audition_load(&source);
-    assert!(!browser.install_audition(old, source.clone(), std::sync::Arc::clone(&audio)));
-    assert!(browser.install_audition(new, source, audio));
+    assert!(!browser.install_audition(
+        old,
+        source.clone(),
+        analysed(std::sync::Arc::clone(&audio), None)
+    ));
+    assert!(browser.install_audition(new, source, analysed(audio, None)));
     assert!(!browser.audition_playing);
 }
 
@@ -188,18 +207,88 @@ fn warp_import_resolves_the_same_grid_fit_without_confirmation() {
         sample_rate: 44_100,
     };
 
-    let input = browser.audition_import_input();
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/loop_128_bpm.wav"),
+    };
+    let input = browser.import_input_for_source(&source);
     assert_eq!(input.mode, crate::state::AuditionMode::Warp);
     assert_eq!(input.source_bpm, None);
     assert_eq!(
-        input.resolve_for_audio(&audio, 120.0).unwrap().source_bpm,
+        input
+            .resolve_for_analysis(&analysed(
+                std::sync::Arc::new(audio),
+                Some(crate::warp::LoopGridFit {
+                    bars: 4,
+                    source_bpm: 128.0,
+                }),
+            ))
+            .unwrap()
+            .source_bpm,
         Some(128.0)
     );
 }
 
 #[test]
-fn warp_audition_plan_always_grid_fits_valid_audio() {
-    let browser = BrowserState {
+fn warp_import_uses_background_analysis_for_fast_loops() {
+    let analysed = analysed(
+        Arc::new(vibez_core::audio_buffer::DecodedAudio {
+            channels: vec![vec![0.0; 124_518]],
+            sample_rate: 44_100,
+        }),
+        Some(crate::warp::LoopGridFit {
+            bars: 2,
+            source_bpm: 170.0,
+        }),
+    );
+    let input = crate::state::AuditionImportInput {
+        mode: crate::state::AuditionMode::Warp,
+        source_bpm: None,
+    };
+
+    assert_eq!(
+        input.resolve_for_analysis(&analysed).unwrap().source_bpm,
+        Some(170.0)
+    );
+}
+
+#[test]
+fn dragged_source_does_not_inherit_the_selected_sources_tempo() {
+    let selected = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/selected_128.wav"),
+    };
+    let dragged = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/dragged_170.wav"),
+    };
+    let mut browser = BrowserState {
+        audition_mode: crate::state::AuditionMode::Warp,
+        ..BrowserState::default()
+    };
+    browser.select_source(selected.clone());
+    assert!(browser.install_waveform(
+        selected,
+        analysed(
+            std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.0; 44_100]],
+                sample_rate: 44_100,
+            }),
+            Some(crate::warp::LoopGridFit {
+                bars: 4,
+                source_bpm: 128.0,
+            }),
+        )
+    ));
+    browser.begin_pending_drag(dragged.clone(), "dragged_170.wav".into(), 0.0, 0.0);
+    assert!(browser.move_pending_drag(10.0, 0.0));
+
+    assert_eq!(browser.import_input_for_source(&dragged).source_bpm, None);
+}
+
+#[test]
+fn warp_audition_plan_uses_the_cached_source_analysis() {
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/loop_128_bpm.wav"),
+    };
+    let mut browser = BrowserState {
         audition_mode: crate::state::AuditionMode::Warp,
         ..BrowserState::default()
     };
@@ -209,14 +298,28 @@ fn warp_audition_plan_always_grid_fits_valid_audio() {
         sample_rate: 44_100,
     };
 
+    browser.select_source(source.clone());
+    assert!(browser.install_waveform(
+        source.clone(),
+        analysed(
+            std::sync::Arc::new(audio),
+            Some(crate::warp::LoopGridFit {
+                bars: 4,
+                source_bpm: 128.0,
+            }),
+        )
+    ));
     assert_eq!(
-        browser.audition_playback_plan(&audio, 120.0),
+        browser.audition_playback_plan(&source),
         crate::state::BrowserAuditionPlan::Warp { source_bpm: 128.0 }
     );
 }
 
 #[test]
 fn warp_audition_and_import_keep_one_shots_raw() {
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/hit.wav"),
+    };
     let browser = BrowserState {
         audition_mode: crate::state::AuditionMode::Warp,
         ..BrowserState::default()
@@ -227,13 +330,13 @@ fn warp_audition_and_import_keep_one_shots_raw() {
     };
 
     assert_eq!(
-        browser.audition_playback_plan(&audio, 120.0),
+        browser.audition_playback_plan(&source),
         crate::state::BrowserAuditionPlan::Raw
     );
     assert_eq!(
         browser
-            .audition_import_input()
-            .resolve_for_audio(&audio, 120.0)
+            .import_input_for_source(&source)
+            .resolve_for_analysis(&analysed(std::sync::Arc::new(audio), None))
             .unwrap(),
         crate::state::AuditionImportInput {
             mode: crate::state::AuditionMode::Raw,
@@ -256,7 +359,10 @@ fn selected_source_can_reuse_its_decoded_waveform_for_retriggering() {
     });
     let mut browser = BrowserState::default();
     browser.select_source(source.clone());
-    assert!(browser.install_waveform(source.clone(), std::sync::Arc::clone(&audio)));
+    assert!(browser.install_waveform(
+        source.clone(),
+        analysed(std::sync::Arc::clone(&audio), None)
+    ));
 
     assert!(std::sync::Arc::ptr_eq(
         &browser.waveform_for_source(&source).unwrap(),
@@ -276,7 +382,7 @@ fn warp_preparation_keeps_the_loaded_waveform_without_claiming_playback() {
     });
     let mut browser = BrowserState::default();
     browser.select_source(source.clone());
-    assert!(browser.install_waveform(source.clone(), audio));
+    assert!(browser.install_waveform(source.clone(), analysed(audio, None)));
 
     let preparation = browser.begin_audition_preparation(&source);
     assert!(browser.audition_loading);
@@ -356,6 +462,10 @@ fn drag_preview_reports_exact_raw_and_warp_musical_lengths() {
                 sample_rate: 44_100,
             },
         )),
+        waveform_loop_fit: Some(crate::warp::LoopGridFit {
+            bars: 1,
+            source_bpm: 120.0,
+        }),
         ..BrowserState::default()
     };
     assert_eq!(browser.drag_preview_beats(120.0), Some(4.0));

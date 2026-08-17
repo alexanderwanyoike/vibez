@@ -88,6 +88,7 @@ pub struct BrowserState {
     /// waveform. Audition still travels through the existing engine path.
     pub waveform_source: Option<MediaSourceRef>,
     pub waveform_audio: Option<Arc<DecodedAudio>>,
+    pub waveform_loop_fit: Option<crate::warp::LoopGridFit>,
     pub waveform_loading: bool,
     pub waveform_error: Option<String>,
     pub audition_enabled: bool,
@@ -149,6 +150,7 @@ impl Default for BrowserState {
             selected_source: None,
             waveform_source: None,
             waveform_audio: None,
+            waveform_loop_fit: None,
             waveform_loading: false,
             waveform_error: None,
             audition_enabled: true,
@@ -439,12 +441,12 @@ impl BrowserState {
         &mut self,
         generation: u64,
         source: MediaSourceRef,
-        audio: Arc<DecodedAudio>,
+        analysed: crate::message::AnalysedBrowserAudio,
     ) -> bool {
         if !self.audition_request_is_current(generation) {
             return false;
         }
-        if !self.install_waveform(source, audio) {
+        if !self.install_waveform(source, analysed) {
             return false;
         }
         self.audition_loading = false;
@@ -482,31 +484,27 @@ impl BrowserState {
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
     }
 
-    pub fn audition_import_input(&self) -> AuditionImportInput {
+    pub fn import_input_for_source(&self, source: &MediaSourceRef) -> AuditionImportInput {
         AuditionImportInput {
             mode: self.audition_mode,
-            // WARP resolves this from the decoded loop boundary and Project
-            // tempo immediately before rendering the import.
-            source_bpm: None,
+            source_bpm: if self.waveform_source.as_ref() == Some(source) {
+                self.waveform_loop_fit.map(|fit| fit.source_bpm)
+            } else {
+                None
+            },
         }
     }
 
-    pub fn audition_playback_plan(
-        &self,
-        audio: &DecodedAudio,
-        project_bpm: f64,
-    ) -> BrowserAuditionPlan {
+    pub fn audition_playback_plan(&self, source: &MediaSourceRef) -> BrowserAuditionPlan {
         match self.audition_mode {
             AuditionMode::Raw => BrowserAuditionPlan::Raw,
-            AuditionMode::Warp => crate::warp::fit_loop_to_project(
-                audio.num_frames(),
-                audio.sample_rate as f64,
-                project_bpm,
-            )
-            .map(|fit| BrowserAuditionPlan::Warp {
-                source_bpm: fit.source_bpm,
-            })
-            .unwrap_or(BrowserAuditionPlan::Raw),
+            AuditionMode::Warp if self.waveform_source.as_ref() == Some(source) => self
+                .waveform_loop_fit
+                .map(|fit| BrowserAuditionPlan::Warp {
+                    source_bpm: fit.source_bpm,
+                })
+                .unwrap_or(BrowserAuditionPlan::Raw),
+            AuditionMode::Warp => BrowserAuditionPlan::Raw,
         }
     }
 
@@ -572,24 +570,25 @@ impl BrowserState {
         let seconds = audio.num_frames() as f64 / audio.sample_rate as f64;
         match self.audition_mode {
             AuditionMode::Raw => (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0),
-            AuditionMode::Warp => crate::warp::fit_loop_to_project(
-                audio.num_frames(),
-                audio.sample_rate as f64,
-                project_bpm,
-            )
-            .map(|fit| fit.bars as f64 * 4.0)
-            .or_else(|| (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0)),
+            AuditionMode::Warp => self
+                .waveform_loop_fit
+                .map(|fit| fit.bars as f64 * 4.0)
+                .or_else(|| (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0)),
         }
     }
 
-    pub fn install_waveform(&mut self, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> bool {
+    pub fn install_waveform(
+        &mut self,
+        source: MediaSourceRef,
+        analysed: crate::message::AnalysedBrowserAudio,
+    ) -> bool {
         if self.selected_source.as_ref() != Some(&source) {
             return false;
         }
-        let channels = audio.num_channels();
-        let sample_rate = audio.sample_rate;
+        let channels = analysed.audio.num_channels();
+        let sample_rate = analysed.audio.sample_rate;
         let duration_seconds = if sample_rate > 0 {
-            Some(audio.num_frames() as f64 / sample_rate as f64)
+            Some(analysed.audio.num_frames() as f64 / sample_rate as f64)
         } else {
             None
         };
@@ -599,7 +598,8 @@ impl BrowserState {
             entry.sample_rate = Some(sample_rate);
         }
         self.waveform_source = Some(source);
-        self.waveform_audio = Some(audio);
+        self.waveform_audio = Some(analysed.audio);
+        self.waveform_loop_fit = analysed.loop_fit;
         self.waveform_loading = false;
         self.waveform_error = None;
         true
@@ -615,6 +615,7 @@ impl BrowserState {
     fn clear_waveform(&mut self) {
         self.waveform_source = None;
         self.waveform_audio = None;
+        self.waveform_loop_fit = None;
         self.waveform_loading = false;
         self.waveform_error = None;
     }

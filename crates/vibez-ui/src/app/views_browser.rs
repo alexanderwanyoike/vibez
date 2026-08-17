@@ -376,15 +376,7 @@ impl App {
             let bpm = if selected {
                 self.state
                     .browser
-                    .waveform_audio
-                    .as_ref()
-                    .and_then(|audio| {
-                        crate::warp::fit_loop_to_project(
-                            audio.num_frames(),
-                            audio.sample_rate as f64,
-                            self.state.transport.bpm,
-                        )
-                    })
+                    .waveform_loop_fit
                     .map(|fit| format!("{:.0}", fit.source_bpm))
                     .unwrap_or_else(|| "—".into())
             } else {

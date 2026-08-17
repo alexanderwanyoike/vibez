@@ -181,6 +181,12 @@ pub struct RemoteMaterializedSample {
     pub metadata: vibez_dropbox::DerivedMetadata,
 }
 
+#[derive(Debug, Clone)]
+pub struct AnalysedBrowserAudio {
+    pub audio: Arc<DecodedAudio>,
+    pub loop_fit: Option<crate::warp::LoopGridFit>,
+}
+
 #[derive(Debug)]
 pub struct RemoteCatalogStartupData {
     pub catalog: crate::remote_provider::RemoteCatalogSnapshot,
@@ -593,8 +599,8 @@ pub enum Message {
     /// The `u64` is the audition request generation minted at spawn
     /// time; stale completions (stopped or superseded requests) are
     /// dropped instead of starting playback.
-    LocalSamplePreviewReady(MediaSourceRef, u64, Result<Arc<DecodedAudio>, String>),
-    BrowserWaveformReady(MediaSourceRef, Result<Arc<DecodedAudio>, String>),
+    LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
+    BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
     BrowserAuditionWarpReady {
         source: MediaSourceRef,
         generation: u64,
@@ -619,7 +625,7 @@ pub enum Message {
     BrowserSampleDecoded(
         BrowserImportTarget,
         AuditionImportInput,
-        Arc<DecodedAudio>,
+        AnalysedBrowserAudio,
         String,
         MediaSourceRef,
     ),
@@ -781,7 +787,7 @@ pub enum Message {
         request_id: u64,
         target: BrowserImportTarget,
         treatment: AuditionImportInput,
-        result: Result<(Arc<DecodedAudio>, String, MediaSourceRef), String>,
+        result: Result<(AnalysedBrowserAudio, String, MediaSourceRef), String>,
     },
     DropboxPreview(DropboxEntry),
     DropboxImportToArrangement(DropboxEntry),
