@@ -76,8 +76,10 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         assert!(browser.install_audition(
             generation,
             browser.selected_source.clone().unwrap(),
-            Arc::clone(&audition.audio),
-            audition.loop_fit,
+            crate::message::AnalysedBrowserAudio {
+                audio: Arc::clone(&audition.audio),
+                loop_fit: audition.loop_fit,
+            },
         ));
         let metadata = &browser.entries[0];
         assert_eq!(metadata.channels, Some(channels));
@@ -559,7 +561,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
         rev: Some("rev-9".into()),
         size: None,
     };
-    let (decoded, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
+    let (analysed, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
         .await
         .unwrap();
     assert!(matches!(
@@ -575,7 +577,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
             position_samples: 0,
         },
         treatment,
-        decoded,
+        analysed.audio,
         staged,
         60.0,
     )

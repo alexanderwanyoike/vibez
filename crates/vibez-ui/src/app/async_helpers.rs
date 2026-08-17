@@ -32,6 +32,33 @@ pub(super) async fn decode_file_async(
     .map_err(|e| format!("decode task failed: {e}"))?
 }
 
+pub(super) async fn analyse_browser_audio_async(
+    audio: vibez_core::audio_buffer::DecodedAudio,
+    source_name: String,
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    tokio::task::spawn_blocking(move || {
+        let loop_fit = crate::warp::analyse_loop_tempo(&audio, &source_name);
+        crate::message::AnalysedBrowserAudio {
+            audio: Arc::new(audio),
+            loop_fit,
+        }
+    })
+    .await
+    .map_err(|error| format!("Browser analysis task failed: {error}"))
+}
+
+pub(super) async fn decode_analyse_and_stage_local_async(
+    path: PathBuf,
+) -> Result<(crate::message::AnalysedBrowserAudio, MediaSourceRef), String> {
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (audio, source) = decode_and_stage_local_async(path).await?;
+    let analysed = analyse_browser_audio_async(audio, name).await?;
+    Ok((analysed, source))
+}
+
 pub(super) async fn decode_and_stage_local_async(
     path: PathBuf,
 ) -> Result<(vibez_core::audio_buffer::DecodedAudio, MediaSourceRef), String> {
@@ -330,14 +357,7 @@ pub(super) async fn fetch_dropbox_sample_async(
     client: Option<Arc<DropboxClient>>,
     cache: DropboxCache,
     entry: DropboxEntry,
-) -> Result<
-    (
-        Arc<vibez_core::audio_buffer::DecodedAudio>,
-        String,
-        MediaSourceRef,
-    ),
-    String,
-> {
+) -> Result<(crate::message::AnalysedBrowserAudio, String, MediaSourceRef), String> {
     let _lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
     let local = match cache
         .lookup(&entry.path_lower, entry.rev.as_deref())
@@ -378,7 +398,8 @@ pub(super) async fn fetch_dropbox_sample_async(
     })
     .await
     .map_err(|error| format!("Remote Project Media staging task failed: {error}"))??;
-    Ok((Arc::new(decoded), entry.name, source))
+    let analysed = analyse_browser_audio_async(decoded, entry.name.clone()).await?;
+    Ok((analysed, entry.name, source))
 }
 
 pub(super) async fn materialize_remote_sample_async(

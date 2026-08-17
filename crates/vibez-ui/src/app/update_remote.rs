@@ -495,6 +495,10 @@ impl App {
                     &materialized.name,
                     materialized.metadata.bpm,
                 );
+                let analysed = crate::message::AnalysedBrowserAudio {
+                    audio: Arc::clone(&materialized.audio),
+                    loop_fit,
+                };
                 self.state
                     .browser
                     .remote
@@ -509,20 +513,17 @@ impl App {
                 let follow_up = if self.state.browser.selected_source.as_ref() != Some(&source) {
                     Task::none()
                 } else if self.state.browser.audition_enabled {
-                    if self.state.browser.install_audition(
-                        generation,
-                        source.clone(),
-                        Arc::clone(&materialized.audio),
-                        loop_fit,
-                    ) {
+                    if self
+                        .state
+                        .browser
+                        .install_audition(generation, source.clone(), analysed)
+                    {
                         self.play_browser_mode(source, materialized.audio)
                     } else {
                         Task::none()
                     }
                 } else {
-                    self.state
-                        .browser
-                        .install_waveform(source, materialized.audio, loop_fit);
+                    self.state.browser.install_waveform(source, analysed);
                     self.state.status_text = format!("Cached Remote media: {}", materialized.name);
                     Task::none()
                 };

@@ -482,11 +482,11 @@ impl App {
         generation: u64,
         analysed: crate::message::AnalysedBrowserAudio,
     ) -> Task<Message> {
-        let crate::message::AnalysedBrowserAudio { audio, loop_fit } = analysed;
+        let audio = Arc::clone(&analysed.audio);
         if self
             .state
             .browser
-            .install_audition(generation, source, Arc::clone(&audio), loop_fit)
+            .install_audition(generation, source, analysed)
         {
             let source = self.state.browser.selected_source.clone().unwrap();
             return self.play_browser_mode(source, audio);
@@ -515,11 +515,7 @@ impl App {
         source: MediaSourceRef,
         analysed: crate::message::AnalysedBrowserAudio,
     ) -> Task<Message> {
-        if self
-            .state
-            .browser
-            .install_waveform(source, analysed.audio, analysed.loop_fit)
-        {
+        if self.state.browser.install_waveform(source, analysed) {
             self.state.status_text = "Waveform ready".into();
         }
         Task::none()
@@ -554,7 +550,7 @@ impl App {
         &mut self,
         target: BrowserImportTarget,
         treatment: crate::state::AuditionImportInput,
-        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+        analysed: crate::message::AnalysedBrowserAudio,
         name: String,
         source: MediaSourceRef,
     ) -> Task<Message> {
@@ -572,7 +568,7 @@ impl App {
         } else {
             Task::none()
         };
-        let import = self.prepare_browser_sample_import(target, treatment, audio, name, source);
+        let import = self.prepare_browser_sample_import(target, treatment, analysed, name, source);
         let pending_audition = if remote_import_finished {
             self.pending_remote_audition
                 .take()
@@ -589,14 +585,7 @@ impl App {
         request_id: u64,
         target: BrowserImportTarget,
         treatment: crate::state::AuditionImportInput,
-        result: Result<
-            (
-                Arc<vibez_core::audio_buffer::DecodedAudio>,
-                String,
-                MediaSourceRef,
-            ),
-            String,
-        >,
+        result: Result<(crate::message::AnalysedBrowserAudio, String, MediaSourceRef), String>,
     ) -> Task<Message> {
         if !self.remote_import_request.finish(request_id) {
             // Staging copies are content-addressed, so a superseding
@@ -606,8 +595,8 @@ impl App {
             return Task::none();
         }
         match result {
-            Ok((audio, name, source)) => self.update(Message::BrowserSampleDecoded(
-                target, treatment, audio, name, source,
+            Ok((analysed, name, source)) => self.update(Message::BrowserSampleDecoded(
+                target, treatment, analysed, name, source,
             )),
             Err(error) => Task::batch([
                 self.media_cache_maintenance_task(),

@@ -625,7 +625,7 @@ pub enum Message {
     BrowserSampleDecoded(
         BrowserImportTarget,
         AuditionImportInput,
-        Arc<DecodedAudio>,
+        AnalysedBrowserAudio,
         String,
         MediaSourceRef,
     ),
@@ -787,7 +787,7 @@ pub enum Message {
         request_id: u64,
         target: BrowserImportTarget,
         treatment: AuditionImportInput,
-        result: Result<(Arc<DecodedAudio>, String, MediaSourceRef), String>,
+        result: Result<(AnalysedBrowserAudio, String, MediaSourceRef), String>,
     },
     DropboxPreview(DropboxEntry),
     DropboxImportToArrangement(DropboxEntry),

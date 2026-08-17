@@ -11,7 +11,7 @@
 //!   Drives slice-and-snap audio quantize.
 //! - `detect_bpm` returns an `Option<BpmEstimate>`. Autocorrelates the
 //!   onset flux (so it works on sustained melodic material, not just
-//!   percussion), octave-folds into [60, 180] BPM using Parncutt's
+//!   percussion), octave-folds into [60, 200] BPM using Parncutt's
 //!   preference curve, and gates on confidence so sparse or silent
 //!   clips return `None` rather than guessing.
 
@@ -168,7 +168,7 @@ const BPM_MIN: f64 = 40.0;
 const BPM_MAX: f64 = 280.0;
 // Target octave for folded output (dance-music conventional range).
 const BPM_FOLD_LO: f64 = 60.0;
-const BPM_FOLD_HI: f64 = 180.0;
+const BPM_FOLD_HI: f64 = 200.0;
 const BPM_FOLD_PREF: f64 = 120.0;
 // Working sample rate for the autocorrelation. 500 Hz gives a lag
 // precision of ~0.5 BPM at 120 BPM, further refined by parabolic
@@ -186,7 +186,7 @@ const MIN_SECONDS_FOR_BPM_F64: f64 = 1.0;
 
 /// Detect the tempo of `audio`. Returns `None` when the audio is too
 /// short, too sparse, or the autocorrelation is not strong enough to
-/// commit to a tempo. Output BPM is always in `[60, 180]` after
+/// commit to a tempo. Output BPM is always in `[60, 200]` after
 /// Parncutt octave folding.
 pub fn detect_bpm(audio: &DecodedAudio, sample_rate: u32) -> Option<BpmEstimate> {
     let frames = audio.num_frames();
@@ -616,6 +616,17 @@ mod tests {
         assert!(
             (est.bpm - 174.0).abs() < 1.5,
             "expected ~174 BPM, got {}",
+            est.bpm
+        );
+    }
+
+    #[test]
+    fn detects_190_bpm_without_folding_to_half_time() {
+        let audio = synthetic_kick_track(44_100, 190.0, 8.0);
+        let est = detect_bpm(&audio, 44_100).expect("expected detection");
+        assert!(
+            (est.bpm - 190.0).abs() < 2.0,
+            "expected ~190 BPM, got {}",
             est.bpm
         );
     }

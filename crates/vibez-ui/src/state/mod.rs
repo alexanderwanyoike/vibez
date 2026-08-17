@@ -43,26 +43,20 @@ pub struct AuditionImportInput {
 impl AuditionImportInput {
     /// Resolve Browser WARP from source evidence only. Project tempo is not an
     /// input because it must never change the identified source tempo.
-    pub fn resolve_for_audio(
+    pub fn resolve_for_analysis(
         mut self,
-        audio: &DecodedAudio,
-        source_name: &str,
+        analysed: &crate::message::AnalysedBrowserAudio,
     ) -> Result<Self, String> {
         if self.mode == AuditionMode::Raw {
             return Ok(self);
         }
-        if audio.num_frames() == 0 || audio.sample_rate == 0 {
+        if analysed.audio.num_frames() == 0 || analysed.audio.sample_rate == 0 {
             return Err("Cannot prepare empty or invalid audio".into());
         }
         if self.source_bpm.is_some() {
             return Ok(self);
         }
-        let Some(fit) = crate::warp::fit_loop_tempo(
-            audio.num_frames(),
-            audio.sample_rate as f64,
-            source_name,
-            None,
-        ) else {
+        let Some(fit) = analysed.loop_fit else {
             self.mode = AuditionMode::Raw;
             self.source_bpm = None;
             return Ok(self);

@@ -441,13 +441,12 @@ impl BrowserState {
         &mut self,
         generation: u64,
         source: MediaSourceRef,
-        audio: Arc<DecodedAudio>,
-        loop_fit: Option<crate::warp::LoopGridFit>,
+        analysed: crate::message::AnalysedBrowserAudio,
     ) -> bool {
         if !self.audition_request_is_current(generation) {
             return false;
         }
-        if !self.install_waveform(source, audio, loop_fit) {
+        if !self.install_waveform(source, analysed) {
             return false;
         }
         self.audition_loading = false;
@@ -485,10 +484,10 @@ impl BrowserState {
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
     }
 
-    pub fn audition_import_input(&self) -> AuditionImportInput {
+    pub fn import_input_for_source(&self, source: &MediaSourceRef) -> AuditionImportInput {
         AuditionImportInput {
             mode: self.audition_mode,
-            source_bpm: if self.waveform_source == self.selected_source {
+            source_bpm: if self.waveform_source.as_ref() == Some(source) {
                 self.waveform_loop_fit.map(|fit| fit.source_bpm)
             } else {
                 None
@@ -581,16 +580,15 @@ impl BrowserState {
     pub fn install_waveform(
         &mut self,
         source: MediaSourceRef,
-        audio: Arc<DecodedAudio>,
-        loop_fit: Option<crate::warp::LoopGridFit>,
+        analysed: crate::message::AnalysedBrowserAudio,
     ) -> bool {
         if self.selected_source.as_ref() != Some(&source) {
             return false;
         }
-        let channels = audio.num_channels();
-        let sample_rate = audio.sample_rate;
+        let channels = analysed.audio.num_channels();
+        let sample_rate = analysed.audio.sample_rate;
         let duration_seconds = if sample_rate > 0 {
-            Some(audio.num_frames() as f64 / sample_rate as f64)
+            Some(analysed.audio.num_frames() as f64 / sample_rate as f64)
         } else {
             None
         };
@@ -600,8 +598,8 @@ impl BrowserState {
             entry.sample_rate = Some(sample_rate);
         }
         self.waveform_source = Some(source);
-        self.waveform_audio = Some(audio);
-        self.waveform_loop_fit = loop_fit;
+        self.waveform_audio = Some(analysed.audio);
+        self.waveform_loop_fit = analysed.loop_fit;
         self.waveform_loading = false;
         self.waveform_error = None;
         true
