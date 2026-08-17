@@ -1,7 +1,7 @@
 //! Shared input/output CPAL stream selection and construction errors.
 
 use cpal::traits::DeviceTrait;
-use cpal::{SampleFormat, SampleRate};
+use cpal::SampleFormat;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StreamDirection {
@@ -126,7 +126,7 @@ pub(crate) fn select_stream_config(
     candidates
         .into_iter()
         .next()
-        .and_then(|range| range.try_with_sample_rate(SampleRate(sample_rate)))
+        .and_then(|range| range.try_with_sample_rate(cpal::SampleRate(sample_rate)))
         .ok_or_else(|| {
             StreamOpenError::Unsupported(format!(
                 "audio {} does not support {sample_rate} Hz with {} buffer",

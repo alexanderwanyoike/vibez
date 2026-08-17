@@ -30,6 +30,8 @@ vibez-dropbox = { path = "crates/vibez-dropbox" }
 vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio
+# Host upgrades change ALSA, CoreAudio and WASAPI behaviour together. Keep them
+# in a dedicated hardware-regression PR; CPAL 0.16 already provides ASIO.
 cpal = "0.16"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "ogg", "vorbis", "wav", "aiff", "isomp4", "aac", "pcm"] }
 rubato = "0.16"

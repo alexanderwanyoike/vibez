@@ -11,6 +11,7 @@ use cpal::{FromSample, Sample, SampleFormat, SampleRate, StreamConfig};
 use vibez_core::id::TrackId;
 use vibez_core::track::AudioInputRoute;
 
+use crate::audio_host::{AudioBackend, AudioHostError};
 use crate::stream_config::{select_stream_config, StreamDirection, StreamOpenError};
 
 const DEFAULT_BRIDGE_FRAMES: usize = 262_144;
@@ -23,6 +24,7 @@ pub enum AudioInputEvent {
 
 #[derive(Debug)]
 pub enum AudioInputError {
+    AudioHost(AudioHostError),
     NoInputDevice,
     InputDeviceNotFound(String),
     Devices(cpal::DevicesError),
@@ -32,6 +34,7 @@ pub enum AudioInputError {
 impl fmt::Display for AudioInputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AudioHost(error) => error.fmt(formatter),
             Self::NoInputDevice => formatter.write_str("no default Audio Input is available"),
             Self::InputDeviceNotFound(name) => {
                 write!(formatter, "Audio Input is unavailable: {name}")
@@ -47,6 +50,11 @@ impl std::error::Error for AudioInputError {}
 impl From<cpal::DevicesError> for AudioInputError {
     fn from(error: cpal::DevicesError) -> Self {
         Self::Devices(error)
+    }
+}
+impl From<AudioHostError> for AudioInputError {
+    fn from(error: AudioHostError) -> Self {
+        Self::AudioHost(error)
     }
 }
 impl From<cpal::BuildStreamError> for AudioInputError {
@@ -403,16 +411,18 @@ pub struct AudioInputStream {
     pub device_name: String,
     pub channels: usize,
     pub sample_rate: u32,
+    pub backend: AudioBackend,
 }
 
 impl AudioInputStream {
     pub fn open(
+        backend: AudioBackend,
         device_name: Option<&str>,
         sample_rate: u32,
         buffer_size: Option<u32>,
         bridge: Arc<AudioInputBridge>,
     ) -> Result<Self, AudioInputError> {
-        let host = cpal::default_host();
+        let host = backend.create_host()?;
         let device = match device_name {
             Some(name) => host
                 .input_devices()?
@@ -422,6 +432,18 @@ impl AudioInputStream {
                 .default_input_device()
                 .ok_or(AudioInputError::NoInputDevice)?,
         };
+        Self::open_on_device(backend, device, sample_rate, buffer_size, bridge)
+    }
+
+    /// Open input through a concrete device already owned by the output path.
+    /// ASIO uses this route so both directions share one driver and buffer set.
+    pub fn open_on_device(
+        backend: AudioBackend,
+        device: cpal::Device,
+        sample_rate: u32,
+        buffer_size: Option<u32>,
+        bridge: Arc<AudioInputBridge>,
+    ) -> Result<Self, AudioInputError> {
         let selected = select_stream_config(
             &device,
             StreamDirection::Input,
@@ -450,9 +472,10 @@ impl AudioInputStream {
             events,
             device_name: device
                 .name()
-                .unwrap_or_else(|_| device_name.unwrap_or("System Default").to_string()),
+                .unwrap_or_else(|_| "System Default".to_string()),
             channels,
             sample_rate,
+            backend,
         })
     }
 

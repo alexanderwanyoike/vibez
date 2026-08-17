@@ -111,6 +111,12 @@ fn settings_divider<'a>() -> Element<'a, Message> {
 
 impl App {
     pub(super) fn view_settings_audio_tab(&self) -> Element<'_, Message> {
+        let backend_picker = settings_pick_list(
+            vibez_audio_io::audio_host::AudioBackend::available(),
+            Some(self.state.audio_settings.backend),
+            Message::SelectAudioBackend,
+            132.0,
+        );
         let output_picker = settings_pick_list(
             self.state.audio_settings.output_choices(),
             Some(self.state.audio_settings.selected_output_choice()),
@@ -132,9 +138,14 @@ impl App {
                     .active_output_name
                     .as_deref()
                     .unwrap_or("System Default");
+                let backend = self
+                    .state
+                    .audio_settings
+                    .active_backend
+                    .unwrap_or(self.state.audio_settings.backend);
                 row![
                     icons::icon(icons::CIRCLE_DOT).size(9).color(th::success()),
-                    text(format!("Running · {active}"))
+                    text(format!("Running · {backend} · {active}"))
                         .size(10)
                         .color(th::text_dim())
                 ]
@@ -201,8 +212,55 @@ impl App {
         ]
         .align_y(iced::Alignment::Center);
 
-        let device_group = container(
+        let backend_row = row![
             column![
+                text("Driver Type").size(12).color(th::text()),
+                text("The audio system used for input and output")
+                    .size(9)
+                    .color(th::text_muted())
+            ]
+            .spacing(1)
+            .width(Length::Fill),
+            backend_picker
+        ]
+        .spacing(18)
+        .align_y(iced::Alignment::Center);
+        let backend_section = if vibez_audio_io::audio_host::AudioBackend::available().len() > 1 {
+            column![backend_row, settings_divider()]
+        } else {
+            column![]
+        };
+
+        let device_rows = if self.state.audio_settings.backend
+            == vibez_audio_io::audio_host::AudioBackend::Asio
+        {
+            column![
+                backend_section,
+                row![
+                    column![
+                        text("Audio Device").size(12).color(th::text()),
+                        output_status,
+                        input_status
+                    ]
+                    .spacing(3)
+                    .width(Length::Fill),
+                    output_picker
+                ]
+                .spacing(18)
+                .align_y(iced::Alignment::Center),
+                settings_divider(),
+                column![
+                    text("ASIO Routing").size(12).color(th::text()),
+                    text("Choose speakers and headphones in the driver's control panel. ASIO4ALL exposes it from the Windows tray while running")
+                        .size(9)
+                        .color(th::text_muted())
+                ]
+                .spacing(1)
+                .width(Length::Fill)
+            ]
+        } else {
+            column![
+                backend_section,
                 row![
                     column![
                         text("Output Device").size(12).color(th::text()),
@@ -225,20 +283,21 @@ impl App {
                     input_picker
                 ]
                 .spacing(18)
-                .align_y(iced::Alignment::Center),
+                .align_y(iced::Alignment::Center)
             ]
-            .spacing(9),
-        )
-        .padding([9, 10])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_dark().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        });
+        };
+        let device_group =
+            container(device_rows.spacing(9))
+                .padding([9, 10])
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                });
 
         let sizes = self.state.audio_settings.buffer_size_choices();
         let mut buf_row = row![].spacing(3);

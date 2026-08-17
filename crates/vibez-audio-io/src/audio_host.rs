@@ -4,6 +4,84 @@
 //! discovering input/output devices and their supported configurations.
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use serde::{Deserialize, Serialize};
+
+/// Stable application-facing audio backend choice.
+///
+/// `System` maps to the native CPAL default on every platform. `Asio` remains
+/// serializable on non-Windows systems so a settings file copied between
+/// machines can be read and safely repaired by the application.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioBackend {
+    #[default]
+    System,
+    Asio,
+}
+
+impl AudioBackend {
+    /// Backends compiled into this Vibez build for the current platform.
+    pub const fn available() -> &'static [Self] {
+        #[cfg(target_os = "windows")]
+        {
+            &[Self::System, Self::Asio]
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            &[Self::System]
+        }
+    }
+
+    pub fn is_available(self) -> bool {
+        Self::available().contains(&self)
+    }
+
+    /// Construct the CPAL host represented by this stable backend choice.
+    pub fn create_host(self) -> Result<cpal::Host, AudioHostError> {
+        match self {
+            Self::System => Ok(cpal::default_host()),
+            Self::Asio => {
+                #[cfg(target_os = "windows")]
+                {
+                    cpal::host_from_id(cpal::HostId::Asio)
+                        .map_err(|_| AudioHostError::BackendUnavailable(self))
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Err(AudioHostError::BackendUnavailable(self))
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for AudioBackend {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::System => formatter.write_str(system_backend_name()),
+            Self::Asio => formatter.write_str("ASIO"),
+        }
+    }
+}
+
+const fn system_backend_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "WASAPI"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "CoreAudio"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "ALSA"
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        "System Audio"
+    }
+}
 
 /// Information about an available audio input or output device.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +125,8 @@ pub struct AudioDeviceCatalog {
 /// Errors that can occur during host / device enumeration.
 #[derive(Debug)]
 pub enum AudioHostError {
+    /// The selected backend is not compiled in or cannot initialise.
+    BackendUnavailable(AudioBackend),
     /// Failed to enumerate devices.
     DevicesError(cpal::DevicesError),
     /// No default device found for the requested direction.
@@ -62,6 +142,9 @@ pub enum AudioHostError {
 impl std::fmt::Display for AudioHostError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::BackendUnavailable(backend) => {
+                write!(f, "{backend} audio backend is unavailable")
+            }
             Self::DevicesError(e) => write!(f, "failed to enumerate audio devices: {e}"),
             Self::NoDefaultDevice(direction) => {
                 write!(f, "no default audio {direction} device found")
@@ -78,6 +161,7 @@ impl std::fmt::Display for AudioHostError {
 impl std::error::Error for AudioHostError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::BackendUnavailable(_) => None,
             Self::DevicesError(e) => Some(e),
             Self::NoDefaultDevice(_) => None,
             Self::DeviceNameError(e) => Some(e),
@@ -113,15 +197,21 @@ impl From<cpal::DefaultStreamConfigError> for AudioHostError {
 
 /// Wrapper around [`cpal::Host`] that provides ergonomic device enumeration.
 pub struct AudioHost {
+    backend: AudioBackend,
     host: cpal::Host,
 }
 
 impl AudioHost {
-    /// Create a new `AudioHost` using the platform default host.
-    pub fn new() -> Self {
-        Self {
-            host: cpal::default_host(),
-        }
+    /// Create an `AudioHost` for one explicit application backend.
+    pub fn new(backend: AudioBackend) -> Result<Self, AudioHostError> {
+        Ok(Self {
+            backend,
+            host: backend.create_host()?,
+        })
+    }
+
+    pub fn backend(&self) -> AudioBackend {
+        self.backend
     }
 
     /// Return a reference to the inner [`cpal::Host`].
@@ -189,12 +279,6 @@ impl AudioHost {
     pub fn default_output_device_info(&self) -> Result<DeviceInfo, AudioHostError> {
         let device = self.default_output_device()?;
         output_device_info(&device)
-    }
-}
-
-impl Default for AudioHost {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -274,7 +358,36 @@ mod tests {
     /// hardware-dependent, so we only assert that construction succeeds.
     #[test]
     fn audio_host_construction() {
-        let _host = AudioHost::new();
+        let host = AudioHost::new(AudioBackend::System).unwrap();
+        assert_eq!(host.backend(), AudioBackend::System);
+    }
+
+    #[test]
+    fn backend_names_match_the_native_platform() {
+        assert!(AudioBackend::available().contains(&AudioBackend::System));
+        #[cfg(target_os = "windows")]
+        assert_eq!(AudioBackend::System.to_string(), "WASAPI");
+        #[cfg(target_os = "macos")]
+        assert_eq!(AudioBackend::System.to_string(), "CoreAudio");
+        #[cfg(target_os = "linux")]
+        assert_eq!(AudioBackend::System.to_string(), "ALSA");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_build_includes_the_asio_host() {
+        let host = AudioHost::new(AudioBackend::Asio).unwrap();
+        assert_eq!(host.backend(), AudioBackend::Asio);
+    }
+
+    #[test]
+    fn backend_identity_roundtrips_for_cross_platform_settings() {
+        let encoded = serde_json::to_string(&AudioBackend::Asio).unwrap();
+        assert_eq!(encoded, "\"asio\"");
+        assert_eq!(
+            serde_json::from_str::<AudioBackend>(&encoded).unwrap(),
+            AudioBackend::Asio
+        );
     }
 
     /// Verify that `DeviceInfo`, `StreamConfigInfo`, and `SupportedConfigRange`
