@@ -24,12 +24,6 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
       - run: cargo check --workspace
-      - name: Verify Windows executable resources
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --package vibez --bin vibez
-          ./scripts/check_windows_resources.ps1 target/debug/vibez.exe
 
   test:
     name: Test
@@ -45,6 +39,12 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
       - run: cargo test --workspace
+      - name: Verify Windows executable resources
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --package vibez --bin vibez
+          ./scripts/check_windows_resources.ps1 target/debug/vibez.exe
 
   clippy:
     name: Clippy

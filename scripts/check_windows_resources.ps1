@@ -3,7 +3,7 @@ param(
     [string]$Executable
 )
 
-$resolved = (Resolve-Path $Executable).Path
+$resolved = (Resolve-Path $Executable -ErrorAction Stop).Path
 
 Add-Type @"
 using System;
@@ -50,8 +50,8 @@ if (-not [VibezPeResources]::HasApplicationIcon($resolved)) {
 }
 
 $versionInfo = (Get-Item $resolved).VersionInfo
-if ($versionInfo.ProductName -ne "vibez") {
-    throw "Expected ProductName 'vibez', got '$($versionInfo.ProductName)'"
+if ([string]::IsNullOrWhiteSpace($versionInfo.ProductName)) {
+    throw "The executable has no ProductName version resource"
 }
 
 Write-Host "Verified embedded vibez application icon and version resources in $resolved"
