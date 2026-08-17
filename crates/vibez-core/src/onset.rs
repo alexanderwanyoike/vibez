@@ -168,6 +168,8 @@ const BPM_MIN: f64 = 40.0;
 const BPM_MAX: f64 = 280.0;
 // Target octave for folded output (dance-music conventional range).
 const BPM_FOLD_LO: f64 = 60.0;
+// Keep aligned with vibez-ui's PLAUSIBLE_LOOP_BPM_MAX so Browser fitting does
+// not accept a source tempo which onset analysis has already folded in half.
 const BPM_FOLD_HI: f64 = 200.0;
 const BPM_FOLD_PREF: f64 = 120.0;
 // Working sample rate for the autocorrelation. 500 Hz gives a lag

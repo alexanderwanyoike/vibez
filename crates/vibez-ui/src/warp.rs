@@ -55,8 +55,15 @@ pub struct LoopGridFit {
 
 const LOOP_GRID_BARS: [u32; 5] = [1, 2, 4, 8, 16];
 const PLAUSIBLE_LOOP_BPM_MIN: f64 = 60.0;
+// Keep aligned with vibez_core::onset::BPM_FOLD_HI. The detector must not
+// fold a tempo which this grid fitter treats as a valid source tempo.
 const PLAUSIBLE_LOOP_BPM_MAX: f64 = 200.0;
 const FILENAME_TEMPO_TOLERANCE: f64 = 1.10;
+
+struct LoopTempoDecision {
+    fit: LoopGridFit,
+    filename_hint_decided: bool,
+}
 
 /// Extract a conventional tempo token from a production-loop filename.
 /// Explicit `124bpm`/`bpm124` tokens win; otherwise a delimiter-separated
@@ -118,22 +125,34 @@ pub fn fit_loop_tempo(
     source_name: &str,
     detected_bpm: Option<f64>,
 ) -> Option<LoopGridFit> {
+    fit_loop_tempo_decision(source_frames, sample_rate, source_name, detected_bpm)
+        .map(|decision| decision.fit)
+}
+
+fn fit_loop_tempo_decision(
+    source_frames: usize,
+    sample_rate: f64,
+    source_name: &str,
+    detected_bpm: Option<f64>,
+) -> Option<LoopTempoDecision> {
     if source_frames == 0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
         return None;
     }
 
     let source_seconds = source_frames as f64 / sample_rate;
-    let candidates: Vec<_> = LOOP_GRID_BARS
-        .into_iter()
-        .map(|bars| LoopGridFit {
+    let candidates = LOOP_GRID_BARS.map(|bars| {
+        let fit = LoopGridFit {
             bars,
             source_bpm: bars as f64 * 4.0 * 60.0 / source_seconds,
-        })
-        .filter(|fit| (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm))
-        .collect();
+        };
+        (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX)
+            .contains(&fit.source_bpm)
+            .then_some(fit)
+    });
     let name_hint = bpm_hint_from_name(source_name).filter(|hint| {
         candidates
             .iter()
+            .flatten()
             .any(|fit| (fit.source_bpm / hint).ln().abs() <= FILENAME_TEMPO_TOLERANCE.ln())
     });
     let reference_bpm = name_hint
@@ -143,12 +162,16 @@ pub fn fit_loop_tempo(
             })
         })
         .unwrap_or(120.0);
-    candidates.into_iter().min_by(|left, right| {
+    let fit = candidates.into_iter().flatten().min_by(|left, right| {
         (left.source_bpm / reference_bpm)
             .ln()
             .abs()
             .partial_cmp(&(right.source_bpm / reference_bpm).ln().abs())
             .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    Some(LoopTempoDecision {
+        fit,
+        filename_hint_decided: name_hint.is_some(),
     })
 }
 
@@ -163,17 +186,14 @@ fn analyse_loop_tempo_with(
     source_name: &str,
     detect: impl FnOnce() -> Option<f64>,
 ) -> Option<LoopGridFit> {
-    let cheap_fit = fit_loop_tempo(
+    let cheap_decision = fit_loop_tempo_decision(
         audio.num_frames(),
         audio.sample_rate as f64,
         source_name,
         None,
     )?;
-    let hint_decides = bpm_hint_from_name(source_name).is_some_and(|hint| {
-        (cheap_fit.source_bpm / hint).ln().abs() <= FILENAME_TEMPO_TOLERANCE.ln()
-    });
-    if hint_decides {
-        return Some(cheap_fit);
+    if cheap_decision.filename_hint_decided {
+        return Some(cheap_decision.fit);
     }
     fit_loop_tempo(
         audio.num_frames(),

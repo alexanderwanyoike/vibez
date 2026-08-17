@@ -73,10 +73,7 @@ impl App {
                 };
                 let analysis_name = name.clone();
                 Task::perform(
-                    async move {
-                        let audio = decode_file_async(staging_path).await?;
-                        analyse_browser_audio_async(audio, analysis_name).await
-                    },
+                    decode_and_analyse_async(staging_path, analysis_name),
                     move |result| match result {
                         Ok(analysed) => Message::BrowserSampleDecoded(
                             target.clone(),
@@ -104,10 +101,7 @@ impl App {
                 };
                 let analysis_name = name.clone();
                 Task::perform(
-                    async move {
-                        let audio = decode_file_async(staging_path).await?;
-                        analyse_browser_audio_async(audio, analysis_name).await
-                    },
+                    decode_and_analyse_async(staging_path, analysis_name),
                     move |result| match result {
                         Ok(analysed) => Message::BrowserSampleDecoded(
                             target.clone(),
