@@ -294,6 +294,54 @@ fn add_audio_clip(
 }
 
 #[test]
+fn audio_loop_region_must_be_ordered_and_inside_the_source() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
+    let mut engine = RecordingEngine::default();
+
+    arrangement.update(
+        ArrangementMsg::SetClipLoopRegion {
+            track_id,
+            clip_id,
+            loop_start: 800,
+            loop_end: 1_001,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(
+        (
+            arrangement.tracks[0].clips[0].loop_start,
+            arrangement.tracks[0].clips[0].loop_end
+        ),
+        (0, 0)
+    );
+    assert!(engine.0.is_empty());
+
+    arrangement.update(
+        ArrangementMsg::SetClipLoopRegion {
+            track_id,
+            clip_id,
+            loop_start: 200,
+            loop_end: 800,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(
+        (
+            arrangement.tracks[0].clips[0].loop_start,
+            arrangement.tracks[0].clips[0].loop_end
+        ),
+        (200, 800)
+    );
+    assert!(matches!(
+        engine.0.as_slice(),
+        [EngineCommand::SetClipLoop { .. }]
+    ));
+}
+
+#[test]
 fn split_audio_clip_replaces_clip_with_two_halves() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);

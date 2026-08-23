@@ -396,21 +396,26 @@ impl TimelineEditorState {
                 loop_start,
                 loop_end,
             } => {
-                let mut enabled = false;
+                let mut command = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_start = loop_start;
-                        clip.loop_end = loop_end;
-                        enabled = clip.loop_enabled;
+                        let source_frames = clip.audio.num_frames() as u64;
+                        if loop_start < loop_end && loop_end <= source_frames {
+                            clip.loop_start = loop_start;
+                            clip.loop_end = loop_end;
+                            command = Some(clip.loop_enabled);
+                        }
                     }
                 }
-                engine.send(EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start,
-                    loop_end,
-                });
+                if let Some(enabled) = command {
+                    engine.send(EngineCommand::SetClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start,
+                        loop_end,
+                    });
+                }
             }
             ArrangementMsg::SelectArrangementClip {
                 selection,

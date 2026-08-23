@@ -259,21 +259,30 @@ impl PianoRollState {
                 loop_start_beats,
                 loop_end_beats,
             } => {
-                let mut enabled = false;
+                let mut command = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_start_beats = loop_start_beats;
-                        clip.loop_end_beats = loop_end_beats;
-                        enabled = clip.loop_enabled;
+                        let valid = loop_start_beats.is_finite()
+                            && loop_end_beats.is_finite()
+                            && loop_start_beats >= 0.0
+                            && loop_start_beats < loop_end_beats
+                            && loop_end_beats <= clip.duration_beats;
+                        if valid {
+                            clip.loop_start_beats = loop_start_beats;
+                            clip.loop_end_beats = loop_end_beats;
+                            command = Some(clip.loop_enabled);
+                        }
                     }
                 }
-                engine.send(EngineCommand::SetNoteClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                });
+                if let Some(enabled) = command {
+                    engine.send(EngineCommand::SetNoteClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start_beats,
+                        loop_end_beats,
+                    });
+                }
             }
             PianoRollMsg::AddNoteClipToTrack(track_id) => {
                 let clip_id = ClipId::new();
@@ -1136,6 +1145,46 @@ mod tests {
         assert!(!clip.loop_enabled);
         assert_eq!(clip.loop_start_beats, 0.0);
         assert_eq!(clip.loop_end_beats, 0.0);
+    }
+
+    #[test]
+    fn midi_loop_region_must_be_ordered_and_inside_the_clip() {
+        let (mut tracks, track_id, clip_id) = midi_track_with_clip();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        piano_roll.update(
+            PianoRollMsg::SetNoteClipLoopRegion {
+                track_id,
+                clip_id,
+                loop_start_beats: 3.0,
+                loop_end_beats: 5.0,
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+        let clip = &tracks.get(track_id).unwrap().note_clips[0];
+        assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (0.0, 0.0));
+        assert!(engine.0.is_empty());
+
+        piano_roll.update(
+            PianoRollMsg::SetNoteClipLoopRegion {
+                track_id,
+                clip_id,
+                loop_start_beats: 1.0,
+                loop_end_beats: 3.0,
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+        let clip = &tracks.get(track_id).unwrap().note_clips[0];
+        assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (1.0, 3.0));
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::SetNoteClipLoop { .. }]
+        ));
     }
 
     #[test]

@@ -556,6 +556,17 @@ impl PianoRollWidget {
             }
         }
 
+        if let Some(clip) = &self.clip {
+            if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
+                clip_loop_markers::draw_brace(
+                    &mut frame,
+                    self.beat_to_x(clip.loop_start_beats, &bounds),
+                    self.beat_to_x(clip.loop_end_beats, &bounds),
+                    theme::accent(),
+                );
+            }
+        }
+
         // Ruler playhead marker
         if playhead_x >= KEY_WIDTH {
             let marker = canvas::Path::line(
