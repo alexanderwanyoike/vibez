@@ -201,8 +201,7 @@ impl TimelineEditorState {
                             fragment.notes = visible_notes(clip, local_start, local_end);
                             fragment.selected_notes.clear();
                             if fragment.loop_enabled {
-                                fragment.loop_start_beats = 0.0;
-                                fragment.loop_end_beats = fragment.duration_beats;
+                                fragment.reset_loop_region_to_clip();
                             }
                             fragment
                         })
@@ -296,12 +295,9 @@ impl TimelineEditorState {
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
-                let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
                 clip.duration = new_duration;
-                if new_duration > source_len && !clip.loop_enabled {
-                    clip.loop_enabled = true;
-                    clip.loop_start = clip.source_offset;
-                    clip.loop_end = clip.source_offset + source_len;
+                if clip.loop_enabled {
+                    clip.clamp_loop_to_clip();
                 }
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 sync_data = Some((
@@ -942,10 +938,8 @@ impl TimelineEditorState {
                 right.selected_notes.clear();
 
                 if clip.loop_enabled {
-                    left.loop_start_beats = 0.0;
-                    left.loop_end_beats = left.duration_beats;
-                    right.loop_start_beats = 0.0;
-                    right.loop_end_beats = right.duration_beats;
+                    left.reset_loop_region_to_clip();
+                    right.reset_loop_region_to_clip();
                 }
                 (left, right)
             });

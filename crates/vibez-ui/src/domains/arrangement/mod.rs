@@ -373,9 +373,8 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end == 0 {
-                            clip.loop_start = clip.source_offset;
-                            clip.loop_end = clip.source_offset + clip.duration;
+                        if clip.loop_enabled {
+                            clip.reset_loop_region_to_clip();
                         }
                         cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
                     }
