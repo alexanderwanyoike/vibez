@@ -18,6 +18,106 @@ use crate::state::UiClip;
 use super::*;
 
 impl App {
+    pub(super) fn apply_clip_bpm_detected_at(
+        &mut self,
+        location: vibez_project::TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        bpm: Option<f64>,
+        confidence: f32,
+    ) -> crate::domains::arrangement::ArrangementAction {
+        match location {
+            vibez_project::TimelineLocation::Arrange => self
+                .state
+                .arrangement
+                .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence),
+            vibez_project::TimelineLocation::Section(section_id)
+                if self.state.perform.selected_section == Some(section_id) =>
+            {
+                let action = self
+                    .state
+                    .perform
+                    .section_editor
+                    .editor_mut()
+                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
+                self.state.perform.commit_selected_section_timeline();
+                if action.mark_dirty {
+                    self.refresh_playing_section_after_edit(section_id);
+                }
+                action
+            }
+            vibez_project::TimelineLocation::Section(section_id) => {
+                let Some(section) =
+                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
+                else {
+                    return crate::domains::arrangement::ArrangementAction::default();
+                };
+                let mut editor = crate::state::TimelineEditorState {
+                    timeline: Arc::clone(&section.timeline),
+                    ..crate::state::TimelineEditorState::default()
+                };
+                let action = editor.apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
+                section.timeline = editor.timeline;
+                if action.mark_dirty {
+                    self.refresh_playing_section_after_edit(section_id);
+                }
+                action
+            }
+        }
+    }
+
+    pub(super) fn apply_clip_warp_success_at(
+        &mut self,
+        location: vibez_project::TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        success: crate::message::ClipWarpSuccess,
+    ) -> crate::domains::arrangement::ArrangementAction {
+        match location {
+            vibez_project::TimelineLocation::Arrange => {
+                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                self.state.arrangement.apply_clip_warp_success(
+                    &mut engine,
+                    track_id,
+                    clip_id,
+                    success,
+                )
+            }
+            vibez_project::TimelineLocation::Section(section_id)
+                if self.state.perform.selected_section == Some(section_id) =>
+            {
+                let action = {
+                    let mut engine = crate::domains::DiscardingEngine;
+                    self.state
+                        .perform
+                        .section_editor
+                        .editor_mut()
+                        .apply_clip_warp_success(&mut engine, track_id, clip_id, success)
+                };
+                self.state.perform.commit_selected_section_timeline();
+                self.refresh_playing_section_after_edit(section_id);
+                action
+            }
+            vibez_project::TimelineLocation::Section(section_id) => {
+                let Some(section) =
+                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
+                else {
+                    return crate::domains::arrangement::ArrangementAction::default();
+                };
+                let mut editor = crate::state::TimelineEditorState {
+                    timeline: Arc::clone(&section.timeline),
+                    ..crate::state::TimelineEditorState::default()
+                };
+                let mut engine = crate::domains::DiscardingEngine;
+                let action =
+                    editor.apply_clip_warp_success(&mut engine, track_id, clip_id, success);
+                section.timeline = editor.timeline;
+                self.refresh_playing_section_after_edit(section_id);
+                action
+            }
+        }
+    }
+
     pub(super) fn dispatch_drop_on_arrangement(
         &mut self,
         track_id: TrackId,
@@ -215,10 +315,11 @@ impl App {
 
     pub(super) fn dispatch_detect_clip_bpm(
         &mut self,
+        location: vibez_project::TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
     ) -> Task<Message> {
-        let Some(content) = self.state.arrange_content(track_id) else {
+        let Some(content) = self.timeline_content_at(location, track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
@@ -232,10 +333,11 @@ impl App {
             .original_audio
             .clone()
             .unwrap_or_else(|| Arc::clone(&clip.audio));
-        let sample_rate = self.state.transport.sample_rate;
+        let sample_rate = audio.sample_rate;
         self.state.status_text = format!("Detecting BPM for {}...", clip.name);
         Task::perform(detect_clip_bpm_async(audio, sample_rate), move |estimate| {
             Message::ClipBpmDetected {
+                location,
                 track_id,
                 clip_id,
                 bpm: estimate.map(|e| e.bpm),
@@ -252,7 +354,7 @@ impl App {
     /// clips are beat-positioned and follow inherently.
     pub(super) fn follow_tempo_change(&mut self, old_bpm: f64, new_bpm: f64) -> Task<Message> {
         let position_ratio = old_bpm / new_bpm;
-        let mut warped: Vec<(TrackId, ClipId)> = Vec::new();
+        let mut warped: Vec<(vibez_project::TimelineLocation, TrackId, ClipId)> = Vec::new();
         let mut moves: Vec<(TrackId, ClipId, u64)> = Vec::new();
 
         for (track_id, content) in &mut Arc::make_mut(&mut self.state.arrangement.timeline).by_track
@@ -266,7 +368,7 @@ impl App {
                     clip.position = new_position;
                     moves.push((*track_id, clip.id, new_position));
                 }
-                warped.push((*track_id, clip.id));
+                warped.push((vibez_project::TimelineLocation::Arrange, *track_id, clip.id));
             }
         }
         for (track_id, clip_id, new_position) in moves {
@@ -275,6 +377,58 @@ impl App {
                 clip_id,
                 new_position,
             });
+        }
+
+        let selected_section = self.state.perform.selected_section;
+        if let Some(section_id) = selected_section {
+            for (track_id, content) in
+                &mut Arc::make_mut(&mut self.state.perform.section_editor.editor_mut().timeline)
+                    .by_track
+            {
+                for clip in &mut content.clips {
+                    if !clip.warped {
+                        continue;
+                    }
+                    clip.position = (clip.position as f64 * position_ratio).round() as u64;
+                    warped.push((
+                        vibez_project::TimelineLocation::Section(section_id),
+                        *track_id,
+                        clip.id,
+                    ));
+                }
+            }
+            self.state.perform.commit_selected_section_timeline();
+            self.refresh_playing_section_after_edit(section_id);
+        }
+        let section_ids: Vec<_> = self
+            .state
+            .perform
+            .sections
+            .sections
+            .iter()
+            .map(|section| section.id)
+            .filter(|section_id| Some(*section_id) != selected_section)
+            .collect();
+        for section_id in section_ids {
+            let Some(section) =
+                Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
+            else {
+                continue;
+            };
+            for (track_id, content) in &mut Arc::make_mut(&mut section.timeline).by_track {
+                for clip in &mut content.clips {
+                    if !clip.warped {
+                        continue;
+                    }
+                    clip.position = (clip.position as f64 * position_ratio).round() as u64;
+                    warped.push((
+                        vibez_project::TimelineLocation::Section(section_id),
+                        *track_id,
+                        clip.id,
+                    ));
+                }
+            }
+            self.refresh_playing_section_after_edit(section_id);
         }
         if warped.is_empty() {
             return Task::none();
@@ -285,15 +439,19 @@ impl App {
         );
         let tasks: Vec<Task<Message>> = warped
             .into_iter()
-            .map(|(track_id, clip_id)| self.dispatch_warp_clip_to_project(track_id, clip_id))
+            .map(|(location, track_id, clip_id)| {
+                self.dispatch_warp_clip_to_project(location, track_id, clip_id, false)
+            })
             .collect();
         Task::batch(tasks)
     }
 
     pub(super) fn dispatch_warp_clip_to_project(
         &mut self,
+        location: vibez_project::TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
+        record_undo: bool,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
         let sample_rate = self.state.transport.sample_rate;
@@ -301,7 +459,7 @@ impl App {
             self.state.status_text = "Cannot warp at zero BPM".to_string();
             return Task::none();
         }
-        let Some(content) = self.state.arrange_content(track_id) else {
+        let Some(content) = self.timeline_content_at(location, track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
@@ -336,13 +494,16 @@ impl App {
             loop_end: clip.loop_end,
             clip_bpm,
             project_bpm,
+            transpose_semitones: clip.transpose.semitones(),
         };
         let _ = sample_rate;
         self.state.status_text = format!("Warping to {project_bpm:.0} BPM...");
         Task::perform(crate::warp::warp_clip_async(input), move |result| {
             Message::ClipWarpReady {
+                location,
                 track_id,
                 clip_id,
+                record_undo,
                 result,
             }
         })
@@ -485,6 +646,7 @@ impl App {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
 
         if self.state.find_track(track_id).is_some() {
@@ -499,6 +661,8 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                gain_db: Default::default(),
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -577,7 +741,14 @@ impl App {
         let count = targets.len();
         let tasks: Vec<Task<Message>> = targets
             .into_iter()
-            .map(|(tid, cid)| self.dispatch_warp_clip_to_project(tid, cid))
+            .map(|(tid, cid)| {
+                self.dispatch_warp_clip_to_project(
+                    vibez_project::TimelineLocation::Arrange,
+                    tid,
+                    cid,
+                    true,
+                )
+            })
             .collect();
         self.state.status_text = format!(
             "Re-warping {count} clip(s) to {:.0} BPM",

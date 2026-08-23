@@ -89,9 +89,11 @@ impl App {
             return Task::none();
         }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
-        let deferred_clipboard_project_edit = matches!(
+        let deferred_arrangement_project_edit = matches!(
             &message,
-            Message::Arrangement(msg) if msg.is_clipboard_project_edit()
+            Message::Arrangement(msg)
+                if msg.is_clipboard_project_edit()
+                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. })
         );
         let should_mark_dirty = matches!(
             &message,
@@ -115,14 +117,18 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
                 | Message::Arrangement(ArrangementMsg::AddMidiTrack)
                 | Message::AudioQuantizeReady { .. }
-                | Message::ClipWarpReady { .. }
+                | Message::ClipBpmDetected { bpm: Some(_), .. }
+                | Message::ClipWarpReady {
+                    record_undo: true,
+                    ..
+                }
                 | Message::ClipAutoWarpReady { .. }
         ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
             || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
             || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
             || matches!(&message, Message::Automation(m) if m.marks_dirty())
             || matches!(&message, Message::Perform(m) if m.marks_dirty());
-        if should_mark_dirty && !deferred_clipboard_project_edit {
+        if should_mark_dirty && !deferred_arrangement_project_edit {
             self.push_undo_snapshot(undo_gesture);
             self.mark_project_dirty();
         }
@@ -204,9 +210,9 @@ impl App {
                 self.apply_devices_action(action);
             }
             Message::Arrangement(msg) => {
-                let clipboard_snapshot = msg
-                    .is_clipboard_project_edit()
-                    .then(|| self.take_snapshot());
+                let deferred_snapshot = (msg.is_clipboard_project_edit()
+                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. }))
+                .then(|| self.take_snapshot());
                 let playhead_beats = self.focused_editor_playhead_beats();
                 let samples_per_beat = if self.state.transport.bpm > 0.0 {
                     60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
@@ -224,7 +230,7 @@ impl App {
                     playhead_beats,
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
-                if let (true, Some(snapshot)) = (action.mark_dirty, clipboard_snapshot) {
+                if let (true, Some(snapshot)) = (action.mark_dirty, deferred_snapshot) {
                     self.state.project.history.push_edit(snapshot, undo_gesture);
                     self.mark_project_dirty();
                 }
@@ -607,43 +613,109 @@ impl App {
             },
 
             // -- Warping --
-            Message::DetectClipBpm { track_id, clip_id } => {
-                return self.dispatch_detect_clip_bpm(track_id, clip_id);
+            Message::DetectClipBpm {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                return self.dispatch_detect_clip_bpm(location, track_id, clip_id);
             }
             Message::ClipBpmDetected {
+                location,
                 track_id,
                 clip_id,
                 bpm,
                 confidence,
             } => {
-                let action = self
-                    .state
-                    .arrangement
-                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
-                return self.apply_arrangement_action(action);
+                let action =
+                    self.apply_clip_bpm_detected_at(location, track_id, clip_id, bpm, confidence);
+                return self.apply_arrangement_action_at(action, location);
             }
-            Message::WarpClipToProject { track_id, clip_id } => {
-                return self.dispatch_warp_clip_to_project(track_id, clip_id);
+            Message::WarpClipToProject {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                return self.dispatch_warp_clip_to_project(location, track_id, clip_id, true);
             }
             Message::ClipWarpReady {
+                location,
+                track_id,
+                clip_id,
+                record_undo: _,
+                result,
+            } => match result {
+                Ok(success) => {
+                    let action =
+                        self.apply_clip_warp_success_at(location, track_id, clip_id, success);
+                    return self.apply_arrangement_action_at(action, location);
+                }
+                Err(err) => {
+                    self.state.status_text = format!("Warp failed: {err}");
+                }
+            },
+            Message::ClipTransposeReady {
+                location,
                 track_id,
                 clip_id,
                 result,
             } => match result {
                 Ok(success) => {
-                    let action = {
-                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                        self.state.arrangement.apply_clip_warp_success(
-                            &mut engine,
-                            track_id,
-                            clip_id,
-                            success,
-                        )
+                    let action = match location {
+                        vibez_project::TimelineLocation::Arrange => {
+                            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                            self.state.arrangement.apply_clip_transpose_success(
+                                &mut engine,
+                                track_id,
+                                clip_id,
+                                success,
+                            )
+                        }
+                        vibez_project::TimelineLocation::Section(section_id) => {
+                            if self.state.perform.selected_section == Some(section_id) {
+                                let action = {
+                                    let mut engine = crate::domains::DiscardingEngine;
+                                    self.state
+                                        .perform
+                                        .section_editor
+                                        .editor_mut()
+                                        .apply_clip_transpose_success(
+                                            &mut engine,
+                                            track_id,
+                                            clip_id,
+                                            success,
+                                        )
+                                };
+                                self.state.perform.commit_selected_section_timeline();
+                                self.refresh_playing_section_after_edit(section_id);
+                                action
+                            } else {
+                                let Some(section) = Arc::make_mut(&mut self.state.perform.sections)
+                                    .by_id_mut(section_id)
+                                else {
+                                    return Task::none();
+                                };
+                                let mut editor = crate::state::TimelineEditorState {
+                                    timeline: Arc::clone(&section.timeline),
+                                    ..crate::state::TimelineEditorState::default()
+                                };
+                                let mut engine = crate::domains::DiscardingEngine;
+                                let action = editor.apply_clip_transpose_success(
+                                    &mut engine,
+                                    track_id,
+                                    clip_id,
+                                    success,
+                                );
+                                section.timeline = editor.timeline;
+                                self.refresh_playing_section_after_edit(section_id);
+                                action
+                            }
+                        }
                     };
-                    return self.apply_arrangement_action(action);
+                    return self.apply_arrangement_action_at(action, location);
                 }
-                Err(err) => {
-                    self.state.status_text = format!("Warp failed: {err}");
+                Err(error) => {
+                    self.state.status_text = format!("Transpose failed: {error}");
                 }
             },
 

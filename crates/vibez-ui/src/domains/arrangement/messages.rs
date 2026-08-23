@@ -1,8 +1,43 @@
 //! Arrange messages, cross-domain actions, and read-only update context.
 
-use vibez_core::id::{ClipId, TrackId};
+use std::sync::Arc;
 
-use crate::state::ArrangementSelection;
+use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::ClipTranspose;
+
+use crate::state::{ArrangementSelection, AudioClipInspectorField};
+
+#[derive(Debug, Clone)]
+pub struct ClipTransposeRenderRequest {
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub source_audio: Arc<DecodedAudio>,
+    pub target_frames: usize,
+    pub transpose: ClipTranspose,
+    pub expected_warped: bool,
+    pub geometry: Option<ClipRenderedGeometry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipRenderedGeometry {
+    pub source_offset: u64,
+    pub duration: u64,
+    pub loop_start: u64,
+    pub loop_end: u64,
+}
+
+impl PartialEq for ClipTransposeRenderRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.track_id == other.track_id
+            && self.clip_id == other.clip_id
+            && self.target_frames == other.target_frames
+            && self.transpose == other.transpose
+            && self.expected_warped == other.expected_warped
+            && self.geometry == other.geometry
+            && Arc::ptr_eq(&self.source_audio, &other.source_audio)
+    }
+}
 
 /// Messages the arrangement domain handles (track tranche).
 #[derive(Debug, Clone)]
@@ -136,14 +171,15 @@ pub enum ArrangementMsg {
     },
     CreateClipFromSelection,
     CreateNoteClipFromSelection(TrackId),
-    ClipBpmInputChanged {
-        track_id: TrackId,
+    AudioClipInspectorInputChanged {
         clip_id: ClipId,
+        field: AudioClipInspectorField,
         text: String,
     },
-    SubmitClipBpm {
+    SubmitAudioClipInspectorField {
         track_id: TrackId,
         clip_id: ClipId,
+        field: AudioClipInspectorField,
     },
     SetClipNominalBpm {
         track_id: TrackId,
@@ -192,8 +228,8 @@ impl ArrangementMsg {
                 | Self::SplitClipsAtRegion { .. }
                 | Self::CreateClipFromSelection
                 | Self::CreateNoteClipFromSelection(_)
-                | Self::ClipBpmInputChanged { .. }
-                | Self::SubmitClipBpm { .. }
+                | Self::AudioClipInspectorInputChanged { .. }
+                | Self::SubmitAudioClipInspectorField { .. }
                 | Self::SetClipNominalBpm { .. }
                 | Self::ClearClipWarp { .. }
         )
@@ -215,7 +251,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::EndMarqueeSelect
                 | ArrangementMsg::SetSelectionAsLoop
                 | ArrangementMsg::CopySelectedClips
-                | ArrangementMsg::ClipBpmInputChanged { .. }
+                | ArrangementMsg::AudioClipInspectorInputChanged { .. }
         )
     }
 
@@ -249,6 +285,11 @@ pub struct ArrangementAction {
     pub scroll_to_beat: Option<f64>,
     /// The project content changed outside the undo-snapshot path.
     pub mark_dirty: bool,
+    /// Duration-preserving pitch render requested by a committed Transpose.
+    pub transpose_render: Option<ClipTransposeRenderRequest>,
+    /// A changed source tempo must immediately rebuild an already-warped Clip
+    /// against the current Project tempo.
+    pub warp_refresh: Option<(TrackId, ClipId)>,
 }
 
 /// Read-only cross-domain facts for arrangement updates.

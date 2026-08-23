@@ -14,7 +14,9 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState, UiClip};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, DetailPanelTab, TimelineEditorState, UiClip,
+};
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
@@ -44,14 +46,10 @@ fn resolved_detail_playhead_samples(
 fn effective_detail_panel_height(
     preferred_height: f32,
     window_height: f32,
-    midi_clip_editor_visible: bool,
+    editor_min_height: f32,
 ) -> f32 {
     let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
-    let preferred_height = if midi_clip_editor_visible {
-        preferred_height.max(MIDI_DETAIL_PANEL_MIN_HEIGHT)
-    } else {
-        preferred_height
-    };
+    let preferred_height = preferred_height.max(editor_min_height);
     preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
 }
 
@@ -80,6 +78,23 @@ fn focused_note_clip_for_track(editor: &TimelineEditorState, track_id: TrackId) 
         .selected_note_clip
         .filter(|(selected_track, _)| *selected_track == track_id)
         .map(|(_, clip_id)| clip_id)
+}
+
+fn single_selected_audio_clip_for_track(
+    editor: &TimelineEditorState,
+    track_id: TrackId,
+) -> Option<ClipId> {
+    let mut selections = editor.selected_clips.iter();
+    match (selections.next(), selections.next()) {
+        (
+            Some(ArrangementSelection::AudioClip {
+                track_id: selected_track,
+                clip_id,
+            }),
+            None,
+        ) if *selected_track == track_id => Some(*clip_id),
+        _ => None,
+    }
 }
 
 impl App {
@@ -119,6 +134,21 @@ impl App {
 
     fn midi_clip_editor_visible(&self) -> bool {
         self.visible_piano_roll_clip().is_some()
+    }
+
+    fn detail_editor_min_height(&self) -> f32 {
+        if self.midi_clip_editor_visible() {
+            return MIDI_DETAIL_PANEL_MIN_HEIGHT;
+        }
+        let editor = self.state.active_timeline_editor();
+        let audio_selected = editor.selected_track.is_some_and(|track_id| {
+            single_selected_audio_clip_for_track(editor, track_id).is_some()
+        });
+        if audio_selected {
+            260.0
+        } else {
+            DETAIL_PANEL_MIN_HEIGHT
+        }
     }
 
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
@@ -199,18 +229,10 @@ impl App {
                         self.view_midi_track_clip_placeholder(track_id, track_color)
                     } else {
                         // Find a single selected audio clip on this track
-                        let audio_sel = self
-                            .state
-                            .active_timeline_editor()
-                            .selected_clips
-                            .iter()
-                            .find_map(|s| match s {
-                                ArrangementSelection::AudioClip {
-                                    track_id: tid,
-                                    clip_id: cid,
-                                } if *tid == track_id => Some(*cid),
-                                _ => None,
-                            });
+                        let audio_sel = single_selected_audio_clip_for_track(
+                            self.state.active_timeline_editor(),
+                            track_id,
+                        );
                         if let Some(sel_cid) = audio_sel {
                             if let Some(clip) = self
                                 .state
@@ -243,7 +265,7 @@ impl App {
         let panel_height = effective_detail_panel_height(
             self.state.view.detail_panel_height,
             self.state.view.window_height,
-            self.midi_clip_editor_visible(),
+            self.detail_editor_min_height(),
         );
         container(detail_content)
             .width(Length::Fill)
@@ -264,7 +286,7 @@ impl App {
         effective_detail_panel_height(
             self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
             self.state.view.window_height,
-            self.midi_clip_editor_visible(),
+            self.detail_editor_min_height(),
         )
     }
 
@@ -588,7 +610,7 @@ impl App {
             audio: Arc::clone(&clip.audio),
             duration_samples: clip.duration,
             source_offset: clip.source_offset,
-            sample_rate: self.state.transport.sample_rate,
+            sample_rate: clip.audio.sample_rate,
             track_color,
             playhead_normalized,
             loop_enabled: clip.loop_enabled,
@@ -601,11 +623,11 @@ impl App {
             .height(Length::Fill)
             .into();
 
-        let label = text("Waveform").size(11).color(th::text_dim());
+        let label = text("WAVEFORM").size(10).color(th::text_dim());
         let clip_info = text(format!(
             "{}: {:.1}s",
             clip.name,
-            clip.duration as f64 / self.state.transport.sample_rate as f64
+            clip.duration as f64 / f64::from(clip.audio.sample_rate.max(1))
         ))
         .size(10)
         .color(th::text_muted());
@@ -614,12 +636,145 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
-        let quantize_row = self.view_audio_quantize_row(track_id, clip.id);
-        let warp_row = self.view_audio_warp_row(track_id, clip);
+        let field = |label_text: &'static str,
+                     inspector_field: AudioClipInspectorField,
+                     committed: String,
+                     width: f32| {
+            column![
+                text(label_text).size(9).color(th::text_muted()),
+                self.view_audio_clip_field_input(
+                    track_id,
+                    clip.id,
+                    inspector_field,
+                    committed,
+                    width,
+                )
+            ]
+            .spacing(2)
+        };
+        let sample_rate = f64::from(clip.audio.sample_rate.max(1));
+        let source_start = clip.source_offset as f64 / sample_rate;
+        let source_end = clip.source_offset.saturating_add(clip.duration) as f64 / sample_rate;
+        let loop_start = clip.loop_start as f64 / sample_rate;
+        let loop_end = clip.loop_end as f64 / sample_rate;
 
-        let content = column![header_row, quantize_row, warp_row, waveform_canvas]
+        let gain_and_transpose = row![
+            field(
+                "GAIN dB",
+                AudioClipInspectorField::Gain,
+                format!("{:.1}", clip.gain_db.db()),
+                92.0,
+            ),
+            field(
+                "TRANSPOSE st",
+                AudioClipInspectorField::Transpose,
+                clip.transpose.semitones().to_string(),
+                92.0,
+            )
+        ]
+        .spacing(8);
+        let source_bounds = row![
+            field(
+                "SOURCE START s",
+                AudioClipInspectorField::SourceStart,
+                format!("{source_start:.3}"),
+                92.0,
+            ),
+            field(
+                "SOURCE END s",
+                AudioClipInspectorField::SourceEnd,
+                format!("{source_end:.3}"),
+                92.0,
+            )
+        ]
+        .spacing(8);
+        let loop_bounds = row![
+            field(
+                "LOOP START s",
+                AudioClipInspectorField::LoopStart,
+                format!("{loop_start:.3}"),
+                92.0,
+            ),
+            field(
+                "LOOP END s",
+                AudioClipInspectorField::LoopEnd,
+                format!("{loop_end:.3}"),
+                92.0,
+            )
+        ]
+        .spacing(8);
+
+        let loop_enabled = clip.loop_enabled;
+        let loop_color = if loop_enabled {
+            th::accent()
+        } else {
+            th::text_dim()
+        };
+        let loop_button = button(
+            row![
+                icons::icon(icons::REPEAT).size(10).color(loop_color),
+                text(if loop_enabled { "LOOP ON" } else { "LOOP OFF" })
+                    .size(10)
+                    .color(loop_color)
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::Arrangement(ArrangementMsg::ToggleClipLoop(
+            track_id, clip.id,
+        )))
+        .padding([4, 8])
+        .style(move |_theme: &Theme, _status| button::Style {
+            background: Some(if loop_enabled {
+                th::accent_dim().into()
+            } else {
+                th::bg_elevated().into()
+            }),
+            text_color: loop_color,
+            border: iced::Border {
+                color: if loop_enabled {
+                    th::accent()
+                } else {
+                    th::border()
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let inspector = container(
+            column![
+                text("AUDIO CLIP").size(10).color(th::accent()),
+                text(clip.name.clone()).size(13).color(th::text()),
+                gain_and_transpose,
+                self.view_audio_warp_row(track_id, clip),
+                source_bounds,
+                row![loop_button].align_y(iced::Alignment::Center),
+                loop_bounds,
+            ]
+            .spacing(7)
+            .padding(8),
+        )
+        .width(Length::Fixed(224.0))
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_elevated().into()),
+            border: iced::Border {
+                color: th::border(),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let quantize_row = self.view_audio_quantize_row(track_id, clip.id);
+        let waveform = column![header_row, quantize_row, waveform_canvas]
             .spacing(6)
-            .padding(4);
+            .padding(4)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let content = row![inspector, waveform].spacing(6).padding(4);
 
         container(content)
             .width(Length::FillPortion(1))
@@ -642,32 +797,33 @@ impl App {
         clip: &UiClip,
     ) -> Element<'_, Message> {
         let clip_id = clip.id;
-        let label = text("Warp").size(11).color(th::text_dim());
-
         let default_text = clip
             .original_bpm
             .map(|bpm| format!("{:.1}", bpm))
             .unwrap_or_default();
         let text_value = self
             .state
-            .arrangement
-            .clip_bpm_edit
-            .get(&clip_id)
+            .active_timeline_editor()
+            .audio_clip_inspector_edits
+            .get(&(clip_id, AudioClipInspectorField::SourceBpm))
             .cloned()
             .unwrap_or(default_text);
 
         let bpm_input = text_input("BPM", &text_value)
             .on_input(move |t| {
-                Message::Arrangement(ArrangementMsg::ClipBpmInputChanged {
-                    track_id,
+                Message::Arrangement(ArrangementMsg::AudioClipInspectorInputChanged {
                     clip_id,
+                    field: AudioClipInspectorField::SourceBpm,
                     text: t,
                 })
             })
-            .on_submit(Message::Arrangement(ArrangementMsg::SubmitClipBpm {
-                track_id,
-                clip_id,
-            }))
+            .on_submit(Message::Arrangement(
+                ArrangementMsg::SubmitAudioClipInspectorField {
+                    track_id,
+                    clip_id,
+                    field: AudioClipInspectorField::SourceBpm,
+                },
+            ))
             .size(11)
             .width(Length::Fixed(70.0));
 
@@ -688,62 +844,83 @@ impl App {
             }
         };
 
-        let detect_btn = button(text("Detect").size(11).color(th::text()))
-            .on_press(Message::DetectClipBpm { track_id, clip_id })
+        let detect_btn = button(text("DETECT").size(10).color(th::text()))
+            .on_press(Message::DetectClipBpm {
+                location: self.active_timeline_location(),
+                track_id,
+                clip_id,
+            })
             .padding([4, 10])
             .style(button_style);
 
-        let warp_btn = button(
-            text(format!("Warp → {:.0} BPM", self.state.transport.bpm))
-                .size(11)
-                .color(th::text()),
-        )
-        .on_press(Message::WarpClipToProject { track_id, clip_id })
-        .padding([4, 10])
-        .style(button_style);
-
-        let mut row_widgets = row![label, bpm_input, detect_btn, warp_btn]
-            .spacing(6)
-            .align_y(iced::Alignment::Center);
-
-        if clip.warped {
-            let clear_btn = button(text("Clear warp").size(11).color(th::text_dim()))
-                .on_press(Message::Arrangement(ArrangementMsg::ClearClipWarp {
+        let warp_btn = button(text(if clip.warped { "WARP ON" } else { "WARP" }).size(10))
+            .on_press(if clip.warped {
+                Message::Arrangement(ArrangementMsg::ClearClipWarp { track_id, clip_id })
+            } else {
+                Message::WarpClipToProject {
+                    location: self.active_timeline_location(),
                     track_id,
                     clip_id,
-                }))
-                .padding([4, 10])
-                .style(button_style);
-            row_widgets = row_widgets.push(clear_btn);
-
-            if let Some(warped_to) = clip.warped_to_bpm {
-                let stale = (warped_to - self.state.transport.bpm).abs() > 0.01;
-                if stale {
-                    row_widgets = row_widgets.push(
-                        text(format!("(was {:.0})", warped_to))
-                            .size(10)
-                            .color(th::meter_yellow()),
-                    );
                 }
-            }
-        } else if let Some(detected) = clip.original_bpm {
-            // Auto-warp declined (low confidence) or was never run:
-            // the clip knows its tempo and it disagrees with the
-            // project. Say so loudly instead of a status-bar whisper;
-            // the Warp button on this same row is the one-click fix.
-            if (detected - self.state.transport.bpm).abs() > 0.5 {
-                row_widgets = row_widgets.push(
-                    text(format!(
-                        "OUT OF TEMPO: clip {detected:.1} BPM vs project {:.0}",
-                        self.state.transport.bpm
-                    ))
-                    .size(10)
-                    .color(th::meter_yellow()),
-                );
-            }
-        }
+            })
+            .padding([4, 10])
+            .style(button_style);
 
-        row_widgets.into()
+        column![
+            text("SOURCE BPM").size(9).color(th::text_muted()),
+            row![bpm_input, detect_btn, warp_btn]
+                .spacing(5)
+                .align_y(iced::Alignment::Center),
+            text(if clip.warped {
+                format!("Following project at {:.0} BPM", self.state.transport.bpm)
+            } else {
+                "Raw source timing".to_string()
+            })
+            .size(9)
+            .color(if clip.warped {
+                th::accent()
+            } else {
+                th::text_muted()
+            })
+        ]
+        .spacing(2)
+        .into()
+    }
+
+    fn view_audio_clip_field_input(
+        &self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        field: AudioClipInspectorField,
+        committed: String,
+        width: f32,
+    ) -> Element<'_, Message> {
+        let value = self
+            .state
+            .active_timeline_editor()
+            .audio_clip_inspector_edits
+            .get(&(clip_id, field))
+            .cloned()
+            .unwrap_or(committed);
+        text_input("", &value)
+            .on_input(move |text| {
+                Message::Arrangement(ArrangementMsg::AudioClipInspectorInputChanged {
+                    clip_id,
+                    field,
+                    text,
+                })
+            })
+            .on_submit(Message::Arrangement(
+                ArrangementMsg::SubmitAudioClipInspectorField {
+                    track_id,
+                    clip_id,
+                    field,
+                },
+            ))
+            .size(11)
+            .padding([3, 6])
+            .width(Length::Fixed(width))
+            .into()
     }
 
     pub(super) fn view_audio_quantize_row(
@@ -798,24 +975,31 @@ impl App {
 mod tests {
     use super::{
         effective_detail_panel_height, focused_note_clip_for_track,
-        resolved_detail_playhead_samples, visible_note_clip_for_track,
+        resolved_detail_playhead_samples, single_selected_audio_clip_for_track,
+        visible_note_clip_for_track,
     };
     use crate::state::{ArrangementSelection, TimelineEditorState};
     use vibez_core::id::{ClipId, SectionId, TrackId};
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
-        assert_eq!(effective_detail_panel_height(80.0, 900.0, false), 180.0);
-        assert_eq!(effective_detail_panel_height(360.0, 900.0, false), 360.0);
-        assert_eq!(effective_detail_panel_height(800.0, 900.0, false), 540.0);
-        assert_eq!(effective_detail_panel_height(320.0, 520.0, false), 180.0);
+        assert_eq!(effective_detail_panel_height(80.0, 900.0, 180.0), 180.0);
+        assert_eq!(effective_detail_panel_height(360.0, 900.0, 180.0), 360.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 540.0);
+        assert_eq!(effective_detail_panel_height(320.0, 520.0, 180.0), 180.0);
     }
 
     #[test]
     fn visible_midi_clip_keeps_both_note_and_velocity_editors_usable() {
-        assert_eq!(effective_detail_panel_height(280.0, 900.0, true), 360.0);
-        assert_eq!(effective_detail_panel_height(420.0, 900.0, true), 420.0);
-        assert_eq!(effective_detail_panel_height(280.0, 520.0, true), 180.0);
+        assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 360.0);
+        assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 420.0);
+        assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
+    }
+
+    #[test]
+    fn audio_inspector_gets_enough_height_for_its_compact_controls() {
+        assert_eq!(effective_detail_panel_height(180.0, 900.0, 260.0), 260.0);
+        assert_eq!(effective_detail_panel_height(320.0, 900.0, 260.0), 320.0);
     }
 
     #[test]
@@ -833,6 +1017,34 @@ mod tests {
         );
         assert_eq!(
             resolved_detail_playhead_samples(true, Some(other), Some(playing), 96_000, 12_000,),
+            None
+        );
+    }
+
+    #[test]
+    fn audio_inspector_never_chooses_an_arbitrary_clip_from_multi_selection() {
+        let track_id = TrackId::new();
+        let first = ClipId::new();
+        let second = ClipId::new();
+        let mut editor = TimelineEditorState::default();
+        editor
+            .selected_clips
+            .insert(ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: first,
+            });
+        assert_eq!(
+            single_selected_audio_clip_for_track(&editor, track_id),
+            Some(first)
+        );
+        editor
+            .selected_clips
+            .insert(ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: second,
+            });
+        assert_eq!(
+            single_selected_audio_clip_for_track(&editor, track_id),
             None
         );
     }

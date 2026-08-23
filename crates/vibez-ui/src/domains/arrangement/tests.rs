@@ -3,7 +3,7 @@
 use super::test_support::*;
 use super::*;
 use crate::domains::test_support::RecordingEngine;
-use crate::state::UiClip;
+use crate::state::{AudioClipInspectorField, UiClip};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
 use vibez_core::track::AudioInputRoute;
@@ -280,6 +280,8 @@ fn add_audio_clip(
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        gain_db: Default::default(),
+        transpose: Default::default(),
         original_bpm: None,
         warped: false,
         warped_to_bpm: None,
@@ -473,7 +475,23 @@ fn warp_then_clear_roundtrips_clip_geometry() {
         EngineCommand::ReplaceClipAudio { .. }
     ));
 
-    let action = a.apply_clear_clip_warp(&mut engine, tid, cid);
+    let mut action = a.apply_clear_clip_warp(&mut engine, tid, cid);
+    let request = action
+        .transpose_render
+        .take()
+        .expect("clearing Warp renders the raw-timing buffer off-thread");
+    a.apply_clip_transpose_success(
+        &mut engine,
+        tid,
+        cid,
+        crate::message::ClipTransposeSuccess {
+            audio: Arc::clone(&request.source_audio),
+            source_audio: request.source_audio,
+            transpose: request.transpose,
+            expected_warped: request.expected_warped,
+            geometry: request.geometry,
+        },
+    );
     let clip = &a.arrangement.timeline.get(tid).unwrap().clips[0];
     assert!(!clip.warped);
     assert_eq!(clip.duration, 1000);
@@ -483,16 +501,124 @@ fn warp_then_clear_roundtrips_clip_geometry() {
 }
 
 #[test]
+fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::Gain), "6.0".into());
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::Gain,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].gain_db.db(), 6.0);
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipGain { linear_gain, .. })
+            if (*linear_gain - 1.995_262).abs() < 0.001
+    ));
+
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::SourceStart), "0.250".into());
+    a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::SourceStart,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let clip = &a.tracks[0].clips[0];
+    assert_eq!(clip.source_offset, 11_025);
+    assert_eq!(clip.duration, 33_075);
+    assert!(engine.0.iter().any(|command| matches!(
+        command,
+        EngineCommand::SetClipBounds {
+            source_offset: 11_025,
+            duration: 33_075,
+            ..
+        }
+    )));
+
+    a.update(
+        ArrangementMsg::ToggleClipLoop(tid, cid),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let clip = &a.tracks[0].clips[0];
+    assert!(clip.loop_enabled);
+    assert_eq!(clip.loop_start, 11_025);
+    assert_eq!(clip.loop_end, 44_100);
+}
+
+#[test]
+fn invalid_inspector_boundary_leaves_the_clip_unchanged() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::SourceEnd), "2.0".into());
+
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::SourceEnd,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].duration, 44_100);
+    assert!(engine.0.is_empty());
+}
+
+#[test]
+fn inspector_transpose_requests_one_duration_preserving_background_render() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::Transpose), "7".into());
+
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::Transpose,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let request = action.transpose_render.expect("transpose render request");
+    assert_eq!(request.transpose.semitones(), 7);
+    assert_eq!(request.target_frames, 44_100);
+    assert!(request.geometry.is_none());
+    assert_eq!(a.tracks[0].clips[0].transpose.semitones(), 7);
+    assert!(engine.0.is_empty(), "DSP never runs on the audio thread");
+}
+
+#[test]
 fn bpm_detected_commits_and_clears_pending_edit() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
-    a.clip_bpm_edit.insert(cid, "999".to_string());
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::SourceBpm), "999".to_string());
     let action = a.apply_clip_bpm_detected(tid, cid, Some(174.0), 0.9);
     assert_eq!(
         a.arrangement.timeline.get(tid).unwrap().clips[0].original_bpm,
         Some(174.0)
     );
-    assert!(a.clip_bpm_edit.is_empty());
+    assert!(a.audio_clip_inspector_edits.is_empty());
     assert!(action.mark_dirty);
 
     let action = a.apply_clip_bpm_detected(tid, cid, None, 0.0);
@@ -505,11 +631,15 @@ fn submit_clip_bpm_parses_and_rejects_garbage() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
     let mut engine = RecordingEngine::default();
-    a.clip_bpm_edit.insert(cid, "140.5".to_string());
+    a.audio_clip_inspector_edits.insert(
+        (cid, AudioClipInspectorField::SourceBpm),
+        "140.5".to_string(),
+    );
     let action = a.update(
-        ArrangementMsg::SubmitClipBpm {
+        ArrangementMsg::SubmitAudioClipInspectorField {
             track_id: tid,
             clip_id: cid,
+            field: AudioClipInspectorField::SourceBpm,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -517,11 +647,15 @@ fn submit_clip_bpm_parses_and_rejects_garbage() {
     assert_eq!(a.tracks[0].clips[0].original_bpm, Some(140.5));
     assert!(action.mark_dirty);
 
-    a.clip_bpm_edit.insert(cid, "not a number".to_string());
+    a.audio_clip_inspector_edits.insert(
+        (cid, AudioClipInspectorField::SourceBpm),
+        "not a number".to_string(),
+    );
     let action = a.update(
-        ArrangementMsg::SubmitClipBpm {
+        ArrangementMsg::SubmitAudioClipInspectorField {
             track_id: tid,
             clip_id: cid,
+            field: AudioClipInspectorField::SourceBpm,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -686,6 +820,8 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     audio.loop_enabled = true;
     audio.loop_start = 10;
     audio.loop_end = 110;
+    audio.gain_db = vibez_core::track::ClipGainDb::new(-4.0).unwrap();
+    audio.transpose = vibez_core::track::ClipTranspose::new(5);
 
     let mut engine = RecordingEngine::default();
     a.update(
@@ -731,6 +867,8 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     let audio_copy = a.tracks[0].clips.last().unwrap();
     assert!(audio_copy.loop_enabled);
     assert_eq!((audio_copy.loop_start, audio_copy.loop_end), (10, 110));
+    assert_eq!(audio_copy.gain_db.db(), -4.0);
+    assert_eq!(audio_copy.transpose.semitones(), 5);
     let midi_copy = a.tracks[1].note_clips.last().unwrap();
     assert!(midi_copy.loop_enabled);
     assert_eq!(
@@ -743,8 +881,10 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
             loop_enabled: true,
             loop_start: 10,
             loop_end: 110,
+            linear_gain,
             ..
-        }
+        } if (*linear_gain - vibez_core::track::ClipGainDb::new(-4.0).unwrap().linear()).abs()
+            < f32::EPSILON
     )));
     assert!(engine.0.iter().any(|command| matches!(
         command,

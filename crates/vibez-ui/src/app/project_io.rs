@@ -783,6 +783,7 @@ impl App {
                     loop_enabled: clip.info.loop_enabled,
                     loop_start: clip.info.loop_start,
                     loop_end: clip.info.loop_end,
+                    linear_gain: clip.info.gain_db.linear(),
                 });
             }
             if self.state.find_track(clip.info.track_id).is_some() {

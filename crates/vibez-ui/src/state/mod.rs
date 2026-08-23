@@ -370,10 +370,9 @@ pub struct TimelineEditorState {
     /// An arrangement drag (move/resize) is active; drives edge
     /// auto-scroll on ticks.
     pub drag_resize_active: bool,
-    /// In-flight text edits for the clip BPM field in the clip detail
-    /// panel; a missing entry means show the committed
-    /// `UiClip::original_bpm` value instead.
-    pub clip_bpm_edit: HashMap<ClipId, String>,
+    /// In-flight numeric Inspector edits. A missing entry means the control
+    /// shows its committed Audio Clip value.
+    pub audio_clip_inspector_edits: HashMap<(ClipId, AudioClipInspectorField), String>,
 }
 
 impl Default for TimelineEditorState {
@@ -389,7 +388,7 @@ impl Default for TimelineEditorState {
             time_selection_track: None,
             marquee: None,
             drag_resize_active: false,
-            clip_bpm_edit: HashMap::new(),
+            audio_clip_inspector_edits: HashMap::new(),
         }
     }
 }

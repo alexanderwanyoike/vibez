@@ -68,6 +68,7 @@ fn source(
                     loop_enabled: false,
                     loop_start: 0,
                     loop_end: 0,
+                    linear_gain: 1.0,
                 }],
                 Vec::new(),
                 Vec::new(),
@@ -203,6 +204,7 @@ fn stopped_count_in_does_not_play_arrangement_content() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     commands

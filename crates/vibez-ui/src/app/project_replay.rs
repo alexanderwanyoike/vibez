@@ -317,6 +317,7 @@ impl App {
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                linear_gain: clip.gain_db.linear(),
             });
         }
 

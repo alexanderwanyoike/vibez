@@ -38,6 +38,8 @@ pub struct EngineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// Pre-channel scalar resolved on the UI thread from the persisted dB value.
+    pub linear_gain: f32,
 }
 
 impl EngineClip {
@@ -350,7 +352,7 @@ impl PreparedPlaybackSource {
                     } else {
                         0.0
                     };
-                    output[frame * channels + ch] += sample;
+                    output[frame * channels + ch] += sample * clip.linear_gain;
                 }
                 clip_rendered = true;
             }
@@ -475,6 +477,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
@@ -505,6 +508,7 @@ mod tests {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                linear_gain: 1.0,
             }],
             Vec::new(),
             Vec::new(),

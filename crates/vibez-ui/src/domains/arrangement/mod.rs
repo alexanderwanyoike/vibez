@@ -22,7 +22,10 @@ use crate::state::{
 };
 
 mod messages;
-pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+pub use messages::{
+    ArrangementAction, ArrangementCtx, ArrangementMsg, ClipRenderedGeometry,
+    ClipTransposeRenderRequest,
+};
 mod clipboard;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
@@ -373,7 +376,7 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end == 0 {
+                        if clip.loop_enabled && clip.loop_end <= clip.loop_start {
                             clip.loop_start = clip.source_offset;
                             clip.loop_end = clip.source_offset + clip.duration;
                         }
@@ -559,6 +562,7 @@ impl TimelineEditorState {
                             loop_enabled: clip.loop_enabled,
                             loop_start: clip.loop_start,
                             loop_end: clip.loop_end,
+                            linear_gain: clip.gain_db.linear(),
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -639,6 +643,7 @@ impl TimelineEditorState {
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start: duplicate.loop_start,
                                         loop_end: duplicate.loop_end,
+                                        linear_gain: duplicate.gain_db.linear(),
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -973,29 +978,19 @@ impl TimelineEditorState {
                     track_id,
                 );
             }
-            ArrangementMsg::ClipBpmInputChanged {
-                track_id: _,
+            ArrangementMsg::AudioClipInspectorInputChanged {
                 clip_id,
+                field,
                 text,
             } => {
-                self.clip_bpm_edit.insert(clip_id, text);
+                self.audio_clip_inspector_edits
+                    .insert((clip_id, field), text);
             }
-            ArrangementMsg::SubmitClipBpm { track_id, clip_id } => {
-                let parsed = self
-                    .clip_bpm_edit
-                    .remove(&clip_id)
-                    .and_then(|t| t.parse::<f64>().ok())
-                    .filter(|b| *b > 0.0 && *b < 1_000.0);
-                if let Some(bpm) = parsed {
-                    if let Some(track) = self.find_content_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(bpm);
-                        }
-                    }
-                    action.status = Some(format!("Clip BPM set to {:.1}", bpm));
-                    action.mark_dirty = true;
-                }
-            }
+            ArrangementMsg::SubmitAudioClipInspectorField {
+                track_id,
+                clip_id,
+                field,
+            } => return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field),
             ArrangementMsg::SetClipNominalBpm {
                 track_id,
                 clip_id,

@@ -6,7 +6,9 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::{AudioInputRoute, ClipInfo, DrumPadState, InputMonitoring, MediaSourceRef};
+use vibez_core::track::{
+    AudioInputRoute, ClipInfo, ClipTranspose, DrumPadState, InputMonitoring, MediaSourceRef,
+};
 use vibez_dropbox::{AccountInfo, DropboxEntry, Tokens as DropboxTokens};
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
@@ -79,6 +81,15 @@ pub struct LoadedClipData {
     /// Raw un-warped audio, retained when `info.warped` so later
     /// re-warps stretch from the original.
     pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClipTransposeSuccess {
+    pub audio: Arc<DecodedAudio>,
+    pub source_audio: Arc<DecodedAudio>,
+    pub transpose: ClipTranspose,
+    pub expected_warped: bool,
+    pub geometry: Option<crate::domains::arrangement::ClipRenderedGeometry>,
 }
 
 #[derive(Debug, Clone)]
@@ -703,12 +714,14 @@ pub enum Message {
     // -- Warping (manual + auto) --
     /// Kick off a background BPM detection for the given clip.
     DetectClipBpm {
+        location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
     },
     /// Background BPM detection result. `bpm` is `None` when the
     /// detector refused to commit (silence, sparse pad, too short).
     ClipBpmDetected {
+        location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
         bpm: Option<f64>,
@@ -720,14 +733,26 @@ pub enum Message {
     /// clip's nominal BPM (wired to the BPM text input's Enter key).
     /// Kick off a background warp-to-project-tempo for the clip.
     WarpClipToProject {
+        location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
     },
     /// Background warp result.
     ClipWarpReady {
+        location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
+        /// `false` when an earlier edit (for example Source BPM or Project
+        /// tempo) already owns the Undo step for this refresh.
+        record_undo: bool,
         result: Result<ClipWarpSuccess, String>,
+    },
+    /// Background duration-preserving Transpose render completed.
+    ClipTransposeReady {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        result: Result<ClipTransposeSuccess, String>,
     },
     /// Revert the clip's audio to the un-warped `original_audio` and
     /// clear warp metadata.
