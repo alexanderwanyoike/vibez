@@ -6,7 +6,7 @@ use iced::widget::{canvas, column, text};
 use iced::{Color, Element, Length, Rectangle, Renderer, Theme};
 
 use crate::message::{DrumPadParam, Message};
-use crate::state::{AudioClipInspectorField, UndoGestureId};
+use crate::state::{AudioClipInspectorField, AudioClipRotaryField, UndoGestureId};
 use crate::theme;
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag::ValueDrag;
@@ -41,7 +41,7 @@ pub enum KnobTarget {
     },
     AudioClip {
         clip_id: ClipId,
-        field: AudioClipInspectorField,
+        field: AudioClipRotaryField,
     },
 }
 
@@ -125,7 +125,7 @@ impl EffectKnobWidget {
     pub fn for_audio_clip(
         track_id: TrackId,
         clip_id: ClipId,
-        field: AudioClipInspectorField,
+        field: AudioClipRotaryField,
         value: f32,
         min: f32,
         max: f32,
@@ -186,7 +186,7 @@ impl EffectKnobWidget {
             }
             KnobTarget::Send { bus_id } => Message::set_send(self.track_id, bus_id, value),
             KnobTarget::AudioClip { clip_id, field } => Message::Arrangement(
-                crate::domains::arrangement::ArrangementMsg::SetAudioClipInspectorValue {
+                crate::domains::arrangement::ArrangementMsg::SetAudioClipRotaryValue {
                     track_id: self.track_id,
                     clip_id,
                     field,
@@ -200,7 +200,7 @@ impl EffectKnobWidget {
         match self.target {
             KnobTarget::AudioClip {
                 clip_id,
-                field: AudioClipInspectorField::Transpose,
+                field: AudioClipRotaryField::Transpose,
             } => Message::Arrangement(
                 crate::domains::arrangement::ArrangementMsg::AudioClipInspectorInputChanged {
                     clip_id,
@@ -216,7 +216,7 @@ impl EffectKnobWidget {
         match self.target {
             KnobTarget::AudioClip {
                 clip_id,
-                field: AudioClipInspectorField::Transpose,
+                field: AudioClipRotaryField::Transpose,
             } => Some(Message::Arrangement(
                 crate::domains::arrangement::ArrangementMsg::SubmitAudioClipInspectorField {
                     track_id: self.track_id,
@@ -225,6 +225,23 @@ impl EffectKnobWidget {
                 },
             )),
             _ => None,
+        }
+    }
+
+    fn wheel_value_message(&self, value: f32) -> Message {
+        match self.target {
+            KnobTarget::AudioClip {
+                clip_id,
+                field: AudioClipRotaryField::Transpose,
+            } => Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::PreviewAudioClipRotaryValue {
+                    track_id: self.track_id,
+                    clip_id,
+                    field: AudioClipRotaryField::Transpose,
+                    value,
+                },
+            ),
+            _ => self.immediate_value_message(value),
         }
     }
 
@@ -491,7 +508,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
                 return (
                     canvas::event::Status::Captured,
-                    Some(self.immediate_value_message(new_value)),
+                    Some(self.wheel_value_message(new_value)),
                 );
             }
 
@@ -521,7 +538,7 @@ mod tests {
     use super::*;
     use crate::domains::arrangement::ArrangementMsg;
 
-    fn clip_knob(field: AudioClipInspectorField) -> EffectKnobWidget {
+    fn clip_knob(field: AudioClipRotaryField) -> EffectKnobWidget {
         EffectKnobWidget::for_audio_clip(
             TrackId::new(),
             ClipId::new(),
@@ -536,11 +553,11 @@ mod tests {
 
     #[test]
     fn gain_knob_drag_commits_realtime_clip_values() {
-        let knob = clip_knob(AudioClipInspectorField::Gain);
+        let knob = clip_knob(AudioClipRotaryField::Gain);
         assert!(matches!(
             knob.drag_value_message(-6.0),
-            Message::Arrangement(ArrangementMsg::SetAudioClipInspectorValue {
-                field: AudioClipInspectorField::Gain,
+            Message::Arrangement(ArrangementMsg::SetAudioClipRotaryValue {
+                field: AudioClipRotaryField::Gain,
                 value,
                 ..
             }) if value == -6.0
@@ -550,7 +567,7 @@ mod tests {
 
     #[test]
     fn transpose_knob_previews_during_drag_and_renders_once_on_release() {
-        let knob = clip_knob(AudioClipInspectorField::Transpose);
+        let knob = clip_knob(AudioClipRotaryField::Transpose);
         assert!(matches!(
             knob.drag_value_message(7.6),
             Message::Arrangement(ArrangementMsg::AudioClipInspectorInputChanged {
@@ -570,11 +587,19 @@ mod tests {
         ));
         assert!(matches!(
             knob.immediate_value_message(-12.0),
-            Message::Arrangement(ArrangementMsg::SetAudioClipInspectorValue {
-                field: AudioClipInspectorField::Transpose,
+            Message::Arrangement(ArrangementMsg::SetAudioClipRotaryValue {
+                field: AudioClipRotaryField::Transpose,
                 value,
                 ..
             }) if value == -12.0
+        ));
+        assert!(matches!(
+            knob.wheel_value_message(5.0),
+            Message::Arrangement(ArrangementMsg::PreviewAudioClipRotaryValue {
+                field: AudioClipRotaryField::Transpose,
+                value,
+                ..
+            }) if value == 5.0
         ));
     }
 }

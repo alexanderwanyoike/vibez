@@ -6,7 +6,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::ClipTranspose;
 
-use crate::state::{ArrangementSelection, AudioClipInspectorField};
+use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
 
 #[derive(Debug, Clone)]
 pub struct ClipTransposeRenderRequest {
@@ -16,6 +16,11 @@ pub struct ClipTransposeRenderRequest {
     pub target_frames: usize,
     pub transpose: ClipTranspose,
     pub expected_warped: bool,
+    /// Audio buffer the clip still held when this render was requested.
+    pub expected_audio: Arc<DecodedAudio>,
+    /// Geometry the render was calculated from. `None` means geometry is not
+    /// replaced by this render and therefore does not make the result stale.
+    pub expected_geometry: Option<ClipRenderedGeometry>,
     pub geometry: Option<ClipRenderedGeometry>,
 }
 
@@ -34,6 +39,8 @@ impl PartialEq for ClipTransposeRenderRequest {
             && self.target_frames == other.target_frames
             && self.transpose == other.transpose
             && self.expected_warped == other.expected_warped
+            && Arc::ptr_eq(&self.expected_audio, &other.expected_audio)
+            && self.expected_geometry == other.expected_geometry
             && self.geometry == other.geometry
             && Arc::ptr_eq(&self.source_audio, &other.source_audio)
     }
@@ -176,15 +183,27 @@ pub enum ArrangementMsg {
         field: AudioClipInspectorField,
         text: String,
     },
+    DiscardAudioClipInspectorEdit {
+        clip_id: ClipId,
+        field: AudioClipInspectorField,
+    },
     SubmitAudioClipInspectorField {
         track_id: TrackId,
         clip_id: ClipId,
         field: AudioClipInspectorField,
     },
-    SetAudioClipInspectorValue {
+    SetAudioClipRotaryValue {
         track_id: TrackId,
         clip_id: ClipId,
-        field: AudioClipInspectorField,
+        field: AudioClipRotaryField,
+        value: f32,
+    },
+    /// Update a rotary readout and schedule one Transpose commit after wheel
+    /// input settles. Gain never uses this path because it is real-time safe.
+    PreviewAudioClipRotaryValue {
+        track_id: TrackId,
+        clip_id: ClipId,
+        field: AudioClipRotaryField,
         value: f32,
     },
     SetClipNominalBpm {
@@ -235,8 +254,10 @@ impl ArrangementMsg {
                 | Self::CreateClipFromSelection
                 | Self::CreateNoteClipFromSelection(_)
                 | Self::AudioClipInspectorInputChanged { .. }
+                | Self::DiscardAudioClipInspectorEdit { .. }
                 | Self::SubmitAudioClipInspectorField { .. }
-                | Self::SetAudioClipInspectorValue { .. }
+                | Self::SetAudioClipRotaryValue { .. }
+                | Self::PreviewAudioClipRotaryValue { .. }
                 | Self::SetClipNominalBpm { .. }
                 | Self::ClearClipWarp { .. }
         )
@@ -259,6 +280,8 @@ impl ArrangementMsg {
                 | ArrangementMsg::SetSelectionAsLoop
                 | ArrangementMsg::CopySelectedClips
                 | ArrangementMsg::AudioClipInspectorInputChanged { .. }
+                | ArrangementMsg::DiscardAudioClipInspectorEdit { .. }
+                | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
         )
     }
 
@@ -294,6 +317,8 @@ pub struct ArrangementAction {
     pub mark_dirty: bool,
     /// Duration-preserving pitch render requested by a committed Transpose.
     pub transpose_render: Option<ClipTransposeRenderRequest>,
+    /// Transpose wheel preview to commit after input has settled.
+    pub transpose_debounce: Option<(TrackId, ClipId, i8, u64)>,
     /// A changed source tempo must immediately rebuild an already-warped Clip
     /// against the current Project tempo.
     pub warp_refresh: Option<(TrackId, ClipId)>,

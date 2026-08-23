@@ -373,6 +373,35 @@ pub struct TimelineEditorState {
     /// In-flight numeric Inspector edits. A missing entry means the control
     /// shows its committed Audio Clip value.
     pub audio_clip_inspector_edits: HashMap<(ClipId, AudioClipInspectorField), String>,
+    /// Monotonic per-clip token used to reject superseded Transpose wheel
+    /// settle tasks, including gestures that revisit an earlier value.
+    pub audio_clip_transpose_debounce: HashMap<ClipId, u64>,
+}
+
+impl TimelineEditorState {
+    pub fn discard_orphaned_audio_clip_inspector_edits(&mut self) {
+        let existing: HashSet<ClipId> = self
+            .timeline
+            .by_track
+            .values()
+            .flat_map(|content| content.clips.iter().map(|clip| clip.id))
+            .collect();
+        self.audio_clip_inspector_edits
+            .retain(|(clip_id, _), _| existing.contains(clip_id));
+        self.audio_clip_transpose_debounce
+            .retain(|clip_id, _| existing.contains(clip_id));
+    }
+
+    pub fn discard_audio_clip_inspector_edits(&mut self) {
+        self.audio_clip_inspector_edits.clear();
+        self.audio_clip_transpose_debounce.clear();
+    }
+
+    pub fn discard_audio_clip_inspector_edits_for(&mut self, clip_id: ClipId) {
+        self.audio_clip_inspector_edits
+            .retain(|(draft_clip_id, _), _| *draft_clip_id != clip_id);
+        self.audio_clip_transpose_debounce.remove(&clip_id);
+    }
 }
 
 impl Default for TimelineEditorState {
@@ -389,6 +418,7 @@ impl Default for TimelineEditorState {
             marquee: None,
             drag_resize_active: false,
             audio_clip_inspector_edits: HashMap::new(),
+            audio_clip_transpose_debounce: HashMap::new(),
         }
     }
 }
@@ -780,6 +810,14 @@ impl AppState {
             self.perform.section_editor.editor()
         } else {
             &self.arrangement.editor
+        }
+    }
+
+    pub fn active_timeline_editor_mut(&mut self) -> &mut TimelineEditorState {
+        if self.view.workspace == Workspace::Perform && self.perform.selected_section.is_some() {
+            self.perform.section_editor.editor_mut()
+        } else {
+            &mut self.arrangement.editor
         }
     }
 

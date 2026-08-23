@@ -89,7 +89,10 @@ pub struct ClipTransposeSuccess {
     pub source_audio: Arc<DecodedAudio>,
     pub transpose: ClipTranspose,
     pub expected_warped: bool,
+    pub expected_audio: Arc<DecodedAudio>,
+    pub expected_geometry: Option<crate::domains::arrangement::ClipRenderedGeometry>,
     pub geometry: Option<crate::domains::arrangement::ClipRenderedGeometry>,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -754,6 +757,13 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
         result: Result<ClipTransposeSuccess, String>,
+    },
+    CommitAudioClipTransposeAfterDelay {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        expected_semitones: i8,
+        expected_revision: u64,
     },
     /// Revert the clip's audio to the un-warped `original_audio` and
     /// clear warp metadata.

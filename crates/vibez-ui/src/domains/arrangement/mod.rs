@@ -17,8 +17,8 @@ use vibez_engine::commands::EngineCommand;
 use super::timeline_editor::TimelineEditorAdapter;
 use super::EngineHandle;
 use crate::state::{
-    ArrangementSelection, ArrangementState, AudioClipInspectorField, ProjectTrack,
-    ProjectTracksState, TimelineEditorState, TrackTimelineContent, UiNoteClip,
+    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TimelineEditorState,
+    TrackTimelineContent, UiNoteClip,
 };
 
 mod messages;
@@ -419,6 +419,7 @@ impl TimelineEditorState {
                 selection,
                 shift_held,
             } => {
+                self.discard_audio_clip_inspector_edits();
                 // Clicking a clip switches the editor back to clip selection.
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
@@ -487,6 +488,7 @@ impl TimelineEditorState {
                 clip_id,
                 new_duration,
             } => {
+                self.discard_audio_clip_inspector_edits_for(clip_id);
                 return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
             ArrangementMsg::MoveClipToTrack {
@@ -986,28 +988,30 @@ impl TimelineEditorState {
                 self.audio_clip_inspector_edits
                     .insert((clip_id, field), text);
             }
+            ArrangementMsg::DiscardAudioClipInspectorEdit { clip_id, field } => {
+                self.audio_clip_inspector_edits.remove(&(clip_id, field));
+                if field == crate::state::AudioClipInspectorField::Transpose {
+                    self.audio_clip_transpose_debounce.remove(&clip_id);
+                }
+            }
             ArrangementMsg::SubmitAudioClipInspectorField {
                 track_id,
                 clip_id,
                 field,
             } => return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field),
-            ArrangementMsg::SetAudioClipInspectorValue {
+            ArrangementMsg::SetAudioClipRotaryValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => return self.set_audio_clip_rotary_value(engine, track_id, clip_id, field, value),
+            ArrangementMsg::PreviewAudioClipRotaryValue {
                 track_id,
                 clip_id,
                 field,
                 value,
             } => {
-                let text = match field {
-                    AudioClipInspectorField::Gain => format!("{value:.1}"),
-                    AudioClipInspectorField::Transpose => format!("{:.0}", value.round()),
-                    _ => {
-                        action.status = Some("This Audio Clip control is not rotary".into());
-                        return action;
-                    }
-                };
-                self.audio_clip_inspector_edits
-                    .insert((clip_id, field), text);
-                return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field);
+                return self.preview_audio_clip_rotary_value(track_id, clip_id, field, value);
             }
             ArrangementMsg::SetClipNominalBpm {
                 track_id,
@@ -1031,6 +1035,7 @@ impl TimelineEditorState {
     }
 }
 
+mod audio_clip_inspector;
 mod media_ops;
 mod ops;
 

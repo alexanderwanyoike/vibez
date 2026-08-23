@@ -223,6 +223,22 @@ impl App {
                 }
             })
         });
+        let transpose_debounce_task = action.transpose_debounce.take().map(
+            |(track_id, clip_id, expected_semitones, expected_revision)| {
+                Task::perform(
+                    async {
+                        tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+                    },
+                    move |()| Message::CommitAudioClipTransposeAfterDelay {
+                        location,
+                        track_id,
+                        clip_id,
+                        expected_semitones,
+                        expected_revision,
+                    },
+                )
+            },
+        );
         let warp_task = action.warp_refresh.take().map(|(track_id, clip_id)| {
             self.dispatch_warp_clip_to_project(location, track_id, clip_id, false)
         });
@@ -288,7 +304,12 @@ impl App {
         if action.mark_dirty {
             self.mark_project_dirty();
         }
-        Task::batch(transpose_task.into_iter().chain(warp_task))
+        Task::batch(
+            transpose_task
+                .into_iter()
+                .chain(transpose_debounce_task)
+                .chain(warp_task),
+        )
     }
 
     /// Route cross-domain effects requested by the view domain.
@@ -303,6 +324,10 @@ impl App {
                 ArrangementSelection::AudioClip { track_id, clip_id }
             };
             if !self.state.arrangement.selected_clips.contains(&selection) {
+                self.state
+                    .arrangement
+                    .editor
+                    .discard_audio_clip_inspector_edits();
                 self.state.arrangement.selected_clips.clear();
                 self.state.arrangement.selected_clips.insert(selection);
             }

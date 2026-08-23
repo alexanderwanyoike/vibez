@@ -61,6 +61,25 @@ pub enum AudioClipInspectorField {
     Transpose,
 }
 
+/// Inspector fields that can be controlled by a rotary widget.
+///
+/// Keeping this narrower than [`AudioClipInspectorField`] makes it impossible
+/// for a knob to emit a source or loop-bound edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClipRotaryField {
+    Gain,
+    Transpose,
+}
+
+impl AudioClipRotaryField {
+    pub const fn inspector_field(self) -> AudioClipInspectorField {
+        match self {
+            Self::Gain => AudioClipInspectorField::Gain,
+            Self::Transpose => AudioClipInspectorField::Transpose,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UiDrumPad {
     pub name: Option<String>,

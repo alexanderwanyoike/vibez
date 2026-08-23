@@ -111,11 +111,45 @@ pub fn pitch_preserving_stretch_transposed(
     signalsmith_stretch(audio, target_frames, semitones)
 }
 
+/// Transposed stretch plus whether Signalsmith declined and the linear
+/// fallback therefore could not preserve the requested pitch shift.
+pub fn pitch_preserving_stretch_transposed_checked(
+    audio: &DecodedAudio,
+    target_frames: usize,
+    semitones: f32,
+) -> (DecodedAudio, bool) {
+    if !semitones.is_finite() || semitones.abs() < f32::EPSILON {
+        return (pitch_preserving_stretch(audio, target_frames), false);
+    }
+    if audio.num_frames() == 0 || target_frames == 0 {
+        return (
+            DecodedAudio {
+                channels: audio
+                    .channels
+                    .iter()
+                    .map(|_| vec![0.0; target_frames])
+                    .collect(),
+                sample_rate: audio.sample_rate,
+            },
+            false,
+        );
+    }
+    signalsmith_stretch_checked(audio, target_frames, semitones)
+}
+
 /// Offline whole-buffer stretch through Signalsmith Stretch (the
 /// library behind serious commercial time-stretching). Interleaves,
 /// runs `exact` (which handles latency pre-roll and flush), and
 /// deinterleaves. Falls back to resampling if the engine declines.
 fn signalsmith_stretch(audio: &DecodedAudio, target_frames: usize, semitones: f32) -> DecodedAudio {
+    signalsmith_stretch_checked(audio, target_frames, semitones).0
+}
+
+fn signalsmith_stretch_checked(
+    audio: &DecodedAudio,
+    target_frames: usize,
+    semitones: f32,
+) -> (DecodedAudio, bool) {
     let ch = audio.channels.len().max(1);
     let src_frames = audio.num_frames();
 
@@ -130,7 +164,10 @@ fn signalsmith_stretch(audio: &DecodedAudio, target_frames: usize, semitones: f3
     let mut stretch = signalsmith_stretch::Stretch::preset_default(ch as u32, audio.sample_rate);
     stretch.set_transpose_factor_semitones(semitones, None);
     if !stretch.exact(&input, &mut output) {
-        return stretch_to(audio, target_frames);
+        return (
+            stretch_to(audio, target_frames),
+            semitones.abs() >= f32::EPSILON,
+        );
     }
 
     let mut channels = vec![Vec::with_capacity(target_frames); ch];
@@ -139,10 +176,13 @@ fn signalsmith_stretch(audio: &DecodedAudio, target_frames: usize, semitones: f3
             channel.push(output[f * ch + c]);
         }
     }
-    DecodedAudio {
-        channels,
-        sample_rate: audio.sample_rate,
-    }
+    (
+        DecodedAudio {
+            channels,
+            sample_rate: audio.sample_rate,
+        },
+        false,
+    )
 }
 
 /// Pitch-preserving stretch of a single channel. Falls back to the

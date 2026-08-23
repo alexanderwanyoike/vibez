@@ -176,19 +176,24 @@ pub(super) async fn transpose_clip_async(
     request: crate::domains::arrangement::ClipTransposeRenderRequest,
 ) -> Result<crate::message::ClipTransposeSuccess, String> {
     run_off_ui_thread("clip transpose", move || {
-        let audio = Arc::new(
-            vibez_dsp::time_stretch::pitch_preserving_stretch_transposed(
+        let (audio, transpose_fallback) =
+            vibez_dsp::time_stretch::pitch_preserving_stretch_transposed_checked(
                 &request.source_audio,
                 request.target_frames,
                 f32::from(request.transpose.semitones()),
-            ),
-        );
+            );
         crate::message::ClipTransposeSuccess {
-            audio,
+            audio: Arc::new(audio),
             source_audio: request.source_audio,
             transpose: request.transpose,
             expected_warped: request.expected_warped,
+            expected_audio: request.expected_audio,
+            expected_geometry: request.expected_geometry,
             geometry: request.geometry,
+            warning: transpose_fallback.then(|| {
+                "Signalsmith declined this render; timing was restored but Transpose was not applied"
+                    .to_string()
+            }),
         }
     })
     .await

@@ -458,7 +458,7 @@ fn warp_success(
 fn warp_then_clear_roundtrips_clip_geometry() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
-    let original = Arc::clone(&a.tracks[0].clips[0].audio);
+    let original = Arc::clone(&a.arrangement.timeline.get(tid).unwrap().clips[0].audio);
     let mut engine = RecordingEngine::default();
 
     let action =
@@ -489,7 +489,10 @@ fn warp_then_clear_roundtrips_clip_geometry() {
             source_audio: request.source_audio,
             transpose: request.transpose,
             expected_warped: request.expected_warped,
+            expected_audio: request.expected_audio,
+            expected_geometry: request.expected_geometry,
             geometry: request.geometry,
+            warning: None,
         },
     );
     let clip = &a.arrangement.timeline.get(tid).unwrap().clips[0];
@@ -498,6 +501,95 @@ fn warp_then_clear_roundtrips_clip_geometry() {
     assert!(clip.original_audio.is_none());
     assert!(Arc::ptr_eq(&clip.audio, &original));
     assert!(action.mark_dirty);
+}
+
+fn completed_transpose_request(
+    request: ClipTransposeRenderRequest,
+) -> crate::message::ClipTransposeSuccess {
+    crate::message::ClipTransposeSuccess {
+        audio: Arc::clone(&request.source_audio),
+        source_audio: request.source_audio,
+        transpose: request.transpose,
+        expected_warped: request.expected_warped,
+        expected_audio: request.expected_audio,
+        expected_geometry: request.expected_geometry,
+        geometry: request.geometry,
+        warning: None,
+    }
+}
+
+#[test]
+fn transpose_result_requeues_after_warp_wins_the_race() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let original = Arc::clone(&a.tracks[0].clips[0].audio);
+    let mut engine = RecordingEngine::default();
+
+    let transpose = a.set_audio_clip_rotary_value(
+        &mut engine,
+        tid,
+        cid,
+        crate::state::AudioClipRotaryField::Transpose,
+        5.0,
+    );
+    let old_request = transpose
+        .transpose_render
+        .expect("initial Transpose render");
+    a.apply_clip_warp_success(&mut engine, tid, cid, warp_success(original));
+    let warped_audio = Arc::clone(&a.arrangement.timeline.get(tid).unwrap().clips[0].audio);
+
+    let stale = a.apply_clip_transpose_success(
+        &mut engine,
+        tid,
+        cid,
+        completed_transpose_request(old_request),
+    );
+
+    assert!(Arc::ptr_eq(
+        &a.arrangement.timeline.get(tid).unwrap().clips[0].audio,
+        &warped_audio
+    ));
+    let refreshed = stale
+        .transpose_render
+        .expect("stale result should rebuild from current Warp state");
+    assert!(refreshed.expected_warped);
+    assert_eq!(refreshed.transpose.semitones(), 5);
+    assert_eq!(refreshed.target_frames, 2_000);
+}
+
+#[test]
+fn clear_warp_result_requeues_without_overwriting_new_geometry() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let original = Arc::clone(&a.arrangement.timeline.get(tid).unwrap().clips[0].audio);
+    let mut engine = RecordingEngine::default();
+    a.apply_clip_warp_success(&mut engine, tid, cid, warp_success(original));
+    let clear_request = a
+        .apply_clear_clip_warp(&mut engine, tid, cid)
+        .transpose_render
+        .expect("clear Warp render");
+    Arc::make_mut(&mut a.arrangement.timeline)
+        .get_mut(tid)
+        .unwrap()
+        .clips[0]
+        .duration = 1_250;
+
+    let stale = a.apply_clip_transpose_success(
+        &mut engine,
+        tid,
+        cid,
+        completed_transpose_request(clear_request),
+    );
+
+    assert_eq!(
+        a.arrangement.timeline.get(tid).unwrap().clips[0].duration,
+        1_250
+    );
+    let refreshed = stale
+        .transpose_render
+        .expect("geometry edit should rebuild clear-Warp render");
+    assert_eq!(refreshed.expected_geometry.unwrap().duration, 1_250);
+    assert_eq!(refreshed.geometry.unwrap().duration, 625);
 }
 
 #[test]
@@ -566,17 +658,17 @@ fn inspector_knobs_commit_gain_and_rounded_transpose_values() {
     let mut engine = RecordingEngine::default();
 
     let gain_action = a.update(
-        ArrangementMsg::SetAudioClipInspectorValue {
+        ArrangementMsg::SetAudioClipRotaryValue {
             track_id: tid,
             clip_id: cid,
-            field: AudioClipInspectorField::Gain,
+            field: crate::state::AudioClipRotaryField::Gain,
             value: -6.25,
         },
         &mut engine,
         ArrangementCtx::default(),
     );
     assert!(gain_action.mark_dirty);
-    assert_eq!(a.tracks[0].clips[0].gain_db.db(), -6.2);
+    assert_eq!(a.tracks[0].clips[0].gain_db.db(), -6.25);
     assert!(matches!(
         engine.0.last(),
         Some(EngineCommand::SetClipGain { track_id, clip_id, .. })
@@ -584,10 +676,10 @@ fn inspector_knobs_commit_gain_and_rounded_transpose_values() {
     ));
 
     let transpose_action = a.update(
-        ArrangementMsg::SetAudioClipInspectorValue {
+        ArrangementMsg::SetAudioClipRotaryValue {
             track_id: tid,
             clip_id: cid,
-            field: AudioClipInspectorField::Transpose,
+            field: crate::state::AudioClipRotaryField::Transpose,
             value: 7.6,
         },
         &mut engine,
@@ -621,6 +713,124 @@ fn invalid_inspector_boundary_leaves_the_clip_unchanged() {
     assert!(!action.mark_dirty);
     assert_eq!(a.tracks[0].clips[0].duration, 44_100);
     assert!(engine.0.is_empty());
+    assert_eq!(
+        a.audio_clip_inspector_edits
+            .get(&(cid, AudioClipInspectorField::SourceEnd))
+            .map(String::as_str),
+        Some("2.0"),
+        "rejected text remains available for correction"
+    );
+}
+
+#[test]
+fn loop_fields_seed_an_uninitialised_pair_from_source_bounds() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.source_offset = 4_410;
+    clip.duration = 39_690;
+    clip.loop_start = 0;
+    clip.loop_end = 0;
+    let mut engine = RecordingEngine::default();
+
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::LoopStart), "0.250".into());
+    let start_action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::LoopStart,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(start_action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].loop_start, 11_025);
+    assert_eq!(a.tracks[0].clips[0].loop_end, 44_100);
+
+    a.tracks[0].clips[0].loop_start = 0;
+    a.tracks[0].clips[0].loop_end = 0;
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::LoopEnd), "0.750".into());
+    let end_action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::LoopEnd,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(end_action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].loop_start, 4_410);
+    assert_eq!(a.tracks[0].clips[0].loop_end, 33_075);
+}
+
+#[test]
+fn typed_transpose_rounds_fractional_semitones() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::Transpose), "-1.5".into());
+
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::Transpose,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(a.tracks[0].clips[0].transpose.semitones(), -2);
+    assert_eq!(
+        action
+            .transpose_render
+            .expect("fractional Transpose should render")
+            .transpose
+            .semitones(),
+        -2
+    );
+}
+
+#[test]
+fn transpose_wheel_preview_defers_render_until_settle() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+
+    let action = a.preview_audio_clip_rotary_value(
+        tid,
+        cid,
+        crate::state::AudioClipRotaryField::Transpose,
+        7.6,
+    );
+
+    assert!(!action.mark_dirty);
+    assert!(action.transpose_render.is_none());
+    assert_eq!(action.transpose_debounce, Some((tid, cid, 8, 1)));
+    assert_eq!(
+        a.audio_clip_inspector_edits
+            .get(&(cid, AudioClipInspectorField::Transpose))
+            .map(String::as_str),
+        Some("8")
+    );
+
+    let second = a.preview_audio_clip_rotary_value(
+        tid,
+        cid,
+        crate::state::AudioClipRotaryField::Transpose,
+        9.0,
+    );
+    let revisited = a.preview_audio_clip_rotary_value(
+        tid,
+        cid,
+        crate::state::AudioClipRotaryField::Transpose,
+        8.0,
+    );
+    assert_eq!(second.transpose_debounce, Some((tid, cid, 9, 2)));
+    assert_eq!(revisited.transpose_debounce, Some((tid, cid, 8, 3)));
 }
 
 #[test]

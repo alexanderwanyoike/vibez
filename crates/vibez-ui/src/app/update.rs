@@ -230,6 +230,9 @@ impl App {
                     playhead_beats,
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
+                self.state
+                    .active_timeline_editor_mut()
+                    .discard_orphaned_audio_clip_inspector_edits();
                 if let (true, Some(snapshot)) = (action.mark_dirty, deferred_snapshot) {
                     self.state.project.history.push_edit(snapshot, undo_gesture);
                     self.mark_project_dirty();
@@ -726,6 +729,40 @@ impl App {
                     self.state.status_text = format!("Transpose failed: {error}");
                 }
             },
+            Message::CommitAudioClipTransposeAfterDelay {
+                location,
+                track_id,
+                clip_id,
+                expected_semitones,
+                expected_revision,
+            } => {
+                if self.active_timeline_location() != location {
+                    return Task::none();
+                }
+                let expected = expected_semitones.to_string();
+                let still_current = self
+                    .state
+                    .active_timeline_editor()
+                    .audio_clip_inspector_edits
+                    .get(&(clip_id, crate::state::AudioClipInspectorField::Transpose))
+                    == Some(&expected)
+                    && self
+                        .state
+                        .active_timeline_editor()
+                        .audio_clip_transpose_debounce
+                        .get(&clip_id)
+                        == Some(&expected_revision);
+                if !still_current {
+                    return Task::none();
+                }
+                return self.update(Message::Arrangement(
+                    ArrangementMsg::SubmitAudioClipInspectorField {
+                        track_id,
+                        clip_id,
+                        field: crate::state::AudioClipInspectorField::Transpose,
+                    },
+                ));
+            }
 
             // -- Undo / redo --
 

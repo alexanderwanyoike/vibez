@@ -3,17 +3,15 @@
 
 use std::collections::HashSet;
 
-use crate::message::{
-    AudioQuantizeSuccess, AutoWarpOutcome, ClipTransposeSuccess, ClipWarpSuccess,
-};
+use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
 use std::sync::Arc;
 
 use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
-use vibez_core::track::{ClipGainDb, ClipTranspose};
 use vibez_engine::commands::EngineCommand;
 
+use super::audio_clip_inspector::clear_warp_request;
 use super::EngineHandle;
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
@@ -104,239 +102,6 @@ fn unmuted_beat_ranges(lane: &AutomationLane, start: f64, end: f64) -> Vec<(f64,
 }
 
 impl TimelineEditorState {
-    pub fn apply_clip_transpose_success(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: ClipTransposeSuccess,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
-        else {
-            return action;
-        };
-        // Undo or a newer Transpose may have won while this render was in
-        // flight. Never let stale audio overwrite the current property state.
-        if clip.transpose != success.transpose || clip.warped != success.expected_warped {
-            return action;
-        }
-        clip.audio = Arc::clone(&success.audio);
-        if let Some(geometry) = success.geometry {
-            clip.source_offset = geometry.source_offset;
-            clip.duration = geometry.duration;
-            clip.loop_start = geometry.loop_start;
-            clip.loop_end = geometry.loop_end;
-            engine.send(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&success.audio),
-                duration: geometry.duration,
-                source_offset: geometry.source_offset,
-                loop_start: geometry.loop_start,
-                loop_end: geometry.loop_end,
-            });
-        } else {
-            engine.send(EngineCommand::ReplaceClipBuffer {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&success.audio),
-            });
-        }
-        clip.original_audio = if clip.transpose.semitones() == 0 && !clip.warped {
-            None
-        } else {
-            Some(success.source_audio)
-        };
-        action.status = Some(format!(
-            "Clip Transpose {:+} st",
-            clip.transpose.semitones()
-        ));
-        action
-    }
-
-    pub(super) fn commit_audio_clip_inspector_field(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        field: AudioClipInspectorField,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        let Some(text) = self.audio_clip_inspector_edits.remove(&(clip_id, field)) else {
-            return action;
-        };
-        let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
-        else {
-            action.status = Some("Audio Clip is no longer available".into());
-            return action;
-        };
-
-        let source_frames = clip.audio.num_frames() as u64;
-        let sample_rate = u64::from(clip.audio.sample_rate.max(1));
-        let seconds_to_frames = |seconds: f64| -> Option<u64> {
-            (seconds.is_finite() && seconds >= 0.0)
-                .then(|| (seconds * sample_rate as f64).round() as u64)
-        };
-        let format_seconds = |frames: u64| frames as f64 / sample_rate as f64;
-
-        match field {
-            AudioClipInspectorField::Gain => {
-                let Some(gain) = text.parse::<f32>().ok().and_then(ClipGainDb::new) else {
-                    action.status = Some(format!(
-                        "Clip Gain must be {:.0} to +{:.0} dB",
-                        ClipGainDb::MIN,
-                        ClipGainDb::MAX
-                    ));
-                    return action;
-                };
-                clip.gain_db = gain;
-                engine.send(EngineCommand::SetClipGain {
-                    track_id,
-                    clip_id,
-                    linear_gain: gain.linear(),
-                });
-                action.status = Some(format!("Clip Gain {:+.1} dB", gain.db()));
-            }
-            AudioClipInspectorField::SourceBpm => {
-                let Some(bpm) = text
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|bpm| bpm.is_finite() && *bpm > 0.0 && *bpm < 1_000.0)
-                else {
-                    action.status = Some("Source BPM must be between 0 and 1000".into());
-                    return action;
-                };
-                clip.original_bpm = Some(bpm);
-                if clip.warped {
-                    action.warp_refresh = Some((track_id, clip_id));
-                }
-                action.status = Some(format!("Source tempo {bpm:.1} BPM"));
-            }
-            AudioClipInspectorField::SourceStart | AudioClipInspectorField::SourceEnd => {
-                let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
-                    action.status =
-                        Some("Source boundary must be a positive time in seconds".into());
-                    return action;
-                };
-                let current_end = clip
-                    .source_offset
-                    .saturating_add(clip.duration)
-                    .min(source_frames);
-                let (new_start, new_end) = match field {
-                    AudioClipInspectorField::SourceStart => (value, current_end),
-                    AudioClipInspectorField::SourceEnd => (clip.source_offset, value),
-                    _ => unreachable!(),
-                };
-                if new_start >= new_end || new_end > source_frames {
-                    action.status = Some(format!(
-                        "Source bounds must stay ordered inside 0.000 to {:.3} s",
-                        format_seconds(source_frames)
-                    ));
-                    return action;
-                }
-                clip.source_offset = new_start;
-                clip.duration = new_end - new_start;
-                clip.loop_start = clip.loop_start.clamp(new_start, new_end);
-                clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
-                if clip.loop_end <= clip.loop_start {
-                    clip.loop_enabled = false;
-                }
-                engine.send(EngineCommand::SetClipBounds {
-                    track_id,
-                    clip_id,
-                    source_offset: clip.source_offset,
-                    duration: clip.duration,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
-                engine.send(EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                });
-                action.status = Some(format!(
-                    "Source {:.3} to {:.3} s",
-                    format_seconds(new_start),
-                    format_seconds(new_end)
-                ));
-            }
-            AudioClipInspectorField::LoopStart | AudioClipInspectorField::LoopEnd => {
-                let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
-                    action.status = Some("Loop boundary must be a positive time in seconds".into());
-                    return action;
-                };
-                let source_end = clip.source_offset.saturating_add(clip.duration);
-                let (new_start, new_end) = match field {
-                    AudioClipInspectorField::LoopStart => (value, clip.loop_end),
-                    AudioClipInspectorField::LoopEnd => (clip.loop_start, value),
-                    _ => unreachable!(),
-                };
-                if new_start < clip.source_offset || new_start >= new_end || new_end > source_end {
-                    action.status = Some(format!(
-                        "Loop bounds must stay ordered inside {:.3} to {:.3} s",
-                        format_seconds(clip.source_offset),
-                        format_seconds(source_end)
-                    ));
-                    return action;
-                }
-                clip.loop_start = new_start;
-                clip.loop_end = new_end;
-                engine.send(EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled: clip.loop_enabled,
-                    loop_start: new_start,
-                    loop_end: new_end,
-                });
-                action.status = Some(format!(
-                    "Loop {:.3} to {:.3} s",
-                    format_seconds(new_start),
-                    format_seconds(new_end)
-                ));
-            }
-            AudioClipInspectorField::Transpose => {
-                let Some(semitones) = text
-                    .parse::<i8>()
-                    .ok()
-                    .filter(|value| (ClipTranspose::MIN..=ClipTranspose::MAX).contains(value))
-                else {
-                    action.status = Some(format!(
-                        "Transpose must be {} to +{} semitones",
-                        ClipTranspose::MIN,
-                        ClipTranspose::MAX
-                    ));
-                    return action;
-                };
-                let transpose = ClipTranspose::new(semitones);
-                let source_audio = clip
-                    .original_audio
-                    .clone()
-                    .unwrap_or_else(|| Arc::clone(&clip.audio));
-                clip.transpose = transpose;
-                clip.original_audio = Some(Arc::clone(&source_audio));
-                action.transpose_render = Some(ClipTransposeRenderRequest {
-                    track_id,
-                    clip_id,
-                    source_audio,
-                    target_frames: clip.audio.num_frames(),
-                    transpose,
-                    expected_warped: clip.warped,
-                    geometry: None,
-                });
-                action.status = Some(format!("Transposing Clip {semitones:+} st..."));
-            }
-        }
-        action.mark_dirty = true;
-        action
-    }
-
     pub(super) fn op_trim_selected_by_track_mutes(
         &mut self,
         engine: &mut impl EngineHandle,
@@ -616,6 +381,7 @@ impl TimelineEditorState {
                 clip.original_audio = Some(Arc::clone(&success.original_audio));
             }
         }
+        self.discard_audio_clip_inspector_edits_for(clip_id);
         action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
         action.mark_dirty = true;
         action
@@ -673,32 +439,10 @@ impl TimelineEditorState {
             .find_content_mut(track_id)
             .and_then(|track| track.clips.iter_mut().find(|clip| clip.id == clip_id))
         {
-            if let Some(original) = clip.original_audio.as_ref().map(Arc::clone) {
-                let current_frames = clip.audio.num_frames().max(1) as f64;
-                let original_frames = original.num_frames() as u64;
-                let ratio = original_frames as f64 / current_frames;
-                let scale = |frames: u64| (frames as f64 * ratio).round() as u64;
-                let source_offset = scale(clip.source_offset).min(original_frames);
-                let source_end = scale(clip.source_offset.saturating_add(clip.duration))
-                    .min(original_frames)
-                    .max(source_offset);
-                let geometry = ClipRenderedGeometry {
-                    source_offset,
-                    duration: source_end - source_offset,
-                    loop_start: scale(clip.loop_start).min(original_frames),
-                    loop_end: scale(clip.loop_end).min(original_frames),
-                };
+            if clip.original_audio.is_some() {
                 clip.warped = false;
                 clip.warped_to_bpm = None;
-                action.transpose_render = Some(ClipTransposeRenderRequest {
-                    track_id,
-                    clip_id,
-                    source_audio: original,
-                    target_frames: original_frames as usize,
-                    transpose: clip.transpose,
-                    expected_warped: false,
-                    geometry: Some(geometry),
-                });
+                action.transpose_render = clear_warp_request(track_id, clip);
                 action.status = Some("Returning Clip to raw timing...".into());
             } else {
                 clip.warped = false;
@@ -737,6 +481,7 @@ impl TimelineEditorState {
             } => !(*tid == track_id && *cid == old_clip_id),
             _ => true,
         });
+        self.discard_audio_clip_inspector_edits_for(old_clip_id);
 
         engine.send(EngineCommand::AddClip {
             track_id,
