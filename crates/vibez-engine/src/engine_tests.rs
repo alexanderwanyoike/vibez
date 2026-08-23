@@ -1331,7 +1331,12 @@ fn audition_loop_fades_the_source_boundary_without_silence_or_a_click() {
     let mut buf = vec![0.0f32; 20_000];
     engine.process(&mut buf, 2);
 
-    let left: Vec<f32> = buf.chunks_exact(2).map(|frame| frame[0]).collect();
+    let left: Vec<f32> = buf
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|frame| frame[0])
+        .collect();
     assert!(left[4_500..].iter().any(|sample| sample.abs() > 0.3));
     let largest_step = left[300..]
         .windows(2)

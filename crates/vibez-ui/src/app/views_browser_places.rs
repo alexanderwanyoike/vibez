@@ -13,6 +13,57 @@ use crate::theme as th;
 use super::views_browser_style::*;
 use super::*;
 
+const TREE_ICON_SIZE: f32 = 12.0;
+
+fn place_mode_marker(active: bool) -> iced::widget::Text<'static> {
+    icons::icon(if active {
+        icons::CIRCLE_DOT
+    } else {
+        icons::CIRCLE
+    })
+    .size(TREE_ICON_SIZE)
+    .color(if active {
+        th::accent()
+    } else {
+        th::text_muted()
+    })
+}
+
+fn tree_toggle(expanded: bool, message: Message) -> Element<'static, Message> {
+    button(
+        icons::icon(if expanded {
+            icons::CHEVRON_DOWN
+        } else {
+            icons::CHEVRON_RIGHT
+        })
+        .size(TREE_ICON_SIZE)
+        .color(th::text_muted()),
+    )
+    .on_press(message)
+    .padding([4, 2])
+    .style(browser_utility_action_style)
+    .into()
+}
+
+fn tree_leaf_marker() -> Element<'static, Message> {
+    container(
+        icons::icon(icons::DOT)
+            .size(TREE_ICON_SIZE)
+            .color(th::text_muted()),
+    )
+    .padding([4, 3])
+    .into()
+}
+
+fn catalog_state_marker(state: &str) -> Element<'static, Message> {
+    let (icon, color) = match state {
+        "INDEXING" | "UPDATING" => (icons::REFRESH_CW, th::text_muted()),
+        "STALE" | "WATCH ERR" | "WARN" => (icons::TRIANGLE_ALERT, th::danger()),
+        _ => (icons::DOT, th::text_muted()),
+    };
+    icons::icon(icon).size(TREE_ICON_SIZE).color(color).into()
+}
+
 impl App {
     pub(super) fn view_browser_places(&self) -> Element<'_, Message> {
         let local_active = self.state.browser.mode == SampleBrowserMode::Local;
@@ -20,13 +71,7 @@ impl App {
         let place_button = |label: &'static str, active: bool, mode| {
             button(
                 row![
-                    text(if active { "●" } else { "○" })
-                        .size(9)
-                        .color(if active {
-                            th::accent()
-                        } else {
-                            th::text_muted()
-                        }),
+                    place_mode_marker(active),
                     text(label)
                         .size(11)
                         .color(if active { th::text() } else { th::text_dim() })
@@ -82,21 +127,12 @@ impl App {
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string());
             let toggle: Element<'_, Message> = if has_children {
-                button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                tree_toggle(
+                    expanded,
+                    Message::Browser(BrowserMsg::ToggleLocalFolder(root.clone())),
                 )
-                .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
-                    root.clone(),
-                )))
-                .padding([4, 2])
-                .style(browser_utility_action_style)
-                .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
-                    .padding([4, 3])
-                    .into()
+                tree_leaf_marker()
             };
             let root_button = button(
                 text(label)
@@ -117,18 +153,7 @@ impl App {
                 .padding([4, 2])
                 .style(browser_utility_action_style);
             let root_state = self.state.browser.root_catalog_label(root);
-            let state_marker = text(match root_state {
-                "INDEXING" | "UPDATING" => "↻",
-                "STALE" | "WATCH ERR" => "!",
-                "WARN" => "!",
-                _ => "·",
-            })
-            .size(9)
-            .color(if matches!(root_state, "STALE" | "WATCH ERR" | "WARN") {
-                th::danger()
-            } else {
-                th::text_muted()
-            });
+            let state_marker = catalog_state_marker(root_state);
             local_tree_rows.push(
                 row![toggle, root_button, state_marker, remove]
                     .spacing(1)
@@ -144,14 +169,10 @@ impl App {
         }
 
         let remote = &self.state.browser.remote;
-        let remote_toggle = button(
-            text(if remote.place_expanded { "▾" } else { "▸" })
-                .size(10)
-                .color(th::text_muted()),
-        )
-        .on_press(Message::Browser(BrowserMsg::ToggleRemotePlace))
-        .padding([3, 2])
-        .style(browser_utility_action_style);
+        let remote_toggle = tree_toggle(
+            remote.place_expanded,
+            Message::Browser(BrowserMsg::ToggleRemotePlace),
+        );
         let remote_select = button(
             row![
                 container(text("")).width(Length::Fixed(1.0)),
@@ -180,18 +201,10 @@ impl App {
         );
         if remote.place_expanded {
             let connection_active = remote_active && remote.current_path.is_empty();
-            let connection_toggle = button(
-                text(if remote.connection_expanded {
-                    "▾"
-                } else {
-                    "▸"
-                })
-                .size(10)
-                .color(th::text_muted()),
-            )
-            .on_press(Message::Browser(BrowserMsg::ToggleRemoteConnection))
-            .padding([3, 2])
-            .style(browser_utility_action_style);
+            let connection_toggle = tree_toggle(
+                remote.connection_expanded,
+                Message::Browser(BrowserMsg::ToggleRemoteConnection),
+            );
             let connection = button(
                 text(remote.catalog.connection_name.as_str())
                     .size(10)
@@ -302,21 +315,12 @@ impl App {
                     child.root_path == root && child.path.parent() == Some(&folder.path)
                 });
             let toggle: Element<'a, Message> = if has_children {
-                button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                tree_toggle(
+                    expanded,
+                    Message::Browser(BrowserMsg::ToggleLocalFolder(folder.path.clone())),
                 )
-                .on_press(Message::Browser(BrowserMsg::ToggleLocalFolder(
-                    folder.path.clone(),
-                )))
-                .padding([3, 2])
-                .style(browser_utility_action_style)
-                .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
-                    .padding([3, 3])
-                    .into()
+                tree_leaf_marker()
             };
             let select = button(
                 text(folder.name.clone())
@@ -372,21 +376,14 @@ impl App {
                 .iter()
                 .any(|&child| remote.catalog.entries[child].is_folder);
             let toggle: Element<'a, Message> = if has_children {
-                button(
-                    text(if expanded { "▾" } else { "▸" })
-                        .size(10)
-                        .color(th::text_muted()),
+                tree_toggle(
+                    expanded,
+                    Message::Browser(BrowserMsg::ToggleRemoteFolder(
+                        folder.provider_item_id.clone(),
+                    )),
                 )
-                .on_press(Message::Browser(BrowserMsg::ToggleRemoteFolder(
-                    folder.provider_item_id.clone(),
-                )))
-                .padding([3, 2])
-                .style(browser_utility_action_style)
-                .into()
             } else {
-                container(text("·").size(9).color(th::text_muted()))
-                    .padding([3, 3])
-                    .into()
+                tree_leaf_marker()
             };
             let select = button(
                 text(folder.name.clone())

@@ -49,6 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-asio-sdk
+        if: runner.os == 'Windows'
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -75,6 +77,11 @@ jobs:
 
       - name: Build
         run: cargo build --release -p vibez --bins
+
+      - name: Verify Windows executable resources
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check_windows_resources.ps1 target/release/vibez.exe
 
       # ---------- Linux: tar.gz + .deb + AppImage ----------
       - name: Package tarball (Linux)

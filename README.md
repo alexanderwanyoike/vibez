@@ -50,8 +50,9 @@ of Arrange applies to it unchanged:
   drag/resize/split/join, time selection, looping, and an overview minimap
 - **Audio recording** from a soundcard input or the output of an instrument
   track, with the waveform drawn while the take is recorded
-- **Soundcard settings** for choosing the input device, output device, sample
-  rate and buffer size
+- **Soundcard settings** for choosing the audio backend, input/output device,
+  sample rate and buffer size. Windows builds support WASAPI and ASIO;
+  macOS uses CoreAudio and Linux uses ALSA
 - **Warping** with automatic BPM detection and high-quality time stretching
   through Signalsmith Stretch. Warped clips follow the project BPM
 - **Piano roll** with draw and select modes, multi-note editing, velocity,
@@ -89,7 +90,7 @@ selected one.
 
 ## Status
 
-v0.1.10, and still early. Linux is the primary development platform; macOS and
+v0.1.11, and still early. Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
 format changes are still possible: treat this as a working alpha rather than a
@@ -104,6 +105,13 @@ Linux additionally needs:
 
 ```sh
 sudo apt install libasound2-dev libudev-dev libdbus-1-dev
+```
+
+Windows ASIO builds use a checksum-pinned copy of Steinberg's SDK. Set it up
+in the same PowerShell session before running Cargo:
+
+```powershell
+./scripts/setup_asio_sdk.ps1
 ```
 
 Then:
@@ -150,6 +158,11 @@ where a redundant-looking cast can be load-bearing on another target.
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+Windows ASIO builds link Steinberg's ASIO SDK under its GPLv3 option, which is
+compatible with Vibez's GPL-3.0-or-later licence. The release build downloads
+one checksum-pinned copy from Steinberg's official SDK endpoint. ASIO is a
+trademark of Steinberg Media Technologies GmbH.
 
 ## For Mum
 

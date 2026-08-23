@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/vibez-daw/vibez"
@@ -30,6 +30,8 @@ vibez-dropbox = { path = "crates/vibez-dropbox" }
 vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio
+# Host upgrades change ALSA, CoreAudio and WASAPI behaviour together. Keep them
+# in a dedicated hardware-regression PR; CPAL 0.16 already provides ASIO.
 cpal = "0.16"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "ogg", "vorbis", "wav", "aiff", "isomp4", "aac", "pcm"] }
 rubato = "0.16"
@@ -57,6 +59,9 @@ license.workspace = true
 vibez-ui = { workspace = true }
 vibez-plugin-host = { workspace = true }
 iced = { workspace = true }
+
+[build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading = "0.8"

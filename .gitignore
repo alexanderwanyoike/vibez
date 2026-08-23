@@ -1,4 +1,5 @@
 /target
+/.asio-sdk
 *.swp
 *.swo
 *~

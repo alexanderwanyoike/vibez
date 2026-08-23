@@ -276,8 +276,12 @@ impl App {
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
             preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
-            preferred_audio_input: self.state.audio_settings.preferred_input_name.clone(),
-            preferred_audio_output: self.state.audio_settings.preferred_output_name.clone(),
+            // Legacy read-only migration fields. New saves use the per-backend
+            // map below and deliberately omit these values from JSON.
+            preferred_audio_input: None,
+            audio_backend: self.state.audio_settings.backend,
+            preferred_audio_output: None,
+            audio_device_preferences: self.state.audio_settings.backend_preferences.clone(),
             audio_sample_rate: Some(self.state.audio_settings.sample_rate),
             audio_buffer_size: self.state.audio_settings.buffer_size,
             theme: Some(self.state.current_theme_name.clone()),
