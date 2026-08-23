@@ -60,6 +60,9 @@ vibez-ui = { workspace = true }
 vibez-plugin-host = { workspace = true }
 iced = { workspace = true }
 
+[build-dependencies]
+winresource = { version = "0.1.31", default-features = false }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading = "0.8"
 
