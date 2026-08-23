@@ -767,7 +767,9 @@ mod tests {
             .map(|index| (-(index as f32), index as f32))
             .collect();
         let compacted: Vec<_> = original
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| (pair[0].0.min(pair[1].0), pair[0].1.max(pair[1].1)))
             .collect();
 
