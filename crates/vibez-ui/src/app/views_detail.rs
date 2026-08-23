@@ -28,6 +28,29 @@ const MIDI_DETAIL_PANEL_MIN_HEIGHT: f32 = 360.0;
 const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
 
+fn audio_clip_value_input_style(
+    _theme: &Theme,
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    let focused = matches!(status, iced::widget::text_input::Status::Focused);
+    iced::widget::text_input::Style {
+        background: th::bg_surface().into(),
+        border: iced::Border {
+            color: if focused {
+                th::accent()
+            } else {
+                th::border_light()
+            },
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        icon: th::text_dim(),
+        placeholder: th::text_dim(),
+        value: th::text(),
+        selection: th::accent_dim(),
+    }
+}
+
 fn resolved_detail_playhead_samples(
     editing_perform: bool,
     selected_section: Option<SectionId>,
@@ -636,73 +659,89 @@ impl App {
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
-        let field = |label_text: &'static str,
-                     inspector_field: AudioClipInspectorField,
-                     committed: String,
-                     width: f32| {
-            column![
-                text(label_text).size(9).color(th::text_muted()),
-                self.view_audio_clip_field_input(
-                    track_id,
-                    clip.id,
-                    inspector_field,
-                    committed,
-                    width,
-                )
-            ]
-            .spacing(2)
-        };
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
         let source_end = clip.source_offset.saturating_add(clip.duration) as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;
         let loop_end = clip.loop_end as f64 / sample_rate;
 
-        let gain_and_transpose = row![
-            field(
-                "GAIN dB",
+        let parameter = |label_text: &'static str,
+                         inspector_field: AudioClipInspectorField,
+                         committed: String,
+                         unit: &'static str| {
+            container(
+                column![
+                    text(label_text).size(8).color(th::text_muted()),
+                    row![
+                        self.view_audio_clip_field_input(
+                            track_id,
+                            clip.id,
+                            inspector_field,
+                            committed,
+                            62.0,
+                        ),
+                        text(unit).size(8).color(th::text_dim()),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                ]
+                .spacing(2),
+            )
+            .padding([4, 6])
+            .width(Length::FillPortion(1))
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::divider(),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            })
+        };
+        let gain_and_pitch = row![
+            parameter(
+                "GAIN",
                 AudioClipInspectorField::Gain,
                 format!("{:.1}", clip.gain_db.db()),
-                92.0,
+                "dB",
             ),
-            field(
-                "TRANSPOSE st",
+            parameter(
+                "PITCH",
                 AudioClipInspectorField::Transpose,
                 clip.transpose.semitones().to_string(),
-                92.0,
-            )
-        ]
-        .spacing(8);
-        let source_bounds = row![
-            field(
-                "SOURCE START s",
-                AudioClipInspectorField::SourceStart,
-                format!("{source_start:.3}"),
-                92.0,
+                "st",
             ),
-            field(
-                "SOURCE END s",
-                AudioClipInspectorField::SourceEnd,
-                format!("{source_end:.3}"),
-                92.0,
-            )
         ]
-        .spacing(8);
-        let loop_bounds = row![
-            field(
-                "LOOP START s",
-                AudioClipInspectorField::LoopStart,
-                format!("{loop_start:.3}"),
-                92.0,
-            ),
-            field(
-                "LOOP END s",
-                AudioClipInspectorField::LoopEnd,
-                format!("{loop_end:.3}"),
-                92.0,
-            )
-        ]
-        .spacing(8);
+        .spacing(5);
+
+        let range_row = |start_label: &'static str,
+                         start_field: AudioClipInspectorField,
+                         start_value: String,
+                         end_label: &'static str,
+                         end_field: AudioClipInspectorField,
+                         end_value: String| {
+            row![
+                text(start_label).size(8).color(th::text_dim()),
+                self.view_audio_clip_field_input(
+                    track_id,
+                    clip.id,
+                    start_field,
+                    start_value,
+                    62.0,
+                ),
+                text(end_label).size(8).color(th::text_dim()),
+                self.view_audio_clip_field_input(
+                    track_id,
+                    clip.id,
+                    end_field,
+                    end_value,
+                    62.0,
+                ),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+        };
 
         let loop_enabled = clip.loop_enabled;
         let loop_color = if loop_enabled {
@@ -713,17 +752,17 @@ impl App {
         let loop_button = button(
             row![
                 icons::icon(icons::REPEAT).size(10).color(loop_color),
-                text(if loop_enabled { "LOOP ON" } else { "LOOP OFF" })
-                    .size(10)
+                text(if loop_enabled { "ON" } else { "OFF" })
+                    .size(8)
                     .color(loop_color)
             ]
-            .spacing(5)
+            .spacing(4)
             .align_y(iced::Alignment::Center),
         )
         .on_press(Message::Arrangement(ArrangementMsg::ToggleClipLoop(
             track_id, clip.id,
         )))
-        .padding([4, 8])
+        .padding([3, 7])
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(if loop_enabled {
                 th::accent_dim().into()
@@ -738,32 +777,87 @@ impl App {
                     th::border()
                 },
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: 2.0.into(),
             },
             ..Default::default()
         });
 
+        let divider = || {
+            container(horizontal_space())
+                .width(Length::Fill)
+                .height(Length::Fixed(1.0))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::divider().into()),
+                    ..Default::default()
+                })
+        };
+        let clip_identity = row![
+            icons::icon(icons::AUDIO_WAVEFORM)
+                .size(13)
+                .color(track_color),
+            column![
+                text("AUDIO CLIP").size(8).color(th::text_muted()),
+                text(clip.name.clone())
+                    .size(11)
+                    .color(th::text())
+                    .width(Length::Fill),
+            ]
+            .spacing(1)
+            .width(Length::Fill),
+        ]
+        .spacing(7)
+        .align_y(iced::Alignment::Center);
+        let source_bounds = column![
+            text("SOURCE").size(8).color(th::text_muted()),
+            range_row(
+                "START",
+                AudioClipInspectorField::SourceStart,
+                format!("{source_start:.3}"),
+                "END",
+                AudioClipInspectorField::SourceEnd,
+                format!("{source_end:.3}"),
+            ),
+        ]
+        .spacing(3);
+        let loop_bounds = column![
+            row![
+                text("LOOP").size(8).color(th::text_muted()),
+                horizontal_space(),
+                loop_button,
+            ]
+            .align_y(iced::Alignment::Center),
+            range_row(
+                "START",
+                AudioClipInspectorField::LoopStart,
+                format!("{loop_start:.3}"),
+                "END",
+                AudioClipInspectorField::LoopEnd,
+                format!("{loop_end:.3}"),
+            ),
+        ]
+        .spacing(3);
+
         let inspector = container(
             column![
-                text("AUDIO CLIP").size(10).color(th::accent()),
-                text(clip.name.clone()).size(13).color(th::text()),
-                gain_and_transpose,
+                clip_identity,
                 self.view_audio_warp_row(track_id, clip),
+                divider(),
+                gain_and_pitch,
+                divider(),
                 source_bounds,
-                row![loop_button].align_y(iced::Alignment::Center),
                 loop_bounds,
             ]
-            .spacing(7)
-            .padding(8),
+            .spacing(6)
+            .padding([7, 8]),
         )
-        .width(Length::Fixed(224.0))
+        .width(Length::Fixed(232.0))
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
+            background: Some(th::bg_dark().into()),
             border: iced::Border {
-                color: th::border(),
+                color: th::divider(),
                 width: 1.0,
-                radius: 4.0.into(),
+                radius: 2.0.into(),
             },
             ..Default::default()
         });
@@ -824,66 +918,105 @@ impl App {
                     field: AudioClipInspectorField::SourceBpm,
                 },
             ))
-            .size(11)
-            .width(Length::Fixed(70.0));
+            .size(10)
+            .padding([2, 5])
+            .width(Length::Fixed(56.0))
+            .style(audio_clip_value_input_style);
 
-        let button_style = |_theme: &Theme, status: button::Status| {
+        let utility_button_style = |_theme: &Theme, status: button::Status| {
             let bg = match status {
                 button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-                _ => Some(th::bg_elevated().into()),
+                _ => Some(th::bg_surface().into()),
             };
             button::Style {
                 background: bg,
-                text_color: th::text(),
+                text_color: th::text_dim(),
                 border: iced::Border {
-                    color: th::border(),
+                    color: th::divider(),
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 2.0.into(),
                 },
                 ..Default::default()
             }
         };
 
-        let detect_btn = button(text("DETECT").size(10).color(th::text()))
+        let detect_btn = button(text("DETECT").size(8).color(th::text_dim()))
             .on_press(Message::DetectClipBpm {
                 location: self.active_timeline_location(),
                 track_id,
                 clip_id,
             })
-            .padding([4, 10])
-            .style(button_style);
+            .padding([3, 6])
+            .style(utility_button_style);
 
-        let warp_btn = button(text(if clip.warped { "WARP ON" } else { "WARP" }).size(10))
-            .on_press(if clip.warped {
-                Message::Arrangement(ArrangementMsg::ClearClipWarp { track_id, clip_id })
+        let mode_button = |label: String, active: bool, message: Option<Message>| {
+            let control = button(center(text(label).size(9)).width(Length::Fill))
+                .width(Length::FillPortion(1))
+                .padding([4, 5])
+                .style(move |_theme: &Theme, status| {
+                    let hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: Some(
+                            if active {
+                                th::accent_dim()
+                            } else if hovered {
+                                th::bg_hover()
+                            } else {
+                                th::bg_surface()
+                            }
+                            .into(),
+                        ),
+                        text_color: if active { th::accent() } else { th::text_dim() },
+                        border: iced::Border {
+                            color: if active { th::accent() } else { th::divider() },
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+            if let Some(message) = message {
+                control.on_press(message)
             } else {
-                Message::WarpClipToProject {
-                    location: self.active_timeline_location(),
+                control
+            }
+        };
+        let raw = mode_button(
+            "RAW".into(),
+            !clip.warped,
+            clip.warped
+                .then_some(Message::Arrangement(ArrangementMsg::ClearClipWarp {
                     track_id,
                     clip_id,
-                }
-            })
-            .padding([4, 10])
-            .style(button_style);
+                })),
+        );
+        let warp = mode_button(
+            if clip.warped {
+                format!("WARP · {:.0}", self.state.transport.bpm)
+            } else {
+                "WARP".into()
+            },
+            clip.warped,
+            (!clip.warped).then_some(Message::WarpClipToProject {
+                location: self.active_timeline_location(),
+                track_id,
+                clip_id,
+            }),
+        );
 
         column![
-            text("SOURCE BPM").size(9).color(th::text_muted()),
-            row![bpm_input, detect_btn, warp_btn]
-                .spacing(5)
-                .align_y(iced::Alignment::Center),
-            text(if clip.warped {
-                format!("Following project at {:.0} BPM", self.state.transport.bpm)
-            } else {
-                "Raw source timing".to_string()
-            })
-            .size(9)
-            .color(if clip.warped {
-                th::accent()
-            } else {
-                th::text_muted()
-            })
+            row![raw, warp].spacing(3),
+            row![
+                text("SOURCE BPM").size(8).color(th::text_muted()),
+                horizontal_space(),
+                bpm_input,
+                detect_btn,
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(2)
+        .spacing(5)
         .into()
     }
 
@@ -917,9 +1050,10 @@ impl App {
                     field,
                 },
             ))
-            .size(11)
-            .padding([3, 6])
+            .size(10)
+            .padding([2, 5])
             .width(Length::Fixed(width))
+            .style(audio_clip_value_input_style)
             .into()
     }
 
