@@ -679,6 +679,59 @@ fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
 }
 
 #[test]
+fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let mut engine = RecordingEngine::default();
+    arrangement.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let track_id = arrangement.tracks[1].id;
+    let clip_id = ClipId::new();
+    arrangement.tracks[1].note_clips.push(UiNoteClip {
+        id: clip_id,
+        name: "Two bars".to_string(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: vec![MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_beat: 6.0,
+            duration_beats: 0.5,
+        }],
+        selected_notes: HashSet::new(),
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 4.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    });
+    arrangement
+        .selected_clips
+        .insert(ArrangementSelection::NoteClip { track_id, clip_id });
+    engine.0.clear();
+
+    arrangement.update(
+        ArrangementMsg::ToggleSelectedClipLoop,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let clip = &arrangement.tracks[1].note_clips[0];
+    assert!(clip.loop_enabled);
+    assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (0.0, 8.0));
+    assert!(matches!(
+        engine.0.as_slice(),
+        [EngineCommand::SetNoteClipLoop {
+            enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: 8.0,
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn duplicate_preserves_audio_and_midi_loop_settings() {
     let mut a = arrangement_with_tracks(1);
     let (audio_tid, audio_id) = add_audio_clip(&mut a, 0, 0, 300);

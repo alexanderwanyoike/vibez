@@ -391,7 +391,7 @@ impl TimelineEditorState {
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.loop_enabled = enable;
-                        if enable && clip.loop_end_beats <= clip.loop_start_beats {
+                        if enable {
                             clip.loop_start_beats = 0.0;
                             clip.loop_end_beats = clip.duration_beats;
                         }
