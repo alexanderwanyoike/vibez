@@ -63,9 +63,9 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let audition = decode_local_for_preview_async(source_path.clone())
             .await
             .unwrap();
-        assert_eq!(audition.num_channels(), channels, "{file_name}");
-        assert_eq!(audition.sample_rate, sample_rate, "{file_name}");
-        assert_audible(Arc::clone(&audition), file_name);
+        assert_eq!(audition.audio.num_channels(), channels, "{file_name}");
+        assert_eq!(audition.audio.sample_rate, sample_rate, "{file_name}");
+        assert_audible(Arc::clone(&audition.audio), file_name);
 
         let mut browser = crate::state::BrowserState {
             entries: catalog.entries,
@@ -76,7 +76,10 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         assert!(browser.install_audition(
             generation,
             browser.selected_source.clone().unwrap(),
-            Arc::clone(&audition)
+            crate::message::AnalysedBrowserAudio {
+                audio: Arc::clone(&audition.audio),
+                loop_fit: audition.loop_fit,
+            },
         ));
         let metadata = &browser.entries[0];
         assert_eq!(metadata.channels, Some(channels));
@@ -88,7 +91,11 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let (imported, staged) = decode_and_stage_local_async(source_path.clone())
             .await
             .unwrap();
-        assert_eq!(imported.num_frames(), audition.num_frames(), "{file_name}");
+        assert_eq!(
+            imported.num_frames(),
+            audition.audio.num_frames(),
+            "{file_name}"
+        );
         let track = TrackInfo::new("Audio");
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
@@ -532,6 +539,64 @@ async fn cached_remote_media_materializes_without_a_client_and_persists_metadata
 }
 
 #[tokio::test]
+async fn remote_import_reuses_the_cached_audition_tempo() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("fast-loop.wav");
+    let sample_rate = 44_100_u32;
+    let source_bpm = 190.0;
+    let frames = (4.0 * 4.0 * 60.0 / source_bpm * sample_rate as f64).round() as usize;
+    let beat_frames = (60.0 / source_bpm * sample_rate as f64).round() as usize;
+    let mut channel = vec![0.0_f32; frames];
+    for beat in (0..frames).step_by(beat_frames) {
+        for offset in 0..256.min(frames - beat) {
+            channel[beat + offset] = 0.9 * (1.0 - offset as f32 / 256.0);
+        }
+    }
+    let audio = DecodedAudio {
+        channels: vec![channel],
+        sample_rate,
+    };
+    vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
+    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
+    cache
+        .write(
+            "/megalodon/fast-loop.wav",
+            Some("rev-old-analysis"),
+            &std::fs::read(&source_path).unwrap(),
+        )
+        .unwrap();
+    cache
+        .store_derived_metadata(
+            "/megalodon/fast-loop.wav",
+            Some("rev-old-analysis"),
+            vibez_dropbox::DerivedMetadata {
+                provider_revision: Some("rev-old-analysis".into()),
+                duration_seconds: audio.duration_seconds(),
+                channels: 1,
+                sample_rate,
+                bpm: Some(95.0),
+                bpm_confidence: Some(0.9),
+                waveform_peaks: vec![],
+            },
+        )
+        .unwrap();
+    let entry = DropboxEntry {
+        path_lower: "/megalodon/fast-loop.wav".into(),
+        path_display: "/Megalodon/Fast Loop.wav".into(),
+        name: "Fast Loop.wav".into(),
+        is_folder: false,
+        rev: Some("rev-old-analysis".into()),
+        size: None,
+    };
+
+    let (analysed, _, _) = fetch_dropbox_sample_async(None, cache, entry)
+        .await
+        .unwrap();
+
+    assert!((analysed.loop_fit.unwrap().source_bpm - 95.0).abs() < 0.01);
+}
+
+#[tokio::test]
 async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("remote-loop.wav");
@@ -554,7 +619,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
         rev: Some("rev-9".into()),
         size: None,
     };
-    let (decoded, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
+    let (analysed, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
         .await
         .unwrap();
     assert!(matches!(
@@ -570,7 +635,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
             position_samples: 0,
         },
         treatment,
-        decoded,
+        analysed.audio,
         staged,
         60.0,
     )

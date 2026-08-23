@@ -5,9 +5,21 @@ use super::*;
 
 pub(super) async fn decode_local_for_preview_async(
     path: PathBuf,
-) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
-    let audio = decode_file_async(path).await?;
-    Ok(Arc::new(audio))
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    tokio::task::spawn_blocking(move || {
+        let name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let audio = file_io::decode_audio_file(&path).map_err(|error| error.to_string())?;
+        let loop_fit = crate::warp::analyse_loop_tempo(&audio, &name);
+        Ok(crate::message::AnalysedBrowserAudio {
+            audio: Arc::new(audio),
+            loop_fit,
+        })
+    })
+    .await
+    .map_err(|error| format!("preview decode task failed: {error}"))?
 }
 
 pub(super) async fn decode_file_async(
@@ -18,6 +30,57 @@ pub(super) async fn decode_file_async(
     })
     .await
     .map_err(|e| format!("decode task failed: {e}"))?
+}
+
+pub(super) async fn analyse_browser_audio_async(
+    audio: vibez_core::audio_buffer::DecodedAudio,
+    source_name: String,
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    analyse_browser_audio_with_cached_metadata_async(audio, source_name, None).await
+}
+
+async fn analyse_browser_audio_with_cached_metadata_async(
+    audio: vibez_core::audio_buffer::DecodedAudio,
+    source_name: String,
+    cached_metadata: Option<vibez_dropbox::DerivedMetadata>,
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    tokio::task::spawn_blocking(move || {
+        let loop_fit = match cached_metadata {
+            Some(metadata) => crate::warp::fit_loop_tempo(
+                audio.num_frames(),
+                audio.sample_rate as f64,
+                &source_name,
+                metadata.bpm,
+            ),
+            None => crate::warp::analyse_loop_tempo(&audio, &source_name),
+        };
+        crate::message::AnalysedBrowserAudio {
+            audio: Arc::new(audio),
+            loop_fit,
+        }
+    })
+    .await
+    .map_err(|error| format!("Browser analysis task failed: {error}"))
+}
+
+pub(super) async fn decode_and_analyse_async(
+    path: PathBuf,
+    source_name: String,
+) -> Result<crate::message::AnalysedBrowserAudio, String> {
+    let audio = decode_file_async(path).await?;
+    analyse_browser_audio_async(audio, source_name).await
+}
+
+pub(super) async fn decode_analyse_and_stage_local_async(
+    path: PathBuf,
+) -> Result<(crate::message::AnalysedBrowserAudio, MediaSourceRef), String> {
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (audio, source) = decode_and_stage_local_async(path).await?;
+    let analysed = analyse_browser_audio_async(audio, name).await?;
+    Ok((analysed, source))
 }
 
 pub(super) async fn decode_and_stage_local_async(
@@ -318,14 +381,7 @@ pub(super) async fn fetch_dropbox_sample_async(
     client: Option<Arc<DropboxClient>>,
     cache: DropboxCache,
     entry: DropboxEntry,
-) -> Result<
-    (
-        Arc<vibez_core::audio_buffer::DecodedAudio>,
-        String,
-        MediaSourceRef,
-    ),
-    String,
-> {
+) -> Result<(crate::message::AnalysedBrowserAudio, String, MediaSourceRef), String> {
     let _lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
     let local = match cache
         .lookup(&entry.path_lower, entry.rev.as_deref())
@@ -342,6 +398,15 @@ pub(super) async fn fetch_dropbox_sample_async(
             write_cache_blocking(&cache, &entry, bytes).await?
         }
     };
+    let metadata_cache = cache.clone();
+    let metadata_path = entry.path_lower.clone();
+    let metadata_revision = entry.rev.clone();
+    let cached_metadata = tokio::task::spawn_blocking(move || {
+        metadata_cache.derived_metadata(&metadata_path, metadata_revision.as_deref())
+    })
+    .await
+    .map_err(|error| format!("Derived Metadata lookup task failed: {error}"))?
+    .map_err(|error| format!("Derived Metadata lookup failed: {error}"))?;
     let decode_path = local.clone();
     let decoded = tokio::task::spawn_blocking(move || {
         vibez_audio_io::file_io::decode_audio_file(&decode_path).map_err(|e| e.to_string())
@@ -366,7 +431,13 @@ pub(super) async fn fetch_dropbox_sample_async(
     })
     .await
     .map_err(|error| format!("Remote Project Media staging task failed: {error}"))??;
-    Ok((Arc::new(decoded), entry.name, source))
+    let analysed = analyse_browser_audio_with_cached_metadata_async(
+        decoded,
+        entry.name.clone(),
+        cached_metadata,
+    )
+    .await?;
+    Ok((analysed, entry.name, source))
 }
 
 pub(super) async fn materialize_remote_sample_async(

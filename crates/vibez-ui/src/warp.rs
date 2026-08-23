@@ -43,69 +43,164 @@ pub struct WarpClipInput {
     pub project_bpm: f64,
 }
 
-/// Deterministic mapping from a clean production loop to the Project grid.
+/// Intrinsic tempo analysis for a clean production loop.
 ///
-/// Browser WARP treats the complete source boundary as musical truth: the
-/// loop is assumed to span one of the conventional 1/2/4/8/16 bar lengths,
-/// and the source BPM is derived from that span. This avoids asking a generic
-/// beat detector to choose between rhythmic subdivisions before the producer
-/// can hear or import the loop.
+/// This deliberately contains no Project tempo. Browser WARP must identify
+/// the source before deciding how long its Project-tempo rendering should be.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LoopGridFit {
     pub bars: u32,
     pub source_bpm: f64,
-    pub target_frames: usize,
 }
 
 const LOOP_GRID_BARS: [u32; 5] = [1, 2, 4, 8, 16];
 const PLAUSIBLE_LOOP_BPM_MIN: f64 = 60.0;
+// Keep aligned with vibez_core::onset::BPM_FOLD_HI. The detector must not
+// fold a tempo which this grid fitter treats as a valid source tempo.
 const PLAUSIBLE_LOOP_BPM_MAX: f64 = 200.0;
+const FILENAME_TEMPO_TOLERANCE: f64 = 1.10;
 
-/// Fit a complete source loop to the conventional Project bar span that
-/// requires the least time stretching. Candidates in a practical production
-/// tempo range win over half/double-time interpretations outside that range.
-/// Audio with no plausible interpretation is treated as a one-shot rather
-/// than being stretched into an arbitrary bar length.
-pub fn fit_loop_to_project(
+struct LoopTempoDecision {
+    fit: LoopGridFit,
+    filename_hint_decided: bool,
+}
+
+/// Extract a conventional tempo token from a production-loop filename.
+/// Explicit `124bpm`/`bpm124` tokens win; otherwise a delimiter-separated
+/// number in the supported loop range is accepted.
+pub fn bpm_hint_from_name(name: &str) -> Option<f64> {
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    let tokens: Vec<&str> = stem
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '.')
+        .filter(|token| !token.is_empty())
+        .collect();
+    let plausible = |value: f64| {
+        value.is_finite() && (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&value)
+    };
+
+    for (index, token) in tokens.iter().enumerate() {
+        let marked = token
+            .strip_suffix("bpm")
+            .or_else(|| token.strip_prefix("bpm"))
+            .and_then(|number| number.parse::<f64>().ok())
+            .filter(|value| plausible(*value));
+        if marked.is_some() {
+            return marked;
+        }
+        if token.eq_ignore_ascii_case("bpm") {
+            // `bpm 128` is explicit; prefer it to an unrelated number that
+            // happens to precede the marker (`Loop_90_bpm_128.wav`).
+            let adjacent = tokens
+                .get(index + 1)
+                .and_then(|next| next.parse::<f64>().ok())
+                .or_else(|| {
+                    index
+                        .checked_sub(1)
+                        .and_then(|previous| tokens[previous].parse::<f64>().ok())
+                })
+                .filter(|value| plausible(*value));
+            if adjacent.is_some() {
+                return adjacent;
+            }
+        }
+    }
+
+    tokens
+        .into_iter()
+        .filter_map(|token| token.parse::<f64>().ok())
+        .find(|value| plausible(*value))
+}
+
+/// Fit a complete source loop to a conventional 1/2/4/8/16 bar span.
+/// Filename and audio-analysis evidence resolve half/double-time ambiguity.
+/// The stable 120 BPM preference is only a final fallback, so the result can
+/// never change when the Project tempo changes.
+pub fn fit_loop_tempo(
     source_frames: usize,
     sample_rate: f64,
-    project_bpm: f64,
+    source_name: &str,
+    detected_bpm: Option<f64>,
 ) -> Option<LoopGridFit> {
-    if source_frames == 0
-        || !sample_rate.is_finite()
-        || sample_rate <= 0.0
-        || !project_bpm.is_finite()
-        || project_bpm <= 0.0
-    {
+    fit_loop_tempo_decision(source_frames, sample_rate, source_name, detected_bpm)
+        .map(|decision| decision.fit)
+}
+
+fn fit_loop_tempo_decision(
+    source_frames: usize,
+    sample_rate: f64,
+    source_name: &str,
+    detected_bpm: Option<f64>,
+) -> Option<LoopTempoDecision> {
+    if source_frames == 0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
         return None;
     }
 
     let source_seconds = source_frames as f64 / sample_rate;
     let candidates = LOOP_GRID_BARS.map(|bars| {
-        let beats = bars as f64 * 4.0;
-        let source_bpm = beats * 60.0 / source_seconds;
-        let target_frames = (beats * 60.0 / project_bpm * sample_rate).round() as usize;
-        let stretch_distance = (target_frames as f64 / source_frames as f64).ln().abs();
-        (
-            LoopGridFit {
-                bars,
-                source_bpm,
-                target_frames,
-            },
-            stretch_distance,
-        )
+        let fit = LoopGridFit {
+            bars,
+            source_bpm: bars as f64 * 4.0 * 60.0 / source_seconds,
+        };
+        (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX)
+            .contains(&fit.source_bpm)
+            .then_some(fit)
     });
-    candidates
-        .into_iter()
-        .filter(|(fit, _)| {
-            (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(&fit.source_bpm)
+    let name_hint = bpm_hint_from_name(source_name).filter(|hint| {
+        candidates
+            .iter()
+            .flatten()
+            .any(|fit| (fit.source_bpm / hint).ln().abs() <= FILENAME_TEMPO_TOLERANCE.ln())
+    });
+    let reference_bpm = name_hint
+        .or_else(|| {
+            detected_bpm.filter(|bpm| {
+                bpm.is_finite() && (PLAUSIBLE_LOOP_BPM_MIN..=PLAUSIBLE_LOOP_BPM_MAX).contains(bpm)
+            })
         })
-        .min_by(|left, right| {
-            left.1
-                .partial_cmp(&right.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(fit, _)| fit)
+        .unwrap_or(120.0);
+    let fit = candidates.into_iter().flatten().min_by(|left, right| {
+        (left.source_bpm / reference_bpm)
+            .ln()
+            .abs()
+            .partial_cmp(&(right.source_bpm / reference_bpm).ln().abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    Some(LoopTempoDecision {
+        fit,
+        filename_hint_decided: name_hint.is_some(),
+    })
+}
+
+pub fn analyse_loop_tempo(audio: &DecodedAudio, source_name: &str) -> Option<LoopGridFit> {
+    analyse_loop_tempo_with(audio, source_name, || {
+        vibez_core::onset::detect_bpm(audio, audio.sample_rate).map(|value| value.bpm)
+    })
+}
+
+fn analyse_loop_tempo_with(
+    audio: &DecodedAudio,
+    source_name: &str,
+    detect: impl FnOnce() -> Option<f64>,
+) -> Option<LoopGridFit> {
+    let cheap_decision = fit_loop_tempo_decision(
+        audio.num_frames(),
+        audio.sample_rate as f64,
+        source_name,
+        None,
+    )?;
+    if cheap_decision.filename_hint_decided {
+        return Some(cheap_decision.fit);
+    }
+    fit_loop_tempo(
+        audio.num_frames(),
+        audio.sample_rate as f64,
+        source_name,
+        detect(),
+    )
 }
 
 /// Deterministic warped length for a clip: the naive proportional
@@ -246,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn grid_fit_derives_clean_loop_tempo_from_its_project_bar_span() {
+    fn grid_fit_derives_clean_loop_tempo_from_source_evidence() {
         let cases = [
             (2.0, 120.0, 120.0),
             (1.0, 122.0, 122.0),
@@ -259,31 +354,101 @@ mod tests {
 
         for (bars, source_bpm, expected_bpm) in cases {
             let audio = exact_loop(bars, source_bpm);
-            let fit = fit_loop_to_project(audio.num_frames(), audio.sample_rate as f64, 120.0)
+            let name = format!("loop_{source_bpm}_bpm.wav");
+            let fit = fit_loop_tempo(audio.num_frames(), audio.sample_rate as f64, &name, None)
                 .expect("valid audio and project tempo must always produce a grid fit");
 
             assert_eq!(fit.bars, bars as u32);
             assert!((fit.source_bpm - expected_bpm).abs() < 0.01);
-            let expected_frames = (bars * 4.0 * 60.0 / 120.0 * SR as f64).round() as usize;
-            assert_eq!(fit.target_frames, expected_frames);
         }
     }
 
     #[test]
-    fn grid_fit_uses_a_plausible_source_octave_when_project_tempo_is_far_away() {
-        let audio = exact_loop(4.0, 120.0);
-        let fit = fit_loop_to_project(audio.num_frames(), audio.sample_rate as f64, 174.0).unwrap();
+    fn source_tempo_does_not_change_with_the_project_tempo() {
+        let audio = exact_loop(2.0, 124.0);
+        let fit = fit_loop_tempo(
+            audio.num_frames(),
+            audio.sample_rate as f64,
+            "US_DDH_Bass_124_Expectation_Fm.wav",
+            Some(160.0),
+        )
+        .unwrap();
+
+        assert_eq!(fit.bars, 2);
+        assert!((fit.source_bpm - 124.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn filename_fit_skips_expensive_audio_detection() {
+        let audio = exact_loop(4.0, 128.0);
+        let fit = analyse_loop_tempo_with(&audio, "Warehouse_128_bpm.wav", || {
+            panic!("filename evidence should avoid onset analysis")
+        })
+        .unwrap();
 
         assert_eq!(fit.bars, 4);
-        assert!((fit.source_bpm - 120.0).abs() < 0.01);
+        assert!((fit.source_bpm - 128.0).abs() < 0.01);
     }
 
     #[test]
     fn grid_fit_rejects_a_one_shot_with_no_plausible_loop_tempo() {
         assert_eq!(
-            fit_loop_to_project(SR as usize / 20, SR as f64, 120.0),
+            fit_loop_tempo(SR as usize / 20, SR as f64, "hit.wav", None),
             None
         );
+    }
+
+    #[test]
+    fn filename_bpm_hint_understands_common_sample_pack_names() {
+        assert_eq!(
+            bpm_hint_from_name("US_DDH_Bass_124_Expectation_Fm.wav"),
+            Some(124.0)
+        );
+        assert_eq!(bpm_hint_from_name("Warehouse 128bpm.wav"), Some(128.0));
+        assert_eq!(bpm_hint_from_name("Warehouse_bpm_135.wav"), Some(135.0));
+        assert_eq!(bpm_hint_from_name("recorded_2026_take_04.wav"), None);
+        assert_eq!(bpm_hint_from_name("Loop_90_bpm_128.wav"), Some(128.0));
+    }
+
+    #[test]
+    fn unrelated_filename_number_does_not_discard_audio_evidence() {
+        let audio = exact_loop(2.0, 124.0);
+        let fit = fit_loop_tempo(
+            audio.num_frames(),
+            audio.sample_rate as f64,
+            "catalogue_100_bass.wav",
+            Some(124.0),
+        )
+        .unwrap();
+
+        assert_eq!(fit.bars, 2);
+        assert!((fit.source_bpm - 124.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn production_loop_tail_does_not_invalidate_a_filename_tempo() {
+        let exact = exact_loop(4.0, 128.0);
+        let frames_with_tail = exact.num_frames() + (SR as usize * 60 / 128);
+        let fit =
+            fit_loop_tempo(frames_with_tail, SR as f64, "Warehouse_128_bpm.wav", None).unwrap();
+
+        assert_eq!(fit.bars, 4);
+        assert!((fit.source_bpm - 128.0).abs() < 8.0);
+    }
+
+    #[test]
+    fn audio_estimate_resolves_the_grid_without_a_filename_hint() {
+        let audio = exact_loop(2.0, 124.0);
+        let fit = fit_loop_tempo(
+            audio.num_frames(),
+            audio.sample_rate as f64,
+            "Expectation_Fm.wav",
+            Some(160.0),
+        )
+        .unwrap();
+
+        assert_eq!(fit.bars, 2);
+        assert!((fit.source_bpm - 124.0).abs() < 0.01);
     }
 
     fn first_warp_input(

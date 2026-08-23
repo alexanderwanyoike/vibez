@@ -494,7 +494,12 @@ impl App {
         entry: DropboxEntry,
     ) -> Task<Message> {
         let target = BrowserImportTarget::ArrangementClip(self.state.arrangement.selected_track);
-        let treatment = self.state.browser.audition_import_input();
+        let source = MediaSourceRef::DropboxFile {
+            path_lower: entry.path_lower.clone(),
+            display_path: entry.path_display.clone(),
+            rev: entry.rev.clone(),
+        };
+        let treatment = self.state.browser.import_input_for_source(&source);
         self.start_remote_import(entry, target, treatment)
     }
 
@@ -503,7 +508,12 @@ impl App {
             self.state.status_text = "Select a Sampler or Drum Pad track first".into();
             return Task::none();
         };
-        let treatment = self.state.browser.audition_import_input();
+        let source = MediaSourceRef::DropboxFile {
+            path_lower: entry.path_lower.clone(),
+            display_path: entry.path_display.clone(),
+            rev: entry.rev.clone(),
+        };
+        let treatment = self.state.browser.import_input_for_source(&source);
         self.start_remote_import(entry, target, treatment)
     }
 }
