@@ -644,6 +644,7 @@ pub enum Message {
     OpenSettings,
     CloseSettings,
     SelectSettingsTab(SettingsTab),
+    SelectAudioBackend(vibez_audio_io::audio_host::AudioBackend),
     SetBufferSize(u32),
     SetAudioSampleRate(AudioSampleRate),
     SelectAudioInput(AudioDeviceChoice),

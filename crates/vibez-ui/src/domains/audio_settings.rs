@@ -2,7 +2,10 @@
 
 use std::fmt;
 
-use vibez_audio_io::audio_host::{AudioDeviceCatalog, DeviceInfo, SupportedConfigRange};
+use serde::{Deserialize, Serialize};
+use vibez_audio_io::audio_host::{
+    AudioBackend, AudioDeviceCatalog, DeviceInfo, SupportedConfigRange,
+};
 
 pub const BUFFER_SIZE_CHOICES: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
@@ -53,9 +56,48 @@ impl fmt::Display for AudioSampleRate {
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioDevicePreferences {
+    #[serde(default)]
+    pub input_name: Option<String>,
+    #[serde(default)]
+    pub output_name: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioBackendPreferences {
+    #[serde(default)]
+    pub system: AudioDevicePreferences,
+    #[serde(default)]
+    pub asio: AudioDevicePreferences,
+}
+
+impl AudioBackendPreferences {
+    pub fn for_backend(&self, backend: AudioBackend) -> &AudioDevicePreferences {
+        match backend {
+            AudioBackend::System => &self.system,
+            AudioBackend::Asio => &self.asio,
+        }
+    }
+
+    pub fn for_backend_mut(&mut self, backend: AudioBackend) -> &mut AudioDevicePreferences {
+        match backend {
+            AudioBackend::System => &mut self.system,
+            AudioBackend::Asio => &mut self.asio,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioSettingsState {
+    /// Persisted backend whose devices are displayed in Settings.
+    pub backend: AudioBackend,
+    /// Backend currently driving the engine callback. This may remain the
+    /// previous backend when a requested driver is temporarily unavailable.
+    pub active_backend: Option<AudioBackend>,
     pub catalog: AudioDeviceCatalog,
+    /// Remembered targets for every backend, including inactive backends.
+    pub backend_preferences: AudioBackendPreferences,
     /// Persisted target. It remains named when that device is temporarily absent.
     pub preferred_input_name: Option<String>,
     /// Persisted target. It remains named when fallback output is active.
@@ -70,7 +112,10 @@ pub struct AudioSettingsState {
 impl Default for AudioSettingsState {
     fn default() -> Self {
         Self {
+            backend: AudioBackend::System,
+            active_backend: None,
             catalog: AudioDeviceCatalog::default(),
+            backend_preferences: AudioBackendPreferences::default(),
             preferred_input_name: None,
             preferred_output_name: None,
             active_output_name: None,
@@ -82,6 +127,24 @@ impl Default for AudioSettingsState {
 }
 
 impl AudioSettingsState {
+    pub fn remember_current_backend(&mut self) {
+        let preferences = self.backend_preferences.for_backend_mut(self.backend);
+        preferences
+            .input_name
+            .clone_from(&self.preferred_input_name);
+        preferences
+            .output_name
+            .clone_from(&self.preferred_output_name);
+    }
+
+    pub fn restore_backend_preferences(&mut self, backend: AudioBackend) {
+        let preferences = self.backend_preferences.for_backend(backend);
+        self.preferred_input_name
+            .clone_from(&preferences.input_name);
+        self.preferred_output_name
+            .clone_from(&preferences.output_name);
+    }
+
     pub fn output_choices(&self) -> Vec<AudioDeviceChoice> {
         device_choices(
             self.usable_output_devices(),
@@ -447,6 +510,42 @@ mod tests {
                 true
             )),
             Some((44_100, 512))
+        );
+    }
+
+    #[test]
+    fn backend_device_preferences_survive_round_trip_switching() {
+        let mut state = AudioSettingsState {
+            backend: AudioBackend::System,
+            preferred_input_name: Some("UR12 Input".into()),
+            preferred_output_name: Some("UR12 Speakers".into()),
+            ..Default::default()
+        };
+        state.remember_current_backend();
+
+        state.backend = AudioBackend::Asio;
+        state.restore_backend_preferences(AudioBackend::Asio);
+        assert_eq!(state.preferred_input_name, None);
+        assert_eq!(state.preferred_output_name, None);
+
+        state.preferred_input_name = Some("ASIO4ALL v2".into());
+        state.preferred_output_name = Some("ASIO4ALL v2".into());
+        state.remember_current_backend();
+
+        state.backend = AudioBackend::System;
+        state.restore_backend_preferences(AudioBackend::System);
+        assert_eq!(state.preferred_input_name.as_deref(), Some("UR12 Input"));
+        assert_eq!(
+            state.preferred_output_name.as_deref(),
+            Some("UR12 Speakers")
+        );
+        assert_eq!(
+            state
+                .backend_preferences
+                .for_backend(AudioBackend::Asio)
+                .output_name
+                .as_deref(),
+            Some("ASIO4ALL v2")
         );
     }
 }
