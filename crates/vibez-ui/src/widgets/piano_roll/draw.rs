@@ -489,6 +489,18 @@ impl PianoRollWidget {
             theme::bg_surface(),
         );
 
+        // Paint the brace below ruler text so bar numbers remain legible.
+        if let Some(clip) = &self.clip {
+            if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
+                clip_loop_markers::draw_brace(
+                    &mut frame,
+                    self.beat_to_x(clip.loop_start_beats, &bounds),
+                    self.beat_to_x(clip.loop_end_beats, &bounds),
+                    theme::accent(),
+                );
+            }
+        }
+
         // Bottom border
         let ruler_border = canvas::Path::line(
             iced::Point::new(0.0, RULER_HEIGHT),
@@ -553,17 +565,6 @@ impl PianoRollWidget {
                     size: iced::Pixels(8.0),
                     ..Default::default()
                 });
-            }
-        }
-
-        if let Some(clip) = &self.clip {
-            if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
-                clip_loop_markers::draw_brace(
-                    &mut frame,
-                    self.beat_to_x(clip.loop_start_beats, &bounds),
-                    self.beat_to_x(clip.loop_end_beats, &bounds),
-                    theme::accent(),
-                );
             }
         }
 

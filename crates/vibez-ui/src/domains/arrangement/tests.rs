@@ -294,17 +294,18 @@ fn add_audio_clip(
 }
 
 #[test]
-fn audio_loop_region_must_be_ordered_and_inside_the_source() {
+fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
     let mut arrangement = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
+    arrangement.tracks[0].clips[0].duration = 400;
     let mut engine = RecordingEngine::default();
 
     arrangement.update(
         ArrangementMsg::SetClipLoopRegion {
             track_id,
             clip_id,
-            loop_start: 800,
-            loop_end: 1_001,
+            loop_start: 200,
+            loop_end: 800,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -323,7 +324,7 @@ fn audio_loop_region_must_be_ordered_and_inside_the_source() {
             track_id,
             clip_id,
             loop_start: 200,
-            loop_end: 800,
+            loop_end: 400,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -333,12 +334,25 @@ fn audio_loop_region_must_be_ordered_and_inside_the_source() {
             arrangement.tracks[0].clips[0].loop_start,
             arrangement.tracks[0].clips[0].loop_end
         ),
-        (200, 800)
+        (200, 400)
     );
     assert!(matches!(
         engine.0.as_slice(),
         [EngineCommand::SetClipLoop { .. }]
     ));
+
+    engine.0.clear();
+    arrangement.update(
+        ArrangementMsg::SetClipLoopRegion {
+            track_id,
+            clip_id,
+            loop_start: 200,
+            loop_end: 400,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(engine.0.is_empty());
 }
 
 #[test]

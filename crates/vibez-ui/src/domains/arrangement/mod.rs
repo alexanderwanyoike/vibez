@@ -398,10 +398,7 @@ impl TimelineEditorState {
                 let mut command = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        let source_frames = clip.audio.num_frames() as u64;
-                        if loop_start < loop_end && loop_end <= source_frames {
-                            clip.loop_start = loop_start;
-                            clip.loop_end = loop_end;
+                        if clip.set_loop_region(loop_start, loop_end) {
                             command = Some(clip.loop_enabled);
                         }
                     }

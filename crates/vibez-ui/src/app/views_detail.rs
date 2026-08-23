@@ -591,6 +591,8 @@ impl App {
             duration_samples: clip.duration,
             source_offset: clip.source_offset,
             sample_rate: self.state.transport.sample_rate,
+            bpm: self.state.transport.bpm,
+            grid: self.state.view.grid_config(),
             track_color,
             playhead_normalized,
             loop_enabled: clip.loop_enabled,

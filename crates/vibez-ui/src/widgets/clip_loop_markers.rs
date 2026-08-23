@@ -3,7 +3,9 @@
 use iced::widget::canvas;
 use iced::{Color, Point};
 
-pub(crate) const MARKER_RAIL_HEIGHT: f32 = 18.0;
+use crate::state::UndoGestureId;
+
+pub(crate) const MARKER_RAIL_HEIGHT: f32 = 20.0;
 const HANDLE_WIDTH: f32 = 8.0;
 const HIT_RADIUS: f32 = 8.0;
 
@@ -11,6 +13,52 @@ const HIT_RADIUS: f32 = 8.0;
 pub(crate) enum LoopMarker {
     Start,
     End,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LoopDrag {
+    Start {
+        fixed_end: f64,
+        undo_gesture: UndoGestureId,
+    },
+    End {
+        fixed_start: f64,
+        undo_gesture: UndoGestureId,
+    },
+}
+
+impl LoopDrag {
+    pub(crate) fn begin(marker: LoopMarker, start: f64, end: f64) -> Self {
+        match marker {
+            LoopMarker::Start => Self::Start {
+                fixed_end: end,
+                undo_gesture: UndoGestureId::new(),
+            },
+            LoopMarker::End => Self::End {
+                fixed_start: start,
+                undo_gesture: UndoGestureId::new(),
+            },
+        }
+    }
+
+    pub(crate) fn resolve(self, pointer: f64, min_length: f64, max: f64) -> (f64, f64) {
+        match self {
+            Self::Start { fixed_end, .. } => (
+                pointer.clamp(0.0, (fixed_end - min_length).max(0.0)),
+                fixed_end,
+            ),
+            Self::End { fixed_start, .. } => (
+                fixed_start,
+                pointer.clamp((fixed_start + min_length).min(max), max),
+            ),
+        }
+    }
+
+    pub(crate) fn undo_gesture(self) -> UndoGestureId {
+        match self {
+            Self::Start { undo_gesture, .. } | Self::End { undo_gesture, .. } => undo_gesture,
+        }
+    }
 }
 
 pub(crate) fn hit_test(
@@ -87,5 +135,14 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn drag_respects_the_minimum_length_when_the_pointer_overshoots() {
+        let start = LoopDrag::begin(LoopMarker::Start, 10.0, 20.0);
+        assert_eq!(start.resolve(30.0, 4.0, 40.0), (16.0, 20.0));
+
+        let end = LoopDrag::begin(LoopMarker::End, 10.0, 20.0);
+        assert_eq!(end.resolve(0.0, 4.0, 40.0), (10.0, 14.0));
     }
 }

@@ -261,14 +261,7 @@ impl PianoRollState {
                 let mut command = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let valid = loop_start_beats.is_finite()
-                            && loop_end_beats.is_finite()
-                            && loop_start_beats >= 0.0
-                            && loop_start_beats < loop_end_beats
-                            && loop_end_beats <= clip.duration_beats;
-                        if valid {
-                            clip.loop_start_beats = loop_start_beats;
-                            clip.loop_end_beats = loop_end_beats;
+                        if clip.set_loop_region(loop_start_beats, loop_end_beats) {
                             command = Some(clip.loop_enabled);
                         }
                     }
@@ -1163,6 +1156,20 @@ mod tests {
             engine.0.as_slice(),
             [EngineCommand::SetNoteClipLoop { .. }]
         ));
+
+        engine.0.clear();
+        piano_roll.update(
+            PianoRollMsg::SetNoteClipLoopRegion {
+                track_id,
+                clip_id,
+                loop_start_beats: 1.0,
+                loop_end_beats: 3.0,
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+        assert!(engine.0.is_empty());
     }
 
     #[test]

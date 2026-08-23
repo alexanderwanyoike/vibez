@@ -7,9 +7,9 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
-use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId};
+use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip};
 use crate::timeline_geometry::TimelineGeometry;
-use crate::widgets::clip_loop_markers::{self, LoopMarker};
+use crate::widgets::clip_loop_markers::{self, LoopDrag, MARKER_RAIL_HEIGHT};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
@@ -20,7 +20,7 @@ const KEY_WIDTH: f32 = 52.0;
 /// Height of each piano key row.
 const KEY_HEIGHT: f32 = 16.0;
 /// Height of the ruler strip at the top.
-const RULER_HEIGHT: f32 = 20.0;
+const RULER_HEIGHT: f32 = MARKER_RAIL_HEIGHT;
 
 /// Lowest MIDI note displayed (C2 = 36).
 const LOW_NOTE: u8 = 36;
@@ -173,19 +173,6 @@ impl PianoRollWidget {
         None
     }
 
-    fn hit_test_loop_marker(&self, position: Point, bounds: &Rectangle) -> Option<LoopMarker> {
-        let clip = self.clip.as_ref()?;
-        if !clip.loop_enabled || clip.loop_end_beats <= clip.loop_start_beats {
-            return None;
-        }
-        clip_loop_markers::hit_test(
-            self.beat_to_x(clip.loop_start_beats, bounds),
-            self.beat_to_x(clip.loop_end_beats, bounds),
-            position,
-            RULER_HEIGHT,
-        )
-    }
-
     /// Musical extent of a rubber-band rectangle, clipped to the grid.
     /// `None` when the box misses the note grid entirely.
     fn marquee_region(
@@ -282,15 +269,9 @@ enum DragAction {
         current: Point,
         additive: bool,
     },
-    LoopStart {
+    Loop {
         clip_id: ClipId,
-        fixed_end: f64,
-        undo_gesture: UndoGestureId,
-    },
-    LoopEnd {
-        clip_id: ClipId,
-        fixed_start: f64,
-        undo_gesture: UndoGestureId,
+        drag: LoopDrag,
     },
 }
 
@@ -344,23 +325,25 @@ impl canvas::Program<Message> for PianoRollWidget {
                 DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
-                DragAction::LoopStart { .. } | DragAction::LoopEnd { .. } => {
-                    mouse::Interaction::ResizingHorizontally
-                }
+                DragAction::Loop { .. } => mouse::Interaction::ResizingHorizontally,
                 DragAction::MarqueeNotes { .. } => mouse::Interaction::Crosshair,
             };
         }
 
-        // Draw mode: always crosshair
+        if let Some(pos) = cursor.position_in(bounds) {
+            if self.hit_test_loop_marker(pos, &bounds).is_some() {
+                return mouse::Interaction::ResizingHorizontally;
+            }
+        }
+
+        // Draw mode: the note grid uses a crosshair, but loop braces
+        // retain their horizontal resize cursor in every edit mode.
         if self.edit_mode == PianoRollEditMode::Draw {
             return mouse::Interaction::Crosshair;
         }
 
         // Select mode: hover over note edge
         if let Some(pos) = cursor.position_in(bounds) {
-            if self.hit_test_loop_marker(pos, &bounds).is_some() {
-                return mouse::Interaction::ResizingHorizontally;
-            }
             if pos.x >= KEY_WIDTH && pos.y > RULER_HEIGHT {
                 if let Some((_idx, near_right)) = self.hit_test_note(pos, &bounds) {
                     if near_right {
@@ -400,24 +383,10 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if pos.y <= RULER_HEIGHT {
-                        let Some(marker) = self.hit_test_loop_marker(pos, &bounds) else {
+                        let Some(drag) = self.begin_loop_drag(pos, &bounds) else {
                             return (canvas::event::Status::Ignored, None);
                         };
-                        let Some(clip) = &self.clip else {
-                            return (canvas::event::Status::Ignored, None);
-                        };
-                        state.drag = Some(match marker {
-                            LoopMarker::Start => DragAction::LoopStart {
-                                clip_id: clip.clip_id,
-                                fixed_end: clip.loop_end_beats,
-                                undo_gesture: UndoGestureId::new(),
-                            },
-                            LoopMarker::End => DragAction::LoopEnd {
-                                clip_id: clip.clip_id,
-                                fixed_start: clip.loop_start_beats,
-                                undo_gesture: UndoGestureId::new(),
-                            },
-                        });
+                        state.drag = Some(drag);
                         state.last_cursor = Some(pos);
                         return (canvas::event::Status::Captured, None);
                     }
@@ -647,54 +616,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                     state.last_cursor = Some(local);
 
                     if let Some(drag) = state.drag.as_ref() {
-                        let min_length = if self.grid.snap_enabled {
-                            self.effective_grid(&bounds).beat_size()
-                        } else {
-                            0.01
-                        };
-                        let pointer_beat = self.snapped_beat(
-                            self.x_to_beat(local.x.clamp(KEY_WIDTH, bounds.width), &bounds),
-                            &bounds,
-                        );
-                        let edit = match drag {
-                            DragAction::LoopStart {
-                                clip_id,
-                                fixed_end,
-                                undo_gesture,
-                            } => Some((
-                                *clip_id,
-                                pointer_beat.clamp(0.0, (*fixed_end - min_length).max(0.0)),
-                                *fixed_end,
-                                *undo_gesture,
-                            )),
-                            DragAction::LoopEnd {
-                                clip_id,
-                                fixed_start,
-                                undo_gesture,
-                            } => Some((
-                                *clip_id,
-                                *fixed_start,
-                                pointer_beat.clamp(
-                                    (*fixed_start + min_length).min(self.total_beats),
-                                    self.total_beats,
-                                ),
-                                *undo_gesture,
-                            )),
-                            _ => None,
-                        };
-                        if let Some((clip_id, loop_start_beats, loop_end_beats, gesture)) = edit {
-                            return (
-                                canvas::event::Status::Captured,
-                                Some(
-                                    Message::PianoRoll(PianoRollMsg::SetNoteClipLoopRegion {
-                                        track_id: self.track_id,
-                                        clip_id,
-                                        loop_start_beats,
-                                        loop_end_beats,
-                                    })
-                                    .in_undo_gesture(gesture),
-                                ),
-                            );
+                        if let Some(message) = self.loop_drag_message(drag, local, &bounds) {
+                            return (canvas::event::Status::Captured, Some(message));
                         }
                     }
 
@@ -828,9 +751,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     }
                                 }
                                 // Handled above, before this borrow.
-                                DragAction::MarqueeNotes { .. }
-                                | DragAction::LoopStart { .. }
-                                | DragAction::LoopEnd { .. } => {}
+                                DragAction::MarqueeNotes { .. } | DragAction::Loop { .. } => {}
                             }
                         }
                     }
@@ -1046,171 +967,10 @@ fn is_black_key(pitch: u8) -> bool {
     matches!(pitch % 12, 1 | 3 | 6 | 8 | 10)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use iced::widget::canvas::Program;
-
-    fn piano_roll_message(message: Option<Message>) -> Option<PianoRollMsg> {
-        match message {
-            Some(Message::UndoGesture { edit, .. }) => piano_roll_message(Some(*edit)),
-            Some(Message::PianoRoll(message)) => Some(message),
-            _ => None,
-        }
-    }
-
-    fn gesture_id(message: &Option<Message>) -> Option<UndoGestureId> {
-        match message {
-            Some(Message::UndoGesture { id, .. }) => Some(*id),
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn piano_roll_uses_triplet_grid_and_preserves_free_positions_when_snap_is_off() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::EIGHTH.triplet(), true, false, 0);
-        assert!((widget.snapped_beat(0.31, &bounds) - 1.0 / 3.0).abs() < 1e-9);
-
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
-        assert_eq!(widget.snapped_beat(0.31, &bounds), 0.31);
-    }
-
-    #[test]
-    fn creating_a_note_keeps_it_in_the_cell_the_pointer_is_over() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0);
-
-        // Right half of the cell starting at 0.25. Nearest-line snapping
-        // rounds up to 0.5, putting the note in the *next* cell, which is
-        // what made clicks feel offset from the cursor.
-        assert_eq!(widget.snapped_beat(0.4, &bounds), 0.5);
-        assert_eq!(widget.snapped_beat_floor(0.4, &bounds), 0.25);
-
-        // Left half still lands in the same cell either way.
-        assert_eq!(widget.snapped_beat_floor(0.3, &bounds), 0.25);
-        // Exactly on a line is unambiguous.
-        assert_eq!(widget.snapped_beat_floor(0.25, &bounds), 0.25);
-    }
-
-    #[test]
-    fn creation_snapping_is_free_when_snap_is_disabled() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
-
-        assert_eq!(widget.snapped_beat_floor(0.4, &bounds), 0.4);
-    }
-
-    #[test]
-    fn overlapping_notes_hit_test_to_the_one_drawn_on_top() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.total_beats = 16.0;
-        widget.scroll_y = 0.0;
-
-        let note = |start: f64| MidiNote {
-            pitch: 60,
-            start_beat: start,
-            duration_beats: 2.0,
-            velocity: 100,
-        };
-        widget.clip = Some(PianoRollClipData {
-            clip_id: ClipId::new(),
-            // Same pitch, overlapping spans: the later note is painted last
-            // and so sits on top.
-            notes: vec![note(0.0), note(0.5)],
-            selected_notes: HashSet::new(),
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-        });
-
-        // A point inside the overlap must resolve to the top note (index 1).
-        let x = widget.beat_to_x(1.0, &bounds);
-        let y = widget.pitch_to_y(60) + 4.0;
-        assert_eq!(
-            widget.hit_test_note(Point::new(x, y), &bounds).map(|h| h.0),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn loop_end_marker_drag_snaps_and_keeps_the_start_fixed() {
-        let track_id = TrackId::new();
-        let clip = UiNoteClip {
-            id: ClipId::new(),
-            name: "Two bars".into(),
-            position_beats: 0.0,
-            duration_beats: 8.0,
-            notes: Vec::new(),
-            selected_notes: HashSet::new(),
-            loop_enabled: true,
-            loop_start_beats: 2.0,
-            loop_end_beats: 6.0,
-            groove_grid: vibez_core::perform::GrooveGrid::Off,
-        };
-        let widget = PianoRollWidget::from_clip(
-            track_id,
-            &clip,
-            0.0,
-            8.0,
-            Color::WHITE,
-            GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
-            0.0,
-            PianoRollEditMode::Select,
-        );
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let end = Point::new(widget.beat_to_x(6.0, &bounds), 5.0);
-        let target = Point::new(widget.beat_to_x(7.1, &bounds), 5.0);
-        let mut state = PianoRollState::default();
-
-        let pressed = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-                bounds,
-                mouse::Cursor::Available(end),
-            )
-            .0;
-        assert_eq!(pressed, canvas::event::Status::Captured);
-
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
-                bounds,
-                mouse::Cursor::Available(target),
-            )
-            .1;
-        assert!(matches!(
-            piano_roll_message(message.clone()),
-            Some(PianoRollMsg::SetNoteClipLoopRegion {
-                track_id: actual_track,
-                clip_id: actual_clip,
-                loop_start_beats: 2.0,
-                loop_end_beats: 7.0,
-            }) if actual_track == track_id && actual_clip == clip.id
-        ));
-        let second_target = Point::new(widget.beat_to_x(7.4, &bounds), 5.0);
-        let second = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved {
-                    position: second_target,
-                }),
-                bounds,
-                mouse::Cursor::Available(second_target),
-            )
-            .1;
-        assert!(gesture_id(&message).is_some());
-        assert_eq!(gesture_id(&message), gesture_id(&second));
-    }
-}
-
 mod draw;
+mod loop_drag;
+#[cfg(test)]
+mod tests;
 mod velocity_lane;
 
 pub use velocity_lane::VelocityLaneWidget;
