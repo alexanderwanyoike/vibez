@@ -560,6 +560,47 @@ fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
 }
 
 #[test]
+fn inspector_knobs_commit_gain_and_rounded_transpose_values() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+
+    let gain_action = a.update(
+        ArrangementMsg::SetAudioClipInspectorValue {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::Gain,
+            value: -6.25,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(gain_action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].gain_db.db(), -6.2);
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipGain { track_id, clip_id, .. })
+            if *track_id == tid && *clip_id == cid
+    ));
+
+    let transpose_action = a.update(
+        ArrangementMsg::SetAudioClipInspectorValue {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::Transpose,
+            value: 7.6,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let request = transpose_action
+        .transpose_render
+        .expect("knob transpose render request");
+    assert_eq!(request.transpose.semitones(), 8);
+    assert_eq!(a.tracks[0].clips[0].transpose.semitones(), 8);
+}
+
+#[test]
 fn invalid_inspector_boundary_leaves_the_clip_unchanged() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
@@ -580,6 +621,84 @@ fn invalid_inspector_boundary_leaves_the_clip_unchanged() {
     assert!(!action.mark_dirty);
     assert_eq!(a.tracks[0].clips[0].duration, 44_100);
     assert!(engine.0.is_empty());
+}
+
+#[test]
+fn source_start_uses_the_rendered_source_end_for_a_looped_clip() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.duration = 88_200;
+    clip.loop_enabled = true;
+    clip.loop_start = 0;
+    clip.loop_end = 44_100;
+    let mut engine = RecordingEngine::default();
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::SourceStart), "0.250".into());
+
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::SourceStart,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(action.mark_dirty);
+    let clip = &a.tracks[0].clips[0];
+    assert_eq!(clip.source_offset, 11_025);
+    assert_eq!(clip.duration, 33_075);
+    assert_eq!(clip.loop_start, 11_025);
+    assert_eq!(clip.loop_end, 44_100);
+}
+
+#[test]
+fn audio_quantize_replaces_and_selects_the_clip_in_its_timeline() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, old_clip_id) = add_audio_clip(&mut a, 0, 120, 44_100);
+    Arc::make_mut(&mut a.arrangement.timeline).ensure(tid).clips[0].gain_db =
+        vibez_core::track::ClipGainDb::new(-4.0).unwrap();
+    let new_clip_id = ClipId::new();
+    let new_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 22_050]],
+        sample_rate: 44_100,
+    });
+    let mut engine = RecordingEngine::default();
+
+    let action = a.apply_audio_quantize_success(
+        &mut engine,
+        tid,
+        old_clip_id,
+        crate::message::AudioQuantizeSuccess {
+            new_clip_id,
+            new_audio,
+            new_name: "Quantized Clip".into(),
+            new_position: 0,
+            new_duration: 22_050,
+            slice_count: 4,
+            grid_label: "1/16".into(),
+        },
+        44_100,
+    );
+
+    assert!(action.mark_dirty);
+    let clips = &a.arrangement.timeline.get(tid).unwrap().clips;
+    assert_eq!(clips.len(), 1);
+    let clip = &clips[0];
+    assert_eq!(clip.id, new_clip_id);
+    assert_eq!(clip.name, "Quantized Clip");
+    assert_eq!(clip.gain_db.db(), -4.0);
+    assert!(a.selected_clips.contains(&ArrangementSelection::AudioClip {
+        track_id: tid,
+        clip_id: new_clip_id,
+    }));
+    assert!(matches!(
+        engine.0.as_slice(),
+        [EngineCommand::RemoveClip(track_id, clip_id), EngineCommand::AddClip { clip_id: added, .. }]
+            if *track_id == tid && *clip_id == old_clip_id && *added == new_clip_id
+    ));
 }
 
 #[test]

@@ -18,6 +18,71 @@ use crate::state::UiClip;
 use super::*;
 
 impl App {
+    pub(super) fn apply_audio_quantize_success_at(
+        &mut self,
+        location: vibez_project::TimelineLocation,
+        track_id: TrackId,
+        old_clip_id: ClipId,
+        success: crate::message::AudioQuantizeSuccess,
+        sample_rate: u32,
+    ) -> crate::domains::arrangement::ArrangementAction {
+        match location {
+            vibez_project::TimelineLocation::Arrange => {
+                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+                self.state.arrangement.apply_audio_quantize_success(
+                    &mut engine,
+                    track_id,
+                    old_clip_id,
+                    success,
+                    sample_rate,
+                )
+            }
+            vibez_project::TimelineLocation::Section(section_id)
+                if self.state.perform.selected_section == Some(section_id) =>
+            {
+                let action = {
+                    let mut engine = crate::domains::DiscardingEngine;
+                    self.state
+                        .perform
+                        .section_editor
+                        .editor_mut()
+                        .apply_audio_quantize_success(
+                            &mut engine,
+                            track_id,
+                            old_clip_id,
+                            success,
+                            sample_rate,
+                        )
+                };
+                self.state.perform.commit_selected_section_timeline();
+                self.refresh_playing_section_after_edit(section_id);
+                action
+            }
+            vibez_project::TimelineLocation::Section(section_id) => {
+                let Some(section) =
+                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
+                else {
+                    return crate::domains::arrangement::ArrangementAction::default();
+                };
+                let mut editor = crate::state::TimelineEditorState {
+                    timeline: Arc::clone(&section.timeline),
+                    ..crate::state::TimelineEditorState::default()
+                };
+                let mut engine = crate::domains::DiscardingEngine;
+                let action = editor.apply_audio_quantize_success(
+                    &mut engine,
+                    track_id,
+                    old_clip_id,
+                    success,
+                    sample_rate,
+                );
+                section.timeline = editor.timeline;
+                self.refresh_playing_section_after_edit(section_id);
+                action
+            }
+        }
+    }
+
     pub(super) fn apply_clip_bpm_detected_at(
         &mut self,
         location: vibez_project::TimelineLocation,
@@ -274,11 +339,12 @@ impl App {
 
     pub(super) fn dispatch_audio_quantize(
         &mut self,
+        location: vibez_project::TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
         grid: crate::state::SnapGrid,
     ) -> Task<Message> {
-        let Some(content) = self.state.arrange_content(track_id) else {
+        let Some(content) = self.timeline_content_at(location, track_id) else {
             self.state.status_text = "Track not found".to_string();
             return Task::none();
         };
@@ -306,6 +372,7 @@ impl App {
         self.state.status_text = format!("Quantizing {}...", input.original_name);
         Task::perform(quantize_audio_clip_async(input), move |result| {
             Message::AudioQuantizeReady {
+                location,
                 track_id,
                 old_clip_id: clip_id,
                 result,

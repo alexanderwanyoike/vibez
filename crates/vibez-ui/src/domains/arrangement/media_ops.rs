@@ -223,7 +223,10 @@ impl TimelineEditorState {
                         Some("Source boundary must be a positive time in seconds".into());
                     return action;
                 };
-                let current_end = clip.source_offset.saturating_add(clip.duration);
+                let current_end = clip
+                    .source_offset
+                    .saturating_add(clip.duration)
+                    .min(source_frames);
                 let (new_start, new_end) = match field {
                     AudioClipInspectorField::SourceStart => (value, current_end),
                     AudioClipInspectorField::SourceEnd => (clip.source_offset, value),
@@ -777,6 +780,7 @@ impl TimelineEditorState {
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
         ));
+        action.mark_dirty = true;
         action
     }
 

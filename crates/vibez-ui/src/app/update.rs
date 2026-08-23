@@ -116,7 +116,7 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
                 | Message::Arrangement(ArrangementMsg::AddMidiTrack)
-                | Message::AudioQuantizeReady { .. }
+                | Message::AudioQuantizeReady { result: Ok(_), .. }
                 | Message::ClipBpmDetected { bpm: Some(_), .. }
                 | Message::ClipWarpReady {
                     record_undo: true,
@@ -579,33 +579,41 @@ impl App {
                     .view
                     .grid_config()
                     .effective_grid(self.active_editor_pixels_per_beat());
-                return self.dispatch_audio_quantize(track_id, clip_id, grid);
+                return self.dispatch_audio_quantize(
+                    self.active_timeline_location(),
+                    track_id,
+                    clip_id,
+                    grid,
+                );
             }
             Message::QuantizeAudioClipAt {
                 track_id,
                 clip_id,
                 grid,
             } => {
-                return self.dispatch_audio_quantize(track_id, clip_id, grid);
+                return self.dispatch_audio_quantize(
+                    self.active_timeline_location(),
+                    track_id,
+                    clip_id,
+                    grid,
+                );
             }
             Message::AudioQuantizeReady {
+                location,
                 track_id,
                 old_clip_id,
                 result,
             } => match result {
                 Ok(success) => {
                     let sample_rate = self.state.transport.sample_rate;
-                    let action = {
-                        let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                        self.state.arrangement.apply_audio_quantize_success(
-                            &mut engine,
-                            track_id,
-                            old_clip_id,
-                            success,
-                            sample_rate,
-                        )
-                    };
-                    return self.apply_arrangement_action(action);
+                    let action = self.apply_audio_quantize_success_at(
+                        location,
+                        track_id,
+                        old_clip_id,
+                        success,
+                        sample_rate,
+                    );
+                    return self.apply_arrangement_action_at(action, location);
                 }
                 Err(err) => {
                     self.state.status_text = format!("Quantize failed: {err}");

@@ -17,8 +17,8 @@ use vibez_engine::commands::EngineCommand;
 use super::timeline_editor::TimelineEditorAdapter;
 use super::EngineHandle;
 use crate::state::{
-    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TimelineEditorState,
-    TrackTimelineContent, UiNoteClip,
+    ArrangementSelection, ArrangementState, AudioClipInspectorField, ProjectTrack,
+    ProjectTracksState, TimelineEditorState, TrackTimelineContent, UiNoteClip,
 };
 
 mod messages;
@@ -991,6 +991,24 @@ impl TimelineEditorState {
                 clip_id,
                 field,
             } => return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field),
+            ArrangementMsg::SetAudioClipInspectorValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => {
+                let text = match field {
+                    AudioClipInspectorField::Gain => format!("{value:.1}"),
+                    AudioClipInspectorField::Transpose => format!("{:.0}", value.round()),
+                    _ => {
+                        action.status = Some("This Audio Clip control is not rotary".into());
+                        return action;
+                    }
+                };
+                self.audio_clip_inspector_edits
+                    .insert((clip_id, field), text);
+                return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field);
+            }
             ArrangementMsg::SetClipNominalBpm {
                 track_id,
                 clip_id,

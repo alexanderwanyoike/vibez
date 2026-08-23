@@ -19,11 +19,14 @@ use crate::state::{
 };
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::AudioClipDetailWidget;
+use crate::widgets::effect_knob::EffectKnobWidget;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
+use vibez_core::track::{ClipGainDb, ClipTranspose};
 
 use super::*;
 
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const AUDIO_DETAIL_PANEL_MIN_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_MIN_HEIGHT: f32 = 360.0;
 const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
@@ -168,7 +171,7 @@ impl App {
             single_selected_audio_clip_for_track(editor, track_id).is_some()
         });
         if audio_selected {
-            260.0
+            AUDIO_DETAIL_PANEL_MIN_HEIGHT
         } else {
             DETAIL_PANEL_MIN_HEIGHT
         }
@@ -661,34 +664,65 @@ impl App {
 
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
-        let source_end = clip.source_offset.saturating_add(clip.duration) as f64 / sample_rate;
+        let source_end_frames = clip
+            .source_offset
+            .saturating_add(clip.duration)
+            .min(clip.audio.num_frames() as u64);
+        let source_end = source_end_frames as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;
         let loop_end = clip.loop_end as f64 / sample_rate;
 
         let parameter = |label_text: &'static str,
                          inspector_field: AudioClipInspectorField,
+                         current_value: f32,
                          committed: String,
-                         unit: &'static str| {
+                         unit: &'static str,
+                         min: f32,
+                         max: f32| {
+            let knob_value = self
+                .state
+                .active_timeline_editor()
+                .audio_clip_inspector_edits
+                .get(&(clip.id, inspector_field))
+                .and_then(|text| text.parse::<f32>().ok())
+                .unwrap_or(current_value);
+            let knob = canvas(EffectKnobWidget::for_audio_clip(
+                track_id,
+                clip.id,
+                inspector_field,
+                knob_value,
+                min,
+                max,
+                0.0,
+                track_color,
+            ))
+            .width(Length::Fixed(34.0))
+            .height(Length::Fixed(34.0));
             container(
-                column![
-                    text(label_text).size(8).color(th::text_muted()),
-                    row![
-                        self.view_audio_clip_field_input(
-                            track_id,
-                            clip.id,
-                            inspector_field,
-                            committed,
-                            62.0,
-                        ),
-                        text(unit).size(8).color(th::text_dim()),
+                row![
+                    column![
+                        text(label_text).size(8).color(th::text_muted()),
+                        row![
+                            self.view_audio_clip_field_input(
+                                track_id,
+                                clip.id,
+                                inspector_field,
+                                committed,
+                                52.0,
+                            ),
+                            text(unit).size(8).color(th::text_dim()),
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center),
                     ]
-                    .spacing(4)
-                    .align_y(iced::Alignment::Center),
+                    .spacing(3),
+                    knob,
                 ]
-                .spacing(2),
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
             )
             .padding([4, 6])
-            .width(Length::FillPortion(1))
+            .width(Length::Fixed(116.0))
             .style(|_theme: &Theme| container::Style {
                 background: Some(th::bg_surface().into()),
                 border: iced::Border {
@@ -699,47 +733,52 @@ impl App {
                 ..Default::default()
             })
         };
-        let gain_and_pitch = row![
+        let gain_and_pitch = column![
             parameter(
                 "GAIN",
                 AudioClipInspectorField::Gain,
+                clip.gain_db.db(),
                 format!("{:.1}", clip.gain_db.db()),
                 "dB",
+                ClipGainDb::MIN,
+                ClipGainDb::MAX,
             ),
             parameter(
                 "PITCH",
                 AudioClipInspectorField::Transpose,
+                f32::from(clip.transpose.semitones()),
                 clip.transpose.semitones().to_string(),
                 "st",
+                f32::from(ClipTranspose::MIN),
+                f32::from(ClipTranspose::MAX),
             ),
         ]
-        .spacing(5);
+        .spacing(6);
 
-        let range_row = |start_label: &'static str,
-                         start_field: AudioClipInspectorField,
+        let range_field = |label_text: &'static str,
+                           inspector_field: AudioClipInspectorField,
+                           committed: String| {
+            column![
+                text(label_text).size(8).color(th::text_dim()),
+                self.view_audio_clip_field_input(
+                    track_id,
+                    clip.id,
+                    inspector_field,
+                    committed,
+                    92.0,
+                ),
+            ]
+            .spacing(3)
+        };
+        let range_row = |start_field: AudioClipInspectorField,
                          start_value: String,
-                         end_label: &'static str,
                          end_field: AudioClipInspectorField,
                          end_value: String| {
             row![
-                text(start_label).size(8).color(th::text_dim()),
-                self.view_audio_clip_field_input(
-                    track_id,
-                    clip.id,
-                    start_field,
-                    start_value,
-                    62.0,
-                ),
-                text(end_label).size(8).color(th::text_dim()),
-                self.view_audio_clip_field_input(
-                    track_id,
-                    clip.id,
-                    end_field,
-                    end_value,
-                    62.0,
-                ),
+                range_field("START", start_field, start_value,),
+                range_field("END", end_field, end_value,),
             ]
-            .spacing(4)
+            .spacing(8)
             .align_y(iced::Alignment::Center)
         };
 
@@ -750,14 +789,9 @@ impl App {
             th::text_dim()
         };
         let loop_button = button(
-            row![
-                icons::icon(icons::REPEAT).size(10).color(loop_color),
-                text(if loop_enabled { "ON" } else { "OFF" })
-                    .size(8)
-                    .color(loop_color)
-            ]
-            .spacing(4)
-            .align_y(iced::Alignment::Center),
+            text(if loop_enabled { "LOOP ON" } else { "LOOP OFF" })
+                .size(9)
+                .color(loop_color),
         )
         .on_press(Message::Arrangement(ArrangementMsg::ToggleClipLoop(
             track_id, clip.id,
@@ -810,47 +844,41 @@ impl App {
         let source_bounds = column![
             text("SOURCE").size(8).color(th::text_muted()),
             range_row(
-                "START",
                 AudioClipInspectorField::SourceStart,
                 format!("{source_start:.3}"),
-                "END",
                 AudioClipInspectorField::SourceEnd,
                 format!("{source_end:.3}"),
             ),
         ]
         .spacing(3);
         let loop_bounds = column![
-            row![
-                text("LOOP").size(8).color(th::text_muted()),
-                horizontal_space(),
-                loop_button,
-            ]
-            .align_y(iced::Alignment::Center),
+            row![loop_button].align_y(iced::Alignment::Center),
             range_row(
-                "START",
                 AudioClipInspectorField::LoopStart,
                 format!("{loop_start:.3}"),
-                "END",
                 AudioClipInspectorField::LoopEnd,
                 format!("{loop_end:.3}"),
             ),
         ]
         .spacing(3);
 
+        let timing_controls = column![
+            self.view_audio_warp_row(track_id, clip),
+            divider(),
+            source_bounds,
+            loop_bounds,
+        ]
+        .spacing(6)
+        .width(Length::Fill);
+        let inspector_body = row![timing_controls, gain_and_pitch]
+            .spacing(8)
+            .align_y(iced::Alignment::Start);
         let inspector = container(
-            column![
-                clip_identity,
-                self.view_audio_warp_row(track_id, clip),
-                divider(),
-                gain_and_pitch,
-                divider(),
-                source_bounds,
-                loop_bounds,
-            ]
-            .spacing(6)
-            .padding([7, 8]),
+            column![clip_identity, inspector_body]
+                .spacing(6)
+                .padding([7, 8]),
         )
-        .width(Length::Fixed(232.0))
+        .width(Length::Fixed(388.0))
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_dark().into()),
@@ -949,64 +977,61 @@ impl App {
             .padding([3, 6])
             .style(utility_button_style);
 
-        let mode_button = |label: String, active: bool, message: Option<Message>| {
-            let control = button(center(text(label).size(9)).width(Length::Fill))
-                .width(Length::FillPortion(1))
-                .padding([4, 5])
-                .style(move |_theme: &Theme, status| {
-                    let hovered =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    button::Style {
-                        background: Some(
-                            if active {
-                                th::accent_dim()
-                            } else if hovered {
-                                th::bg_hover()
-                            } else {
-                                th::bg_surface()
-                            }
-                            .into(),
-                        ),
-                        text_color: if active { th::accent() } else { th::text_dim() },
-                        border: iced::Border {
-                            color: if active { th::accent() } else { th::divider() },
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                });
-            if let Some(message) = message {
-                control.on_press(message)
-            } else {
-                control
-            }
-        };
-        let raw = mode_button(
-            "RAW".into(),
-            !clip.warped,
-            clip.warped
-                .then_some(Message::Arrangement(ArrangementMsg::ClearClipWarp {
-                    track_id,
-                    clip_id,
-                })),
-        );
-        let warp = mode_button(
-            if clip.warped {
-                format!("WARP · {:.0}", self.state.transport.bpm)
-            } else {
-                "WARP".into()
-            },
-            clip.warped,
-            (!clip.warped).then_some(Message::WarpClipToProject {
+        let warped = clip.warped;
+        let warp_message = if warped {
+            Message::Arrangement(ArrangementMsg::ClearClipWarp { track_id, clip_id })
+        } else {
+            Message::WarpClipToProject {
                 location: self.active_timeline_location(),
                 track_id,
                 clip_id,
-            }),
-        );
+            }
+        };
+        let warp_button = button(
+            text(if warped { "WARP ON" } else { "WARP OFF" })
+                .size(10)
+                .color(if warped { th::accent() } else { th::text_dim() }),
+        )
+        .on_press(warp_message)
+        .padding([5, 10])
+        .style(move |_theme: &Theme, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: Some(
+                    if warped {
+                        th::accent_dim()
+                    } else if hovered {
+                        th::bg_hover()
+                    } else {
+                        th::bg_surface()
+                    }
+                    .into(),
+                ),
+                text_color: if warped { th::accent() } else { th::text_dim() },
+                border: iced::Border {
+                    color: if warped { th::accent() } else { th::divider() },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+        let warp_target = text(if warped {
+            format!("TO {:.0} BPM", self.state.transport.bpm)
+        } else {
+            "SOURCE TIMING".into()
+        })
+        .size(8)
+        .color(if warped {
+            th::accent()
+        } else {
+            th::text_muted()
+        });
 
         column![
-            row![raw, warp].spacing(3),
+            row![warp_button, horizontal_space(), warp_target]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
             row![
                 text("SOURCE BPM").size(8).color(th::text_muted()),
                 horizontal_space(),
@@ -1050,8 +1075,8 @@ impl App {
                     field,
                 },
             ))
-            .size(10)
-            .padding([2, 5])
+            .size(11)
+            .padding([4, 6])
             .width(Length::Fixed(width))
             .style(audio_clip_value_input_style)
             .into()

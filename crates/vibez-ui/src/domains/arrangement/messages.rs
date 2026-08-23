@@ -181,6 +181,12 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         field: AudioClipInspectorField,
     },
+    SetAudioClipInspectorValue {
+        track_id: TrackId,
+        clip_id: ClipId,
+        field: AudioClipInspectorField,
+        value: f32,
+    },
     SetClipNominalBpm {
         track_id: TrackId,
         clip_id: ClipId,
@@ -230,6 +236,7 @@ impl ArrangementMsg {
                 | Self::CreateNoteClipFromSelection(_)
                 | Self::AudioClipInspectorInputChanged { .. }
                 | Self::SubmitAudioClipInspectorField { .. }
+                | Self::SetAudioClipInspectorValue { .. }
                 | Self::SetClipNominalBpm { .. }
                 | Self::ClearClipWarp { .. }
         )

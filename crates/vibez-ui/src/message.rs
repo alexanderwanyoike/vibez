@@ -706,6 +706,7 @@ pub enum Message {
     },
     /// Background audio-quantize computation finished.
     AudioQuantizeReady {
+        location: TimelineLocation,
         track_id: TrackId,
         old_clip_id: ClipId,
         result: Result<AudioQuantizeSuccess, String>,
