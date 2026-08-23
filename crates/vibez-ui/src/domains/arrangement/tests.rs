@@ -780,6 +780,94 @@ fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
 }
 
 #[test]
+fn enabling_a_mixed_loop_selection_preserves_existing_regions() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let mut engine = RecordingEngine::default();
+    arrangement.update(
+        ArrangementMsg::AddMidiTrack,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let track_id = arrangement.tracks[1].id;
+    let existing_id = ClipId::new();
+    let disabled_id = ClipId::new();
+    for (id, loop_enabled, loop_start_beats, loop_end_beats) in [
+        (existing_id, true, 2.0, 6.0),
+        (disabled_id, false, 0.0, 0.0),
+    ] {
+        arrangement.tracks[1].note_clips.push(UiNoteClip {
+            id,
+            name: "Pattern".to_string(),
+            position_beats: 0.0,
+            duration_beats: 8.0,
+            notes: Vec::new(),
+            selected_notes: HashSet::new(),
+            loop_enabled,
+            loop_start_beats,
+            loop_end_beats,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
+        });
+        arrangement
+            .selected_clips
+            .insert(ArrangementSelection::NoteClip {
+                track_id,
+                clip_id: id,
+            });
+    }
+
+    arrangement.update(
+        ArrangementMsg::ToggleSelectedClipLoop,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let content = &arrangement.tracks[1];
+    let existing = content
+        .note_clips
+        .iter()
+        .find(|clip| clip.id == existing_id)
+        .unwrap();
+    let enabled = content
+        .note_clips
+        .iter()
+        .find(|clip| clip.id == disabled_id)
+        .unwrap();
+    assert_eq!(
+        (existing.loop_start_beats, existing.loop_end_beats),
+        (2.0, 6.0)
+    );
+    assert_eq!(
+        (enabled.loop_start_beats, enabled.loop_end_beats),
+        (0.0, 8.0)
+    );
+}
+
+#[test]
+fn extending_audio_does_not_enable_looping_implicitly() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 200);
+    let mut engine = RecordingEngine::default();
+
+    arrangement.update(
+        ArrangementMsg::ResizeAudioClip {
+            track_id,
+            clip_id,
+            new_duration: 400,
+        },
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
+    );
+
+    let clip = &arrangement.tracks[0].clips[0];
+    assert_eq!(clip.duration, 400);
+    assert!(!clip.loop_enabled);
+    assert_eq!((clip.loop_start, clip.loop_end), (0, 0));
+}
+
+#[test]
 fn duplicate_preserves_audio_and_midi_loop_settings() {
     let mut a = arrangement_with_tracks(1);
     let (audio_tid, audio_id) = add_audio_clip(&mut a, 0, 0, 300);

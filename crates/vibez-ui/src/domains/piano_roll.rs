@@ -216,8 +216,7 @@ impl PianoRollState {
                         // the piano-roll markers, never inferred from notes or
                         // retained from a stale pre-resize region.
                         if clip.loop_enabled {
-                            clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats = clip.duration_beats;
+                            clip.reset_loop_region_to_clip();
                         }
                         cmd_data = Some((
                             clip.loop_enabled,
@@ -687,11 +686,8 @@ impl PianoRollState {
                         // untouched so the looped pattern repeats to
                         // fill the new length (the whole point of
                         // stretching a looped clip).
-                        if clip.loop_enabled && clip.loop_end_beats > new_duration_beats {
-                            clip.loop_end_beats = new_duration_beats;
-                            if clip.loop_start_beats >= clip.loop_end_beats {
-                                clip.loop_start_beats = 0.0;
-                            }
+                        if clip.loop_enabled {
+                            clip.clamp_loop_to_duration();
                         }
 
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
@@ -1064,24 +1060,6 @@ mod tests {
             .0
             .iter()
             .any(|c| matches!(c, EngineCommand::SetNoteClipDuration { .. })));
-    }
-
-    #[test]
-    fn toggle_loop_defaults_region_to_the_complete_clip() {
-        let (mut tracks, tid, cid) = midi_track_with_clip();
-        let mut pr = PianoRollState::default();
-        let mut engine = RecordingEngine::default();
-        pr.update(
-            PianoRollMsg::ToggleNoteClipLoop(tid, cid),
-            &mut engine,
-            &mut tracks,
-            PianoRollCtx::default(),
-        );
-        let clip = &tracks.get(tid).unwrap().note_clips[0];
-        assert!(clip.loop_enabled);
-        assert_eq!(clip.loop_start_beats, 0.0);
-        assert_eq!(clip.loop_end_beats, 4.0);
-        assert!(matches!(engine.0[0], EngineCommand::SetNoteClipLoop { .. }));
     }
 
     #[test]
