@@ -7,6 +7,7 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::FrameClipTimeline;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::ClipPlaybackDirection;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::message::Message;
@@ -32,6 +33,7 @@ pub struct AudioClipDetailWidget {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub playback_direction: ClipPlaybackDirection,
 }
 
 #[derive(Debug, Default)]
@@ -92,11 +94,20 @@ impl AudioClipDetailWidget {
         let local = source_frame
             .saturating_sub(self.source_offset)
             .min(visible_frames);
-        (local as f64 / visible_frames as f64 * f64::from(bounds.width)) as f32
+        let fraction = local as f64 / visible_frames as f64;
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
+        (fraction * f64::from(bounds.width)) as f32
     }
 
     fn x_to_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
         let fraction = f64::from(x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
         let local = fraction * self.duration_samples as f64;
         let local = if self.grid.snap_enabled {
             let beat = local / self.samples_per_beat();
@@ -210,6 +221,13 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         let loop_start = self.loop_start as usize;
         let loop_end = self.loop_end as usize;
         let loop_len = if looping { loop_end - loop_start } else { 0 };
+        let timeline = FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration_samples,
+            self.loop_enabled,
+        );
 
         if num_frames > 0 {
             let pixels = w as usize;
@@ -229,7 +247,11 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     .saturating_sub(source_offset)
                     .saturating_add(loop_len);
                 while boundary < num_frames {
-                    let bx = boundary as f32 / num_frames as f32 * w;
+                    let forward_x = boundary as f32 / num_frames as f32 * w;
+                    let bx = match self.playback_direction {
+                        ClipPlaybackDirection::Forward => forward_x,
+                        ClipPlaybackDirection::Reverse => w - forward_x,
+                    };
                     let line = canvas::Path::line(
                         iced::Point::new(bx, AUDIO_RULER_HEIGHT),
                         iced::Point::new(bx, h),
@@ -267,32 +289,28 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             };
 
             for px in 0..pixels {
-                let clip_frame_start = px * num_frames / pixels.max(1);
-                let clip_frame_end = (px + 1) * num_frames / pixels.max(1);
+                let visible_start = px * num_frames / pixels.max(1);
+                let visible_end = (px + 1) * num_frames / pixels.max(1);
+                let (clip_frame_start, clip_frame_end) = match self.playback_direction {
+                    ClipPlaybackDirection::Forward => (visible_start, visible_end),
+                    ClipPlaybackDirection::Reverse => {
+                        (num_frames - visible_end, num_frames - visible_start)
+                    }
+                };
                 let span = clip_frame_end.saturating_sub(clip_frame_start).max(1);
 
                 let (min_val, max_val) = if !looping {
                     // Non-looped: direct contiguous range
-                    let src_start = self.source_offset as usize + clip_frame_start;
-                    let src_end = self.source_offset as usize + clip_frame_end;
+                    let src_start = timeline.source_at(clip_frame_start as u64) as usize;
+                    let src_end = timeline.source_at(clip_frame_end as u64) as usize;
                     peak_for_range(src_start, src_end)
                 } else if span >= loop_len {
                     // Pixel covers at least one full loop cycle — use cached full peak
                     full_loop_peak.unwrap()
                 } else {
                     // Map start/end into source positions within the loop
-                    let raw_start = self.source_offset as usize + clip_frame_start;
-                    let raw_end = self.source_offset as usize + clip_frame_end;
-                    let src_start = if raw_start >= loop_end {
-                        loop_start + (raw_start - loop_start) % loop_len
-                    } else {
-                        raw_start
-                    };
-                    let src_end = if raw_end >= loop_end {
-                        loop_start + (raw_end - loop_start) % loop_len
-                    } else {
-                        raw_end
-                    };
+                    let src_start = timeline.source_at(clip_frame_start as u64) as usize;
+                    let src_end = timeline.source_at(clip_frame_end as u64) as usize;
 
                     if src_start <= src_end {
                         // Contiguous segment
@@ -340,6 +358,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             h,
             theme::text_dim(),
             theme::bg_surface(),
+            self.playback_direction == ClipPlaybackDirection::Forward,
         );
 
         let ruler_border = canvas::Path::line(
@@ -529,6 +548,7 @@ mod tests {
             loop_enabled: true,
             loop_start: 100,
             loop_end: 500,
+            playback_direction: ClipPlaybackDirection::Forward,
         }
     }
 
@@ -623,6 +643,19 @@ mod tests {
         assert_eq!(widget.total_beats(), 8.0);
         assert_eq!(widget.beat_to_x(4.0, &bounds), 400.0);
         assert_eq!(widget.beat_to_x(8.0, &bounds), 800.0);
+    }
+
+    #[test]
+    fn reverse_mirrors_source_markers_and_pointer_mapping() {
+        let mut widget = widget();
+        widget.playback_direction = ClipPlaybackDirection::Reverse;
+        widget.grid.snap_enabled = false;
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+
+        assert_eq!(widget.source_to_x(100, &bounds), 800.0);
+        assert_eq!(widget.source_to_x(300, &bounds), 600.0);
+        assert_eq!(widget.x_to_local_frame(600.0, &bounds), 200);
+        assert_eq!(widget.x_to_local_frame(800.0, &bounds), 0);
     }
 
     #[test]

@@ -68,6 +68,7 @@ struct PeakCacheKey {
     loop_enabled: bool,
     loop_start: u64,
     loop_end: u64,
+    playback_direction: vibez_core::track::ClipPlaybackDirection,
 }
 
 struct PeakCacheEntry {
@@ -88,6 +89,7 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         loop_enabled: clip.loop_enabled,
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
+        playback_direction: clip.playback_direction,
     };
     if let Some(peaks) = PEAK_CACHE.with(|cache| {
         cache.borrow().get(&key).and_then(|entry| {
@@ -128,43 +130,45 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         None
     };
 
-    let peaks = Arc::new(
-        (0..num_peaks)
-            .map(|i| {
-                let cf_start = i * clip.duration as usize / num_peaks;
-                let cf_end = (i + 1) * clip.duration as usize / num_peaks;
-                let span = cf_end.saturating_sub(cf_start).max(1);
+    let mut peaks: Vec<_> = (0..num_peaks)
+        .map(|i| {
+            let cf_start = i * clip.duration as usize / num_peaks;
+            let cf_end = (i + 1) * clip.duration as usize / num_peaks;
+            let span = cf_end.saturating_sub(cf_start).max(1);
 
-                if !looping {
-                    let src_start = timeline.source_at(cf_start as u64) as usize;
-                    let source_end =
-                        clip.source_offset
-                            .saturating_add(clip.duration)
-                            .min(clip.audio.num_frames() as u64) as usize;
-                    if src_start >= source_end {
-                        (0.0, 0.0)
-                    } else {
-                        let src_end = (timeline.source_at(cf_end as u64) as usize).min(source_end);
-                        peak_for_range(src_start, src_end)
-                    }
-                } else if span >= loop_len {
-                    full_loop_peak.unwrap()
+            if !looping {
+                let src_start = timeline.source_at(cf_start as u64) as usize;
+                let source_end = clip
+                    .source_offset
+                    .saturating_add(clip.duration)
+                    .min(clip.audio.num_frames() as u64) as usize;
+                if src_start >= source_end {
+                    (0.0, 0.0)
                 } else {
-                    let src_start = timeline.source_at(cf_start as u64) as usize;
-                    let src_end = timeline.source_at(cf_end as u64) as usize;
-
-                    if src_start <= src_end {
-                        peak_for_range(src_start, src_end.max(src_start + 1))
-                    } else {
-                        // Wraps around loop boundary
-                        let (mn1, mx1) = peak_for_range(src_start, loop_end);
-                        let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
-                        (mn1.min(mn2), mx1.max(mx2))
-                    }
+                    let src_end = (timeline.source_at(cf_end as u64) as usize).min(source_end);
+                    peak_for_range(src_start, src_end)
                 }
-            })
-            .collect(),
-    );
+            } else if span >= loop_len {
+                full_loop_peak.unwrap()
+            } else {
+                let src_start = timeline.source_at(cf_start as u64) as usize;
+                let src_end = timeline.source_at(cf_end as u64) as usize;
+
+                if src_start <= src_end {
+                    peak_for_range(src_start, src_end.max(src_start + 1))
+                } else {
+                    // Wraps around loop boundary
+                    let (mn1, mx1) = peak_for_range(src_start, loop_end);
+                    let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
+                    (mn1.min(mn2), mx1.max(mx2))
+                }
+            }
+        })
+        .collect();
+    if clip.playback_direction == vibez_core::track::ClipPlaybackDirection::Reverse {
+        peaks.reverse();
+    }
+    let peaks = Arc::new(peaks);
     PEAK_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.len() >= 256 {
@@ -219,6 +223,7 @@ mod performance_tests {
     use std::sync::Arc;
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::id::ClipId;
+    use vibez_core::track::ClipPlaybackDirection;
 
     #[test]
     fn duplicated_long_clips_reuse_cached_waveform_peaks() {
@@ -241,6 +246,7 @@ mod performance_tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -254,5 +260,42 @@ mod performance_tests {
             assert_eq!(duplicate_peaks.len(), 1000);
             assert!(Arc::ptr_eq(&first, &duplicate_peaks));
         }
+    }
+
+    #[test]
+    fn reverse_uses_a_distinct_cache_entry_and_mirrors_waveform_peaks() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![[vec![0.25; 100], vec![0.75; 100]].concat()],
+            sample_rate: 100,
+        });
+        let mut clip = UiClip {
+            id: ClipId::new(),
+            name: "Two halves.wav".into(),
+            audio,
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 200,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 200,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: ClipPlaybackDirection::Forward,
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        };
+
+        let forward = compute_clip_peaks(&clip);
+        clip.playback_direction = ClipPlaybackDirection::Reverse;
+        let reverse = compute_clip_peaks(&clip);
+
+        assert_eq!(forward.as_slice(), &[(0.0, 0.25), (0.0, 0.75)]);
+        assert_eq!(reverse.as_slice(), &[(0.0, 0.75), (0.0, 0.25)]);
+        assert!(!Arc::ptr_eq(&forward, &reverse));
     }
 }

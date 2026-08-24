@@ -12,8 +12,8 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_core::track::{
-    AudioInputRoute, ClipFades, ClipGainDb, ClipTranspose, DrumPadState, InputMonitoring,
-    MediaSourceRef,
+    AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
+    InputMonitoring, MediaSourceRef,
 };
 
 /// A clip as represented in the UI.
@@ -38,6 +38,7 @@ pub struct UiClip {
     pub loop_end: u64,
     pub gain_db: ClipGainDb,
     pub fades: ClipFades,
+    pub playback_direction: ClipPlaybackDirection,
     pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.
@@ -127,6 +128,13 @@ impl UiClip {
 
     pub(crate) fn clamp_fades_to_clip(&mut self) {
         self.fades = self.fades.clamped_to(self.duration);
+    }
+
+    pub(crate) fn source_frame_at(&self, clip_frame: u64) -> u64 {
+        self.timeline().source_at(
+            self.playback_direction
+                .map_clip_frame(clip_frame, self.duration),
+        )
     }
 }
 

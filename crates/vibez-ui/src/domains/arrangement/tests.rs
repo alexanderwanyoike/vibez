@@ -1,12 +1,14 @@
 //! Arrangement domain unit tests.
 
+use std::sync::Arc;
+
 use super::test_support::*;
 use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::{AudioClipInspectorField, UiClip};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
-use vibez_core::track::AudioInputRoute;
+use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection};
 
 #[test]
 fn add_track_selects_it_and_names_uniquely() {
@@ -283,6 +285,7 @@ fn add_audio_clip(
         loop_end: 0,
         gain_db: Default::default(),
         fades: Default::default(),
+        playback_direction: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -390,6 +393,76 @@ fn split_audio_clip_replaces_clip_with_two_halves() {
         .0
         .iter()
         .any(|command| matches!(command, EngineCommand::RemoveClip(..))));
+}
+
+#[test]
+fn reverse_toggle_updates_the_clip_and_engine_without_touching_its_audio() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
+    let original_audio = Arc::clone(&a.tracks[0].clips[0].audio);
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::ToggleClipReverse(track_id, clip_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(
+        a.tracks[0].clips[0].playback_direction,
+        ClipPlaybackDirection::Reverse
+    );
+    assert!(Arc::ptr_eq(&original_audio, &a.tracks[0].clips[0].audio));
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipPlaybackDirection {
+            track_id: command_track,
+            clip_id: command_clip,
+            direction: ClipPlaybackDirection::Reverse,
+        }) if *command_track == track_id && *command_clip == clip_id
+    ));
+
+    a.update(
+        ArrangementMsg::ToggleClipReverse(track_id, clip_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(
+        a.tracks[0].clips[0].playback_direction,
+        ClipPlaybackDirection::Forward
+    );
+}
+
+#[test]
+fn splitting_a_reversed_clip_preserves_both_audible_fragments() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
+    let original = &mut a.tracks[0].clips[0];
+    original.playback_direction = ClipPlaybackDirection::Reverse;
+    let expected: Vec<_> = (0..original.duration)
+        .map(|frame| original.source_frame_at(frame))
+        .collect();
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::SplitAudioClip {
+            track_id,
+            clip_id,
+            split_position: 400,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let mut halves: Vec<_> = a.tracks[0].clips.iter().collect();
+    halves.sort_by_key(|clip| clip.position);
+    let actual: Vec<_> = halves
+        .iter()
+        .flat_map(|clip| (0..clip.duration).map(|frame| clip.source_frame_at(frame)))
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(halves[0].source_offset, 600);
+    assert_eq!(halves[1].source_offset, 0);
 }
 
 #[test]
@@ -1836,6 +1909,41 @@ fn split_looped_audio_preserves_source_phase() {
     assert!(halves.iter().all(|clip| clip.loop_enabled));
     assert_eq!(halves[1].source_offset, 50);
     assert_eq!((halves[1].loop_start, halves[1].loop_end), (0, 100));
+}
+
+#[test]
+fn split_looped_reverse_audio_preserves_the_complete_audible_sequence() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 300);
+    let clip = &mut a.tracks[0].clips[0];
+    clip.loop_enabled = true;
+    clip.loop_start = 0;
+    clip.loop_end = 100;
+    clip.playback_direction = ClipPlaybackDirection::Reverse;
+    let expected: Vec<_> = (0..clip.duration)
+        .map(|frame| clip.source_frame_at(frame))
+        .collect();
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::SplitAudioClip {
+            track_id,
+            clip_id,
+            split_position: 150,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let mut halves: Vec<_> = a.tracks[0].clips.iter().collect();
+    halves.sort_by_key(|clip| clip.position);
+    let actual: Vec<_> = halves
+        .iter()
+        .flat_map(|clip| (0..clip.duration).map(|frame| clip.source_frame_at(frame)))
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(halves[0].start_marker, 50);
+    assert_eq!(halves[1].start_marker, 0);
 }
 
 #[test]

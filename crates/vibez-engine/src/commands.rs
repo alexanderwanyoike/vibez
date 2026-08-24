@@ -90,6 +90,7 @@ pub enum EngineCommand {
         loop_end: u64,
         linear_gain: f32,
         fades: vibez_core::track::ClipFades,
+        playback_direction: vibez_core::track::ClipPlaybackDirection,
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
@@ -133,6 +134,12 @@ pub enum EngineCommand {
         track_id: TrackId,
         clip_id: ClipId,
         fades: vibez_core::track::ClipFades,
+    },
+    /// Change traversal direction without replacing decoded audio.
+    SetClipPlaybackDirection {
+        track_id: TrackId,
+        clip_id: ClipId,
+        direction: vibez_core::track::ClipPlaybackDirection,
     },
     /// Commit source and loop boundaries without replacing Clip media.
     SetClipBounds {
@@ -467,6 +474,7 @@ mod tests {
             loop_end: 0,
             linear_gain: 1.0,
             fades: Default::default(),
+            playback_direction: Default::default(),
         };
         let _remove_clip = EngineCommand::RemoveClip(tid, cid);
         let _move_clip = EngineCommand::MoveClip {

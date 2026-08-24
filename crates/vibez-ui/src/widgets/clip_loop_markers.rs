@@ -85,25 +85,37 @@ pub(crate) fn hit_test(
 }
 
 pub(crate) fn draw_brace(frame: &mut canvas::Frame, start_x: f32, end_x: f32, color: Color) {
-    if end_x <= start_x {
+    if end_x == start_x {
         return;
     }
+    let left = start_x.min(end_x);
+    let right = start_x.max(end_x);
 
     frame.fill_rectangle(
-        Point::new(start_x, 1.0),
-        iced::Size::new(end_x - start_x, 3.0),
+        Point::new(left, 1.0),
+        iced::Size::new(right - left, 3.0),
         color,
     );
 
+    let start_inside = if start_x < end_x {
+        start_x + HANDLE_WIDTH
+    } else {
+        start_x - HANDLE_WIDTH
+    };
     let start_handle = canvas::Path::new(|path| {
         path.move_to(Point::new(start_x, 1.0));
-        path.line_to(Point::new(start_x + HANDLE_WIDTH, 1.0));
+        path.line_to(Point::new(start_inside, 1.0));
         path.line_to(Point::new(start_x, 10.0));
         path.close();
     });
+    let end_inside = if end_x > start_x {
+        end_x - HANDLE_WIDTH
+    } else {
+        end_x + HANDLE_WIDTH
+    };
     let end_handle = canvas::Path::new(|path| {
         path.move_to(Point::new(end_x, 1.0));
-        path.line_to(Point::new(end_x - HANDLE_WIDTH, 1.0));
+        path.line_to(Point::new(end_inside, 1.0));
         path.line_to(Point::new(end_x, 10.0));
         path.close();
     });
@@ -124,6 +136,7 @@ pub(crate) fn draw_start(
     line_end: f32,
     color: Color,
     fill: Color,
+    points_right: bool,
 ) {
     let stem = canvas::Path::line(
         Point::new(marker_x, START_MARKER_BOTTOM),
@@ -137,11 +150,13 @@ pub(crate) fn draw_start(
     );
 
     let handle = canvas::Path::new(|path| {
+        let tip_x = if points_right {
+            marker_x + START_MARKER_WIDTH
+        } else {
+            marker_x - START_MARKER_WIDTH
+        };
         path.move_to(Point::new(marker_x, START_MARKER_TOP));
-        path.line_to(Point::new(
-            marker_x + START_MARKER_WIDTH,
-            START_MARKER_MIDDLE,
-        ));
+        path.line_to(Point::new(tip_x, START_MARKER_MIDDLE));
         path.line_to(Point::new(marker_x, START_MARKER_BOTTOM));
         path.close();
     });

@@ -244,19 +244,22 @@ fn render_offline_inner(
                 continue;
             }
             match req.clip_audio.get(&clip.id) {
-                Some(audio) => engine.playback_source.clips.push(EngineClip {
-                    id: clip.id,
-                    audio: Arc::clone(audio),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    start_marker: clip.resolved_start_marker(audio.num_frames() as u64),
-                    duration: clip.duration,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                    linear_gain: clip.gain_db.linear(),
-                    fades: clip.fades.clamped_to(clip.duration),
-                }),
+                Some(audio) => {
+                    engine.playback_source.clips.push(EngineClip {
+                        id: clip.id,
+                        audio: Arc::clone(audio),
+                        position: clip.position,
+                        source_offset: clip.source_offset,
+                        start_marker: clip.resolved_start_marker(audio.num_frames() as u64),
+                        duration: clip.duration,
+                        loop_enabled: clip.loop_enabled,
+                        loop_start: clip.loop_start,
+                        loop_end: clip.loop_end,
+                        linear_gain: clip.gain_db.linear(),
+                        fades: clip.fades.clamped_to(clip.duration),
+                        playback_direction: clip.playback_direction,
+                    });
+                }
                 None => warnings.push(format!("Clip '{}' audio missing, skipped", clip.name)),
             }
         }
@@ -799,6 +802,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -865,6 +869,7 @@ mod tests {
             loop_end: 0,
             gain_db: vibez_core::track::ClipGainDb::new(-6.0).unwrap(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -902,6 +907,64 @@ mod tests {
     }
 
     #[test]
+    fn offline_render_uses_the_same_reverse_traversal_as_live_playback() {
+        let mut track = bare_track("audio");
+        track.pan = DEFAULT_TRACK_PAN;
+        let track_id = track.id;
+        let clip_id = ClipId::new();
+        let clip = ClipInfo {
+            id: clip_id,
+            track_id,
+            name: "reverse".into(),
+            position: 0,
+            source_offset: 0,
+            start_marker: None,
+            duration: 4,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 4,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        };
+        let request = BounceRequest {
+            master: None,
+            buses: Vec::new(),
+            tracks: vec![track],
+            audio_clips: vec![clip],
+            note_clips: Vec::new(),
+            clip_audio: HashMap::from([(
+                clip_id,
+                Arc::new(DecodedAudio {
+                    channels: vec![vec![1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 44_100,
+                }),
+            )]),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 4),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+
+        let result = render_offline(&request);
+        let pan = std::f32::consts::FRAC_1_SQRT_2;
+        assert_eq!(
+            result.audio.channels[0],
+            vec![4.0 * pan, 3.0 * pan, 2.0 * pan, pan]
+        );
+        assert_eq!(result.audio.channels[1], result.audio.channels[0]);
+    }
+
+    #[test]
     fn mute_silences_master_bounce() {
         let mut track = bare_track("audio");
         track.mute = true;
@@ -923,6 +986,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -972,6 +1036,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1022,6 +1087,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1042,6 +1108,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1310,6 +1377,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1384,6 +1452,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

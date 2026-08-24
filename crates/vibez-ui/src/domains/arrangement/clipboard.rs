@@ -347,6 +347,7 @@ impl TimelineEditorState {
                         loop_end: clip.loop_end,
                         linear_gain: clip.gain_db.linear(),
                         fades: clip.fades,
+                        playback_direction: clip.playback_direction,
                     });
                     selected.insert(ArrangementSelection::AudioClip {
                         track_id,

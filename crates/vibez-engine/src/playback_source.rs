@@ -13,7 +13,7 @@ use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
-use vibez_core::track::ClipFades;
+use vibez_core::track::{ClipFades, ClipPlaybackDirection};
 
 #[cfg(test)]
 thread_local! {
@@ -44,6 +44,7 @@ pub struct EngineClip {
     /// Pre-channel scalar resolved on the UI thread from the persisted dB value.
     pub linear_gain: f32,
     pub fades: ClipFades,
+    pub playback_direction: ClipPlaybackDirection,
 }
 
 impl EngineClip {
@@ -329,6 +330,16 @@ impl PreparedPlaybackSource {
         }
     }
 
+    pub fn set_clip_playback_direction(
+        &mut self,
+        clip_id: ClipId,
+        direction: ClipPlaybackDirection,
+    ) {
+        if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
+            clip.playback_direction = direction;
+        }
+    }
+
     /// Render this resident source into a caller-owned channel buffer.
     /// Channel processing remains outside this type.
     pub fn render_audio(
@@ -363,9 +374,12 @@ impl PreparedPlaybackSource {
                 if global_frame < clip.position || global_frame >= clip.end_position() {
                     continue;
                 }
-                let clip_frame = (global_frame - clip.position) as usize;
-                let source_frame = clip.timeline().source_at(clip_frame as u64) as usize;
-                let fade_gain = clip.fades.gain_at(clip_frame as u64, clip.duration);
+                let clip_frame = global_frame - clip.position;
+                let source_frame = clip.timeline().source_at(
+                    clip.playback_direction
+                        .map_clip_frame(clip_frame, clip.duration),
+                ) as usize;
+                let fade_gain = clip.fades.gain_at(clip_frame, clip.duration);
                 for ch in 0..channels {
                     let sample = if source_frame >= source_end {
                         0.0
@@ -506,6 +520,7 @@ mod tests {
             loop_end: 0,
             linear_gain: 1.0,
             fades: Default::default(),
+            playback_direction: Default::default(),
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
@@ -539,6 +554,7 @@ mod tests {
                 loop_end: 8,
                 linear_gain: 1.0,
                 fades: ClipFades::new(4, 4, 8),
+                playback_direction: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -568,6 +584,7 @@ mod tests {
                 loop_end: 4,
                 linear_gain: 1.0,
                 fades: ClipFades::new(2, 0, 8),
+                playback_direction: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -576,6 +593,74 @@ mod tests {
 
         assert!(source.render_audio(&mut output, 0, 8, 1, None));
         assert_eq!(output, vec![0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn reverse_traverses_the_resolved_clip_without_mutating_its_audio() {
+        let clip_id = ClipId::new();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![(0..8).map(|frame| frame as f32).collect()],
+            sample_rate: 48_000,
+        });
+        let original = Arc::clone(&audio);
+        let mut source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 8,
+                linear_gain: 1.0,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        source.set_clip_playback_direction(clip_id, ClipPlaybackDirection::Reverse);
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0]);
+        assert_eq!(
+            original.channels[0],
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        );
+    }
+
+    #[test]
+    fn reverse_traverses_the_complete_visible_loop_and_keeps_fades_on_timeline_edges() {
+        let clip_id = ClipId::new();
+        let mut source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio: Arc::new(DecodedAudio {
+                    channels: vec![vec![1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 48_000,
+                }),
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 1.0,
+                fades: ClipFades::new(2, 2, 8),
+                playback_direction: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        source.set_clip_playback_direction(clip_id, ClipPlaybackDirection::Reverse);
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 1.5, 2.0, 1.0, 4.0, 3.0, 1.0, 0.0]);
     }
 
     #[test]
@@ -599,6 +684,7 @@ mod tests {
                     loop_end: 8,
                     linear_gain: 1.0,
                     fades: ClipFades::default().linked_fade_out(4, incoming_id, 8),
+                    playback_direction: Default::default(),
                 },
                 EngineClip {
                     id: incoming_id,
@@ -615,6 +701,7 @@ mod tests {
                     loop_end: 8,
                     linear_gain: 1.0,
                     fades: ClipFades::default().linked_fade_in(4, outgoing_id, 8),
+                    playback_direction: Default::default(),
                 },
             ],
             Vec::new(),
@@ -648,6 +735,7 @@ mod tests {
                 loop_end: 0,
                 linear_gain: 1.0,
                 fades: Default::default(),
+                playback_direction: Default::default(),
             }],
             Vec::new(),
             Vec::new(),

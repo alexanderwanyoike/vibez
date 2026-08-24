@@ -686,6 +686,11 @@ impl App {
                 ));
                 if !is_note_clip {
                     col = col.push(menu_btn(
+                        icons::SKIP_BACK,
+                        "Toggle Reverse".into(),
+                        Message::Arrangement(ArrangementMsg::ToggleClipReverse(track_id, clip_id)),
+                    ));
+                    col = col.push(menu_btn(
                         icons::AUDIO_WAVEFORM,
                         "Crossfade Selected Clips".into(),
                         Message::Arrangement(ArrangementMsg::CrossfadeSelectedAudioClips),
