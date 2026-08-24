@@ -7,6 +7,7 @@ use iced::{Color, Rectangle, Renderer};
 use crate::theme;
 use crate::timeline_geometry::TimelineGeometry;
 
+use super::fade_drag::fade_handle_xs;
 use super::*;
 
 fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {

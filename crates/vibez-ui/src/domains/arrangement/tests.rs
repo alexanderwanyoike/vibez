@@ -765,6 +765,35 @@ fn inspector_fades_commit_in_frames_and_clamp_as_one_pair() {
 }
 
 #[test]
+fn unchanged_timeline_fade_is_not_an_edit() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 44_100);
+    a.tracks[0].clips[0].fades = vibez_core::track::ClipFades::new(11_025, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::SetAudioClipFade {
+            track_id,
+            clip_id,
+            edge: crate::state::AudioClipFadeEdge::In,
+            frames: 11_025,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert!(engine.0.is_empty());
+    assert!(ArrangementMsg::SetAudioClipFade {
+        track_id,
+        clip_id,
+        edge: crate::state::AudioClipFadeEdge::In,
+        frames: 11_025,
+    }
+    .defers_project_edit());
+}
+
+#[test]
 fn inspector_knobs_commit_gain_and_rounded_transpose_values() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);

@@ -194,14 +194,17 @@ pub(super) const CLIP_Y: f32 = 4.0;
 pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
 pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
+mod clip_drag;
 mod clips;
 mod clips_draw;
 #[cfg(test)]
 mod clips_tests;
+mod fade_drag;
 pub mod marquee;
 mod minimap;
 mod ruler;
 
+pub use clip_drag::ClipDragAction;
 pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;

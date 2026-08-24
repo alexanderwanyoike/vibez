@@ -91,9 +91,7 @@ impl App {
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         let deferred_arrangement_project_edit = matches!(
             &message,
-            Message::Arrangement(msg)
-                if msg.is_clipboard_project_edit()
-                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. })
+            Message::Arrangement(msg) if msg.defers_project_edit()
         );
         let should_mark_dirty = matches!(
             &message,
@@ -210,9 +208,7 @@ impl App {
                 self.apply_devices_action(action);
             }
             Message::Arrangement(msg) => {
-                let deferred_snapshot = (msg.is_clipboard_project_edit()
-                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. }))
-                .then(|| self.take_snapshot());
+                let deferred_snapshot = msg.defers_project_edit().then(|| self.take_snapshot());
                 let playhead_beats = self.focused_editor_playhead_beats();
                 let samples_per_beat = if self.state.transport.bpm > 0.0 {
                     60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
