@@ -105,6 +105,7 @@ impl TimelineEditorState {
         clip.audio = Arc::clone(&success.audio);
         let replaces_geometry = success.geometry.is_some();
         if let Some(geometry) = success.geometry {
+            clip.fades = clip.fades.scaled(clip.duration, geometry.duration);
             clip.source_offset = geometry.source_offset;
             clip.start_marker = geometry.start_marker;
             clip.duration = geometry.duration;
@@ -119,6 +120,11 @@ impl TimelineEditorState {
                 start_marker: geometry.start_marker,
                 loop_start: geometry.loop_start,
                 loop_end: geometry.loop_end,
+            });
+            engine.send(EngineCommand::SetClipFades {
+                track_id,
+                clip_id,
+                fades: clip.fades,
             });
         } else {
             engine.send(EngineCommand::ReplaceClipBuffer {
@@ -194,6 +200,32 @@ impl TimelineEditorState {
                 });
                 action.status = Some(format!("Clip Gain {:+.1} dB", gain.db()));
             }
+            AudioClipInspectorField::FadeIn | AudioClipInspectorField::FadeOut => {
+                let Some(frames) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
+                    action.status = Some("Fade length must be a positive time in seconds".into());
+                    return action;
+                };
+                let fades = match field {
+                    AudioClipInspectorField::FadeIn => {
+                        clip.fades.with_fade_in(frames, clip.duration)
+                    }
+                    AudioClipInspectorField::FadeOut => {
+                        clip.fades.with_fade_out(frames, clip.duration)
+                    }
+                    _ => unreachable!(),
+                };
+                clip.fades = fades;
+                engine.send(EngineCommand::SetClipFades {
+                    track_id,
+                    clip_id,
+                    fades,
+                });
+                action.status = Some(format!(
+                    "Clip fades {:.3} s in, {:.3} s out",
+                    format_seconds(fades.fade_in_frames()),
+                    format_seconds(fades.fade_out_frames())
+                ));
+            }
             AudioClipInspectorField::SourceBpm => {
                 let Some(bpm) = text
                     .parse::<f64>()
@@ -233,6 +265,7 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
+                clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 clip.loop_start = clip.loop_start.clamp(new_start, new_end);
                 clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
@@ -249,6 +282,11 @@ impl TimelineEditorState {
                     duration: clip.duration,
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
+                });
+                engine.send(EngineCommand::SetClipFades {
+                    track_id,
+                    clip_id,
+                    fades: clip.fades,
                 });
                 engine.send(EngineCommand::SetClipLoop {
                     track_id,

@@ -135,6 +135,143 @@ impl<'de> Deserialize<'de> for ClipTranspose {
     }
 }
 
+/// Nondestructive fade lengths at the visible edges of an Audio Clip.
+///
+/// Values are expressed in timeline frames. They are deliberately independent
+/// of source and loop positions, so a looped Clip fades only where the Clip
+/// begins and ends instead of on every loop pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ClipFades {
+    #[serde(default)]
+    fade_in_frames: u64,
+    #[serde(default)]
+    fade_out_frames: u64,
+}
+
+impl<'de> Deserialize<'de> for ClipFades {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct PersistedFades {
+            #[serde(default)]
+            fade_in_frames: u64,
+            #[serde(default)]
+            fade_out_frames: u64,
+        }
+
+        let persisted = PersistedFades::deserialize(deserializer)?;
+        Ok(Self {
+            fade_in_frames: persisted.fade_in_frames,
+            fade_out_frames: persisted.fade_out_frames,
+        })
+    }
+}
+
+impl ClipFades {
+    pub const fn new(fade_in_frames: u64, fade_out_frames: u64, duration: u64) -> Self {
+        let fade_in_frames = if fade_in_frames > duration {
+            duration
+        } else {
+            fade_in_frames
+        };
+        let remaining = duration - fade_in_frames;
+        let fade_out_frames = if fade_out_frames > remaining {
+            remaining
+        } else {
+            fade_out_frames
+        };
+        Self {
+            fade_in_frames,
+            fade_out_frames,
+        }
+    }
+
+    pub const fn fade_in_frames(self) -> u64 {
+        self.fade_in_frames
+    }
+
+    pub const fn fade_out_frames(self) -> u64 {
+        self.fade_out_frames
+    }
+
+    pub const fn with_fade_in(self, frames: u64, duration: u64) -> Self {
+        Self::new(frames, self.fade_out_frames, duration)
+    }
+
+    pub const fn with_fade_out(self, frames: u64, duration: u64) -> Self {
+        let fade_out_frames = if frames > duration { duration } else { frames };
+        let remaining = duration - fade_out_frames;
+        let fade_in_frames = if self.fade_in_frames > remaining {
+            remaining
+        } else {
+            self.fade_in_frames
+        };
+        Self {
+            fade_in_frames,
+            fade_out_frames,
+        }
+    }
+
+    pub const fn clamped_to(self, duration: u64) -> Self {
+        Self::new(self.fade_in_frames, self.fade_out_frames, duration)
+    }
+
+    pub fn scaled(self, old_duration: u64, new_duration: u64) -> Self {
+        if old_duration == 0 {
+            return Self::default();
+        }
+        let ratio = new_duration as f64 / old_duration as f64;
+        Self::new(
+            (self.fade_in_frames as f64 * ratio).round() as u64,
+            (self.fade_out_frames as f64 * ratio).round() as u64,
+            new_duration,
+        )
+    }
+
+    /// Preserve only fades belonging to an original edge when a Clip is
+    /// split or captured into a smaller fragment.
+    pub const fn for_fragment(
+        self,
+        original_duration: u64,
+        local_start: u64,
+        fragment_duration: u64,
+    ) -> Self {
+        let keeps_start = local_start == 0;
+        let keeps_end = local_start.saturating_add(fragment_duration) >= original_duration;
+        Self::new(
+            if keeps_start { self.fade_in_frames } else { 0 },
+            if keeps_end { self.fade_out_frames } else { 0 },
+            fragment_duration,
+        )
+    }
+
+    pub const fn is_neutral(value: &Self) -> bool {
+        value.fade_in_frames == 0 && value.fade_out_frames == 0
+    }
+
+    /// Per-frame linear amplitude. This is safe to call on the audio thread.
+    #[inline]
+    pub fn gain_at(self, clip_frame: u64, duration: u64) -> f32 {
+        if clip_frame >= duration {
+            return 0.0;
+        }
+        let fade_in = if self.fade_in_frames > 0 && clip_frame < self.fade_in_frames {
+            clip_frame as f32 / self.fade_in_frames as f32
+        } else {
+            1.0
+        };
+        let frames_after = duration - 1 - clip_frame;
+        let fade_out = if self.fade_out_frames > 0 && frames_after < self.fade_out_frames {
+            frames_after as f32 / self.fade_out_frames as f32
+        } else {
+            1.0
+        };
+        fade_in.min(fade_out)
+    }
+}
+
 impl InputMonitoring {
     pub const ALL: [Self; 3] = [Self::Off, Self::Auto, Self::On];
 }
@@ -374,6 +511,9 @@ pub struct ClipInfo {
     /// Nondestructive per-Clip gain before the Project Track channel strip.
     #[serde(default, skip_serializing_if = "ClipGainDb::is_neutral")]
     pub gain_db: ClipGainDb,
+    /// Fade lengths at the visible Clip edges.
+    #[serde(default, skip_serializing_if = "ClipFades::is_neutral")]
+    pub fades: ClipFades,
     /// Duration-preserving pitch offset in semitones.
     #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
     pub transpose: ClipTranspose,
@@ -512,6 +652,7 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             gain_db: Default::default(),
+            fades: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -560,6 +701,7 @@ mod tests {
         clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
         clip.original_bpm = Some(174.0);
         clip.gain_db = ClipGainDb::new(-3.5).unwrap();
+        clip.fades = ClipFades::new(4_410, 8_820, clip.duration);
         clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
@@ -574,6 +716,7 @@ mod tests {
         assert_eq!(clip.source, deserialized.source);
         assert_eq!(clip.original_bpm, deserialized.original_bpm);
         assert_eq!(clip.gain_db, deserialized.gain_db);
+        assert_eq!(clip.fades, deserialized.fades);
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
@@ -606,7 +749,38 @@ mod tests {
         assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
         assert!(clip.source.is_none());
         assert_eq!(clip.gain_db, ClipGainDb::default());
+        assert_eq!(clip.fades, ClipFades::default());
         assert_eq!(clip.transpose, ClipTranspose::default());
         assert_eq!(clip.start_marker, None);
+    }
+
+    #[test]
+    fn clip_fades_enforce_duration_and_render_the_visible_edges() {
+        let fades = ClipFades::new(4, 4, 8);
+        assert_eq!(fades.gain_at(0, 8), 0.0);
+        assert_eq!(fades.gain_at(2, 8), 0.5);
+        assert_eq!(fades.gain_at(3, 8), 0.75);
+        assert_eq!(fades.gain_at(4, 8), 0.75);
+        assert_eq!(fades.gain_at(7, 8), 0.0);
+
+        let clamped = ClipFades::new(7, 7, 10);
+        assert_eq!(clamped.fade_in_frames(), 7);
+        assert_eq!(clamped.fade_out_frames(), 3);
+    }
+
+    #[test]
+    fn neutral_clip_fades_do_not_change_audio_gain() {
+        let fades = ClipFades::default();
+        for frame in 0..8 {
+            assert_eq!(fades.gain_at(frame, 8), 1.0);
+        }
+    }
+
+    #[test]
+    fn clip_fragments_keep_only_the_fades_at_edges_they_contain() {
+        let fades = ClipFades::new(10, 20, 100);
+        assert_eq!(fades.for_fragment(100, 0, 40), ClipFades::new(10, 0, 40));
+        assert_eq!(fades.for_fragment(100, 40, 60), ClipFades::new(0, 20, 60));
+        assert_eq!(fades.for_fragment(100, 20, 40), ClipFades::default());
     }
 }
