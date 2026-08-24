@@ -175,6 +175,7 @@ pub enum ArrangementMsg {
     },
     SplitSelectedAtPlayhead,
     JoinSelectedClips,
+    CrossfadeSelectedAudioClips,
     /// Replace selected clips with the portions where their track's captured
     /// Track Mute automation is off.
     TrimSelectedByTrackMutes,
@@ -262,6 +263,7 @@ impl ArrangementMsg {
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
+                | Self::CrossfadeSelectedAudioClips
                 | Self::TrimSelectedByTrackMutes
                 | Self::DeleteClipsInRegion { .. }
                 | Self::SplitClipsAtRegion { .. }

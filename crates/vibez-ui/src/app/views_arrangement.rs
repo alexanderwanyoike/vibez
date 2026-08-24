@@ -344,6 +344,8 @@ impl App {
                         loop_end: 0,
                         fade_in_frames: 0,
                         fade_out_frames: 0,
+                        crossfade_in: false,
+                        crossfade_out: false,
                         warp_stale: false,
                     });
             }

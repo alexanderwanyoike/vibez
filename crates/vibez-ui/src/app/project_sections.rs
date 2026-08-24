@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use vibez_core::track::{ClipInfo, MediaSourceRef};
+use vibez_core::id::ClipId;
+use vibez_core::track::{ClipFades, ClipInfo, MediaSourceRef};
 use vibez_project::{SectionInfo, TimelineAutomationInfo, TimelineInfo, TimelineLocation};
 
 use crate::domains::perform::{Section, SectionStore};
@@ -160,6 +161,95 @@ pub(super) fn install_loaded_clip(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
+fn valid_crossfade_pair(
+    outgoing_id: ClipId,
+    incoming_id: ClipId,
+    outgoing_start: u64,
+    outgoing_duration: u64,
+    outgoing_fades: ClipFades,
+    incoming_start: u64,
+    incoming_duration: u64,
+    incoming_fades: ClipFades,
+) -> bool {
+    let outgoing_end = outgoing_start.saturating_add(outgoing_duration);
+    let incoming_end = incoming_start.saturating_add(incoming_duration);
+    let overlap = outgoing_end.saturating_sub(incoming_start);
+    outgoing_start < incoming_start
+        && incoming_start < outgoing_end
+        && outgoing_end <= incoming_end
+        && outgoing_fades.crossfade_out_to() == Some(incoming_id)
+        && incoming_fades.crossfade_in_from() == Some(outgoing_id)
+        && outgoing_fades.fade_out_frames() == overlap
+        && incoming_fades.fade_in_frames() == overlap
+}
+
+pub(super) fn sanitize_loaded_crossfades(clips: &mut [crate::message::LoadedTimelineClip]) {
+    for loaded in clips.iter_mut() {
+        loaded.clip.info.fades = loaded.clip.info.fades.clamped_to(loaded.clip.info.duration);
+    }
+    let snapshot: Vec<_> = clips
+        .iter()
+        .map(|loaded| {
+            (
+                loaded.location,
+                loaded.info.track_id,
+                loaded.info.id,
+                loaded.info.position,
+                loaded.info.duration,
+                loaded.info.fades,
+            )
+        })
+        .collect();
+    for loaded in clips {
+        let info = &loaded.info;
+        let incoming_valid = info.fades.crossfade_in_from().is_none_or(|outgoing_id| {
+            snapshot
+                .iter()
+                .find(|entry| {
+                    entry.0 == loaded.location && entry.1 == info.track_id && entry.2 == outgoing_id
+                })
+                .is_some_and(|outgoing| {
+                    valid_crossfade_pair(
+                        outgoing.2,
+                        info.id,
+                        outgoing.3,
+                        outgoing.4,
+                        outgoing.5,
+                        info.position,
+                        info.duration,
+                        info.fades,
+                    )
+                })
+        });
+        let outgoing_valid = info.fades.crossfade_out_to().is_none_or(|incoming_id| {
+            snapshot
+                .iter()
+                .find(|entry| {
+                    entry.0 == loaded.location && entry.1 == info.track_id && entry.2 == incoming_id
+                })
+                .is_some_and(|incoming| {
+                    valid_crossfade_pair(
+                        info.id,
+                        incoming.2,
+                        info.position,
+                        info.duration,
+                        info.fades,
+                        incoming.3,
+                        incoming.4,
+                        incoming.5,
+                    )
+                })
+        });
+        if !incoming_valid {
+            loaded.clip.info.fades = loaded.clip.info.fades.unlink_fade_in();
+        }
+        if !outgoing_valid {
+            loaded.clip.info.fades = loaded.clip.info.fades.unlink_fade_out();
+        }
+    }
+}
+
 pub(super) fn apply_timeline_sources(timeline: &mut ArrangementTimeline, saved: &TimelineInfo) {
     for saved_clip in &saved.clips {
         if let Some(clip) = timeline.get_mut(saved_clip.track_id).and_then(|content| {
@@ -200,6 +290,81 @@ mod tests {
     use super::*;
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::MidiNote;
+
+    fn loaded_audio_clip(
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        position: u64,
+        duration: u64,
+        fades: ClipFades,
+    ) -> crate::message::LoadedTimelineClip {
+        crate::message::LoadedTimelineClip {
+            location,
+            clip: crate::message::LoadedClipData {
+                info: ClipInfo {
+                    id: clip_id,
+                    track_id,
+                    name: "Clip".into(),
+                    position,
+                    source_offset: 0,
+                    start_marker: None,
+                    duration,
+                    source: None,
+                    file_path: None,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: duration,
+                    gain_db: Default::default(),
+                    fades,
+                    transpose: Default::default(),
+                    original_bpm: None,
+                    warped: false,
+                    warped_to_bpm: None,
+                },
+                audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                    channels: vec![vec![0.0; duration as usize]],
+                    sample_rate: 48_000,
+                }),
+                original_audio: None,
+            },
+        }
+    }
+
+    #[test]
+    fn project_load_keeps_reciprocal_crossfades_and_repairs_stale_links() {
+        let track_id = TrackId::new();
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let outgoing = ClipFades::default().linked_fade_out(250, incoming_id, 1_000);
+        let incoming = ClipFades::default().linked_fade_in(250, outgoing_id, 1_000);
+        let mut valid = vec![
+            loaded_audio_clip(
+                TimelineLocation::Arrange,
+                track_id,
+                outgoing_id,
+                0,
+                1_000,
+                outgoing,
+            ),
+            loaded_audio_clip(
+                TimelineLocation::Arrange,
+                track_id,
+                incoming_id,
+                750,
+                1_000,
+                incoming,
+            ),
+        ];
+        sanitize_loaded_crossfades(&mut valid);
+        assert_eq!(valid[0].info.fades.crossfade_out_to(), Some(incoming_id));
+        assert_eq!(valid[1].info.fades.crossfade_in_from(), Some(outgoing_id));
+
+        valid[1].clip.info.position = 1_100;
+        sanitize_loaded_crossfades(&mut valid);
+        assert!(valid[0].info.fades.crossfade_out_to().is_none());
+        assert!(valid[1].info.fades.crossfade_in_from().is_none());
+    }
 
     #[test]
     fn authored_section_midi_projects_to_document_and_back() {

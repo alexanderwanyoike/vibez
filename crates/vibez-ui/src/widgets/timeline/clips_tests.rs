@@ -355,6 +355,8 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
         loop_end: 0,
         fade_in_frames: 0,
         fade_out_frames: 0,
+        crossfade_in: false,
+        crossfade_out: false,
         warp_stale: false,
     });
     let (status, message) = right_click(&canvas, Point::new(10.0, 10.0));
@@ -438,6 +440,8 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         loop_end: 0,
         fade_in_frames: 0,
         fade_out_frames: 0,
+        crossfade_in: false,
+        crossfade_out: false,
         warp_stale: false,
     });
 
@@ -464,6 +468,8 @@ fn selected_audio_fade_handle_drag_emits_realtime_edits_in_one_undo_gesture() {
         loop_end: 44_100,
         fade_in_frames: 11_025,
         fade_out_frames: 0,
+        crossfade_in: false,
+        crossfade_out: false,
         warp_stale: false,
     });
     canvas.selected_clips.insert(clip_id);

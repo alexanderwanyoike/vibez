@@ -684,6 +684,13 @@ impl App {
                     "Join Clips (Ctrl+J)".into(),
                     Message::join_selected_clips(),
                 ));
+                if !is_note_clip {
+                    col = col.push(menu_btn(
+                        icons::AUDIO_WAVEFORM,
+                        "Crossfade Selected Clips".into(),
+                        Message::Arrangement(ArrangementMsg::CrossfadeSelectedAudioClips),
+                    ));
+                }
                 col = col.push(menu_btn(
                     icons::SCISSORS,
                     "Trim Track Mutes".into(),
