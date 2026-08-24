@@ -511,6 +511,32 @@ impl TimelineEditorState {
                 self.discard_audio_clip_inspector_edits_for(clip_id);
                 return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
+            ArrangementMsg::SetAudioClipFade {
+                track_id,
+                clip_id,
+                edge,
+                frames,
+            } => {
+                if let Some(clip) = self
+                    .find_content_mut(track_id)
+                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+                {
+                    clip.fades = match edge {
+                        crate::state::AudioClipFadeEdge::In => {
+                            clip.fades.with_fade_in(frames, clip.duration)
+                        }
+                        crate::state::AudioClipFadeEdge::Out => {
+                            clip.fades.with_fade_out(frames, clip.duration)
+                        }
+                    };
+                    engine.send(EngineCommand::SetClipFades {
+                        track_id,
+                        clip_id,
+                        fades: clip.fades,
+                    });
+                    self.discard_audio_clip_inspector_edits_for(clip_id);
+                }
+            }
             ArrangementMsg::MoveClipToTrack {
                 source_track,
                 target_track,

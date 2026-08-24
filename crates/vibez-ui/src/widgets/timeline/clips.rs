@@ -13,8 +13,8 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarqueeRect, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
-    TrackTimelineContent, UndoGestureId,
+    ArrangementMarqueeRect, ArrangementSelection, AudioClipFadeEdge, ContextMenuTarget, GridConfig,
+    ProjectTrack, TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::local_drag::LocalDrag;
@@ -42,6 +42,13 @@ pub enum ClipDragAction {
         is_note_clip: bool,
         clip_start_beat: f64,
     },
+    FadeClip {
+        undo_gesture: UndoGestureId,
+        clip_id: ClipId,
+        edge: AudioClipFadeEdge,
+        clip_start_beat: f64,
+        duration_frames: u64,
+    },
     PendingSeek {
         beat: f64,
         start_x: f32,
@@ -65,6 +72,17 @@ const MARQUEE_MIN_PX: f32 = 4.0;
 /// Vertical travel before a clip drag may change lane. Without it a
 /// horizontal drag near a row boundary would flicker between tracks.
 const CROSS_TRACK_MIN_PX: f32 = 20.0;
+
+pub(super) fn fade_handle_xs(clip_x: f32, clip_width: f32, clip: &TimelineClip) -> (f32, f32) {
+    if clip.duration == 0 {
+        return (clip_x, clip_x + clip_width);
+    }
+    let pixels_per_frame = clip_width / clip.duration as f32;
+    (
+        clip_x + clip.fade_in_frames as f32 * pixels_per_frame,
+        clip_x + clip_width - clip.fade_out_frames as f32 * pixels_per_frame,
+    )
+}
 
 /// Where an unmodified vertical wheel gesture should be handled.
 ///
@@ -203,6 +221,8 @@ impl TrackClipCanvas {
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
+                fade_in_frames: c.fades.fade_in_frames(),
+                fade_out_frames: c.fades.fade_out_frames(),
                 warp_stale: c.warped
                     && c.warped_to_bpm
                         .map(|b| (b - bpm).abs() > 0.01)
@@ -450,6 +470,41 @@ impl TrackClipCanvas {
 
         None
     }
+
+    fn fade_handle_hit(&self, pos: iced::Point) -> Option<(ClipId, AudioClipFadeEdge, f64, u64)> {
+        if (pos.y - FADE_HANDLE_Y).abs() > FADE_HANDLE_HIT_RADIUS {
+            return None;
+        }
+        let spb = self.spb();
+        for clip in &self.clips {
+            if !self.selected_clips.contains(&clip.clip_id) {
+                continue;
+            }
+            let start_beat = clip.position as f64 / spb;
+            let clip_x = self.beat_to_x(start_beat);
+            let clip_width = self.geometry().width_for_beats(clip.duration as f64 / spb);
+            if pos.x < clip_x || pos.x > clip_x + clip_width {
+                continue;
+            }
+            let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_width, clip);
+            let in_distance = (pos.x - fade_in_x).abs();
+            let out_distance = (pos.x - fade_out_x).abs();
+            let edge = if in_distance <= FADE_HANDLE_HIT_RADIUS
+                && (in_distance < out_distance
+                    || (in_distance == out_distance && pos.x <= clip_x + clip_width / 2.0))
+            {
+                Some(AudioClipFadeEdge::In)
+            } else if out_distance <= FADE_HANDLE_HIT_RADIUS {
+                Some(AudioClipFadeEdge::Out)
+            } else {
+                None
+            };
+            if let Some(edge) = edge {
+                return Some((clip.clip_id, edge, start_beat, clip.duration));
+            }
+        }
+        None
+    }
 }
 
 impl canvas::Program<Message> for TrackClipCanvas {
@@ -475,6 +530,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
             return match drag {
                 ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
+                ClipDragAction::FadeClip { .. } => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
@@ -482,6 +538,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
+            if self.fade_handle_hit(pos).is_some() {
+                return mouse::Interaction::ResizingHorizontally;
+            }
             if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
                 if near_right && in_title_bar {
@@ -528,6 +587,18 @@ impl canvas::Program<Message> for TrackClipCanvas {
             //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
+                    if let Some((clip_id, edge, clip_start_beat, duration_frames)) =
+                        self.fade_handle_hit(pos)
+                    {
+                        state.drag = Some(ClipDragAction::FadeClip {
+                            undo_gesture: UndoGestureId::new(),
+                            clip_id,
+                            edge,
+                            clip_start_beat,
+                            duration_frames,
+                        });
+                        return (canvas::event::Status::Captured, None);
+                    }
                     if let Some((clip_id, is_note_clip, near_right, pos_beats, _dur_beats)) =
                         self.hit_test(pos.x)
                     {
@@ -832,6 +903,33 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         .in_undo_gesture(*undo_gesture);
                                     return (canvas::event::Status::Captured, Some(edit));
                                 }
+                            }
+                            ClipDragAction::FadeClip {
+                                undo_gesture,
+                                clip_id,
+                                edge,
+                                clip_start_beat,
+                                duration_frames,
+                            } => {
+                                let current_beat = self.x_to_beat(local_x);
+                                let duration_beats = *duration_frames as f64 / self.spb();
+                                let frames = match edge {
+                                    AudioClipFadeEdge::In => {
+                                        (current_beat - clip_start_beat).clamp(0.0, duration_beats)
+                                    }
+                                    AudioClipFadeEdge::Out => (clip_start_beat + duration_beats
+                                        - current_beat)
+                                        .clamp(0.0, duration_beats),
+                                };
+                                let frames = (frames * self.spb()).round() as u64;
+                                let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {
+                                    track_id,
+                                    clip_id: *clip_id,
+                                    edge: *edge,
+                                    frames,
+                                })
+                                .in_undo_gesture(*undo_gesture);
+                                return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::PanViewport {
                                 start_local_x,

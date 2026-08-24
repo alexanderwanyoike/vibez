@@ -105,6 +105,12 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         new_duration: u64,
     },
+    SetAudioClipFade {
+        track_id: TrackId,
+        clip_id: ClipId,
+        edge: crate::state::AudioClipFadeEdge,
+        frames: u64,
+    },
     MoveClipToTrack {
         source_track: TrackId,
         target_track: TrackId,
@@ -233,6 +239,7 @@ impl ArrangementMsg {
                 | Self::MoveAudioClip { .. }
                 | Self::MoveNoteClipPosition { .. }
                 | Self::ResizeAudioClip { .. }
+                | Self::SetAudioClipFade { .. }
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::SetClipLoopRegion { .. }

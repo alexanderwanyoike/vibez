@@ -261,6 +261,34 @@ impl TrackClipCanvas {
                 // Selection highlight
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
+                if !is_recording_preview
+                    && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
+                {
+                    let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
+                    let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
+                    let bottom = clip_y + clip_h - 2.0;
+                    let envelope = canvas::Path::new(|builder| {
+                        builder.move_to(iced::Point::new(clip_x, bottom));
+                        builder.line_to(iced::Point::new(fade_in_x, top));
+                        builder.line_to(iced::Point::new(fade_out_x, top));
+                        builder.line_to(iced::Point::new(clip_x + clip_w, bottom));
+                    });
+                    frame.stroke(
+                        &envelope,
+                        canvas::Stroke::default()
+                            .with_color(theme::with_alpha(theme::text(), 0.72))
+                            .with_width(1.25),
+                    );
+                    if is_selected {
+                        for x in [fade_in_x, fade_out_x] {
+                            frame.fill_rectangle(
+                                iced::Point::new(x - 2.5, FADE_HANDLE_Y - 2.5),
+                                iced::Size::new(5.0, 5.0),
+                                theme::accent(),
+                            );
+                        }
+                    }
+                }
                 let border_color = if is_selected {
                     theme::accent()
                 } else {

@@ -21,6 +21,8 @@ pub struct TimelineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub fade_in_frames: u64,
+    pub fade_out_frames: u64,
     /// True when this clip is warped but its `warped_to_bpm` no longer
     /// matches the current project BPM. The canvas draws a diagonal
     /// stripe overlay so the user can see at a glance that a re-warp
@@ -189,6 +191,8 @@ pub(super) const RESIZE_EDGE_PX: f32 = 8.0;
 pub(super) const CLIP_TITLE_HEIGHT: f32 = 18.0;
 /// Top padding of clips within the track canvas.
 pub(super) const CLIP_Y: f32 = 4.0;
+pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
+pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
 mod clips;
 mod clips_draw;
