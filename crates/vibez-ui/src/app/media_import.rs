@@ -26,61 +26,9 @@ impl App {
         success: crate::message::AudioQuantizeSuccess,
         sample_rate: u32,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => {
-                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                self.state.arrangement.apply_audio_quantize_success(
-                    &mut engine,
-                    track_id,
-                    old_clip_id,
-                    success,
-                    sample_rate,
-                )
-            }
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = {
-                    let mut engine = crate::domains::DiscardingEngine;
-                    self.state
-                        .perform
-                        .section_editor
-                        .editor_mut()
-                        .apply_audio_quantize_success(
-                            &mut engine,
-                            track_id,
-                            old_clip_id,
-                            success,
-                            sample_rate,
-                        )
-                };
-                self.state.perform.commit_selected_section_timeline();
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let mut engine = crate::domains::DiscardingEngine;
-                let action = editor.apply_audio_quantize_success(
-                    &mut engine,
-                    track_id,
-                    old_clip_id,
-                    success,
-                    sample_rate,
-                );
-                section.timeline = editor.timeline;
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, engine| {
+            editor.apply_audio_quantize_success(engine, track_id, old_clip_id, success, sample_rate)
+        })
     }
 
     pub(super) fn apply_clip_bpm_detected_at(
@@ -91,44 +39,9 @@ impl App {
         bpm: Option<f64>,
         confidence: f32,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => self
-                .state
-                .arrangement
-                .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence),
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = self
-                    .state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
-                self.state.perform.commit_selected_section_timeline();
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let action = editor.apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
-                section.timeline = editor.timeline;
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, _engine| {
+            editor.apply_clip_bpm_detected(track_id, clip_id, bpm, confidence)
+        })
     }
 
     pub(super) fn apply_clip_warp_success_at(
@@ -138,49 +51,9 @@ impl App {
         clip_id: ClipId,
         success: crate::message::ClipWarpSuccess,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => {
-                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                self.state.arrangement.apply_clip_warp_success(
-                    &mut engine,
-                    track_id,
-                    clip_id,
-                    success,
-                )
-            }
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = {
-                    let mut engine = crate::domains::DiscardingEngine;
-                    self.state
-                        .perform
-                        .section_editor
-                        .editor_mut()
-                        .apply_clip_warp_success(&mut engine, track_id, clip_id, success)
-                };
-                self.state.perform.commit_selected_section_timeline();
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let mut engine = crate::domains::DiscardingEngine;
-                let action =
-                    editor.apply_clip_warp_success(&mut engine, track_id, clip_id, success);
-                section.timeline = editor.timeline;
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, engine| {
+            editor.apply_clip_warp_success(engine, track_id, clip_id, success)
+        })
     }
 
     pub(super) fn dispatch_drop_on_arrangement(

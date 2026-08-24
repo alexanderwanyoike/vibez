@@ -52,56 +52,9 @@ impl App {
                 clip_id,
                 source_frames,
             };
-        match location {
-            vibez_project::TimelineLocation::Arrange => {
-                let mut engine = crate::domains::DiscardingEngine;
-                self.state.arrangement.update(
-                    Arc::make_mut(&mut self.state.project_tracks),
-                    message,
-                    &mut engine,
-                    Default::default(),
-                )
-            }
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let mut engine = crate::domains::DiscardingEngine;
-                let action = self.state.perform.section_editor.editor_mut().update(
-                    Arc::make_mut(&mut self.state.project_tracks),
-                    message,
-                    &mut engine,
-                    Default::default(),
-                );
-                self.state.perform.commit_selected_section_timeline();
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let action = {
-                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                    let Some(section) =
-                        Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                    else {
-                        return Default::default();
-                    };
-                    let mut editor = crate::state::TimelineEditorState {
-                        timeline: Arc::clone(&section.timeline),
-                        ..Default::default()
-                    };
-                    let mut engine = crate::domains::DiscardingEngine;
-                    let action =
-                        editor.update(project_tracks, message, &mut engine, Default::default());
-                    section.timeline = editor.timeline;
-                    action
-                };
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, project_tracks, engine| {
+            editor.update(project_tracks, message, engine, Default::default())
+        })
     }
 
     pub(super) fn finish_detect_clip_transients(
