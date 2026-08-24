@@ -520,7 +520,7 @@ impl TimelineEditorState {
                 edge,
                 frames,
             } => {
-                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+                self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
                 if let Some(clip) = self
                     .find_content_mut(track_id)
                     .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))

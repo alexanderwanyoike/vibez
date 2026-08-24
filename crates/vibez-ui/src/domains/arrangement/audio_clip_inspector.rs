@@ -174,14 +174,23 @@ impl TimelineEditorState {
         else {
             return action;
         };
-        if matches!(
-            field,
-            AudioClipInspectorField::FadeIn
-                | AudioClipInspectorField::FadeOut
-                | AudioClipInspectorField::SourceStart
-                | AudioClipInspectorField::SourceEnd
-        ) {
-            self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+        match field {
+            AudioClipInspectorField::FadeIn => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::In,
+            ),
+            AudioClipInspectorField::FadeOut => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::Out,
+            ),
+            AudioClipInspectorField::SourceStart | AudioClipInspectorField::SourceEnd => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+            }
+            _ => {}
         }
         let Some(clip) = self
             .find_content_mut(track_id)

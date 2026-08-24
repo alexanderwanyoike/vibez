@@ -334,7 +334,7 @@ impl ClipFades {
         }
     }
 
-    /// Per-frame linear amplitude. This is safe to call on the audio thread.
+    /// Per-frame amplitude. This is safe to call on the audio thread.
     #[inline]
     pub fn gain_at(self, clip_frame: u64, duration: u64) -> f32 {
         if clip_frame >= duration {

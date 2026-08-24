@@ -565,6 +565,48 @@ fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
 }
 
 #[test]
+fn one_clip_can_keep_independent_crossfades_on_both_edges() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, first_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, middle_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    let (_, last_id) = add_audio_clip(&mut a, 0, 1_500, 1_000);
+    let mut engine = RecordingEngine::default();
+    let selection = |left, right| {
+        HashSet::from([
+            ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: left,
+            },
+            ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: right,
+            },
+        ])
+    };
+
+    a.selected_clips = selection(first_id, middle_id);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.selected_clips = selection(middle_id, last_id);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let middle = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == middle_id)
+        .unwrap();
+    assert_eq!(middle.fades.crossfade_in_from(), Some(first_id));
+    assert_eq!(middle.fades.crossfade_out_to(), Some(last_id));
+}
+
+#[test]
 fn create_note_clip_needs_midi_track_and_active_selection() {
     let mut a = arrangement_with_tracks(1);
     let audio_tid = a.tracks[0].id;

@@ -3,11 +3,67 @@
 use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::{ArrangementSelection, TimelineEditorState};
+use crate::state::{ArrangementSelection, AudioClipFadeEdge, TimelineEditorState};
 
 use super::{ArrangementAction, EngineHandle};
 
 impl TimelineEditorState {
+    pub(super) fn unlink_crossfade_edge_for_clip(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        track_id: TrackId,
+        clip_id: ClipId,
+        edge: AudioClipFadeEdge,
+    ) {
+        let Some(content) = self.find_content_mut(track_id) else {
+            return;
+        };
+        let Some(fades) = content
+            .clips
+            .iter()
+            .find(|clip| clip.id == clip_id)
+            .map(|clip| clip.fades)
+        else {
+            return;
+        };
+        let peer = match edge {
+            AudioClipFadeEdge::In => fades.crossfade_in_from(),
+            AudioClipFadeEdge::Out => fades.crossfade_out_to(),
+        };
+        let mut changed = Vec::new();
+        for clip in &mut content.clips {
+            let next = if clip.id == clip_id {
+                match edge {
+                    AudioClipFadeEdge::In => clip.fades.unlink_fade_in(),
+                    AudioClipFadeEdge::Out => clip.fades.unlink_fade_out(),
+                }
+            } else if peer == Some(clip.id) {
+                match edge {
+                    AudioClipFadeEdge::In if clip.fades.crossfade_out_to() == Some(clip_id) => {
+                        clip.fades.unlink_fade_out()
+                    }
+                    AudioClipFadeEdge::Out if clip.fades.crossfade_in_from() == Some(clip_id) => {
+                        clip.fades.unlink_fade_in()
+                    }
+                    _ => continue,
+                }
+            } else {
+                continue;
+            };
+            if next != clip.fades {
+                clip.fades = next;
+                changed.push((clip.id, next));
+            }
+        }
+        for (changed_id, fades) in changed {
+            engine.send(EngineCommand::SetClipFades {
+                track_id,
+                clip_id: changed_id,
+                fades,
+            });
+        }
+    }
+
     /// Remove every link touching one Clip while retaining its audible fade
     /// lengths as ordinary linear fades. Geometry edits call this before they
     /// can make a persisted relationship stale.
@@ -114,8 +170,8 @@ impl TimelineEditorState {
         let incoming_id = *incoming_id;
         let overlap = outgoing_end - incoming_start;
 
-        self.unlink_crossfades_for_clip(engine, track_id, outgoing_id);
-        self.unlink_crossfades_for_clip(engine, track_id, incoming_id);
+        self.unlink_crossfade_edge_for_clip(engine, track_id, outgoing_id, AudioClipFadeEdge::Out);
+        self.unlink_crossfade_edge_for_clip(engine, track_id, incoming_id, AudioClipFadeEdge::In);
         let Some(content) = self.find_content_mut(track_id) else {
             return ArrangementAction::default();
         };
