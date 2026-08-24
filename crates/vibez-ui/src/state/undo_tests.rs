@@ -486,6 +486,7 @@ fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
             gain_db: Default::default(),
             fades: Default::default(),
             playback_direction: Default::default(),
+            transient_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: Some(128.0),
             warped: false,
@@ -509,6 +510,113 @@ fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
     assert_eq!(clip.transpose, Default::default());
     assert_eq!(clip.source_offset, 0);
     assert_eq!(clip.duration, 48_000);
+}
+
+#[test]
+fn add_move_and_delete_transient_markers_each_restore_through_undo() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Audio".into(), 0));
+    Arc::make_mut(&mut state.arrangement.timeline)
+        .ensure(track_id)
+        .clips
+        .push(UiClip {
+            id: clip_id,
+            name: "Loop".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; 1_000]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 1_000,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 1_000,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        });
+    let mut engine = RecordingEngine::default();
+
+    let mut edit = |state: &mut AppState, message| {
+        let before = snapshot(state);
+        let action = state.arrangement.update(
+            Arc::make_mut(&mut state.project_tracks),
+            message,
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+        assert!(action.mark_dirty);
+        state.project.history.push_edit(before, None);
+    };
+
+    edit(
+        &mut state,
+        ArrangementMsg::AddTransientMarker {
+            track_id,
+            clip_id,
+            source_frame: 100,
+        },
+    );
+    undo_once(&mut state);
+    assert!(state.arrangement.timeline.get(track_id).unwrap().clips[0]
+        .transient_markers
+        .is_empty());
+
+    edit(
+        &mut state,
+        ArrangementMsg::AddTransientMarker {
+            track_id,
+            clip_id,
+            source_frame: 100,
+        },
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::MoveTransientMarker {
+            track_id,
+            clip_id,
+            from: 100,
+            to: 250,
+        },
+    );
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0]
+            .transient_markers
+            .as_slice()[0]
+            .source_frame(),
+        100
+    );
+
+    edit(
+        &mut state,
+        ArrangementMsg::RemoveTransientMarker {
+            track_id,
+            clip_id,
+            source_frame: 100,
+        },
+    );
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0]
+            .transient_markers
+            .as_slice()[0]
+            .source_frame(),
+        100
+    );
 }
 
 #[test]
@@ -540,6 +648,7 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
             gain_db: Default::default(),
             fades: Default::default(),
             playback_direction: Default::default(),
+            transient_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

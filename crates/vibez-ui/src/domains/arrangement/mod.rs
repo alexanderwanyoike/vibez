@@ -372,6 +372,13 @@ impl TimelineEditorState {
                 // Clear from multi-selection if this clip was selected
                 self.selected_clips
                     .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
+                if self.selected_transient_marker.is_some_and(
+                    |(selected_track, selected_clip, _)| {
+                        selected_track == track_id && selected_clip == clip_id
+                    },
+                ) {
+                    self.selected_transient_marker = None;
+                }
             }
             ArrangementMsg::ToggleClipLoop(track_id, clip_id) => {
                 let mut cmd_data = None;
@@ -414,6 +421,13 @@ impl TimelineEditorState {
                         }
                     });
                 }
+            }
+            message @ (ArrangementMsg::SelectTransientMarker { .. }
+            | ArrangementMsg::AddTransientMarker { .. }
+            | ArrangementMsg::MoveTransientMarker { .. }
+            | ArrangementMsg::RemoveTransientMarker { .. }
+            | ArrangementMsg::ReplaceDetectedTransientMarkers { .. }) => {
+                return self.update_transient_markers(message);
             }
             ArrangementMsg::SetClipLoopRegion {
                 track_id,
@@ -463,6 +477,7 @@ impl TimelineEditorState {
                 shift_held,
             } => {
                 self.discard_audio_clip_inspector_edits();
+                self.selected_transient_marker = None;
                 // Clicking a clip switches the editor back to clip selection.
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
@@ -1150,6 +1165,7 @@ mod audio_clip_inspector;
 mod fragment_geometry;
 mod media_ops;
 mod ops;
+mod transient_markers;
 
 #[cfg(test)]
 mod clipboard_tests;

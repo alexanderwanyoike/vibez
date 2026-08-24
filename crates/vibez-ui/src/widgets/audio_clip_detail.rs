@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -8,12 +9,14 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::FrameClipTimeline;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::ClipPlaybackDirection;
+use vibez_core::transient::{TransientMarkerKind, TransientMarkers};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::message::Message;
 use crate::state::{GridConfig, UndoGestureId};
 use crate::theme;
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
+use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 
 /// Canvas widget for showing a detailed waveform of an audio clip in the detail panel.
@@ -34,11 +37,14 @@ pub struct AudioClipDetailWidget {
     pub loop_start: u64,
     pub loop_end: u64,
     pub playback_direction: ClipPlaybackDirection,
+    pub transient_markers: TransientMarkers,
+    pub selected_transient_marker: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 pub struct AudioClipDetailState {
     drag: Option<AudioMarkerDrag>,
+    double_click: DoubleClick,
 }
 
 const AUDIO_RULER_HEIGHT: f32 = 30.0;
@@ -48,7 +54,14 @@ const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
 enum AudioMarkerDrag {
     Start(UndoGestureId),
     Loop(LoopDrag),
+    Transient {
+        current_source_frame: u64,
+        undo_gesture: UndoGestureId,
+    },
 }
+
+const TRANSIENT_HIT_RADIUS: f32 = 6.0;
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 impl AudioClipDetailWidget {
     fn loop_range_frames(&self) -> u64 {
@@ -118,6 +131,15 @@ impl AudioClipDetailWidget {
         (local.round() as u64).min(self.loop_range_frames())
     }
 
+    fn x_to_unsnapped_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
+        let fraction = f64::from(x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
+        ((fraction * self.duration_samples as f64).round() as u64).min(self.loop_range_frames())
+    }
+
     fn hit_test_loop_marker(&self, position: Point, bounds: &Rectangle) -> Option<LoopMarker> {
         if !self.loop_enabled || self.loop_end <= self.loop_start {
             return None;
@@ -147,6 +169,31 @@ impl AudioClipDetailWidget {
             self.loop_enabled,
         )
         .clamp_start(candidate, self.source_offset, source_end)
+    }
+
+    fn transient_source_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
+        self.source_offset
+            .saturating_add(self.x_to_unsnapped_local_frame(x, bounds))
+    }
+
+    fn hit_test_transient_marker(&self, position: Point, bounds: &Rectangle) -> Option<u64> {
+        (position.y >= AUDIO_RULER_HEIGHT).then(|| {
+            self.transient_markers
+                .as_slice()
+                .iter()
+                .min_by(|left, right| {
+                    let left_distance =
+                        (position.x - self.source_to_x(left.source_frame(), bounds)).abs();
+                    let right_distance =
+                        (position.x - self.source_to_x(right.source_frame(), bounds)).abs();
+                    left_distance.total_cmp(&right_distance)
+                })
+                .filter(|marker| {
+                    (position.x - self.source_to_x(marker.source_frame(), bounds)).abs()
+                        <= TRANSIENT_HIT_RADIUS
+                })
+                .map(|marker| marker.source_frame())
+        })?
     }
 }
 
@@ -412,6 +459,35 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             }
         }
 
+        // Transient Markers sit over the waveform but under the playhead.
+        // Suggested detections are quieter than markers the producer authored
+        // or moved by hand.
+        for marker in self.transient_markers.as_slice() {
+            let x = self.source_to_x(marker.source_frame(), &bounds).floor() + 0.5;
+            let selected = self.selected_transient_marker == Some(marker.source_frame());
+            let color = if selected {
+                theme::meter_yellow()
+            } else if marker.kind() == TransientMarkerKind::Authored {
+                theme::accent()
+            } else {
+                theme::with_alpha(theme::accent(), 0.48)
+            };
+            let line = canvas::Path::line(Point::new(x, AUDIO_RULER_HEIGHT), Point::new(x, h));
+            frame.stroke(
+                &line,
+                canvas::Stroke::default()
+                    .with_color(color)
+                    .with_width(if selected { 2.0 } else { 1.0 }),
+            );
+            let handle = canvas::Path::new(|path| {
+                path.move_to(Point::new(x - 4.0, AUDIO_RULER_HEIGHT));
+                path.line_to(Point::new(x + 4.0, AUDIO_RULER_HEIGHT));
+                path.line_to(Point::new(x, AUDIO_RULER_HEIGHT + 6.0));
+                path.close();
+            });
+            frame.fill(&handle, color);
+        }
+
         // Playhead
         if self.playhead_normalized >= 0.0 && self.playhead_normalized <= 1.0 {
             let px = (self.playhead_normalized as f32) * w;
@@ -438,6 +514,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             || cursor.position_in(bounds).is_some_and(|position| {
                 self.hit_test_start_marker(position, &bounds)
                     || self.hit_test_loop_marker(position, &bounds).is_some()
+                    || self.hit_test_transient_marker(position, &bounds).is_some()
             })
         {
             mouse::Interaction::ResizingHorizontally
@@ -460,6 +537,52 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let Some(position) = cursor.position_in(bounds) else {
                     return (canvas::event::Status::Ignored, None);
                 };
+                if let Some(source_frame) = self.hit_test_transient_marker(position, &bounds) {
+                    state.double_click.clear();
+                    state.drag = Some(AudioMarkerDrag::Transient {
+                        current_source_frame: source_frame,
+                        undo_gesture: UndoGestureId::new(),
+                    });
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Arrangement(
+                            ArrangementMsg::SelectTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: Some(source_frame),
+                            },
+                        )),
+                    );
+                }
+                if position.y >= AUDIO_RULER_HEIGHT {
+                    let double = state.double_click.press(
+                        Instant::now(),
+                        position,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(8.0),
+                    );
+                    if double {
+                        state.double_click.clear();
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Arrangement(ArrangementMsg::AddTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: self.transient_source_from_x(position.x, &bounds),
+                            })),
+                        );
+                    }
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Arrangement(
+                            ArrangementMsg::SelectTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: None,
+                            },
+                        )),
+                    );
+                }
                 state.drag = if self.hit_test_start_marker(position, &bounds) {
                     Some(AudioMarkerDrag::Start(UndoGestureId::new()))
                 } else if let Some(marker) = self.hit_test_loop_marker(position, &bounds) {
@@ -511,6 +634,29 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                             .in_undo_gesture(drag.undo_gesture())
                         })
                     }
+                    AudioMarkerDrag::Transient {
+                        current_source_frame,
+                        undo_gesture,
+                    } => {
+                        let to = self.transient_source_from_x(position.x, &bounds);
+                        if to == current_source_frame {
+                            None
+                        } else {
+                            state.drag = Some(AudioMarkerDrag::Transient {
+                                current_source_frame: to,
+                                undo_gesture,
+                            });
+                            Some(
+                                Message::Arrangement(ArrangementMsg::MoveTransientMarker {
+                                    track_id: self.track_id,
+                                    clip_id: self.clip_id,
+                                    from: current_source_frame,
+                                    to,
+                                })
+                                .in_undo_gesture(undo_gesture),
+                            )
+                        }
+                    }
                 };
                 (canvas::event::Status::Captured, message)
             }
@@ -549,6 +695,8 @@ mod tests {
             loop_start: 100,
             loop_end: 500,
             playback_direction: ClipPlaybackDirection::Forward,
+            transient_markers: Default::default(),
+            selected_transient_marker: None,
         }
     }
 
@@ -656,6 +804,88 @@ mod tests {
         assert_eq!(widget.source_to_x(300, &bounds), 600.0);
         assert_eq!(widget.x_to_local_frame(600.0, &bounds), 200);
         assert_eq!(widget.x_to_local_frame(800.0, &bounds), 0);
+    }
+
+    #[test]
+    fn transient_marker_press_selects_and_drag_authors_a_new_source_position() {
+        let mut widget = widget();
+        widget.transient_markers.replace_suggestions([300]);
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+        let marker = Point::new(widget.source_to_x(300, &bounds), 80.0);
+        let target = Point::new(widget.source_to_x(450, &bounds), 80.0);
+        let mut state = AudioClipDetailState::default();
+
+        let selected = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                mouse::Cursor::Available(marker),
+            )
+            .1;
+        assert!(matches!(
+            arrangement_message(selected),
+            Some(ArrangementMsg::SelectTransientMarker {
+                source_frame: Some(300),
+                ..
+            })
+        ));
+
+        let moved = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+                bounds,
+                mouse::Cursor::Available(target),
+            )
+            .1;
+        assert!(matches!(
+            arrangement_message(moved),
+            Some(ArrangementMsg::MoveTransientMarker {
+                from: 300,
+                to: 450,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn double_clicking_empty_waveform_adds_a_transient_marker() {
+        let widget = widget();
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+        let pointer = Point::new(200.0, 80.0);
+        let mut state = AudioClipDetailState::default();
+
+        let first = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                mouse::Cursor::Available(pointer),
+            )
+            .1;
+        assert!(matches!(
+            arrangement_message(first),
+            Some(ArrangementMsg::SelectTransientMarker {
+                source_frame: None,
+                ..
+            })
+        ));
+        let second = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                mouse::Cursor::Available(pointer),
+            )
+            .1;
+        assert!(matches!(
+            arrangement_message(second),
+            Some(ArrangementMsg::AddTransientMarker {
+                source_frame: 300,
+                ..
+            })
+        ));
     }
 
     #[test]

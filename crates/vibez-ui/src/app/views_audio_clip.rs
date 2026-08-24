@@ -80,6 +80,15 @@ impl App {
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
             playback_direction: clip.playback_direction,
+            transient_markers: clip.transient_markers.clone(),
+            selected_transient_marker: self
+                .state
+                .active_timeline_editor()
+                .selected_transient_marker
+                .filter(|(selected_track, selected_clip, _)| {
+                    *selected_track == track_id && *selected_clip == clip.id
+                })
+                .map(|(_, _, source_frame)| source_frame),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -96,6 +105,77 @@ impl App {
         .size(10)
         .color(th::text_muted());
 
+        let selected_transient = self
+            .state
+            .active_timeline_editor()
+            .selected_transient_marker
+            .filter(|(selected_track, selected_clip, _)| {
+                *selected_track == track_id && *selected_clip == clip.id
+            })
+            .map(|(_, _, source_frame)| source_frame);
+        let marker_button_style = |_theme: &Theme, status: button::Status| button::Style {
+            background: Some(
+                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    th::bg_hover()
+                } else {
+                    th::bg_surface()
+                }
+                .into(),
+            ),
+            text_color: th::text_dim(),
+            border: iced::Border {
+                color: th::divider(),
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            ..Default::default()
+        };
+        let detect_transients = button(text("DETECT TRANSIENTS").size(8))
+            .on_press(Message::DetectClipTransients {
+                location: self.active_timeline_location(),
+                track_id,
+                clip_id: clip.id,
+            })
+            .padding([3, 6])
+            .style(marker_button_style);
+        let add_at_playhead = button(text("ADD MARKER").size(8))
+            .on_press_maybe((playhead_normalized >= 0.0).then(|| {
+                let local_frame = (playhead_normalized * clip.duration as f64).round() as u64;
+                Message::Arrangement(ArrangementMsg::AddTransientMarker {
+                    track_id,
+                    clip_id: clip.id,
+                    source_frame: clip.source_frame_at(local_frame.min(clip.duration)),
+                })
+            }))
+            .padding([3, 6])
+            .style(marker_button_style);
+        let delete_marker = button(text("DELETE MARKER").size(8))
+            .on_press_maybe(selected_transient.map(|source_frame| {
+                Message::Arrangement(ArrangementMsg::RemoveTransientMarker {
+                    track_id,
+                    clip_id: clip.id,
+                    source_frame,
+                })
+            }))
+            .padding([3, 6])
+            .style(marker_button_style);
+        let transient_row = row![
+            text(format!(
+                "{} MARKERS",
+                clip.transient_markers.as_slice().len()
+            ))
+            .size(8)
+            .color(th::text_muted()),
+            detect_transients,
+            add_at_playhead,
+            delete_marker,
+            text("Double-click waveform to add")
+                .size(8)
+                .color(th::text_muted()),
+            horizontal_space()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
         let header_row = row![label, horizontal_space(), clip_info]
             .spacing(4)
             .align_y(iced::Alignment::Center);
@@ -416,7 +496,7 @@ impl App {
         });
 
         let quantize_row = self.view_audio_quantize_row(track_id, clip.id);
-        let waveform = column![header_row, quantize_row, waveform_canvas]
+        let waveform = column![header_row, transient_row, quantize_row, waveform_canvas]
             .spacing(6)
             .padding(4)
             .width(Length::Fill)

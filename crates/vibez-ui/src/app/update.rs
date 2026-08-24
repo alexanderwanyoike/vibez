@@ -627,6 +627,29 @@ impl App {
             } => {
                 return self.dispatch_detect_clip_bpm(location, track_id, clip_id);
             }
+            Message::DetectClipTransients {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                return self.dispatch_detect_clip_transients(location, track_id, clip_id);
+            }
+            Message::ClipTransientsDetected {
+                location,
+                track_id,
+                clip_id,
+                expected_audio,
+                source_frames,
+            } => {
+                return self.finish_detect_clip_transients(
+                    location,
+                    track_id,
+                    clip_id,
+                    expected_audio,
+                    source_frames,
+                    undo_gesture,
+                );
+            }
             Message::ClipBpmDetected {
                 location,
                 track_id,

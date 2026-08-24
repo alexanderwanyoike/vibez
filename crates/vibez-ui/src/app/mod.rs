@@ -178,6 +178,7 @@ mod project_replay;
 mod project_sections;
 mod save_runtime;
 mod section_record;
+mod transient_markers;
 mod update;
 mod update_media;
 mod update_policy;

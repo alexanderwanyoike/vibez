@@ -605,6 +605,7 @@ fn append_timeline_window(
                 gain_db: clip.gain_db,
                 fades: clip.fades,
                 playback_direction: clip.playback_direction,
+                transient_markers: clip.transient_markers.clone(),
                 transpose: clip.transpose,
                 original_bpm: clip.original_bpm,
                 warped: clip.warped,
@@ -614,6 +615,10 @@ fn append_timeline_window(
             fragment.fades = clip
                 .fades
                 .for_fragment(clip.duration, delta, fragment.duration);
+            fragment.transient_markers.retain_source_range(
+                fragment.source_offset,
+                fragment.source_offset.saturating_add(fragment.duration),
+            );
             if fragment.loop_enabled && fragment.loop_end <= fragment.loop_start {
                 fragment.loop_enabled = false;
             }
@@ -727,6 +732,7 @@ mod tests {
                 gain_db: Default::default(),
                 fades: Default::default(),
                 playback_direction: Default::default(),
+                transient_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

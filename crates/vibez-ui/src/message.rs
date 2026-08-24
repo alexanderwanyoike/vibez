@@ -723,6 +723,18 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
+    DetectClipTransients {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    ClipTransientsDetected {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        expected_audio: Arc<DecodedAudio>,
+        source_frames: Vec<u64>,
+    },
     /// Background BPM detection result. `bpm` is `None` when the
     /// detector refused to commit (silence, sparse pad, too short).
     ClipBpmDetected {

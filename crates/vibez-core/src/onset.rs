@@ -481,6 +481,12 @@ mod tests {
     }
 
     #[test]
+    fn onset_detection_is_deterministic_for_identical_audio() {
+        let audio = impulse_train(44_100, &[8_820; 8]);
+        assert_eq!(detect_onsets(&audio, 1.5), detect_onsets(&audio, 1.5));
+    }
+
+    #[test]
     fn sensitivity_affects_yield() {
         // Low-amplitude impulses: high sensitivity should reject them.
         let sr = 44_100u32;

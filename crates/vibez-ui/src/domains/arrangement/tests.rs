@@ -9,6 +9,7 @@ use crate::state::{AudioClipInspectorField, UiClip};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::midi::MidiNote;
 use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection};
+use vibez_core::transient::{TransientMarker, TransientMarkerKind};
 
 #[test]
 fn add_track_selects_it_and_names_uniquely() {
@@ -286,6 +287,7 @@ fn add_audio_clip(
         gain_db: Default::default(),
         fades: Default::default(),
         playback_direction: Default::default(),
+        transient_markers: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -434,11 +436,120 @@ fn reverse_toggle_updates_the_clip_and_engine_without_touching_its_audio() {
 }
 
 #[test]
+fn transient_marker_edits_are_explicit_clamped_and_do_not_touch_audio() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
+    a.tracks[0].clips[0].source_offset = 100;
+    let original_audio = Arc::clone(&a.tracks[0].clips[0].audio);
+    let mut engine = RecordingEngine::default();
+
+    let added = a.update(
+        ArrangementMsg::AddTransientMarker {
+            track_id,
+            clip_id,
+            source_frame: 10,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(added.mark_dirty);
+    assert_eq!(
+        a.tracks[0].clips[0].transient_markers.as_slice(),
+        &[TransientMarker::new(100, TransientMarkerKind::Authored)]
+    );
+    assert_eq!(a.selected_transient_marker, Some((track_id, clip_id, 100)));
+    assert!(Arc::ptr_eq(&original_audio, &a.tracks[0].clips[0].audio));
+    assert!(engine.0.is_empty());
+
+    let moved = a.update(
+        ArrangementMsg::MoveTransientMarker {
+            track_id,
+            clip_id,
+            from: 100,
+            to: 240,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(moved.mark_dirty);
+    assert_eq!(
+        a.tracks[0].clips[0].transient_markers.as_slice(),
+        &[TransientMarker::new(240, TransientMarkerKind::Authored)]
+    );
+
+    let removed = a.update(
+        ArrangementMsg::RemoveTransientMarker {
+            track_id,
+            clip_id,
+            source_frame: 240,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(removed.mark_dirty);
+    assert!(a.tracks[0].clips[0].transient_markers.is_empty());
+    assert_eq!(a.selected_transient_marker, None);
+}
+
+#[test]
+fn detection_replaces_suggestions_but_preserves_authored_transient_markers() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
+    let markers = &mut a.tracks[0].clips[0].transient_markers;
+    markers.add_authored(250);
+    markers.replace_suggestions([100, 400]);
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::ReplaceDetectedTransientMarkers {
+            track_id,
+            clip_id,
+            source_frames: vec![700, 250, 300, 300],
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(action.mark_dirty);
+    assert_eq!(
+        a.tracks[0].clips[0].transient_markers.as_slice(),
+        &[
+            TransientMarker::new(250, TransientMarkerKind::Authored),
+            TransientMarker::new(300, TransientMarkerKind::Suggested),
+            TransientMarker::new(700, TransientMarkerKind::Suggested),
+        ]
+    );
+    assert!(engine.0.is_empty());
+}
+
+#[test]
+fn reverse_changes_marker_display_order_without_changing_source_positions() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
+    a.tracks[0].clips[0]
+        .transient_markers
+        .replace_suggestions([100, 900]);
+    let before = a.tracks[0].clips[0].transient_markers.clone();
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::ToggleClipReverse(track_id, clip_id),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(a.tracks[0].clips[0].transient_markers, before);
+}
+
+#[test]
 fn splitting_a_reversed_clip_preserves_both_audible_fragments() {
     let mut a = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1000);
     let original = &mut a.tracks[0].clips[0];
     original.playback_direction = ClipPlaybackDirection::Reverse;
+    original
+        .transient_markers
+        .replace_suggestions([100, 650, 900]);
     let expected: Vec<_> = (0..original.duration)
         .map(|frame| original.source_frame_at(frame))
         .collect();
@@ -463,6 +574,24 @@ fn splitting_a_reversed_clip_preserves_both_audible_fragments() {
     assert_eq!(actual, expected);
     assert_eq!(halves[0].source_offset, 600);
     assert_eq!(halves[1].source_offset, 0);
+    assert_eq!(
+        halves[0]
+            .transient_markers
+            .as_slice()
+            .iter()
+            .map(|marker| marker.source_frame())
+            .collect::<Vec<_>>(),
+        vec![650, 900]
+    );
+    assert_eq!(
+        halves[1]
+            .transient_markers
+            .as_slice()
+            .iter()
+            .map(|marker| marker.source_frame())
+            .collect::<Vec<_>>(),
+        vec![100]
+    );
 }
 
 #[test]
@@ -799,6 +928,12 @@ fn warp_success(
 fn warp_then_clear_roundtrips_clip_geometry() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
+    Arc::make_mut(&mut a.arrangement.timeline)
+        .get_mut(tid)
+        .unwrap()
+        .clips[0]
+        .transient_markers
+        .replace_suggestions([250, 750]);
     let original = Arc::clone(&a.arrangement.timeline.get(tid).unwrap().clips[0].audio);
     let mut engine = RecordingEngine::default();
 
@@ -810,6 +945,14 @@ fn warp_then_clear_roundtrips_clip_geometry() {
     assert_eq!(clip.warped_to_bpm, Some(120.0));
     assert_eq!(clip.original_bpm, Some(128.0));
     assert!(clip.original_audio.is_some());
+    assert_eq!(
+        clip.transient_markers
+            .as_slice()
+            .iter()
+            .map(|marker| marker.source_frame())
+            .collect::<Vec<_>>(),
+        vec![500, 1500]
+    );
     assert!(action.mark_dirty);
     assert!(matches!(
         engine.0[0],
@@ -841,6 +984,14 @@ fn warp_then_clear_roundtrips_clip_geometry() {
     assert_eq!(clip.duration, 1000);
     assert!(clip.original_audio.is_none());
     assert!(Arc::ptr_eq(&clip.audio, &original));
+    assert_eq!(
+        clip.transient_markers
+            .as_slice()
+            .iter()
+            .map(|marker| marker.source_frame())
+            .collect::<Vec<_>>(),
+        vec![250, 750]
+    );
     assert!(action.mark_dirty);
 }
 
@@ -937,6 +1088,9 @@ fn clear_warp_result_requeues_without_overwriting_new_geometry() {
 fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    a.tracks[0].clips[0]
+        .transient_markers
+        .replace_suggestions([5_000, 20_000, 44_100]);
     let mut engine = RecordingEngine::default();
 
     a.audio_clip_inspector_edits
@@ -972,6 +1126,14 @@ fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
     let clip = &a.tracks[0].clips[0];
     assert_eq!(clip.source_offset, 11_025);
     assert_eq!(clip.duration, 33_075);
+    assert_eq!(
+        clip.transient_markers
+            .as_slice()
+            .iter()
+            .map(|marker| marker.source_frame())
+            .collect::<Vec<_>>(),
+        vec![20_000, 44_100]
+    );
     assert!(engine.0.iter().any(|command| matches!(
         command,
         EngineCommand::SetClipBounds {
