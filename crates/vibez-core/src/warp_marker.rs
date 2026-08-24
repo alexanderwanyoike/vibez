@@ -418,6 +418,14 @@ mod tests {
     }
 
     #[test]
+    fn timeline_frames_past_the_map_hold_the_final_source_frame() {
+        let mut markers = WarpMarkers::default();
+        assert!(markers.add(250, 500, 0, 1_000, 1_000));
+
+        assert_eq!(markers.source_at_timeline(1_250.0, 0, 1_000), 1_000.0);
+    }
+
+    #[test]
     fn fragment_keeps_segment_timing_even_without_an_interior_marker() {
         let mut markers = WarpMarkers::default();
         assert!(markers.add(250, 500, 0, 1_000, 1_000));

@@ -69,21 +69,23 @@ impl EngineClip {
         self.position < end && self.end_position() > pos
     }
 
-    fn source_frame_at(&self, clip_frame: u64) -> f64 {
-        let timeline_frame = self.timeline().source_at(
+    fn source_frame_at(
+        &self,
+        clip_frame: u64,
+        timeline: FrameClipTimeline,
+        warp_timeline_end: u64,
+    ) -> f64 {
+        let timeline_frame = timeline.source_at(
             self.playback_direction
                 .map_clip_frame(clip_frame, self.duration),
         );
         if self.warp_markers.is_empty() {
             return timeline_frame as f64;
         }
-        let identity_timeline_end = self
-            .duration
-            .min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
         self.warp_markers.source_at_timeline(
             timeline_frame.saturating_sub(self.source_offset) as f64,
             self.source_offset,
-            self.warp_markers.timeline_end(identity_timeline_end),
+            warp_timeline_end,
         )
     }
 }
@@ -395,6 +397,11 @@ impl PreparedPlaybackSource {
                 .saturating_add(clip.duration)
                 .min(clip.audio.num_frames() as u64);
             let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
+            let timeline = clip.timeline();
+            let identity_timeline_end = clip
+                .duration
+                .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
+            let warp_timeline_end = clip.warp_markers.timeline_end(identity_timeline_end);
             let mut clip_rendered = false;
             for frame in 0..frames {
                 let global_frame = apply_loop_wrap(pos + frame as u64, loop_region);
@@ -402,7 +409,7 @@ impl PreparedPlaybackSource {
                     continue;
                 }
                 let clip_frame = global_frame - clip.position;
-                let source_frame = clip.source_frame_at(clip_frame);
+                let source_frame = clip.source_frame_at(clip_frame, timeline, warp_timeline_end);
                 let fade_gain = clip.fades.gain_at(clip_frame, clip.duration);
                 for ch in 0..channels {
                     let sample = if source_frame >= source_end as f64 {
