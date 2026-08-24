@@ -115,6 +115,7 @@ fn render_events(
     }
     commands
         .push(EngineCommand::AddNoteClip {
+            start_marker_beats: 0.0,
             track_id,
             clip_id,
             position_beats: 0.0,
@@ -150,6 +151,61 @@ fn midpoint_note(start_beat: f64) -> MidiNote {
 }
 
 #[test]
+fn midi_start_plays_once_then_returns_to_loop_start() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    commands.push(EngineCommand::SetSampleRate(96)).unwrap();
+    commands.push(EngineCommand::SetBpm(60.0)).unwrap();
+    commands
+        .push(EngineCommand::AddMidiTrack(track_id, "Start probe".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetPluginInstrument {
+            track_id,
+            instrument: Box::new(TimedSpy {
+                events: Arc::clone(&events),
+            }),
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::AddNoteClip {
+            track_id,
+            clip_id,
+            position_beats: 0.0,
+            duration_beats: 4.0,
+            start_marker_beats: 2.0,
+            loop_enabled: true,
+            loop_start_beats: 1.0,
+            loop_end_beats: 3.0,
+            groove_grid: GrooveGrid::Off,
+        })
+        .unwrap();
+    for (pitch, start_beat) in [(62, 2.0), (61, 1.0)] {
+        commands
+            .push(EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                note: MidiNote {
+                    pitch,
+                    velocity: 100,
+                    start_beat,
+                    duration_beats: 0.1,
+                },
+            })
+            .unwrap();
+    }
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut vec![0.0; 300 * 2], 2);
+
+    let events = events.lock().unwrap();
+    assert!(events.contains(&TimedEvent::On(0, 62)));
+    assert!(events.contains(&TimedEvent::On(96, 61)));
+    assert!(events.contains(&TimedEvent::On(192, 62)));
+}
+
+#[test]
 fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
     let (mut engine, mut commands, _events) = AudioEngine::new();
     let track_id = TrackId::new();
@@ -172,6 +228,7 @@ fn dense_recorded_groove_schedules_each_note_once_per_audio_block() {
             clip_id,
             position_beats: 0.0,
             duration_beats: 8.0,
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,

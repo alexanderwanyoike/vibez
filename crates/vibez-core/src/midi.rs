@@ -29,6 +29,9 @@ pub struct NoteClipInfo {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
+    /// Initial playback position. Older projects start where their loop starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_marker_beats: Option<f64>,
     #[serde(default)]
     pub loop_enabled: bool,
     #[serde(default)]
@@ -130,6 +133,7 @@ mod tests {
             name: "Pattern 1".into(),
             position_beats: 0.0,
             duration_beats: 4.0,
+            start_marker_beats: Some(1.0),
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -154,6 +158,7 @@ mod tests {
         assert_eq!(loaded.name, "Pattern 1");
         assert_eq!(loaded.notes.len(), 2);
         assert_eq!(loaded.notes[0].pitch, 60);
+        assert_eq!(loaded.start_marker_beats, Some(1.0));
         assert_eq!(loaded.groove_grid, GrooveGrid::Sixteenth);
     }
 
@@ -166,6 +171,7 @@ mod tests {
             position_beats: 0.0,
             duration_beats: 4.0,
             notes: Vec::new(),
+            start_marker_beats: None,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -173,8 +179,10 @@ mod tests {
         };
         let mut json = serde_json::to_value(clip).unwrap();
         json.as_object_mut().unwrap().remove("groove_grid");
+        json.as_object_mut().unwrap().remove("start_marker_beats");
         let loaded: NoteClipInfo = serde_json::from_value(json).unwrap();
         assert_eq!(loaded.groove_grid, GrooveGrid::Off);
+        assert_eq!(loaded.start_marker_beats, None);
     }
 
     #[test]

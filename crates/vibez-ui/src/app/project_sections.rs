@@ -21,6 +21,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
             name: clip.name.clone(),
             position: clip.position,
             source_offset: clip.source_offset,
+            start_marker: Some(clip.start_marker),
             duration: clip.duration,
             source: clip.source.clone(),
             file_path: clip.source.as_ref().and_then(|source| match source {
@@ -48,6 +49,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
                         position_beats: clip.position_beats,
                         duration_beats: clip.duration_beats,
                         notes: clip.notes.clone(),
+                        start_marker_beats: Some(clip.start_marker_beats),
                         loop_enabled: clip.loop_enabled,
                         loop_start_beats: clip.loop_start_beats,
                         loop_end_beats: clip.loop_end_beats,
@@ -98,6 +100,11 @@ pub(super) fn timeline_without_audio(info: &TimelineInfo) -> ArrangementTimeline
         timeline.ensure(automation.track_id).automation = automation.lanes.clone();
     }
     for clip in &info.note_clips {
+        let marker_end = if clip.loop_enabled {
+            clip.duration_beats.min(clip.loop_end_beats)
+        } else {
+            clip.duration_beats
+        };
         timeline.ensure(clip.track_id).note_clips.push(UiNoteClip {
             id: clip.id,
             name: clip.name.clone(),
@@ -105,6 +112,10 @@ pub(super) fn timeline_without_audio(info: &TimelineInfo) -> ArrangementTimeline
             duration_beats: clip.duration_beats,
             notes: clip.notes.clone(),
             selected_notes: HashSet::new(),
+            start_marker_beats: clip
+                .start_marker_beats
+                .unwrap_or(clip.loop_start_beats)
+                .clamp(0.0, (marker_end - 0.01).max(0.0)),
             loop_enabled: clip.loop_enabled,
             loop_start_beats: clip.loop_start_beats,
             loop_end_beats: clip.loop_end_beats,
@@ -130,13 +141,27 @@ pub(super) fn install_loaded_clip(
     timeline: &mut ArrangementTimeline,
     loaded: crate::message::LoadedClipData,
 ) {
+    let source_offset = loaded.info.source_offset;
+    let source_end = source_offset
+        .saturating_add(loaded.info.duration)
+        .min(loaded.audio.num_frames() as u64);
+    let marker_end = if loaded.info.loop_enabled {
+        source_end.min(loaded.info.loop_end)
+    } else {
+        source_end
+    };
+    let start_marker = loaded.info.start_marker.unwrap_or(source_offset).clamp(
+        source_offset,
+        marker_end.saturating_sub(1).max(source_offset),
+    );
     timeline.ensure(loaded.info.track_id).clips.push(UiClip {
         id: loaded.info.id,
         name: loaded.info.name,
         audio: loaded.audio,
         source: loaded.info.source.clone(),
         position: loaded.info.position,
-        source_offset: loaded.info.source_offset,
+        source_offset,
+        start_marker,
         duration: loaded.info.duration,
         loop_enabled: loaded.info.loop_enabled,
         loop_start: loaded.info.loop_start,
@@ -210,6 +235,7 @@ mod tests {
                     duration_beats: 0.25,
                 }],
                 selected_notes: [0].into_iter().collect(),
+                start_marker_beats: 0.0,
                 loop_enabled: true,
                 loop_start_beats: 0.0,
                 loop_end_beats: 4.0,

@@ -20,7 +20,7 @@ use crate::state::{
 use super::*;
 
 fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    let raw = clip.source_offset.saturating_add(local_frame);
+    let raw = clip.start_marker.saturating_add(local_frame);
     if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
         let loop_len = clip.loop_end - clip.loop_start;
         (clip.loop_start + (raw - clip.loop_start) % loop_len) as usize
@@ -30,11 +30,9 @@ fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
 }
 
 fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
-    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
     let mut visible = Vec::new();
     for note in &clip.notes {
-        let mut occurrence = note.start_beat;
-        loop {
+        for occurrence in clip.note_occurrences(note.start_beat) {
             let note_end = occurrence + note.duration_beats;
             let kept_start = occurrence.max(local_start);
             let kept_end = note_end.min(local_end);
@@ -44,16 +42,6 @@ fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<Mid
                     duration_beats: kept_end - kept_start,
                     ..*note
                 });
-            }
-            if !looping
-                || note.start_beat < clip.loop_start_beats
-                || note.start_beat >= clip.loop_end_beats
-            {
-                break;
-            }
-            occurrence += clip.loop_end_beats - clip.loop_start_beats;
-            if occurrence >= local_end {
-                break;
             }
         }
     }
@@ -170,6 +158,7 @@ impl TimelineEditorState {
                                 fragment.position = start_sample;
                                 fragment.source_offset =
                                     audio_source_frame(clip, local_start) as u64;
+                                fragment.start_marker = fragment.source_offset;
                                 fragment.duration = end_sample - start_sample;
                                 fragment
                             })
@@ -203,6 +192,7 @@ impl TimelineEditorState {
                             fragment.duration_beats = end - start;
                             fragment.notes = visible_notes(clip, local_start, local_end);
                             fragment.selected_notes.clear();
+                            fragment.start_marker_beats = 0.0;
                             if fragment.loop_enabled {
                                 fragment.reset_loop_region_to_clip();
                             }
@@ -299,6 +289,14 @@ impl TimelineEditorState {
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
                 clip.duration = new_duration;
+                let source_end = clip
+                    .source_offset
+                    .saturating_add(clip.duration)
+                    .min(clip.audio.num_frames() as u64);
+                clip.start_marker = clip.start_marker.clamp(
+                    clip.source_offset,
+                    source_end.saturating_sub(1).max(clip.source_offset),
+                );
                 if clip.loop_enabled {
                     clip.clamp_loop_to_clip();
                 }
@@ -307,6 +305,7 @@ impl TimelineEditorState {
                     Arc::clone(&clip.audio),
                     clip.position,
                     clip.source_offset,
+                    clip.start_marker,
                     clip.duration,
                     clip.loop_enabled,
                     clip.loop_start,
@@ -319,6 +318,7 @@ impl TimelineEditorState {
             audio,
             position,
             source_offset,
+            start_marker,
             duration,
             loop_enabled,
             loop_start,
@@ -333,6 +333,7 @@ impl TimelineEditorState {
                 audio,
                 position,
                 source_offset,
+                start_marker,
                 duration,
                 loop_enabled,
                 loop_start,
@@ -361,6 +362,7 @@ impl TimelineEditorState {
             audio: Arc::clone(&success.audio),
             duration: success.new_duration,
             source_offset: success.new_source_offset,
+            start_marker: success.new_start_marker,
             loop_start: success.new_loop_start,
             loop_end: success.new_loop_end,
         });
@@ -369,6 +371,7 @@ impl TimelineEditorState {
                 clip.audio = Arc::clone(&success.audio);
                 clip.duration = success.new_duration;
                 clip.source_offset = success.new_source_offset;
+                clip.start_marker = success.new_start_marker;
                 clip.loop_start = success.new_loop_start;
                 clip.loop_end = success.new_loop_end;
                 clip.original_bpm = Some(success.detected_bpm);
@@ -485,6 +488,7 @@ impl TimelineEditorState {
             audio: Arc::clone(&success.new_audio),
             position: success.new_position,
             source_offset: 0,
+            start_marker: 0,
             duration: success.new_duration,
             loop_enabled: false,
             loop_start: 0,
@@ -499,6 +503,7 @@ impl TimelineEditorState {
                 source: None,
                 position: success.new_position,
                 source_offset: 0,
+                start_marker: 0,
                 duration: success.new_duration,
                 loop_enabled: false,
                 loop_start: 0,
@@ -654,6 +659,7 @@ impl TimelineEditorState {
             audio: Arc::clone(&joined_audio),
             position: start_pos,
             source_offset: 0,
+            start_marker: 0,
             duration: total_duration,
             loop_enabled: joined_loop_enabled,
             loop_start: 0,
@@ -668,6 +674,7 @@ impl TimelineEditorState {
                 source: None,
                 position: start_pos,
                 source_offset: 0,
+                start_marker: 0,
                 duration: total_duration,
                 loop_enabled: joined_loop_enabled,
                 loop_start: 0,
@@ -754,6 +761,7 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddNoteClip {
+            start_marker_beats: 0.0,
             track_id,
             clip_id: new_id,
             position_beats: start_pos,
@@ -778,6 +786,7 @@ impl TimelineEditorState {
                 duration_beats: total_duration,
                 notes: merged_notes,
                 selected_notes: HashSet::new(),
+                start_marker_beats: 0.0,
                 loop_enabled: joined_loop_enabled,
                 loop_start_beats: 0.0,
                 loop_end_beats: total_duration,
@@ -816,6 +825,7 @@ impl TimelineEditorState {
                 audio: Arc::clone(&clip.audio),
                 position: clip.position,
                 source_offset: clip.source_offset,
+                start_marker: clip.start_marker,
                 duration: clip.duration,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
@@ -842,6 +852,7 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddNoteClip {
+                start_marker_beats: clip.start_marker_beats,
                 track_id,
                 clip_id: clip.id,
                 position_beats: clip.position_beats,
@@ -893,6 +904,7 @@ impl TimelineEditorState {
                 right.position = split_position;
                 right.duration = clip.duration - left_duration;
                 right.source_offset = audio_source_frame(clip, left_duration) as u64;
+                right.start_marker = right.source_offset;
                 (left, right)
             });
         if let Some((left, right)) = split {
@@ -934,6 +946,7 @@ impl TimelineEditorState {
                 left.duration_beats = local_split;
                 left.notes = visible_notes(clip, 0.0, local_split);
                 left.selected_notes.clear();
+                left.start_marker_beats = 0.0;
 
                 let mut right = clip.clone();
                 right.id = ClipId::new();
@@ -942,6 +955,7 @@ impl TimelineEditorState {
                 right.duration_beats = clip.duration_beats - local_split;
                 right.notes = visible_notes(clip, local_split, clip.duration_beats);
                 right.selected_notes.clear();
+                right.start_marker_beats = 0.0;
 
                 if clip.loop_enabled {
                     left.reset_loop_region_to_clip();

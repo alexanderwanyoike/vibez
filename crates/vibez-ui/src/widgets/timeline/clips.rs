@@ -224,11 +224,16 @@ impl TrackClipCanvas {
                 notes: if geometry.pixels_per_beat() >= 4.0 {
                     c.notes
                         .iter()
-                        .map(|n| (n.pitch, n.start_beat, n.duration_beats))
+                        .flat_map(|note| {
+                            c.note_occurrences(note.start_beat)
+                                .into_iter()
+                                .map(|occurrence| (note.pitch, occurrence, note.duration_beats))
+                        })
                         .collect()
                 } else {
                     Vec::new()
                 },
+                start_marker_beats: c.start_marker_beats,
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,
                 loop_end_beats: c.loop_end_beats,

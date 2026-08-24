@@ -5,7 +5,6 @@ use iced::{Color, Point};
 
 use crate::state::UndoGestureId;
 
-pub(crate) const MARKER_RAIL_HEIGHT: f32 = 20.0;
 const HANDLE_WIDTH: f32 = 8.0;
 const HIT_RADIUS: f32 = 8.0;
 
@@ -115,26 +114,18 @@ mod tests {
     #[test]
     fn closest_marker_wins_when_hit_targets_overlap() {
         assert_eq!(
-            hit_test(100.0, 108.0, Point::new(102.0, 5.0), MARKER_RAIL_HEIGHT),
+            hit_test(100.0, 108.0, Point::new(102.0, 5.0), 20.0),
             Some(LoopMarker::Start)
         );
         assert_eq!(
-            hit_test(100.0, 108.0, Point::new(106.0, 5.0), MARKER_RAIL_HEIGHT),
+            hit_test(100.0, 108.0, Point::new(106.0, 5.0), 20.0),
             Some(LoopMarker::End)
         );
     }
 
     #[test]
     fn marker_hit_target_stays_inside_the_rail() {
-        assert_eq!(
-            hit_test(
-                100.0,
-                200.0,
-                Point::new(100.0, MARKER_RAIL_HEIGHT + 1.0),
-                MARKER_RAIL_HEIGHT
-            ),
-            None
-        );
+        assert_eq!(hit_test(100.0, 200.0, Point::new(100.0, 21.0), 20.0), None);
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub struct TimelineNoteClip {
     pub duration_beats: f64,
     pub name: String,
     pub notes: Vec<(u8, f64, f64)>, // (pitch, start_beat, duration_beats)
+    pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
@@ -45,6 +46,7 @@ pub struct TimelineNoteClip {
 struct PeakCacheKey {
     audio: usize,
     source_offset: u64,
+    start_marker: u64,
     duration: u64,
     loop_enabled: bool,
     loop_start: u64,
@@ -64,6 +66,7 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
     let key = PeakCacheKey {
         audio: Arc::as_ptr(&clip.audio) as usize,
         source_offset: clip.source_offset,
+        start_marker: clip.start_marker,
         duration: clip.duration,
         loop_enabled: clip.loop_enabled,
         loop_start: clip.loop_start,
@@ -115,14 +118,22 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
                 let span = cf_end.saturating_sub(cf_start).max(1);
 
                 if !looping {
-                    let src_start = clip.source_offset as usize + cf_start;
-                    let src_end = clip.source_offset as usize + cf_end;
-                    peak_for_range(src_start, src_end)
+                    let src_start = clip.start_marker as usize + cf_start;
+                    let source_end =
+                        clip.source_offset
+                            .saturating_add(clip.duration)
+                            .min(clip.audio.num_frames() as u64) as usize;
+                    if src_start >= source_end {
+                        (0.0, 0.0)
+                    } else {
+                        let src_end = (clip.start_marker as usize + cf_end).min(source_end);
+                        peak_for_range(src_start, src_end)
+                    }
                 } else if span >= loop_len {
                     full_loop_peak.unwrap()
                 } else {
-                    let raw_start = clip.source_offset as usize + cf_start;
-                    let raw_end = clip.source_offset as usize + cf_end;
+                    let raw_start = clip.start_marker as usize + cf_start;
+                    let raw_end = clip.start_marker as usize + cf_end;
                     let src_start = if raw_start >= loop_end {
                         loop_start + (raw_start - loop_start) % loop_len
                     } else {
@@ -210,6 +221,7 @@ mod performance_tests {
             source: None,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: frames as u64,
             loop_enabled: false,
             loop_start: 0,

@@ -9,9 +9,9 @@ use vibez_core::id::{ClipId, TrackId};
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::message::Message;
-use crate::state::GridConfig;
+use crate::state::{GridConfig, UndoGestureId};
 use crate::theme;
-use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker, MARKER_RAIL_HEIGHT};
+use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::local_drag::LocalDrag;
 
 /// Canvas widget for showing a detailed waveform of an audio clip in the detail panel.
@@ -21,6 +21,7 @@ pub struct AudioClipDetailWidget {
     pub audio: Arc<DecodedAudio>,
     pub duration_samples: u64,
     pub source_offset: u64,
+    pub start_marker: u64,
     pub sample_rate: u32,
     pub bpm: f64,
     pub grid: GridConfig,
@@ -34,7 +35,19 @@ pub struct AudioClipDetailWidget {
 
 #[derive(Debug, Default)]
 pub struct AudioClipDetailState {
-    drag: Option<LoopDrag>,
+    drag: Option<AudioMarkerDrag>,
+}
+
+const AUDIO_RULER_HEIGHT: f32 = 30.0;
+const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
+const START_HANDLE_TOP: f32 = 10.0;
+const START_HANDLE_BOTTOM: f32 = 21.0;
+const MARKER_HIT_RADIUS: f32 = 8.0;
+
+#[derive(Debug, Clone, Copy)]
+enum AudioMarkerDrag {
+    Start(UndoGestureId),
+    Loop(LoopDrag),
 }
 
 impl AudioClipDetailWidget {
@@ -104,8 +117,27 @@ impl AudioClipDetailWidget {
             self.source_to_x(self.loop_start, bounds),
             self.source_to_x(self.loop_end, bounds),
             position,
-            MARKER_RAIL_HEIGHT,
+            LOOP_HANDLE_ROW_HEIGHT,
         )
+    }
+
+    fn hit_test_start_marker(&self, position: Point, bounds: &Rectangle) -> bool {
+        (START_HANDLE_TOP..=START_HANDLE_BOTTOM).contains(&position.y)
+            && (position.x - self.source_to_x(self.start_marker, bounds)).abs() <= MARKER_HIT_RADIUS
+    }
+
+    fn start_marker_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
+        let candidate = self
+            .source_offset
+            .saturating_add(self.x_to_local_frame(x, bounds));
+        let source_end = self.source_offset.saturating_add(self.loop_range_frames());
+        let last_source_frame = source_end.saturating_sub(1);
+        let latest = if self.loop_enabled {
+            last_source_frame.min(self.loop_end.saturating_sub(1))
+        } else {
+            last_source_frame
+        };
+        candidate.clamp(self.source_offset, latest.max(self.source_offset))
     }
 }
 
@@ -148,7 +180,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             } else {
                 (theme::grid_sub(), 1.0)
             };
-            let line = canvas::Path::line(Point::new(x, MARKER_RAIL_HEIGHT), Point::new(x, h));
+            let line = canvas::Path::line(Point::new(x, AUDIO_RULER_HEIGHT), Point::new(x, h));
             frame.stroke(
                 &line,
                 canvas::Stroke::default()
@@ -158,8 +190,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         }
 
         // Center line
-        let waveform_height = (h - MARKER_RAIL_HEIGHT).max(1.0);
-        let center_y = MARKER_RAIL_HEIGHT + waveform_height / 2.0;
+        let waveform_height = (h - AUDIO_RULER_HEIGHT).max(1.0);
+        let center_y = AUDIO_RULER_HEIGHT + waveform_height / 2.0;
         let center_line = canvas::Path::line(
             iced::Point::new(0.0, center_y),
             iced::Point::new(w, center_y),
@@ -201,7 +233,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 while boundary < num_frames {
                     let bx = boundary as f32 / num_frames as f32 * w;
                     let line = canvas::Path::line(
-                        iced::Point::new(bx, MARKER_RAIL_HEIGHT),
+                        iced::Point::new(bx, AUDIO_RULER_HEIGHT),
                         iced::Point::new(bx, h),
                     );
                     frame.stroke(
@@ -291,7 +323,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         // labels so measure numbers remain readable where they overlap.
         frame.fill_rectangle(
             Point::ORIGIN,
-            iced::Size::new(w, MARKER_RAIL_HEIGHT),
+            iced::Size::new(w, AUDIO_RULER_HEIGHT),
             theme::with_alpha(theme::bg_surface(), 0.96),
         );
         if looping {
@@ -303,9 +335,41 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             );
         }
 
+        // Start is a one-shot playback marker, independent of the loop brace.
+        // It lives on its own row so the default overlap with Loop Start remains
+        // directly editable.
+        let start_x = self.source_to_x(self.start_marker, &bounds);
+        let start_color = theme::text();
+        let start_flag = canvas::Path::new(|path| {
+            path.move_to(Point::new(start_x, START_HANDLE_TOP));
+            path.line_to(Point::new(start_x + 8.0, START_HANDLE_TOP));
+            path.line_to(Point::new(start_x, START_HANDLE_BOTTOM));
+            path.close();
+        });
+        frame.fill(&start_flag, start_color);
+        let start_line = canvas::Path::line(
+            Point::new(start_x, START_HANDLE_TOP),
+            Point::new(start_x, h),
+        );
+        frame.stroke(
+            &start_line,
+            canvas::Stroke::default()
+                .with_color(theme::with_alpha(start_color, 0.75))
+                .with_width(1.0),
+        );
+        if start_x + 42.0 < w {
+            frame.fill_text(canvas::Text {
+                content: "START".into(),
+                position: Point::new(start_x + 10.0, 19.0),
+                color: start_color,
+                size: iced::Pixels(8.0),
+                ..Default::default()
+            });
+        }
+
         let ruler_border = canvas::Path::line(
-            Point::new(0.0, MARKER_RAIL_HEIGHT),
-            Point::new(w, MARKER_RAIL_HEIGHT),
+            Point::new(0.0, AUDIO_RULER_HEIGHT),
+            Point::new(w, AUDIO_RULER_HEIGHT),
         );
         frame.stroke(
             &ruler_border,
@@ -324,8 +388,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             let is_beat = beat_millis % 1_000 == 0;
             if is_bar {
                 let tick = canvas::Path::line(
-                    Point::new(x, MARKER_RAIL_HEIGHT - 6.0),
-                    Point::new(x, MARKER_RAIL_HEIGHT),
+                    Point::new(x, AUDIO_RULER_HEIGHT - 6.0),
+                    Point::new(x, AUDIO_RULER_HEIGHT),
                 );
                 frame.stroke(
                     &tick,
@@ -335,15 +399,15 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{}", (beat / 4.0) as usize + 1),
-                    position: Point::new(x + 3.0, 10.0),
+                    position: Point::new(x + 3.0, 29.0),
                     color: theme::text_dim(),
                     size: iced::Pixels(8.0),
                     ..Default::default()
                 });
             } else if is_beat && pixels_per_beat > 40.0 {
                 let tick = canvas::Path::line(
-                    Point::new(x, MARKER_RAIL_HEIGHT - 3.0),
-                    Point::new(x, MARKER_RAIL_HEIGHT),
+                    Point::new(x, AUDIO_RULER_HEIGHT - 3.0),
+                    Point::new(x, AUDIO_RULER_HEIGHT),
                 );
                 frame.stroke(
                     &tick,
@@ -377,10 +441,10 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if state.drag.is_some()
-            || cursor
-                .position_in(bounds)
-                .and_then(|position| self.hit_test_loop_marker(position, &bounds))
-                .is_some()
+            || cursor.position_in(bounds).is_some_and(|position| {
+                self.hit_test_start_marker(position, &bounds)
+                    || self.hit_test_loop_marker(position, &bounds).is_some()
+            })
         {
             mouse::Interaction::ResizingHorizontally
         } else if cursor.is_over(bounds) {
@@ -402,14 +466,17 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let Some(position) = cursor.position_in(bounds) else {
                     return (canvas::event::Status::Ignored, None);
                 };
-                let Some(marker) = self.hit_test_loop_marker(position, &bounds) else {
+                state.drag = if self.hit_test_start_marker(position, &bounds) {
+                    Some(AudioMarkerDrag::Start(UndoGestureId::new()))
+                } else if let Some(marker) = self.hit_test_loop_marker(position, &bounds) {
+                    Some(AudioMarkerDrag::Loop(LoopDrag::begin(
+                        marker,
+                        self.loop_start.saturating_sub(self.source_offset) as f64,
+                        self.loop_end.saturating_sub(self.source_offset) as f64,
+                    )))
+                } else {
                     return (canvas::event::Status::Ignored, None);
                 };
-                state.drag = Some(LoopDrag::begin(
-                    marker,
-                    self.loop_start.saturating_sub(self.source_offset) as f64,
-                    self.loop_end.saturating_sub(self.source_offset) as f64,
-                ));
                 (canvas::event::Status::Captured, None)
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -419,28 +486,39 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 let Some(position) = LocalDrag::unclamped().position(cursor, bounds) else {
                     return (canvas::event::Status::Captured, None);
                 };
-                let pointer = self.x_to_local_frame(position.x, &bounds);
-                let max = self.loop_range_frames();
-                let min_length = self.minimum_loop_frames(&bounds).min(max);
-                let (loop_start, loop_end) =
-                    drag.resolve(pointer as f64, min_length as f64, max as f64);
-                let loop_start = self.source_offset.saturating_add(loop_start.round() as u64);
-                let loop_end = self.source_offset.saturating_add(loop_end.round() as u64);
-                if (loop_start, loop_end) == (self.loop_start, self.loop_end) {
-                    return (canvas::event::Status::Captured, None);
-                }
-                (
-                    canvas::event::Status::Captured,
-                    Some(
-                        Message::Arrangement(ArrangementMsg::SetClipLoopRegion {
-                            track_id: self.track_id,
-                            clip_id: self.clip_id,
-                            loop_start,
-                            loop_end,
+                let message = match drag {
+                    AudioMarkerDrag::Start(undo_gesture) => {
+                        let start_marker = self.start_marker_from_x(position.x, &bounds);
+                        (start_marker != self.start_marker).then(|| {
+                            Message::Arrangement(ArrangementMsg::SetClipStartMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                start_marker,
+                            })
+                            .in_undo_gesture(undo_gesture)
                         })
-                        .in_undo_gesture(drag.undo_gesture()),
-                    ),
-                )
+                    }
+                    AudioMarkerDrag::Loop(drag) => {
+                        let pointer = self.x_to_local_frame(position.x, &bounds);
+                        let max = self.loop_range_frames();
+                        let min_length = self.minimum_loop_frames(&bounds).min(max);
+                        let (loop_start, loop_end) =
+                            drag.resolve(pointer as f64, min_length as f64, max as f64);
+                        let loop_start =
+                            self.source_offset.saturating_add(loop_start.round() as u64);
+                        let loop_end = self.source_offset.saturating_add(loop_end.round() as u64);
+                        ((loop_start, loop_end) != (self.loop_start, self.loop_end)).then(|| {
+                            Message::Arrangement(ArrangementMsg::SetClipLoopRegion {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                loop_start,
+                                loop_end,
+                            })
+                            .in_undo_gesture(drag.undo_gesture())
+                        })
+                    }
+                };
+                (canvas::event::Status::Captured, message)
             }
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                 if state.drag.take().is_some() =>
@@ -467,6 +545,7 @@ mod tests {
             }),
             duration_samples: 800,
             source_offset: 100,
+            start_marker: 100,
             sample_rate: 1_000,
             bpm: 120.0,
             grid: GridConfig::new(crate::state::SnapGrid::QUARTER, true, false, 0),
@@ -519,6 +598,43 @@ mod tests {
                 clip_id,
                 loop_start: 100,
                 loop_end: 600,
+            }) if track_id == widget.track_id && clip_id == widget.clip_id
+        ));
+    }
+
+    #[test]
+    fn overlapping_start_and_loop_start_have_separate_hit_rows() {
+        let mut widget = widget();
+        widget.grid.snap_enabled = false;
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+        let overlap_x = widget.source_to_x(widget.start_marker, &bounds);
+        let target = Point::new(300.0, 15.0);
+        let mut state = AudioClipDetailState::default();
+
+        let pressed = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                mouse::Cursor::Available(Point::new(overlap_x, 15.0)),
+            )
+            .0;
+        assert_eq!(pressed, canvas::event::Status::Captured);
+
+        let message = widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+                bounds,
+                mouse::Cursor::Available(target),
+            )
+            .1;
+        assert!(matches!(
+            arrangement_message(message),
+            Some(ArrangementMsg::SetClipStartMarker {
+                track_id,
+                clip_id,
+                start_marker: 400,
             }) if track_id == widget.track_id && clip_id == widget.clip_id
         ));
     }

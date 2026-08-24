@@ -499,6 +499,35 @@ impl PianoRollWidget {
                     theme::accent(),
                 );
             }
+
+            let start_x = self.beat_to_x(clip.start_marker_beats, &bounds);
+            let start_color = theme::text();
+            let start_flag = canvas::Path::new(|path| {
+                path.move_to(iced::Point::new(start_x, 10.0));
+                path.line_to(iced::Point::new(start_x + 8.0, 10.0));
+                path.line_to(iced::Point::new(start_x, 21.0));
+                path.close();
+            });
+            frame.fill(&start_flag, start_color);
+            let start_line = canvas::Path::line(
+                iced::Point::new(start_x, 10.0),
+                iced::Point::new(start_x, h),
+            );
+            frame.stroke(
+                &start_line,
+                canvas::Stroke::default()
+                    .with_color(theme::with_alpha(start_color, 0.75))
+                    .with_width(1.0),
+            );
+            if start_x + 42.0 < w {
+                frame.fill_text(canvas::Text {
+                    content: "START".into(),
+                    position: iced::Point::new(start_x + 10.0, 19.0),
+                    color: start_color,
+                    size: iced::Pixels(8.0),
+                    ..Default::default()
+                });
+            }
         }
 
         // Bottom border
@@ -539,7 +568,7 @@ impl PianoRollWidget {
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{bar_num}"),
-                    position: iced::Point::new(x + 3.0, 3.0),
+                    position: iced::Point::new(x + 3.0, 29.0),
                     color: theme::text_dim(),
                     size: iced::Pixels(10.0),
                     ..Default::default()
@@ -560,7 +589,7 @@ impl PianoRollWidget {
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{}.{}", bar_index + 1, beat_in_bar),
-                    position: iced::Point::new(x + 2.0, 5.0),
+                    position: iced::Point::new(x + 2.0, 29.0),
                     color: theme::text_muted(),
                     size: iced::Pixels(8.0),
                     ..Default::default()

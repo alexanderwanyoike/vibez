@@ -70,6 +70,7 @@ impl App {
             audio: Arc::clone(&clip.audio),
             duration_samples: clip.duration,
             source_offset: clip.source_offset,
+            start_marker: clip.start_marker,
             sample_rate: clip.audio.sample_rate,
             bpm: self.state.transport.bpm,
             grid: self.state.view.grid_config(),
@@ -105,6 +106,7 @@ impl App {
             .saturating_add(clip.duration)
             .min(clip.audio.num_frames() as u64);
         let source_end = source_end_frames as f64 / sample_rate;
+        let start = clip.start_marker as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;
         let loop_end = clip.loop_end as f64 / sample_rate;
 
@@ -207,13 +209,15 @@ impl App {
             ]
             .spacing(3)
         };
-        let range_row = |start_field: AudioClipInspectorField,
+        let range_row = |start_label: &'static str,
+                         start_field: AudioClipInspectorField,
                          start_value: String,
+                         end_label: &'static str,
                          end_field: AudioClipInspectorField,
                          end_value: String| {
             row![
-                range_field("START", start_field, start_value,),
-                range_field("END", end_field, end_value,),
+                range_field(start_label, start_field, start_value,),
+                range_field(end_label, end_field, end_value,),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center)
@@ -281,18 +285,31 @@ impl App {
         let source_bounds = column![
             text("SOURCE").size(8).color(th::text_muted()),
             range_row(
+                "IN",
                 AudioClipInspectorField::SourceStart,
                 format!("{source_start:.3}"),
+                "OUT",
                 AudioClipInspectorField::SourceEnd,
                 format!("{source_end:.3}"),
             ),
         ]
         .spacing(3);
         let loop_bounds = column![
-            row![loop_button].align_y(iced::Alignment::Center),
+            row![
+                loop_button,
+                horizontal_space(),
+                range_field(
+                    "START",
+                    AudioClipInspectorField::Start,
+                    format!("{start:.3}"),
+                ),
+            ]
+            .align_y(iced::Alignment::End),
             range_row(
+                "LOOP START",
                 AudioClipInspectorField::LoopStart,
                 format!("{loop_start:.3}"),
+                "LOOP END",
                 AudioClipInspectorField::LoopEnd,
                 format!("{loop_end:.3}"),
             ),

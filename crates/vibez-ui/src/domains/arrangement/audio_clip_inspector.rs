@@ -14,6 +14,7 @@ use super::{ArrangementAction, ClipRenderedGeometry, ClipTransposeRenderRequest,
 fn rendered_geometry(clip: &UiClip) -> ClipRenderedGeometry {
     ClipRenderedGeometry {
         source_offset: clip.source_offset,
+        start_marker: clip.start_marker,
         duration: clip.duration,
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
@@ -62,6 +63,7 @@ pub(super) fn clear_warp_request(
         expected_geometry: Some(rendered_geometry(clip)),
         geometry: Some(ClipRenderedGeometry {
             source_offset,
+            start_marker: scale(clip.start_marker).min(original_frames.saturating_sub(1)),
             duration: source_end - source_offset,
             loop_start: scale(clip.loop_start).min(original_frames),
             loop_end: scale(clip.loop_end).min(original_frames),
@@ -104,6 +106,7 @@ impl TimelineEditorState {
         let replaces_geometry = success.geometry.is_some();
         if let Some(geometry) = success.geometry {
             clip.source_offset = geometry.source_offset;
+            clip.start_marker = geometry.start_marker;
             clip.duration = geometry.duration;
             clip.loop_start = geometry.loop_start;
             clip.loop_end = geometry.loop_end;
@@ -113,6 +116,7 @@ impl TimelineEditorState {
                 audio: Arc::clone(&success.audio),
                 duration: geometry.duration,
                 source_offset: geometry.source_offset,
+                start_marker: geometry.start_marker,
                 loop_start: geometry.loop_start,
                 loop_end: geometry.loop_end,
             });
@@ -229,15 +233,19 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
+                clip.start_marker = clip.start_marker.clamp(new_start, new_end - 1);
                 clip.loop_start = clip.loop_start.clamp(new_start, new_end);
                 clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
-                if clip.loop_end <= clip.loop_start {
-                    clip.loop_enabled = false;
+                if clip.loop_enabled
+                    && (clip.loop_end <= clip.loop_start || clip.start_marker >= clip.loop_end)
+                {
+                    clip.reset_loop_region_to_clip();
                 }
                 engine.send(EngineCommand::SetClipBounds {
                     track_id,
                     clip_id,
                     source_offset: clip.source_offset,
+                    start_marker: clip.start_marker,
                     duration: clip.duration,
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
@@ -254,6 +262,27 @@ impl TimelineEditorState {
                     format_seconds(new_start),
                     format_seconds(new_end)
                 ));
+            }
+            AudioClipInspectorField::Start => {
+                let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
+                    action.status = Some("Start must be a positive time in seconds".into());
+                    return action;
+                };
+                if !clip.set_start_marker(value) {
+                    let source_end = clip.source_offset.saturating_add(clip.duration);
+                    action.status = Some(format!(
+                        "Start must be inside {:.3} to {:.3} s and before Loop End",
+                        format_seconds(clip.source_offset),
+                        format_seconds(source_end)
+                    ));
+                    return action;
+                }
+                engine.send(EngineCommand::SetClipStartMarker {
+                    track_id,
+                    clip_id,
+                    start_marker: value,
+                });
+                action.status = Some(format!("Clip Start {:.3} s", format_seconds(value)));
             }
             AudioClipInspectorField::LoopStart | AudioClipInspectorField::LoopEnd => {
                 let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
@@ -281,7 +310,11 @@ impl TimelineEditorState {
                     }
                     _ => unreachable!(),
                 };
-                if new_start < clip.source_offset || new_start >= new_end || new_end > source_end {
+                if new_start < clip.source_offset
+                    || new_start >= new_end
+                    || new_end > source_end
+                    || clip.start_marker >= new_end
+                {
                     action.status = Some(format!(
                         "Loop bounds must stay ordered inside {:.3} to {:.3} s",
                         format_seconds(clip.source_offset),

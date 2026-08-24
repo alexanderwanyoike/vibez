@@ -322,6 +322,7 @@ impl App {
                 audio: Arc::clone(&clip.audio),
                 position: clip.position,
                 source_offset: clip.source_offset,
+                start_marker: clip.start_marker,
                 duration: clip.duration,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
@@ -332,6 +333,7 @@ impl App {
 
         for clip in &content.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
+                start_marker_beats: clip.start_marker_beats,
                 track_id: track.id,
                 clip_id: clip.id,
                 position_beats: clip.position_beats,

@@ -7,9 +7,9 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
-use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip};
+use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId};
 use crate::timeline_geometry::TimelineGeometry;
-use crate::widgets::clip_loop_markers::{self, LoopDrag, MARKER_RAIL_HEIGHT};
+use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
@@ -20,7 +20,7 @@ const KEY_WIDTH: f32 = 52.0;
 /// Height of each piano key row.
 const KEY_HEIGHT: f32 = 16.0;
 /// Height of the ruler strip at the top.
-const RULER_HEIGHT: f32 = MARKER_RAIL_HEIGHT;
+const RULER_HEIGHT: f32 = 30.0;
 
 /// Lowest MIDI note displayed (C2 = 36).
 const LOW_NOTE: u8 = 36;
@@ -56,6 +56,7 @@ pub struct PianoRollClipData {
     pub clip_id: ClipId,
     pub notes: Vec<MidiNote>,
     pub selected_notes: HashSet<usize>,
+    pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
@@ -79,6 +80,7 @@ impl PianoRollWidget {
                 clip_id: clip.id,
                 notes: clip.notes.clone(),
                 selected_notes: clip.selected_notes.clone(),
+                start_marker_beats: clip.start_marker_beats,
                 loop_enabled: clip.loop_enabled,
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
@@ -273,6 +275,10 @@ enum DragAction {
         clip_id: ClipId,
         drag: LoopDrag,
     },
+    Start {
+        clip_id: ClipId,
+        undo_gesture: UndoGestureId,
+    },
 }
 
 /// Drag distance before an empty-space press counts as a rubber-band
@@ -325,13 +331,17 @@ impl canvas::Program<Message> for PianoRollWidget {
                 DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
-                DragAction::Loop { .. } => mouse::Interaction::ResizingHorizontally,
+                DragAction::Loop { .. } | DragAction::Start { .. } => {
+                    mouse::Interaction::ResizingHorizontally
+                }
                 DragAction::MarqueeNotes { .. } => mouse::Interaction::Crosshair,
             };
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
-            if self.hit_test_loop_marker(pos, &bounds).is_some() {
+            if self.hit_test_start_marker(pos, &bounds)
+                || self.hit_test_loop_marker(pos, &bounds).is_some()
+            {
                 return mouse::Interaction::ResizingHorizontally;
             }
         }
@@ -383,7 +393,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if pos.y <= RULER_HEIGHT {
-                        let Some(drag) = self.begin_loop_drag(pos, &bounds) else {
+                        let Some(drag) = self.begin_marker_drag(pos, &bounds) else {
                             return (canvas::event::Status::Ignored, None);
                         };
                         state.drag = Some(drag);
@@ -616,7 +626,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                     state.last_cursor = Some(local);
 
                     if let Some(drag) = state.drag.as_ref() {
-                        if let Some(message) = self.loop_drag_message(drag, local, &bounds) {
+                        if let Some(message) = self.marker_drag_message(drag, local, &bounds) {
                             return (canvas::event::Status::Captured, Some(message));
                         }
                     }
@@ -751,7 +761,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     }
                                 }
                                 // Handled above, before this borrow.
-                                DragAction::MarqueeNotes { .. } | DragAction::Loop { .. } => {}
+                                DragAction::MarqueeNotes { .. }
+                                | DragAction::Loop { .. }
+                                | DragAction::Start { .. } => {}
                             }
                         }
                     }

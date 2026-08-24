@@ -302,6 +302,7 @@ pub struct ClipWarpSuccess {
     pub original_audio: Arc<DecodedAudio>,
     pub new_duration: u64,
     pub new_source_offset: u64,
+    pub new_start_marker: u64,
     pub new_loop_start: u64,
     pub new_loop_end: u64,
     pub detected_bpm: f64,

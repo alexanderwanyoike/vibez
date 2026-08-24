@@ -34,6 +34,7 @@ pub struct EngineClip {
     pub audio: Arc<DecodedAudio>,
     pub position: u64,
     pub source_offset: u64,
+    pub start_marker: u64,
     pub duration: u64,
     pub loop_enabled: bool,
     pub loop_start: u64,
@@ -59,6 +60,7 @@ pub struct EngineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
+    pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
@@ -74,6 +76,7 @@ impl EngineNoteClip {
         position_beats: f64,
         duration_beats: f64,
         notes: Vec<MidiNote>,
+        start_marker_beats: f64,
         loop_enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
@@ -85,6 +88,7 @@ impl EngineNoteClip {
             position_beats,
             duration_beats,
             notes,
+            start_marker_beats,
             loop_enabled,
             loop_start_beats,
             loop_end_beats,
@@ -326,6 +330,10 @@ impl PreparedPlaybackSource {
                 continue;
             }
             let audio_channels = clip.audio.num_channels();
+            let source_end = clip
+                .source_offset
+                .saturating_add(clip.duration)
+                .min(clip.audio.num_frames() as u64) as usize;
             let mut clip_rendered = false;
             for frame in 0..frames {
                 let global_frame = apply_loop_wrap(pos + frame as u64, loop_region);
@@ -334,7 +342,7 @@ impl PreparedPlaybackSource {
                 }
                 let clip_frame = (global_frame - clip.position) as usize;
                 let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
-                    let raw = clip.source_offset as usize + clip_frame;
+                    let raw = clip.start_marker as usize + clip_frame;
                     let loop_len = (clip.loop_end - clip.loop_start) as usize;
                     if raw >= clip.loop_end as usize {
                         clip.loop_start as usize + (raw - clip.loop_start as usize) % loop_len
@@ -342,10 +350,12 @@ impl PreparedPlaybackSource {
                         raw
                     }
                 } else {
-                    clip.source_offset as usize + clip_frame
+                    clip.start_marker as usize + clip_frame
                 };
                 for ch in 0..channels {
-                    let sample = if ch < audio_channels {
+                    let sample = if source_frame >= source_end {
+                        0.0
+                    } else if ch < audio_channels {
                         clip.audio.sample(ch, source_frame)
                     } else if audio_channels > 0 {
                         clip.audio.sample(audio_channels - 1, source_frame)
@@ -433,6 +443,7 @@ mod tests {
             0.0,
             4.0,
             original.clone(),
+            0.0,
             false,
             0.0,
             0.0,
@@ -473,6 +484,7 @@ mod tests {
             audio: Arc::clone(&audio),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 4,
             loop_enabled: false,
             loop_start: 0,
@@ -504,6 +516,7 @@ mod tests {
                 audio,
                 position: 50,
                 source_offset: 0,
+                start_marker: 0,
                 duration: 100,
                 loop_enabled: false,
                 loop_start: 0,
@@ -520,6 +533,7 @@ mod tests {
                 2.0,
                 4.0,
                 Vec::new(),
+                0.0,
                 false,
                 0.0,
                 0.0,

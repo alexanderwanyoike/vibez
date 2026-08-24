@@ -27,6 +27,7 @@ pub struct ClipTransposeRenderRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClipRenderedGeometry {
     pub source_offset: u64,
+    pub start_marker: u64,
     pub duration: u64,
     pub loop_start: u64,
     pub loop_end: u64,
@@ -116,6 +117,11 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         loop_start: u64,
         loop_end: u64,
+    },
+    SetClipStartMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        start_marker: u64,
     },
     SetTimeSelection {
         start_beats: f64,
@@ -230,6 +236,7 @@ impl ArrangementMsg {
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::SetClipLoopRegion { .. }
+                | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }
                 | Self::SelectAllClips
                 | Self::SetTimeSelectionActive(_)

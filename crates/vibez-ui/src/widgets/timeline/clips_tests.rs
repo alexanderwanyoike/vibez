@@ -83,6 +83,7 @@ fn note_clip(position_beats: f64) -> crate::state::UiNoteClip {
             })
             .collect(),
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -376,6 +377,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         duration_beats: 4.0,
         name: "● RECORDING LIVE".into(),
         notes: vec![(60, 0.0, 0.5)],
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,

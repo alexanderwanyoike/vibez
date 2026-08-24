@@ -164,6 +164,7 @@ fn project_with_source(source: MediaSourceRef) -> Project {
                 name: source.display_name(),
                 position: 0,
                 source_offset: 0,
+                start_marker: None,
                 duration: 128,
                 source: Some(source),
                 file_path: None,
@@ -197,6 +198,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
         name: "shared.wav".into(),
         position: 0,
         source_offset: 0,
+        start_marker: None,
         duration: 128,
         source: Some(MediaSourceRef::LocalFile {
             path: source_path.clone(),

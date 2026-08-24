@@ -518,6 +518,7 @@ impl App {
                                 )
                             })
                             .collect(),
+                        start_marker_beats: 0.0,
                         loop_enabled: false,
                         loop_start_beats: 0.0,
                         loop_end_beats: 0.0,

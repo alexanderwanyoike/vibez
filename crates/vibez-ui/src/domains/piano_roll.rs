@@ -31,6 +31,11 @@ pub enum PianoRollMsg {
         loop_start_beats: f64,
         loop_end_beats: f64,
     },
+    SetNoteClipStartMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        start_marker_beats: f64,
+    },
     AddNoteClipToTrack(TrackId),
     SelectNoteClip(TrackId, ClipId),
     AddNote {
@@ -276,6 +281,26 @@ impl PianoRollState {
                     });
                 }
             }
+            PianoRollMsg::SetNoteClipStartMarker {
+                track_id,
+                clip_id,
+                start_marker_beats,
+            } => {
+                let mut changed = false;
+                if let Some(track) = find_track_mut(tracks, track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|clip| clip.id == clip_id)
+                    {
+                        changed = clip.set_start_marker(start_marker_beats);
+                    }
+                }
+                if changed {
+                    engine.send(EngineCommand::SetNoteClipStartMarker {
+                        track_id,
+                        clip_id,
+                        start_marker_beats,
+                    });
+                }
+            }
             PianoRollMsg::AddNoteClipToTrack(track_id) => {
                 let clip_id = ClipId::new();
                 let position_beats = 0.0;
@@ -288,12 +313,14 @@ impl PianoRollState {
                     duration_beats,
                     notes: Vec::new(),
                     selected_notes: HashSet::new(),
+                    start_marker_beats: 0.0,
                     loop_enabled: true,
                     loop_start_beats: 0.0,
                     loop_end_beats: duration_beats,
                     groove_grid: vibez_core::perform::GrooveGrid::Off,
                 });
                 engine.send(EngineCommand::AddNoteClip {
+                    start_marker_beats: 0.0,
                     track_id,
                     clip_id,
                     position_beats,
@@ -565,7 +592,7 @@ impl PianoRollState {
                             .collect();
                         clip.notes.extend_from_slice(&cloned_notes);
                         let was_full_clip_loop = clip.loop_enabled
-                            && clip.loop_start_beats == 0.0
+                            && clip.loop_start_beats == clip.start_marker_beats
                             && (clip.loop_end_beats - clip.duration_beats).abs() < 1e-9;
                         clip.duration_beats *= 2.0;
                         if was_full_clip_loop {
@@ -627,6 +654,10 @@ impl PianoRollState {
                             }
                             clip.position_beats += min_beat;
                             clip.duration_beats = max_beat - min_beat;
+                            clip.start_marker_beats = 0.0;
+                            clip.loop_enabled = false;
+                            clip.loop_start_beats = 0.0;
+                            clip.loop_end_beats = 0.0;
 
                             sync_data = Some((
                                 clip.position_beats,
@@ -641,6 +672,7 @@ impl PianoRollState {
                 if let Some((pos, dur, notes, groove_grid)) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
+                        start_marker_beats: 0.0,
                         track_id,
                         clip_id,
                         position_beats: pos,
@@ -673,6 +705,9 @@ impl PianoRollState {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
+                        clip.start_marker_beats = clip
+                            .start_marker_beats
+                            .clamp(0.0, (new_duration_beats - 0.01).max(0.0));
 
                         // Keep the loop region inside the clip when
                         // shrinking. Extending leaves the region
@@ -688,6 +723,7 @@ impl PianoRollState {
                             clip.position_beats,
                             clip.duration_beats,
                             clip.notes.clone(),
+                            clip.start_marker_beats,
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
@@ -700,6 +736,7 @@ impl PianoRollState {
                     pos,
                     dur,
                     notes,
+                    start_marker_beats,
                     loop_enabled,
                     loop_start_beats,
                     loop_end_beats,
@@ -708,6 +745,7 @@ impl PianoRollState {
                 {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                     engine.send(EngineCommand::AddNoteClip {
+                        start_marker_beats,
                         track_id,
                         clip_id,
                         position_beats: pos,
@@ -731,16 +769,45 @@ impl PianoRollState {
                 action.drag_resize_active = true;
             }
             PianoRollMsg::HalveNoteClip(track_id, clip_id) => {
+                let mut marker_sync = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         let new_dur = (clip.duration_beats / 2.0).max(0.25);
                         clip.duration_beats = new_dur;
+                        clip.start_marker_beats = clip
+                            .start_marker_beats
+                            .clamp(0.0, (new_dur - 0.01).max(0.0));
+                        if clip.loop_enabled {
+                            clip.clamp_loop_to_duration();
+                        }
                         engine.send(EngineCommand::SetNoteClipDuration {
                             track_id,
                             clip_id,
                             duration_beats: new_dur,
                         });
+                        marker_sync = Some((
+                            clip.start_marker_beats,
+                            clip.loop_enabled,
+                            clip.loop_start_beats,
+                            clip.loop_end_beats,
+                        ));
                     }
+                }
+                if let Some((start_marker_beats, enabled, loop_start_beats, loop_end_beats)) =
+                    marker_sync
+                {
+                    engine.send(EngineCommand::SetNoteClipStartMarker {
+                        track_id,
+                        clip_id,
+                        start_marker_beats,
+                    });
+                    engine.send(EngineCommand::SetNoteClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start_beats,
+                        loop_end_beats,
+                    });
                 }
                 action.status = Some("Halved clip duration".to_string());
             }
@@ -802,6 +869,7 @@ mod tests {
                 },
             ],
             selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -1116,6 +1184,39 @@ mod tests {
         assert!(!clip.loop_enabled);
         assert_eq!(clip.loop_start_beats, 0.0);
         assert_eq!(clip.loop_end_beats, 0.0);
+    }
+
+    #[test]
+    fn start_marker_moves_without_changing_the_midi_loop_region() {
+        let (mut tracks, track_id, clip_id) = midi_track_with_clip();
+        let clip = &mut tracks.get_mut(track_id).unwrap().note_clips[0];
+        clip.loop_enabled = true;
+        clip.loop_start_beats = 1.0;
+        clip.loop_end_beats = 4.0;
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        piano_roll.update(
+            PianoRollMsg::SetNoteClipStartMarker {
+                track_id,
+                clip_id,
+                start_marker_beats: 2.0,
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+
+        let clip = &tracks.get(track_id).unwrap().note_clips[0];
+        assert_eq!(clip.start_marker_beats, 2.0);
+        assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (1.0, 4.0));
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::SetNoteClipStartMarker {
+                start_marker_beats: 2.0,
+                ..
+            }]
+        ));
     }
 
     #[test]

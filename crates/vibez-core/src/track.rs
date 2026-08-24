@@ -352,6 +352,10 @@ pub struct ClipInfo {
     pub position: u64,
     /// Offset into the source audio in samples.
     pub source_offset: u64,
+    /// Initial playback position inside the source window. Older projects
+    /// omit it and inherit `source_offset` when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_marker: Option<u64>,
     /// Duration in samples.
     pub duration: u64,
     /// Canonical external media source reference.
@@ -476,6 +480,7 @@ mod tests {
             name: "test".into(),
             position,
             source_offset: 0,
+            start_marker: None,
             duration,
             source: Some(MediaSourceRef::LocalFile {
                 path: PathBuf::from("test.wav"),
@@ -526,6 +531,7 @@ mod tests {
         let mut clip = test_clip(44_100, 88_200);
         clip.name = "vocal.wav".into();
         clip.source_offset = 1_000;
+        clip.start_marker = Some(2_000);
         clip.source = Some(MediaSourceRef::LocalFile {
             path: PathBuf::from("/audio/vocal.wav"),
         });
@@ -540,6 +546,7 @@ mod tests {
         assert_eq!(clip.id, deserialized.id);
         assert_eq!(clip.position, deserialized.position);
         assert_eq!(clip.source_offset, deserialized.source_offset);
+        assert_eq!(clip.start_marker, deserialized.start_marker);
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
         assert_eq!(clip.source, deserialized.source);
@@ -566,5 +573,6 @@ mod tests {
         assert!(clip.source.is_none());
         assert_eq!(clip.gain_db, ClipGainDb::default());
         assert_eq!(clip.transpose, ClipTranspose::default());
+        assert_eq!(clip.start_marker, None);
     }
 }

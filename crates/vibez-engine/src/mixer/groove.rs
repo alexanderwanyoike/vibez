@@ -55,11 +55,12 @@ pub(super) fn collect_timed_note_events(
 
         let local_at_start = (first_beat - clip_start).max(0.0);
         let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-        let effective_at_start = if looping && local_at_start >= clip.loop_end_beats {
+        let raw_at_start = clip.start_marker_beats + local_at_start;
+        let effective_at_start = if looping && raw_at_start >= clip.loop_end_beats {
             let loop_len = clip.loop_end_beats - clip.loop_start_beats;
-            clip.loop_start_beats + (local_at_start - clip.loop_start_beats) % loop_len
+            clip.loop_start_beats + (raw_at_start - clip.loop_end_beats) % loop_len
         } else {
-            local_at_start
+            raw_at_start
         };
         let entering_clip = previous_beat < clip_start;
         let clip_swing = clip.swing_for_pair(effective_at_start, swing, entering_clip);
@@ -78,8 +79,8 @@ pub(super) fn collect_timed_note_events(
             );
         } else {
             for (note_index, note) in clip.notes.iter().enumerate() {
-                let start = mapped_note_start(clip, note, clip_swing);
-                if start < clip.duration_beats {
+                let start = mapped_note_start(clip, note, clip_swing) - clip.start_marker_beats;
+                if start >= 0.0 && start < clip.duration_beats {
                     push_note_on(
                         clip_start + start,
                         note,
@@ -89,8 +90,8 @@ pub(super) fn collect_timed_note_events(
                         note_ons,
                     );
                 }
-                let end = mapped_note_end(clip, note_index, clip_swing);
-                if end < clip.duration_beats {
+                let end = mapped_note_end(clip, note_index, clip_swing) - clip.start_marker_beats;
+                if end >= 0.0 && end < clip.duration_beats {
                     push_note_off(
                         clip_start + end,
                         note.pitch,
@@ -137,6 +138,7 @@ fn collect_looping_clip_events(
         for_each_loop_occurrence(
             start,
             clip.duration_beats,
+            clip.start_marker_beats,
             loop_start,
             loop_end,
             loop_len,
@@ -159,6 +161,7 @@ fn collect_looping_clip_events(
             for_each_loop_occurrence(
                 end,
                 clip.duration_beats,
+                clip.start_marker_beats,
                 loop_start,
                 loop_end,
                 loop_len,
@@ -181,7 +184,7 @@ fn collect_looping_clip_events(
     // The previous renderer flushed all pitches at each loop wrap before
     // retriggering notes at loop_start on the same frame.
     for_each_repetition(
-        loop_end,
+        loop_end - clip.start_marker_beats,
         loop_len,
         clip.duration_beats,
         previous_local,
@@ -202,6 +205,7 @@ fn collect_looping_clip_events(
 fn for_each_loop_occurrence(
     event: f64,
     clip_duration: f64,
+    start_marker: f64,
     loop_start: f64,
     loop_end: f64,
     loop_len: f64,
@@ -209,23 +213,26 @@ fn for_each_loop_occurrence(
     last_local: f64,
     mut visit: impl FnMut(f64),
 ) {
-    if event < 0.0 || event >= clip_duration || event >= loop_end {
+    if event < 0.0 || event >= loop_end {
         return;
     }
-    if event < loop_start {
-        if previous_local < event && event <= last_local {
-            visit(event);
+    if event >= start_marker {
+        let initial = event - start_marker;
+        if initial < clip_duration && previous_local < initial && initial <= last_local {
+            visit(initial);
         }
-        return;
     }
-    for_each_repetition(
-        event,
-        loop_len,
-        clip_duration,
-        previous_local,
-        last_local,
-        visit,
-    );
+    if event >= loop_start {
+        let first_repeat = loop_end - start_marker + event - loop_start;
+        for_each_repetition(
+            first_repeat,
+            loop_len,
+            clip_duration,
+            previous_local,
+            last_local,
+            visit,
+        );
+    }
 }
 
 fn for_each_repetition(

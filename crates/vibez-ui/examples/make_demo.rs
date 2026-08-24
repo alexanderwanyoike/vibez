@@ -45,6 +45,7 @@ fn clip(
     notes: Vec<MidiNote>,
 ) -> NoteClipInfo {
     NoteClipInfo {
+        start_marker_beats: None,
         id: ClipId::new(),
         track_id,
         name: name.to_string(),

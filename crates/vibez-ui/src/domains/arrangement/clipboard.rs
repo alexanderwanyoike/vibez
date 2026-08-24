@@ -140,7 +140,7 @@ impl TimelineEditorState {
                     let mut fragment = clip.clone();
                     fragment.position = 0;
                     fragment.duration = duration.max(1);
-                    let raw_offset = clip.source_offset.saturating_add(delta);
+                    let raw_offset = clip.start_marker.saturating_add(delta);
                     fragment.source_offset = if clip.loop_enabled && clip.loop_end > clip.loop_start
                     {
                         if raw_offset >= clip.loop_end {
@@ -152,6 +152,7 @@ impl TimelineEditorState {
                     } else {
                         raw_offset
                     };
+                    fragment.start_marker = fragment.source_offset;
                     copied.push(ClipboardClip::Audio {
                         track_id: *track_id,
                         track_offset: 0,
@@ -170,21 +171,8 @@ impl TimelineEditorState {
                     let local_start = overlap_start - clip.position_beats;
                     let local_end = overlap_end - clip.position_beats;
                     let mut notes = Vec::new();
-                    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
                     for note in &clip.notes {
-                        let mut occurrences = vec![note.start_beat];
-                        if looping
-                            && note.start_beat >= clip.loop_start_beats
-                            && note.start_beat < clip.loop_end_beats
-                        {
-                            let loop_len = clip.loop_end_beats - clip.loop_start_beats;
-                            let mut occurrence = note.start_beat + loop_len;
-                            while occurrence < local_end {
-                                occurrences.push(occurrence);
-                                occurrence += loop_len;
-                            }
-                        }
-                        for occurrence in occurrences {
+                        for occurrence in clip.note_occurrences(note.start_beat) {
                             let kept_start = occurrence.max(local_start);
                             let kept_end = (occurrence + note.duration_beats).min(local_end);
                             if kept_end > kept_start {
@@ -201,6 +189,7 @@ impl TimelineEditorState {
                     fragment.duration_beats = overlap_end - overlap_start;
                     fragment.notes = notes;
                     fragment.selected_notes.clear();
+                    fragment.start_marker_beats = 0.0;
                     fragment.loop_enabled = false;
                     fragment.loop_start_beats = 0.0;
                     fragment.loop_end_beats = 0.0;
@@ -354,6 +343,7 @@ impl TimelineEditorState {
                         audio: Arc::clone(&clip.audio),
                         position: clip.position,
                         source_offset: clip.source_offset,
+                        start_marker: clip.start_marker,
                         duration: clip.duration,
                         loop_enabled: clip.loop_enabled,
                         loop_start: clip.loop_start,
@@ -374,6 +364,7 @@ impl TimelineEditorState {
                     clip.position_beats = position_beats;
                     clip.selected_notes.clear();
                     engine.send(EngineCommand::AddNoteClip {
+                        start_marker_beats: clip.start_marker_beats,
                         track_id,
                         clip_id: clip.id,
                         position_beats: clip.position_beats,

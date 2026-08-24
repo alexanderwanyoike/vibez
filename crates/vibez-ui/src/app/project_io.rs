@@ -777,12 +777,31 @@ impl App {
             let location = loaded_clip.location;
             let clip = loaded_clip.clip;
             if location == TimelineLocation::Arrange {
+                let source_end = clip
+                    .info
+                    .source_offset
+                    .saturating_add(clip.info.duration)
+                    .min(clip.audio.num_frames() as u64);
+                let marker_end = if clip.info.loop_enabled {
+                    source_end.min(clip.info.loop_end)
+                } else {
+                    source_end
+                };
+                let start_marker = clip
+                    .info
+                    .start_marker
+                    .unwrap_or(clip.info.source_offset)
+                    .clamp(
+                        clip.info.source_offset,
+                        marker_end.saturating_sub(1).max(clip.info.source_offset),
+                    );
                 self.send_command(EngineCommand::AddClip {
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
                     audio: Arc::clone(&clip.audio),
                     position: clip.info.position,
                     source_offset: clip.info.source_offset,
+                    start_marker,
                     duration: clip.info.duration,
                     loop_enabled: clip.info.loop_enabled,
                     loop_start: clip.info.loop_start,
@@ -800,7 +819,17 @@ impl App {
         }
 
         for note_clip in &loaded.project.arrange.note_clips {
+            let marker_end = if note_clip.loop_enabled {
+                note_clip.duration_beats.min(note_clip.loop_end_beats)
+            } else {
+                note_clip.duration_beats
+            };
+            let start_marker_beats = note_clip
+                .start_marker_beats
+                .unwrap_or(note_clip.loop_start_beats)
+                .clamp(0.0, (marker_end - 0.01).max(0.0));
             self.send_command(EngineCommand::AddNoteClip {
+                start_marker_beats,
                 track_id: note_clip.track_id,
                 clip_id: note_clip.id,
                 position_beats: note_clip.position_beats,
@@ -828,6 +857,7 @@ impl App {
                         duration_beats: note_clip.duration_beats,
                         notes: note_clip.notes.clone(),
                         selected_notes: HashSet::new(),
+                        start_marker_beats,
                         loop_enabled: note_clip.loop_enabled,
                         loop_start_beats: note_clip.loop_start_beats,
                         loop_end_beats: note_clip.loop_end_beats,

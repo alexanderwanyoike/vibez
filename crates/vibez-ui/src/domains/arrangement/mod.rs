@@ -416,6 +416,25 @@ impl TimelineEditorState {
                     });
                 }
             }
+            ArrangementMsg::SetClipStartMarker {
+                track_id,
+                clip_id,
+                start_marker,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.find_content_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                        changed = clip.set_start_marker(start_marker);
+                    }
+                }
+                if changed {
+                    engine.send(EngineCommand::SetClipStartMarker {
+                        track_id,
+                        clip_id,
+                        start_marker,
+                    });
+                }
+            }
             ArrangementMsg::SelectArrangementClip {
                 selection,
                 shift_held,
@@ -511,6 +530,7 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddNoteClip {
+                            start_marker_beats: clip.start_marker_beats,
                             track_id: target_track,
                             clip_id,
                             position_beats: clip.position_beats,
@@ -561,6 +581,7 @@ impl TimelineEditorState {
                             audio: Arc::clone(&clip.audio),
                             position: clip.position,
                             source_offset: clip.source_offset,
+                            start_marker: clip.start_marker,
                             duration: clip.duration,
                             loop_enabled: clip.loop_enabled,
                             loop_start: clip.loop_start,
@@ -642,6 +663,7 @@ impl TimelineEditorState {
                                         audio: Arc::clone(&duplicate.audio),
                                         position: duplicate.position,
                                         source_offset: duplicate.source_offset,
+                                        start_marker: duplicate.start_marker,
                                         duration: duplicate.duration,
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start: duplicate.loop_start,
@@ -675,6 +697,7 @@ impl TimelineEditorState {
                                     });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddNoteClip {
+                                        start_marker_beats: duplicate.start_marker_beats,
                                         track_id: *track_id,
                                         clip_id: duplicate.id,
                                         position_beats: duplicate.position_beats,
@@ -827,6 +850,7 @@ impl TimelineEditorState {
                                 duration_beats: clip.duration_beats,
                                 notes: clip.notes.clone(),
                                 selected_notes: HashSet::new(),
+                                start_marker_beats: clip.start_marker_beats,
                                 loop_enabled: clip.loop_enabled,
                                 loop_start_beats: clip.loop_start_beats,
                                 loop_end_beats: clip.loop_end_beats,
@@ -835,6 +859,7 @@ impl TimelineEditorState {
                             new_pos,
                             clip.duration_beats,
                             clip.notes.clone(),
+                            clip.start_marker_beats,
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
@@ -848,6 +873,7 @@ impl TimelineEditorState {
                     pos,
                     dur,
                     notes,
+                    start_marker_beats,
                     loop_enabled,
                     loop_start,
                     loop_end,
@@ -858,6 +884,7 @@ impl TimelineEditorState {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
+                        start_marker_beats,
                         track_id,
                         clip_id: new_clip_id,
                         position_beats: pos,
