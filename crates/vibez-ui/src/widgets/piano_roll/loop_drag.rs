@@ -1,6 +1,7 @@
 //! Loop-brace interaction for the piano roll.
 
 use iced::{Point, Rectangle};
+use vibez_core::clip_timeline::BeatClipTimeline;
 
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
@@ -78,12 +79,14 @@ impl PianoRollWidget {
                 undo_gesture,
             } => {
                 let marker_step = min_length.min(self.total_beats).max(0.01);
-                let latest = if clip.loop_enabled {
-                    self.total_beats.min(clip.loop_end_beats) - marker_step
-                } else {
-                    self.total_beats - marker_step
-                };
-                let start_marker_beats = pointer.clamp(0.0, latest.max(0.0));
+                let start_marker_beats = BeatClipTimeline::new(
+                    clip.start_marker_beats,
+                    clip.loop_start_beats,
+                    clip.loop_end_beats,
+                    self.total_beats,
+                    clip.loop_enabled,
+                )
+                .clamp_start_with_gap(pointer, 0.0, self.total_beats, marker_step);
                 (start_marker_beats != clip.start_marker_beats).then(|| {
                     Message::PianoRoll(PianoRollMsg::SetNoteClipStartMarker {
                         track_id: self.track_id,

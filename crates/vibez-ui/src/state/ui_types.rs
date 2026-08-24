@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
@@ -53,6 +54,16 @@ pub struct UiClip {
 }
 
 impl UiClip {
+    pub(crate) fn timeline(&self) -> FrameClipTimeline {
+        FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration,
+            self.loop_enabled,
+        )
+    }
+
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
         self.loop_start = self.start_marker;
         self.loop_end = self.source_offset.saturating_add(self.duration);
@@ -72,14 +83,24 @@ impl UiClip {
         }
     }
 
+    pub(crate) fn clamp_start_to_source(&mut self) {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        self.start_marker =
+            self.timeline()
+                .clamp_start(self.start_marker, self.source_offset, source_end);
+    }
+
     pub(crate) fn set_start_marker(&mut self, start_marker: u64) -> bool {
         let source_end = self
             .source_offset
             .saturating_add(self.duration)
             .min(self.audio.num_frames() as u64);
-        let valid = start_marker >= self.source_offset
-            && start_marker < source_end
-            && (!self.loop_enabled || start_marker < self.loop_end);
+        let valid = self
+            .timeline()
+            .accepts_start(start_marker, self.source_offset, source_end);
         if !valid || start_marker == self.start_marker {
             return false;
         }
@@ -263,6 +284,16 @@ pub struct UiNoteClip {
 }
 
 impl UiNoteClip {
+    pub(crate) fn timeline(&self) -> BeatClipTimeline {
+        BeatClipTimeline::new(
+            self.start_marker_beats,
+            self.loop_start_beats,
+            self.loop_end_beats,
+            self.duration_beats,
+            self.loop_enabled,
+        )
+    }
+
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
         self.loop_start_beats = self.start_marker_beats;
         self.loop_end_beats = self.duration_beats;
@@ -283,11 +314,16 @@ impl UiNoteClip {
         }
     }
 
+    pub(crate) fn clamp_start_to_duration(&mut self) {
+        self.start_marker_beats =
+            self.timeline()
+                .clamp_start(self.start_marker_beats, 0.0, self.duration_beats);
+    }
+
     pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
-        let valid = start_marker_beats.is_finite()
-            && start_marker_beats >= 0.0
-            && start_marker_beats < self.duration_beats
-            && (!self.loop_enabled || start_marker_beats < self.loop_end_beats);
+        let valid = self
+            .timeline()
+            .accepts_start(start_marker_beats, 0.0, self.duration_beats);
         if !valid || start_marker_beats == self.start_marker_beats {
             return false;
         }
@@ -312,27 +348,7 @@ impl UiNoteClip {
 
     /// Timeline-local occurrences of one source note onset, including repeats.
     pub(crate) fn note_occurrences(&self, source_beat: f64) -> Vec<f64> {
-        let mut occurrences = Vec::new();
-        let looping = self.loop_enabled && self.loop_end_beats > self.loop_start_beats;
-        if source_beat >= self.start_marker_beats {
-            let initial = source_beat - self.start_marker_beats;
-            if initial >= 0.0
-                && initial < self.duration_beats
-                && (!looping || source_beat < self.loop_end_beats)
-            {
-                occurrences.push(initial);
-            }
-        }
-        if looping && source_beat >= self.loop_start_beats && source_beat < self.loop_end_beats {
-            let loop_length = self.loop_end_beats - self.loop_start_beats;
-            let mut occurrence =
-                self.loop_end_beats - self.start_marker_beats + source_beat - self.loop_start_beats;
-            while occurrence < self.duration_beats {
-                occurrences.push(occurrence);
-                occurrence += loop_length;
-            }
-        }
-        occurrences
+        self.timeline().occurrences_of(source_beat).collect()
     }
 }
 

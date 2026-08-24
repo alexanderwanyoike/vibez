@@ -5,6 +5,7 @@ use iced::widget::canvas;
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::clip_timeline::FrameClipTimeline;
 use vibez_core::id::{ClipId, TrackId};
 
 use crate::domains::arrangement::ArrangementMsg;
@@ -127,13 +128,14 @@ impl AudioClipDetailWidget {
             .source_offset
             .saturating_add(self.x_to_local_frame(x, bounds));
         let source_end = self.source_offset.saturating_add(self.loop_range_frames());
-        let last_source_frame = source_end.saturating_sub(1);
-        let latest = if self.loop_enabled {
-            last_source_frame.min(self.loop_end.saturating_sub(1))
-        } else {
-            last_source_frame
-        };
-        candidate.clamp(self.source_offset, latest.max(self.source_offset))
+        FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration_samples,
+            self.loop_enabled,
+        )
+        .clamp_start(candidate, self.source_offset, source_end)
     }
 }
 

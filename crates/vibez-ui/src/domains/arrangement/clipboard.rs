@@ -140,18 +140,7 @@ impl TimelineEditorState {
                     let mut fragment = clip.clone();
                     fragment.position = 0;
                     fragment.duration = duration.max(1);
-                    let raw_offset = clip.start_marker.saturating_add(delta);
-                    fragment.source_offset = if clip.loop_enabled && clip.loop_end > clip.loop_start
-                    {
-                        if raw_offset >= clip.loop_end {
-                            clip.loop_start
-                                + (raw_offset - clip.loop_start) % (clip.loop_end - clip.loop_start)
-                        } else {
-                            raw_offset
-                        }
-                    } else {
-                        raw_offset
-                    };
+                    fragment.source_offset = clip.timeline().source_at(delta);
                     fragment.start_marker = fragment.source_offset;
                     copied.push(ClipboardClip::Audio {
                         track_id: *track_id,

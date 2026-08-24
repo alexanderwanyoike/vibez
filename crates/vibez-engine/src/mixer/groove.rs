@@ -54,18 +54,12 @@ pub(super) fn collect_timed_note_events(
         }
 
         let local_at_start = (first_beat - clip_start).max(0.0);
-        let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
-        let raw_at_start = clip.start_marker_beats + local_at_start;
-        let effective_at_start = if looping && raw_at_start >= clip.loop_end_beats {
-            let loop_len = clip.loop_end_beats - clip.loop_start_beats;
-            clip.loop_start_beats + (raw_at_start - clip.loop_end_beats) % loop_len
-        } else {
-            raw_at_start
-        };
+        let timeline = clip.timeline();
+        let effective_at_start = timeline.source_at(local_at_start);
         let entering_clip = previous_beat < clip_start;
         let clip_swing = clip.swing_for_pair(effective_at_start, swing, entering_clip);
 
-        if looping {
+        if timeline.is_looping() {
             collect_looping_clip_events(
                 clip,
                 previous_beat - clip_start,
@@ -79,8 +73,10 @@ pub(super) fn collect_timed_note_events(
             );
         } else {
             for (note_index, note) in clip.notes.iter().enumerate() {
-                let start = mapped_note_start(clip, note, clip_swing) - clip.start_marker_beats;
-                if start >= 0.0 && start < clip.duration_beats {
+                if let Some(start) = timeline
+                    .occurrences_of(mapped_note_start(clip, note, clip_swing))
+                    .next()
+                {
                     push_note_on(
                         clip_start + start,
                         note,
@@ -90,8 +86,10 @@ pub(super) fn collect_timed_note_events(
                         note_ons,
                     );
                 }
-                let end = mapped_note_end(clip, note_index, clip_swing) - clip.start_marker_beats;
-                if end >= 0.0 && end < clip.duration_beats {
+                if let Some(end) = timeline
+                    .occurrences_of(mapped_note_end(clip, note_index, clip_swing))
+                    .next()
+                {
                     push_note_off(
                         clip_start + end,
                         note.pitch,
@@ -129,125 +127,58 @@ fn collect_looping_clip_events(
     note_ons: &mut Vec<(u32, u8, u8)>,
     note_offs: &mut Vec<(u32, u8)>,
 ) {
-    let loop_start = clip.loop_start_beats;
-    let loop_end = clip.loop_end_beats;
-    let loop_len = loop_end - loop_start;
+    let timeline = clip.timeline();
 
     for (note_index, note) in clip.notes.iter().enumerate() {
         let start = mapped_note_start(clip, note, swing);
-        for_each_loop_occurrence(
-            start,
-            clip.duration_beats,
-            clip.start_marker_beats,
-            loop_start,
-            loop_end,
-            loop_len,
-            previous_local,
-            last_local,
-            |local| {
-                push_note_on(
+        for local in timeline
+            .occurrences_of(start)
+            .starting_after(previous_local)
+            .take_while(|local| *local <= last_local)
+        {
+            push_note_on(
+                clip.position_beats + local,
+                note,
+                pos,
+                frames,
+                samples_per_beat,
+                note_ons,
+            );
+        }
+
+        let end = mapped_note_end(clip, note_index, swing);
+        if end < timeline.loop_end {
+            for local in timeline
+                .occurrences_of(end)
+                .starting_after(previous_local)
+                .take_while(|local| *local <= last_local)
+            {
+                push_note_off(
                     clip.position_beats + local,
-                    note,
+                    note.pitch,
                     pos,
                     frames,
                     samples_per_beat,
-                    note_ons,
+                    note_offs,
                 );
-            },
-        );
-
-        let end = mapped_note_end(clip, note_index, swing);
-        if end < loop_end {
-            for_each_loop_occurrence(
-                end,
-                clip.duration_beats,
-                clip.start_marker_beats,
-                loop_start,
-                loop_end,
-                loop_len,
-                previous_local,
-                last_local,
-                |local| {
-                    push_note_off(
-                        clip.position_beats + local,
-                        note.pitch,
-                        pos,
-                        frames,
-                        samples_per_beat,
-                        note_offs,
-                    );
-                },
-            );
+            }
         }
     }
 
     // The previous renderer flushed all pitches at each loop wrap before
     // retriggering notes at loop_start on the same frame.
-    for_each_repetition(
-        loop_end - clip.start_marker_beats,
-        loop_len,
-        clip.duration_beats,
-        previous_local,
-        last_local,
-        |local| {
-            if let Some(frame) =
-                frame_for_beat(clip.position_beats + local, pos, frames, samples_per_beat)
-            {
-                for note in &clip.notes {
-                    note_offs.push((frame, note.pitch));
-                }
+    for local in timeline
+        .wraps()
+        .starting_after(previous_local)
+        .take_while(|local| *local <= last_local)
+    {
+        if let Some(frame) =
+            frame_for_beat(clip.position_beats + local, pos, frames, samples_per_beat)
+        {
+            for note in &clip.notes {
+                note_offs.push((frame, note.pitch));
             }
-        },
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-fn for_each_loop_occurrence(
-    event: f64,
-    clip_duration: f64,
-    start_marker: f64,
-    loop_start: f64,
-    loop_end: f64,
-    loop_len: f64,
-    previous_local: f64,
-    last_local: f64,
-    mut visit: impl FnMut(f64),
-) {
-    if event < 0.0 || event >= loop_end {
-        return;
-    }
-    if event >= start_marker {
-        let initial = event - start_marker;
-        if initial < clip_duration && previous_local < initial && initial <= last_local {
-            visit(initial);
         }
-    }
-    if event >= loop_start {
-        let first_repeat = loop_end - start_marker + event - loop_start;
-        for_each_repetition(
-            first_repeat,
-            loop_len,
-            clip_duration,
-            previous_local,
-            last_local,
-            visit,
-        );
-    }
-}
-
-fn for_each_repetition(
-    first: f64,
-    step: f64,
-    clip_duration: f64,
-    previous_local: f64,
-    last_local: f64,
-    mut visit: impl FnMut(f64),
-) {
-    let first_index = (((previous_local - first) / step).floor() as i64 + 1).max(0);
-    let mut event = first + first_index as f64 * step;
-    while event < clip_duration && event <= last_local {
-        visit(event);
-        event += step;
     }
 }
 

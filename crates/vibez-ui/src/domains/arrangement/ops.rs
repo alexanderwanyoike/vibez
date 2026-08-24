@@ -487,9 +487,7 @@ impl TimelineEditorState {
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.duration_beats = (clip.duration_beats + delta).max(0.25);
-                        clip.start_marker_beats = clip
-                            .start_marker_beats
-                            .clamp(0.0, (clip.duration_beats - 0.01).max(0.0));
+                        clip.clamp_start_to_duration();
                         if clip.loop_enabled {
                             clip.clamp_loop_to_duration();
                         }

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::clip_timeline::BeatClipTimeline;
 use crate::id::{ClipId, TrackId};
 use crate::perform::GrooveGrid;
 
@@ -46,14 +47,15 @@ impl NoteClipInfo {
     /// Resolve the persisted Start marker into the playable clip window.
     /// Legacy projects begin at Loop Start, matching pre-marker playback.
     pub fn resolved_start_marker_beats(&self) -> f64 {
-        let marker_end = if self.loop_enabled {
-            self.duration_beats.min(self.loop_end_beats)
-        } else {
-            self.duration_beats
-        };
-        self.start_marker_beats
-            .unwrap_or(self.loop_start_beats)
-            .clamp(0.0, (marker_end - 0.01).max(0.0))
+        let start = self.start_marker_beats.unwrap_or(self.loop_start_beats);
+        BeatClipTimeline::new(
+            start,
+            self.loop_start_beats,
+            self.loop_end_beats,
+            self.duration_beats,
+            self.loop_enabled,
+        )
+        .clamp_start(start, 0.0, self.duration_beats)
     }
 }
 
