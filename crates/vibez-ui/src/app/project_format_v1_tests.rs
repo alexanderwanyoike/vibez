@@ -107,6 +107,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
                     name: file_name.into(),
                     position: 0,
                     source_offset: 0,
+                    start_marker: None,
                     duration: imported.num_frames() as u64,
                     source: Some(staged),
                     file_path: None,
@@ -196,6 +197,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
                 name: "loop.wav".into(),
                 position: 0,
                 source_offset: 0,
+                start_marker: None,
                 duration: warped.num_frames() as u64,
                 source: Some(staged),
                 file_path: None,
@@ -296,6 +298,7 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
                 name: "source.wav".into(),
                 position: 0,
                 source_offset: 0,
+                start_marker: None,
                 duration: audio.num_frames() as u64,
                 source: Some(MediaSourceRef::LocalFile {
                     path: source_path.clone(),
@@ -346,6 +349,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
         name: "shared.wav".into(),
         position,
         source_offset: 0,
+        start_marker: None,
         duration: audio.num_frames() as u64,
         source: Some(MediaSourceRef::LocalFile {
             path: source_path.clone(),
@@ -467,6 +471,7 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
                 name: "Remote clip".into(),
                 position: 0,
                 source_offset: 0,
+                start_marker: None,
                 duration: 128,
                 source: Some(MediaSourceRef::DropboxFile {
                     path_lower: "/megalodon/pad.wav".into(),
@@ -666,6 +671,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
                 name,
                 position: 0,
                 source_offset: 0,
+                start_marker: None,
                 duration: warped.num_frames() as u64,
                 source: Some(staged),
                 file_path: None,

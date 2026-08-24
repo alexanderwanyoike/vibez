@@ -276,6 +276,7 @@ fn add_audio_clip(
         source: None,
         position,
         source_offset: 0,
+        start_marker: 0,
         duration,
         loop_enabled: false,
         loop_start: 0,
@@ -509,6 +510,7 @@ fn warp_success(
         }),
         new_duration: 2000,
         new_source_offset: 0,
+        new_start_marker: 0,
         new_loop_start: 0,
         new_loop_end: 0,
         detected_bpm: 128.0,
@@ -697,6 +699,7 @@ fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
         command,
         EngineCommand::SetClipBounds {
             source_offset: 11_025,
+            start_marker: 11_025,
             duration: 33_075,
             ..
         }
@@ -782,6 +785,43 @@ fn invalid_inspector_boundary_leaves_the_clip_unchanged() {
         Some("2.0"),
         "rejected text remains available for correction"
     );
+}
+
+#[test]
+fn clip_start_moves_without_changing_the_loop_region() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 44_100);
+    let clip = &mut arrangement.tracks[0].clips[0];
+    clip.loop_enabled = true;
+    clip.loop_start = 11_025;
+    clip.loop_end = 44_100;
+    let mut engine = RecordingEngine::default();
+    arrangement
+        .audio_clip_inspector_edits
+        .insert((clip_id, AudioClipInspectorField::Start), "0.500".into());
+
+    let action = arrangement.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id,
+            clip_id,
+            field: AudioClipInspectorField::Start,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(action.mark_dirty);
+    let clip = &arrangement.tracks[0].clips[0];
+    assert_eq!(clip.start_marker, 22_050);
+    assert_eq!((clip.loop_start, clip.loop_end), (11_025, 44_100));
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipStartMarker {
+            track_id: sent_track,
+            clip_id: sent_clip,
+            start_marker: 22_050,
+        }) if *sent_track == track_id && *sent_clip == clip_id
+    ));
 }
 
 #[test]
@@ -1112,6 +1152,7 @@ fn partial_time_selection_copies_audio_and_trimmed_midi() {
             duration_beats: 3.0,
         }],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -1226,6 +1267,7 @@ fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
             duration_beats: 0.5,
         }],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
@@ -1279,6 +1321,7 @@ fn enabling_a_mixed_loop_selection_preserves_existing_regions() {
             duration_beats: 8.0,
             notes: Vec::new(),
             selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
             loop_enabled,
             loop_start_beats,
             loop_end_beats,
@@ -1375,6 +1418,7 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
             duration_beats: 1.0,
         }],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
@@ -1421,6 +1465,7 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     assert!(engine.0.iter().any(|command| matches!(
         command,
         EngineCommand::AddNoteClip {
+            start_marker_beats: 0.0,
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
@@ -1470,6 +1515,7 @@ fn midi_duplicate_keeps_the_source_clip_name_readable() {
         duration_beats: 4.0,
         notes: Vec::new(),
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -1601,6 +1647,7 @@ fn trim_track_mutes_materializes_midi_notes_across_unmuted_fragments() {
             duration_beats: 5.0,
         }],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -1737,6 +1784,7 @@ fn split_looped_midi_materializes_both_looped_halves() {
             duration_beats: 1.0,
         }],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: true,
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
@@ -1818,6 +1866,7 @@ fn join_looped_midi_expands_repetitions_and_remains_looped() {
                 duration_beats: 1.0,
             }],
             selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,

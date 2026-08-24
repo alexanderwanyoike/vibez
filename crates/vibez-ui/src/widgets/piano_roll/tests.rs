@@ -66,6 +66,7 @@ fn overlapping_notes_hit_test_to_the_one_drawn_on_top() {
         clip_id: ClipId::new(),
         notes: vec![note(0.0), note(0.5)],
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -89,6 +90,7 @@ fn loop_end_marker_drag_snaps_and_keeps_the_start_fixed() {
         duration_beats: 8.0,
         notes: Vec::new(),
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: true,
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
@@ -152,6 +154,66 @@ fn loop_end_marker_drag_snaps_and_keeps_the_start_fixed() {
 }
 
 #[test]
+fn start_marker_has_its_own_row_when_it_overlaps_loop_start() {
+    let track_id = TrackId::new();
+    let clip = UiNoteClip {
+        id: ClipId::new(),
+        name: "Pattern".into(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: Vec::new(),
+        selected_notes: HashSet::new(),
+        start_marker_beats: 2.0,
+        loop_enabled: true,
+        loop_start_beats: 2.0,
+        loop_end_beats: 6.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    };
+    let widget = PianoRollWidget::from_clip(
+        track_id,
+        &clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        0.0,
+        PianoRollEditMode::Select,
+    );
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let start = Point::new(widget.beat_to_x(2.0, &bounds), 15.0);
+    let target = Point::new(widget.beat_to_x(3.0, &bounds), 15.0);
+    let mut state = PianoRollState::default();
+
+    assert_eq!(
+        widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                bounds,
+                mouse::Cursor::Available(start),
+            )
+            .0,
+        canvas::event::Status::Captured
+    );
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+    assert!(matches!(
+        piano_roll_message(message),
+        Some(PianoRollMsg::SetNoteClipStartMarker {
+            track_id: actual_track,
+            clip_id: actual_clip,
+            start_marker_beats: 3.0,
+        }) if actual_track == track_id && actual_clip == clip.id
+    ));
+}
+
+#[test]
 fn loop_drag_skips_moves_that_stay_in_the_same_grid_cell() {
     let track_id = TrackId::new();
     let clip = UiNoteClip {
@@ -161,6 +223,7 @@ fn loop_drag_skips_moves_that_stay_in_the_same_grid_cell() {
         duration_beats: 8.0,
         notes: Vec::new(),
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: true,
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
@@ -211,6 +274,7 @@ fn loop_handle_keeps_its_resize_cursor_in_draw_mode() {
         duration_beats: 8.0,
         notes: Vec::new(),
         selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
         loop_enabled: true,
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,

@@ -48,6 +48,7 @@ fn source_with_looping(
                     audio: constant_audio(128, value),
                     position: 0,
                     source_offset: 0,
+                    start_marker: 0,
                     duration: 128,
                     loop_enabled: false,
                     loop_start: 0,

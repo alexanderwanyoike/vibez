@@ -235,6 +235,7 @@ impl AudioEngine {
                     audio,
                     position,
                     source_offset,
+                    start_marker,
                     duration,
                     loop_enabled,
                     loop_start,
@@ -247,6 +248,7 @@ impl AudioEngine {
                             audio,
                             position,
                             source_offset,
+                            start_marker,
                             duration,
                             loop_enabled,
                             loop_start,
@@ -268,6 +270,7 @@ impl AudioEngine {
                     audio,
                     duration,
                     source_offset,
+                    start_marker,
                     loop_start,
                     loop_end,
                 } => {
@@ -281,6 +284,7 @@ impl AudioEngine {
                             clip.audio = audio;
                             clip.duration = duration;
                             clip.source_offset = source_offset;
+                            clip.start_marker = start_marker;
                             clip.loop_start = loop_start;
                             clip.loop_end = loop_end;
                         }
@@ -348,6 +352,7 @@ impl AudioEngine {
                     track_id,
                     clip_id,
                     source_offset,
+                    start_marker,
                     duration,
                     loop_start,
                     loop_end,
@@ -365,6 +370,7 @@ impl AudioEngine {
                         })
                     {
                         clip.source_offset = source_offset;
+                        clip.start_marker = start_marker;
                         clip.duration = duration;
                         clip.loop_start = loop_start;
                         clip.loop_end = loop_end;
@@ -611,6 +617,7 @@ impl AudioEngine {
                     clip_id,
                     position_beats,
                     duration_beats,
+                    start_marker_beats,
                     loop_enabled,
                     loop_start_beats,
                     loop_end_beats,
@@ -622,6 +629,7 @@ impl AudioEngine {
                             position_beats,
                             duration_beats,
                             Vec::new(),
+                            start_marker_beats,
                             loop_enabled,
                             loop_start_beats,
                             loop_end_beats,
@@ -801,6 +809,26 @@ impl AudioEngine {
                         }
                     }
                 }
+                EngineCommand::SetClipStartMarker {
+                    track_id,
+                    clip_id,
+                    start_marker,
+                } => {
+                    if let Some(clip) = self
+                        .tracks
+                        .iter_mut()
+                        .find(|track| track.id == track_id)
+                        .and_then(|track| {
+                            track
+                                .playback_source
+                                .clips
+                                .iter_mut()
+                                .find(|clip| clip.id == clip_id)
+                        })
+                    {
+                        clip.start_marker = start_marker;
+                    }
+                }
                 EngineCommand::SetNoteClipLoop {
                     track_id,
                     clip_id,
@@ -820,6 +848,23 @@ impl AudioEngine {
                             clip.loop_end_beats = loop_end_beats;
                         }
                         track.flush_notes();
+                    }
+                }
+                EngineCommand::SetNoteClipStartMarker {
+                    track_id,
+                    clip_id,
+                    start_marker_beats,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+                        if let Some(clip) = track
+                            .playback_source
+                            .note_clips
+                            .iter_mut()
+                            .find(|clip| clip.id == clip_id)
+                        {
+                            clip.start_marker_beats = start_marker_beats;
+                            track.flush_notes();
+                        }
                     }
                 }
 

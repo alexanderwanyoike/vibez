@@ -977,6 +977,7 @@ pub fn representative_document() -> ProjectDocumentV1 {
                         duration_beats: 0.125,
                     },
                 ],
+                start_marker_beats: None,
                 loop_enabled: true,
                 loop_start_beats: 0.0,
                 loop_end_beats: 4.0,

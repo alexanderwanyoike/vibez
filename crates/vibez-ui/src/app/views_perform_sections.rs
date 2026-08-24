@@ -515,9 +515,11 @@ impl App {
                                     note.pitch,
                                     (note.start_beat - preview.position_beats).max(0.0),
                                     note.duration_beats,
+                                    false,
                                 )
                             })
                             .collect(),
+                        start_marker_beats: 0.0,
                         loop_enabled: false,
                         loop_start_beats: 0.0,
                         loop_end_beats: 0.0,

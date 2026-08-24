@@ -381,6 +381,7 @@ mod tests {
                     name: "loop.wav".into(),
                     position: 0,
                     source_offset: 0,
+                    start_marker: None,
                     duration: 44100,
                     source: Some(MediaSourceRef::LocalFile {
                         path: PathBuf::from("audio/loop.wav"),
@@ -443,6 +444,7 @@ mod tests {
                     name: "legacy.wav".into(),
                     position: 128,
                     source_offset: 32,
+                    start_marker: None,
                     duration: 2_048,
                     source: Some(MediaSourceRef::LocalFile {
                         path: PathBuf::from("audio/legacy.wav"),
@@ -543,6 +545,7 @@ mod tests {
                     name: "Pattern 1".into(),
                     position_beats: 0.0,
                     duration_beats: 4.0,
+                    start_marker_beats: None,
                     loop_enabled: false,
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,

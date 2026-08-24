@@ -499,6 +499,15 @@ impl PianoRollWidget {
                     theme::accent(),
                 );
             }
+
+            let start_x = self.beat_to_x(clip.start_marker_beats, &bounds);
+            clip_loop_markers::draw_start(
+                &mut frame,
+                start_x,
+                h,
+                theme::text_dim(),
+                theme::bg_surface(),
+            );
         }
 
         // Bottom border
@@ -539,7 +548,7 @@ impl PianoRollWidget {
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{bar_num}"),
-                    position: iced::Point::new(x + 3.0, 3.0),
+                    position: iced::Point::new(x + 3.0, 29.0),
                     color: theme::text_dim(),
                     size: iced::Pixels(10.0),
                     ..Default::default()
@@ -560,7 +569,7 @@ impl PianoRollWidget {
                 );
                 frame.fill_text(canvas::Text {
                     content: format!("{}.{}", bar_index + 1, beat_in_bar),
-                    position: iced::Point::new(x + 2.0, 5.0),
+                    position: iced::Point::new(x + 2.0, 29.0),
                     color: theme::text_muted(),
                     size: iced::Pixels(8.0),
                     ..Default::default()

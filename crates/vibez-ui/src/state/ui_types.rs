@@ -25,6 +25,9 @@ pub struct UiClip {
     pub position: u64,
     /// Offset into the source audio in samples.
     pub source_offset: u64,
+    /// Initial playback position. This may differ from `loop_start`, allowing
+    /// an intro or pickup to play once before the loop repeats.
+    pub start_marker: u64,
     /// Duration in samples.
     pub duration: u64,
     // Looping
@@ -51,7 +54,7 @@ pub struct UiClip {
 
 impl UiClip {
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
-        self.loop_start = self.source_offset;
+        self.loop_start = self.start_marker;
         self.loop_end = self.source_offset.saturating_add(self.duration);
     }
 
@@ -64,9 +67,24 @@ impl UiClip {
         let clip_end = self.source_offset.saturating_add(self.duration);
         self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
         self.loop_end = self.loop_end.min(clip_end);
-        if self.loop_end <= self.loop_start {
+        if self.loop_end <= self.loop_start || self.start_marker >= self.loop_end {
             self.reset_loop_region_to_clip();
         }
+    }
+
+    pub(crate) fn set_start_marker(&mut self, start_marker: u64) -> bool {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        let valid = start_marker >= self.source_offset
+            && start_marker < source_end
+            && (!self.loop_enabled || start_marker < self.loop_end);
+        if !valid || start_marker == self.start_marker {
+            return false;
+        }
+        self.start_marker = start_marker;
+        true
     }
 
     pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
@@ -75,6 +93,7 @@ impl UiClip {
             .saturating_add(self.duration)
             .min(self.audio.num_frames() as u64);
         let valid = start >= self.source_offset && start < end && end <= clip_end;
+        let valid = valid && self.start_marker < end;
         if !valid || (start, end) == (self.loop_start, self.loop_end) {
             return false;
         }
@@ -91,6 +110,7 @@ pub enum AudioClipInspectorField {
     SourceBpm,
     SourceStart,
     SourceEnd,
+    Start,
     LoopStart,
     LoopEnd,
     Transpose,
@@ -234,6 +254,7 @@ pub struct UiNoteClip {
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
     pub selected_notes: HashSet<usize>,
+    pub start_marker_beats: f64,
     // Looping
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
@@ -243,7 +264,7 @@ pub struct UiNoteClip {
 
 impl UiNoteClip {
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
-        self.loop_start_beats = 0.0;
+        self.loop_start_beats = self.start_marker_beats;
         self.loop_end_beats = self.duration_beats;
     }
 
@@ -255,9 +276,23 @@ impl UiNoteClip {
     pub(crate) fn clamp_loop_to_duration(&mut self) {
         self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
         self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
-        if self.loop_end_beats <= self.loop_start_beats {
+        if self.loop_end_beats <= self.loop_start_beats
+            || self.start_marker_beats >= self.loop_end_beats
+        {
             self.reset_loop_region_to_clip();
         }
+    }
+
+    pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
+        let valid = start_marker_beats.is_finite()
+            && start_marker_beats >= 0.0
+            && start_marker_beats < self.duration_beats
+            && (!self.loop_enabled || start_marker_beats < self.loop_end_beats);
+        if !valid || start_marker_beats == self.start_marker_beats {
+            return false;
+        }
+        self.start_marker_beats = start_marker_beats;
+        true
     }
 
     pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
@@ -265,13 +300,39 @@ impl UiNoteClip {
             && end.is_finite()
             && start >= 0.0
             && start < end
-            && end <= self.duration_beats;
+            && end <= self.duration_beats
+            && self.start_marker_beats < end;
         if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
             return false;
         }
         self.loop_start_beats = start;
         self.loop_end_beats = end;
         true
+    }
+
+    /// Timeline-local occurrences of one source note onset, including repeats.
+    pub(crate) fn note_occurrences(&self, source_beat: f64) -> Vec<f64> {
+        let mut occurrences = Vec::new();
+        let looping = self.loop_enabled && self.loop_end_beats > self.loop_start_beats;
+        if source_beat >= self.start_marker_beats {
+            let initial = source_beat - self.start_marker_beats;
+            if initial >= 0.0
+                && initial < self.duration_beats
+                && (!looping || source_beat < self.loop_end_beats)
+            {
+                occurrences.push(initial);
+            }
+        }
+        if looping && source_beat >= self.loop_start_beats && source_beat < self.loop_end_beats {
+            let loop_length = self.loop_end_beats - self.loop_start_beats;
+            let mut occurrence =
+                self.loop_end_beats - self.start_marker_beats + source_beat - self.loop_start_beats;
+            while occurrence < self.duration_beats {
+                occurrences.push(occurrence);
+                occurrence += loop_length;
+            }
+        }
+        occurrences
     }
 }
 

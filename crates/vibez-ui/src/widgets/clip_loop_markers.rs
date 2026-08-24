@@ -5,9 +5,12 @@ use iced::{Color, Point};
 
 use crate::state::UndoGestureId;
 
-pub(crate) const MARKER_RAIL_HEIGHT: f32 = 20.0;
 const HANDLE_WIDTH: f32 = 8.0;
 const HIT_RADIUS: f32 = 8.0;
+const START_MARKER_TOP: f32 = 10.5;
+const START_MARKER_MIDDLE: f32 = 15.0;
+const START_MARKER_BOTTOM: f32 = 19.5;
+const START_MARKER_WIDTH: f32 = 7.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopMarker {
@@ -108,6 +111,47 @@ pub(crate) fn draw_brace(frame: &mut canvas::Frame, start_x: f32, end_x: f32, co
     frame.fill(&end_handle, color);
 }
 
+pub(crate) fn hit_test_start(marker_x: f32, position: Point) -> bool {
+    (START_MARKER_TOP..=START_MARKER_BOTTOM).contains(&position.y)
+        && (position.x - marker_x).abs() <= HIT_RADIUS
+}
+
+/// Draw the one-shot Start marker as a quiet outlined tab. The shape carries
+/// the meaning, so it does not need a permanent label competing with the ruler.
+pub(crate) fn draw_start(
+    frame: &mut canvas::Frame,
+    marker_x: f32,
+    line_end: f32,
+    color: Color,
+    fill: Color,
+) {
+    let stem = canvas::Path::line(
+        Point::new(marker_x, START_MARKER_BOTTOM),
+        Point::new(marker_x, line_end),
+    );
+    frame.stroke(
+        &stem,
+        canvas::Stroke::default()
+            .with_color(Color { a: 0.45, ..color })
+            .with_width(1.0),
+    );
+
+    let handle = canvas::Path::new(|path| {
+        path.move_to(Point::new(marker_x, START_MARKER_TOP));
+        path.line_to(Point::new(
+            marker_x + START_MARKER_WIDTH,
+            START_MARKER_MIDDLE,
+        ));
+        path.line_to(Point::new(marker_x, START_MARKER_BOTTOM));
+        path.close();
+    });
+    frame.fill(&handle, fill);
+    frame.stroke(
+        &handle,
+        canvas::Stroke::default().with_color(color).with_width(1.0),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,26 +159,18 @@ mod tests {
     #[test]
     fn closest_marker_wins_when_hit_targets_overlap() {
         assert_eq!(
-            hit_test(100.0, 108.0, Point::new(102.0, 5.0), MARKER_RAIL_HEIGHT),
+            hit_test(100.0, 108.0, Point::new(102.0, 5.0), 20.0),
             Some(LoopMarker::Start)
         );
         assert_eq!(
-            hit_test(100.0, 108.0, Point::new(106.0, 5.0), MARKER_RAIL_HEIGHT),
+            hit_test(100.0, 108.0, Point::new(106.0, 5.0), 20.0),
             Some(LoopMarker::End)
         );
     }
 
     #[test]
     fn marker_hit_target_stays_inside_the_rail() {
-        assert_eq!(
-            hit_test(
-                100.0,
-                200.0,
-                Point::new(100.0, MARKER_RAIL_HEIGHT + 1.0),
-                MARKER_RAIL_HEIGHT
-            ),
-            None
-        );
+        assert_eq!(hit_test(100.0, 200.0, Point::new(100.0, 21.0), 20.0), None);
     }
 
     #[test]

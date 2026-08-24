@@ -218,6 +218,7 @@ mod tests {
                     name: outcome.clip_name,
                     position: outcome.start_position_samples,
                     source_offset: 0,
+                    start_marker: None,
                     duration: outcome.audio.num_frames() as u64,
                     source: Some(outcome.source),
                     file_path: None,

@@ -352,6 +352,10 @@ pub struct ClipInfo {
     pub position: u64,
     /// Offset into the source audio in samples.
     pub source_offset: u64,
+    /// Initial playback position inside the source window. Older projects
+    /// omit it and inherit `source_offset` when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_marker: Option<u64>,
     /// Duration in samples.
     pub duration: u64,
     /// Canonical external media source reference.
@@ -395,6 +399,24 @@ impl ClipInfo {
     /// The end position of this clip on the timeline (position + duration).
     pub fn end_position(&self) -> u64 {
         self.position.saturating_add(self.duration)
+    }
+
+    /// Resolve the persisted Start marker into the playable source window.
+    /// Legacy projects begin at Source In, matching pre-marker playback.
+    pub fn resolved_start_marker(&self, source_frames: u64) -> u64 {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(source_frames);
+        let marker_end = if self.loop_enabled {
+            source_end.min(self.loop_end)
+        } else {
+            source_end
+        };
+        self.start_marker.unwrap_or(self.source_offset).clamp(
+            self.source_offset,
+            marker_end.saturating_sub(1).max(self.source_offset),
+        )
     }
 
     pub fn resolved_source(&self) -> Option<&MediaSourceRef> {
@@ -476,6 +498,7 @@ mod tests {
             name: "test".into(),
             position,
             source_offset: 0,
+            start_marker: None,
             duration,
             source: Some(MediaSourceRef::LocalFile {
                 path: PathBuf::from("test.wav"),
@@ -526,6 +549,7 @@ mod tests {
         let mut clip = test_clip(44_100, 88_200);
         clip.name = "vocal.wav".into();
         clip.source_offset = 1_000;
+        clip.start_marker = Some(2_000);
         clip.source = Some(MediaSourceRef::LocalFile {
             path: PathBuf::from("/audio/vocal.wav"),
         });
@@ -540,6 +564,7 @@ mod tests {
         assert_eq!(clip.id, deserialized.id);
         assert_eq!(clip.position, deserialized.position);
         assert_eq!(clip.source_offset, deserialized.source_offset);
+        assert_eq!(clip.start_marker, deserialized.start_marker);
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
         assert_eq!(clip.source, deserialized.source);
@@ -548,6 +573,18 @@ mod tests {
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
+    }
+
+    #[test]
+    fn resolved_start_marker_defaults_and_clamps_to_the_playable_window() {
+        let mut clip = test_clip(0, 100);
+        clip.source_offset = 10;
+        clip.loop_enabled = true;
+        clip.loop_end = 80;
+        assert_eq!(clip.resolved_start_marker(200), 10);
+
+        clip.start_marker = Some(120);
+        assert_eq!(clip.resolved_start_marker(200), 79);
     }
 
     #[test]
@@ -566,5 +603,6 @@ mod tests {
         assert!(clip.source.is_none());
         assert_eq!(clip.gain_db, ClipGainDb::default());
         assert_eq!(clip.transpose, ClipTranspose::default());
+        assert_eq!(clip.start_marker, None);
     }
 }

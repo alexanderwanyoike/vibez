@@ -1032,6 +1032,7 @@ mod tests {
             duration_beats: 4.0,
             notes: Vec::new(),
             selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
