@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::automation::AutomationLane;
+use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
@@ -44,6 +45,16 @@ pub struct EngineClip {
 }
 
 impl EngineClip {
+    pub fn timeline(&self) -> FrameClipTimeline {
+        FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration,
+            self.loop_enabled,
+        )
+    }
+
     pub fn end_position(&self) -> u64 {
         self.position.saturating_add(self.duration)
     }
@@ -96,6 +107,16 @@ impl EngineNoteClip {
             next_same_pitch_start_beats,
             groove_latch: Cell::new(None),
         }
+    }
+
+    pub fn timeline(&self) -> BeatClipTimeline {
+        BeatClipTimeline::new(
+            self.start_marker_beats,
+            self.loop_start_beats,
+            self.loop_end_beats,
+            self.duration_beats,
+            self.loop_enabled,
+        )
     }
 
     #[inline]
@@ -341,17 +362,7 @@ impl PreparedPlaybackSource {
                     continue;
                 }
                 let clip_frame = (global_frame - clip.position) as usize;
-                let source_frame = if clip.loop_enabled && clip.loop_end > clip.loop_start {
-                    let raw = clip.start_marker as usize + clip_frame;
-                    let loop_len = (clip.loop_end - clip.loop_start) as usize;
-                    if raw >= clip.loop_end as usize {
-                        clip.loop_start as usize + (raw - clip.loop_start as usize) % loop_len
-                    } else {
-                        raw
-                    }
-                } else {
-                    clip.start_marker as usize + clip_frame
-                };
+                let source_frame = clip.timeline().source_at(clip_frame as u64) as usize;
                 for ch in 0..channels {
                     let sample = if source_frame >= source_end {
                         0.0

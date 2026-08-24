@@ -20,13 +20,7 @@ use crate::state::{
 use super::*;
 
 fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    let raw = clip.start_marker.saturating_add(local_frame);
-    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
-        let loop_len = clip.loop_end - clip.loop_start;
-        (clip.loop_start + (raw - clip.loop_start) % loop_len) as usize
-    } else {
-        raw as usize
-    }
+    clip.timeline().source_at(local_frame) as usize
 }
 
 fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
@@ -289,14 +283,7 @@ impl TimelineEditorState {
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
                 clip.duration = new_duration;
-                let source_end = clip
-                    .source_offset
-                    .saturating_add(clip.duration)
-                    .min(clip.audio.num_frames() as u64);
-                clip.start_marker = clip.start_marker.clamp(
-                    clip.source_offset,
-                    source_end.saturating_sub(1).max(clip.source_offset),
-                );
+                clip.clamp_start_to_source();
                 if clip.loop_enabled {
                     clip.clamp_loop_to_clip();
                 }

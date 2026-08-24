@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::clip_timeline::FrameClipTimeline;
 use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
@@ -408,14 +409,17 @@ impl ClipInfo {
             .source_offset
             .saturating_add(self.duration)
             .min(source_frames);
-        let marker_end = if self.loop_enabled {
-            source_end.min(self.loop_end)
-        } else {
-            source_end
-        };
-        self.start_marker.unwrap_or(self.source_offset).clamp(
+        FrameClipTimeline::new(
+            self.start_marker.unwrap_or(self.source_offset),
+            self.loop_start,
+            self.loop_end,
+            self.duration,
+            self.loop_enabled,
+        )
+        .clamp_start(
+            self.start_marker.unwrap_or(self.source_offset),
             self.source_offset,
-            marker_end.saturating_sub(1).max(self.source_offset),
+            source_end,
         )
     }
 

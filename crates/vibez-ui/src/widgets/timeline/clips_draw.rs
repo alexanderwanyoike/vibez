@@ -406,8 +406,8 @@ impl TrackClipCanvas {
                 if looping {
                     let loop_len = note_clip.loop_end_beats - note_clip.loop_start_beats;
                     let repeat_color = theme::with_alpha(self.track_color, 0.2);
-                    let mut repeat_beat = note_clip.position_beats + note_clip.loop_end_beats
-                        - note_clip.start_marker_beats;
+                    let mut repeat_beat =
+                        note_clip.position_beats + note_clip.timeline().first_wrap().unwrap_or(0.0);
                     while repeat_beat < note_clip.position_beats + note_clip.duration_beats {
                         let rx = self.beat_to_x(repeat_beat);
                         let rw = geometry.width_for_beats(loop_len);

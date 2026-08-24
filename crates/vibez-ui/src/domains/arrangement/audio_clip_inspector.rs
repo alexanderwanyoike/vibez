@@ -233,7 +233,7 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
-                clip.start_marker = clip.start_marker.clamp(new_start, new_end - 1);
+                clip.clamp_start_to_source();
                 clip.loop_start = clip.loop_start.clamp(new_start, new_end);
                 clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
                 if clip.loop_enabled

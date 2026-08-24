@@ -659,12 +659,7 @@ fn append_timeline_window(
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
-    let raw = clip.start_marker.saturating_add(timeline_delta);
-    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
-        clip.loop_start + (raw - clip.loop_start) % (clip.loop_end - clip.loop_start)
-    } else {
-        raw
-    }
+    clip.timeline().source_at(timeline_delta)
 }
 
 pub(crate) fn captured_visible_notes(

@@ -659,9 +659,7 @@ impl PianoRollState {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.duration_beats = new_duration_beats;
-                        clip.start_marker_beats = clip
-                            .start_marker_beats
-                            .clamp(0.0, (new_duration_beats - 0.01).max(0.0));
+                        clip.clamp_start_to_duration();
 
                         // Keep the loop region inside the clip when
                         // shrinking. Extending leaves the region
@@ -728,9 +726,7 @@ impl PianoRollState {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         let new_dur = (clip.duration_beats / 2.0).max(0.25);
                         clip.duration_beats = new_dur;
-                        clip.start_marker_beats = clip
-                            .start_marker_beats
-                            .clamp(0.0, (new_dur - 0.01).max(0.0));
+                        clip.clamp_start_to_duration();
                         if clip.loop_enabled {
                             clip.clamp_loop_to_duration();
                         }

@@ -225,7 +225,7 @@ impl TrackClipCanvas {
                     c.notes
                         .iter()
                         .flat_map(|note| {
-                            let first_repeat = c.loop_end_beats - c.start_marker_beats;
+                            let first_repeat = c.timeline().first_wrap().unwrap_or(f64::INFINITY);
                             c.note_occurrences(note.start_beat)
                                 .into_iter()
                                 .map(move |occurrence| {
