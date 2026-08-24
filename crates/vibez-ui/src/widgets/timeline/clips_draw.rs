@@ -316,13 +316,18 @@ impl TrackClipCanvas {
                     .into_iter()
                     .flatten()
                     {
-                        frame.fill_text(canvas::Text {
-                            content: "X".into(),
-                            position: iced::Point::new(x - 3.0, top + 3.0),
-                            color: theme::accent(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
+                        let cross = canvas::Path::new(|builder| {
+                            builder.move_to(iced::Point::new(x - 3.0, top + 2.0));
+                            builder.line_to(iced::Point::new(x + 3.0, top + 8.0));
+                            builder.move_to(iced::Point::new(x + 3.0, top + 2.0));
+                            builder.line_to(iced::Point::new(x - 3.0, top + 8.0));
                         });
+                        frame.stroke(
+                            &cross,
+                            canvas::Stroke::default()
+                                .with_color(theme::accent())
+                                .with_width(1.4),
+                        );
                     }
                 }
                 let border_color = if is_selected {

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use vibez_core::id::ClipId;
+use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipFades, ClipInfo, MediaSourceRef};
 use vibez_project::{SectionInfo, TimelineAutomationInfo, TimelineInfo, TimelineLocation};
 
@@ -161,27 +161,45 @@ pub(super) fn install_loaded_clip(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Copy)]
+struct LoadedCrossfadeCandidate {
+    location: TimelineLocation,
+    track_id: TrackId,
+    id: ClipId,
+    start: u64,
+    duration: u64,
+    fades: ClipFades,
+}
+
+impl LoadedCrossfadeCandidate {
+    fn from_loaded(loaded: &crate::message::LoadedTimelineClip) -> Self {
+        Self {
+            location: loaded.location,
+            track_id: loaded.info.track_id,
+            id: loaded.info.id,
+            start: loaded.info.position,
+            duration: loaded.info.duration,
+            fades: loaded.info.fades,
+        }
+    }
+}
+
 fn valid_crossfade_pair(
-    outgoing_id: ClipId,
-    incoming_id: ClipId,
-    outgoing_start: u64,
-    outgoing_duration: u64,
-    outgoing_fades: ClipFades,
-    incoming_start: u64,
-    incoming_duration: u64,
-    incoming_fades: ClipFades,
+    outgoing: LoadedCrossfadeCandidate,
+    incoming: LoadedCrossfadeCandidate,
 ) -> bool {
-    let outgoing_end = outgoing_start.saturating_add(outgoing_duration);
-    let incoming_end = incoming_start.saturating_add(incoming_duration);
-    let overlap = outgoing_end.saturating_sub(incoming_start);
-    outgoing_start < incoming_start
-        && incoming_start < outgoing_end
+    let outgoing_end = outgoing.start.saturating_add(outgoing.duration);
+    let incoming_end = incoming.start.saturating_add(incoming.duration);
+    let overlap = outgoing_end.saturating_sub(incoming.start);
+    outgoing.location == incoming.location
+        && outgoing.track_id == incoming.track_id
+        && outgoing.start < incoming.start
+        && incoming.start < outgoing_end
         && outgoing_end <= incoming_end
-        && outgoing_fades.crossfade_out_to() == Some(incoming_id)
-        && incoming_fades.crossfade_in_from() == Some(outgoing_id)
-        && outgoing_fades.fade_out_frames() == overlap
-        && incoming_fades.fade_in_frames() == overlap
+        && outgoing.fades.crossfade_out_to() == Some(incoming.id)
+        && incoming.fades.crossfade_in_from() == Some(outgoing.id)
+        && outgoing.fades.fade_out_frames() == overlap
+        && incoming.fades.fade_in_frames() == overlap
 }
 
 pub(super) fn sanitize_loaded_crossfades(clips: &mut [crate::message::LoadedTimelineClip]) {
@@ -190,56 +208,22 @@ pub(super) fn sanitize_loaded_crossfades(clips: &mut [crate::message::LoadedTime
     }
     let snapshot: Vec<_> = clips
         .iter()
-        .map(|loaded| {
-            (
-                loaded.location,
-                loaded.info.track_id,
-                loaded.info.id,
-                loaded.info.position,
-                loaded.info.duration,
-                loaded.info.fades,
-            )
-        })
+        .map(LoadedCrossfadeCandidate::from_loaded)
         .collect();
     for loaded in clips {
         let info = &loaded.info;
+        let candidate = LoadedCrossfadeCandidate::from_loaded(loaded);
         let incoming_valid = info.fades.crossfade_in_from().is_none_or(|outgoing_id| {
             snapshot
                 .iter()
-                .find(|entry| {
-                    entry.0 == loaded.location && entry.1 == info.track_id && entry.2 == outgoing_id
-                })
-                .is_some_and(|outgoing| {
-                    valid_crossfade_pair(
-                        outgoing.2,
-                        info.id,
-                        outgoing.3,
-                        outgoing.4,
-                        outgoing.5,
-                        info.position,
-                        info.duration,
-                        info.fades,
-                    )
-                })
+                .find(|entry| entry.id == outgoing_id)
+                .is_some_and(|outgoing| valid_crossfade_pair(*outgoing, candidate))
         });
         let outgoing_valid = info.fades.crossfade_out_to().is_none_or(|incoming_id| {
             snapshot
                 .iter()
-                .find(|entry| {
-                    entry.0 == loaded.location && entry.1 == info.track_id && entry.2 == incoming_id
-                })
-                .is_some_and(|incoming| {
-                    valid_crossfade_pair(
-                        info.id,
-                        incoming.2,
-                        info.position,
-                        info.duration,
-                        info.fades,
-                        incoming.3,
-                        incoming.4,
-                        incoming.5,
-                    )
-                })
+                .find(|entry| entry.id == incoming_id)
+                .is_some_and(|incoming| valid_crossfade_pair(candidate, *incoming))
         });
         if !incoming_valid {
             loaded.clip.info.fades = loaded.clip.info.fades.unlink_fade_in();

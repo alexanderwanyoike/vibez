@@ -123,6 +123,8 @@ mod tests {
             loop_end: 48_000,
             fade_in_frames: 12_345,
             fade_out_frames: 6_789,
+            crossfade_in: false,
+            crossfade_out: false,
             warp_stale: false,
         };
         let (fade_in_x, fade_out_x) = fade_handle_xs(37.0, 481.0, &clip);

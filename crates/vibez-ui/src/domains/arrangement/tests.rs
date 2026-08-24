@@ -607,6 +607,52 @@ fn one_clip_can_keep_independent_crossfades_on_both_edges() {
 }
 
 #[test]
+fn unchanged_fade_drag_keeps_its_crossfade_link() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, outgoing_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, incoming_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    let mut engine = RecordingEngine::default();
+    a.selected_clips = HashSet::from([
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: outgoing_id,
+        },
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: incoming_id,
+        },
+    ]);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    engine.0.clear();
+
+    let action = a.update(
+        ArrangementMsg::SetAudioClipFade {
+            track_id,
+            clip_id: outgoing_id,
+            edge: crate::state::AudioClipFadeEdge::Out,
+            frames: 250,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert!(engine.0.is_empty());
+    assert_eq!(
+        a.tracks[0].clips[0].fades.crossfade_out_to(),
+        Some(incoming_id)
+    );
+    assert_eq!(
+        a.tracks[0].clips[1].fades.crossfade_in_from(),
+        Some(outgoing_id)
+    );
+}
+
+#[test]
 fn create_note_clip_needs_midi_track_and_active_selection() {
     let mut a = arrangement_with_tracks(1);
     let audio_tid = a.tracks[0].id;

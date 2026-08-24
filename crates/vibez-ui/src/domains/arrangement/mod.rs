@@ -520,6 +520,24 @@ impl TimelineEditorState {
                 edge,
                 frames,
             } => {
+                let changes_audible_fades = self
+                    .find_content(track_id)
+                    .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                    .is_some_and(|clip| {
+                        let next = match edge {
+                            crate::state::AudioClipFadeEdge::In => {
+                                clip.fades.with_fade_in(frames, clip.duration)
+                            }
+                            crate::state::AudioClipFadeEdge::Out => {
+                                clip.fades.with_fade_out(frames, clip.duration)
+                            }
+                        };
+                        next.fade_in_frames() != clip.fades.fade_in_frames()
+                            || next.fade_out_frames() != clip.fades.fade_out_frames()
+                    });
+                if !changes_audible_fades {
+                    return ArrangementAction::default();
+                }
                 self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
                 if let Some(clip) = self
                     .find_content_mut(track_id)
@@ -533,9 +551,6 @@ impl TimelineEditorState {
                             clip.fades.with_fade_out(frames, clip.duration)
                         }
                     };
-                    if fades == clip.fades {
-                        return ArrangementAction::default();
-                    }
                     clip.fades = fades;
                     engine.send(EngineCommand::SetClipFades {
                         track_id,
