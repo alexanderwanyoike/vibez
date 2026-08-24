@@ -53,8 +53,16 @@ impl AudioClipDetailWidget {
     }
 
     fn pixels_per_beat(&self, bounds: &Rectangle) -> f32 {
-        let beats = self.duration_samples as f64 / self.samples_per_beat();
+        let beats = self.total_beats();
         (f64::from(bounds.width) / beats.max(f64::EPSILON)) as f32
+    }
+
+    fn total_beats(&self) -> f64 {
+        self.duration_samples as f64 / self.samples_per_beat()
+    }
+
+    fn beat_to_x(&self, beat: f64, bounds: &Rectangle) -> f32 {
+        (beat / self.total_beats().max(f64::EPSILON) * f64::from(bounds.width)) as f32
     }
 
     fn minimum_loop_frames(&self, bounds: &Rectangle) -> u64 {
@@ -119,8 +127,39 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         // Background
         frame.fill_rectangle(iced::Point::ORIGIN, iced::Size::new(w, h), theme::bg_dark());
 
+        let total_beats = self.total_beats().max(f64::EPSILON);
+        let pixels_per_beat = self.pixels_per_beat(&bounds);
+        let grid_step = self.grid.effective_grid(pixels_per_beat).beat_size();
+        let grid_steps = (total_beats / grid_step).ceil() as usize;
+
+        // Musical grid behind the waveform. Audio and MIDI editors now
+        // describe time with the same bars-and-beats language.
+        for step in 0..=grid_steps {
+            let beat = step as f64 * grid_step;
+            let x = self.beat_to_x(beat, &bounds).floor() + 0.5;
+            if x > w {
+                break;
+            }
+            let beat_millis = (beat * 1_000.0).round() as i64;
+            let (color, width) = if beat_millis % 4_000 == 0 {
+                (theme::grid_bar(), 1.5)
+            } else if beat_millis % 1_000 == 0 {
+                (theme::grid_beat(), 1.0)
+            } else {
+                (theme::grid_sub(), 1.0)
+            };
+            let line = canvas::Path::line(Point::new(x, MARKER_RAIL_HEIGHT), Point::new(x, h));
+            frame.stroke(
+                &line,
+                canvas::Stroke::default()
+                    .with_color(color)
+                    .with_width(width),
+            );
+        }
+
         // Center line
-        let center_y = h / 2.0;
+        let waveform_height = (h - MARKER_RAIL_HEIGHT).max(1.0);
+        let center_y = MARKER_RAIL_HEIGHT + waveform_height / 2.0;
         let center_line = canvas::Path::line(
             iced::Point::new(0.0, center_y),
             iced::Point::new(w, center_y),
@@ -144,7 +183,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
 
         if num_frames > 0 {
             let pixels = w as usize;
-            let half_h = h / 2.0 - 2.0;
+            let half_h = (waveform_height / 2.0 - 2.0).max(1.0);
             let channels = self.audio.num_channels();
             let waveform_color = theme::with_alpha(self.track_color, 0.7);
             let loop_line_color = theme::with_alpha(self.track_color, 0.35);
@@ -161,8 +200,10 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     .saturating_add(loop_len);
                 while boundary < num_frames {
                     let bx = boundary as f32 / num_frames as f32 * w;
-                    let line =
-                        canvas::Path::line(iced::Point::new(bx, 0.0), iced::Point::new(bx, h));
+                    let line = canvas::Path::line(
+                        iced::Point::new(bx, MARKER_RAIL_HEIGHT),
+                        iced::Point::new(bx, h),
+                    );
                     frame.stroke(
                         &line,
                         canvas::Stroke::default()
@@ -246,18 +287,71 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             }
         }
 
+        // Ruler rail overlays the waveform. The brace is painted before
+        // labels so measure numbers remain readable where they overlap.
+        frame.fill_rectangle(
+            Point::ORIGIN,
+            iced::Size::new(w, MARKER_RAIL_HEIGHT),
+            theme::with_alpha(theme::bg_surface(), 0.96),
+        );
         if looping {
-            frame.fill_rectangle(
-                Point::ORIGIN,
-                iced::Size::new(w, MARKER_RAIL_HEIGHT),
-                theme::with_alpha(theme::bg_surface(), 0.92),
-            );
             clip_loop_markers::draw_brace(
                 &mut frame,
                 self.source_to_x(self.loop_start, &bounds),
                 self.source_to_x(self.loop_end, &bounds),
                 theme::accent(),
             );
+        }
+
+        let ruler_border = canvas::Path::line(
+            Point::new(0.0, MARKER_RAIL_HEIGHT),
+            Point::new(w, MARKER_RAIL_HEIGHT),
+        );
+        frame.stroke(
+            &ruler_border,
+            canvas::Stroke::default()
+                .with_color(theme::border())
+                .with_width(1.0),
+        );
+        for step in 0..=grid_steps {
+            let beat = step as f64 * grid_step;
+            let x = self.beat_to_x(beat, &bounds).floor() + 0.5;
+            if x > w {
+                break;
+            }
+            let beat_millis = (beat * 1_000.0).round() as i64;
+            let is_bar = beat_millis % 4_000 == 0;
+            let is_beat = beat_millis % 1_000 == 0;
+            if is_bar {
+                let tick = canvas::Path::line(
+                    Point::new(x, MARKER_RAIL_HEIGHT - 6.0),
+                    Point::new(x, MARKER_RAIL_HEIGHT),
+                );
+                frame.stroke(
+                    &tick,
+                    canvas::Stroke::default()
+                        .with_color(theme::text_muted())
+                        .with_width(1.0),
+                );
+                frame.fill_text(canvas::Text {
+                    content: format!("{}", (beat / 4.0) as usize + 1),
+                    position: Point::new(x + 3.0, 10.0),
+                    color: theme::text_dim(),
+                    size: iced::Pixels(8.0),
+                    ..Default::default()
+                });
+            } else if is_beat && pixels_per_beat > 40.0 {
+                let tick = canvas::Path::line(
+                    Point::new(x, MARKER_RAIL_HEIGHT - 3.0),
+                    Point::new(x, MARKER_RAIL_HEIGHT),
+                );
+                frame.stroke(
+                    &tick,
+                    canvas::Stroke::default()
+                        .with_color(theme::text_muted())
+                        .with_width(0.5),
+                );
+            }
         }
 
         // Playhead
@@ -427,6 +521,17 @@ mod tests {
                 loop_end: 600,
             }) if track_id == widget.track_id && clip_id == widget.clip_id
         ));
+    }
+
+    #[test]
+    fn audio_ruler_maps_measures_from_project_tempo() {
+        let mut widget = widget();
+        widget.duration_samples = 4_000;
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+
+        assert_eq!(widget.total_beats(), 8.0);
+        assert_eq!(widget.beat_to_x(4.0, &bounds), 400.0);
+        assert_eq!(widget.beat_to_x(8.0, &bounds), 800.0);
     }
 
     #[test]
