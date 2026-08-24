@@ -31,6 +31,7 @@ fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: Tr
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
 }
@@ -205,6 +206,7 @@ fn perform_gesture_uses_the_active_section_lane_not_arrange_automation() {
                             loop_enabled: false,
                             loop_start: 0,
                             loop_end: 0,
+                            linear_gain: 1.0,
                         }],
                         Vec::new(),
                         vec![section_pan],

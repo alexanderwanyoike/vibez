@@ -253,6 +253,7 @@ fn render_offline_inner(
                     loop_enabled: clip.loop_enabled,
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
+                    linear_gain: clip.gain_db.linear(),
                 }),
                 None => warnings.push(format!("Clip '{}' audio missing, skipped", clip.name)),
             }
@@ -792,6 +793,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -836,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn master_renders_single_clip() {
+    fn master_render_applies_audio_clip_gain() {
         let mut track = bare_track("audio");
         track.pan = DEFAULT_TRACK_PAN;
         let tid = track.id;
@@ -854,6 +857,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: vibez_core::track::ClipGainDb::new(-6.0).unwrap(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -880,7 +885,9 @@ mod tests {
 
         let result = render_offline(&req);
         assert_eq!(result.audio.num_frames(), 200);
-        let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+        let expected = 0.5
+            * vibez_core::track::ClipGainDb::new(-6.0).unwrap().linear()
+            * std::f32::consts::FRAC_1_SQRT_2;
         for frame in 0..200 {
             assert!((result.audio.channels[0][frame] - expected).abs() < 1e-4);
             assert!((result.audio.channels[1][frame] - expected).abs() < 1e-4);
@@ -906,6 +913,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -951,6 +960,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -997,6 +1008,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -1013,6 +1026,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -1275,6 +1290,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -1345,6 +1362,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,

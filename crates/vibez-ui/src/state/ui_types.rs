@@ -10,7 +10,9 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
-use vibez_core::track::{AudioInputRoute, DrumPadState, InputMonitoring, MediaSourceRef};
+use vibez_core::track::{
+    AudioInputRoute, ClipGainDb, ClipTranspose, DrumPadState, InputMonitoring, MediaSourceRef,
+};
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -29,6 +31,8 @@ pub struct UiClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub gain_db: ClipGainDb,
+    pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.
     pub original_bpm: Option<f64>,
@@ -62,6 +66,37 @@ impl UiClip {
         self.loop_end = self.loop_end.min(clip_end);
         if self.loop_end <= self.loop_start {
             self.reset_loop_region_to_clip();
+        }
+    }
+}
+
+/// Editable numeric fields in Audio Clip Inspector V1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AudioClipInspectorField {
+    Gain,
+    SourceBpm,
+    SourceStart,
+    SourceEnd,
+    LoopStart,
+    LoopEnd,
+    Transpose,
+}
+
+/// Inspector fields that can be controlled by a rotary widget.
+///
+/// Keeping this narrower than [`AudioClipInspectorField`] makes it impossible
+/// for a knob to emit a source or loop-bound edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClipRotaryField {
+    Gain,
+    Transpose,
+}
+
+impl AudioClipRotaryField {
+    pub const fn inspector_field(self) -> AudioClipInspectorField {
+        match self {
+            Self::Gain => AudioClipInspectorField::Gain,
+            Self::Transpose => AudioClipInspectorField::Transpose,
         }
     }
 }
