@@ -159,21 +159,6 @@ fn find_note_clip_mut(
         .find(|clip| clip.id == clip_id)
 }
 
-/// Loop region that covers the note content, rounded up to whole
-/// bars (Ableton semantics; dogfood bug #3).
-pub fn default_loop_end(notes: &[MidiNote], duration_beats: f64) -> f64 {
-    const BEATS_PER_BAR: f64 = 4.0;
-    let content_end = notes
-        .iter()
-        .map(|n| n.start_beat + n.duration_beats)
-        .fold(0.0_f64, f64::max);
-    if content_end <= 0.0 {
-        return duration_beats;
-    }
-    let bars = (content_end / BEATS_PER_BAR).ceil().max(1.0);
-    (bars * BEATS_PER_BAR).min(duration_beats)
-}
-
 /// Snap every note start to the grid and sync changed notes to the
 /// engine.
 fn quantize_note_clip(
@@ -226,20 +211,12 @@ impl PianoRollState {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        // Default the loop region whenever the stored
-                        // one is unusable: never set, inverted, or
-                        // stale from before a resize. Ableton
-                        // semantics: the loop region covers the
-                        // CONTENT (rounded up to whole bars), so a
-                        // 1-bar pattern inside a longer clip repeats
-                        // bar by bar instead of playing once followed
-                        // by silence. Bug #3 in the dogfood log.
-                        let invalid = clip.loop_end_beats <= clip.loop_start_beats
-                            || clip.loop_end_beats > clip.duration_beats;
-                        if clip.loop_enabled && invalid {
-                            clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats =
-                                default_loop_end(&clip.notes, clip.duration_beats);
+                        // Activating Loop starts from the complete Clip. A
+                        // shorter musical loop is an explicit edit made with
+                        // the piano-roll markers, never inferred from notes or
+                        // retained from a stale pre-resize region.
+                        if clip.loop_enabled {
+                            clip.reset_loop_region_to_clip();
                         }
                         cmd_data = Some((
                             clip.loop_enabled,
@@ -700,22 +677,8 @@ impl PianoRollState {
                         // untouched so the looped pattern repeats to
                         // fill the new length (the whole point of
                         // stretching a looped clip).
-                        if clip.loop_enabled && clip.loop_end_beats > new_duration_beats {
-                            clip.loop_end_beats = new_duration_beats;
-                            if clip.loop_start_beats >= clip.loop_end_beats {
-                                clip.loop_start_beats = 0.0;
-                            }
-                        }
-
-                        // Auto-enable loop when extending past note content
-                        // Only if the clip actually has notes — empty clips don't loop
-                        if !clip.notes.is_empty() && !clip.loop_enabled {
-                            let loop_end = default_loop_end(&clip.notes, new_duration_beats);
-                            if loop_end > 0.0 && new_duration_beats > loop_end {
-                                clip.loop_enabled = true;
-                                clip.loop_start_beats = 0.0;
-                                clip.loop_end_beats = loop_end;
-                            }
+                        if clip.loop_enabled {
+                            clip.clamp_loop_to_duration();
                         }
 
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
@@ -1091,21 +1054,66 @@ mod tests {
     }
 
     #[test]
-    fn toggle_loop_defaults_region_to_content_bars() {
+    fn enabling_loop_replaces_stale_bounds_with_the_current_clip_length() {
         let (mut tracks, tid, cid) = midi_track_with_clip();
-        let mut pr = PianoRollState::default();
+        let clip = &mut tracks.get_mut(tid).unwrap().note_clips[0];
+        clip.duration_beats = 8.0;
+        clip.loop_enabled = false;
+        clip.loop_start_beats = 0.0;
+        clip.loop_end_beats = 4.0;
+        clip.notes.push(MidiNote {
+            pitch: 67,
+            velocity: 100,
+            start_beat: 6.0,
+            duration_beats: 0.5,
+        });
+
+        let mut piano_roll = PianoRollState::default();
         let mut engine = RecordingEngine::default();
-        pr.update(
+        piano_roll.update(
             PianoRollMsg::ToggleNoteClipLoop(tid, cid),
             &mut engine,
             &mut tracks,
             PianoRollCtx::default(),
         );
+
         let clip = &tracks.get(tid).unwrap().note_clips[0];
         assert!(clip.loop_enabled);
         assert_eq!(clip.loop_start_beats, 0.0);
-        assert_eq!(clip.loop_end_beats, 4.0);
-        assert!(matches!(engine.0[0], EngineCommand::SetNoteClipLoop { .. }));
+        assert_eq!(clip.loop_end_beats, 8.0);
+        assert!(matches!(
+            engine.0.as_slice(),
+            [EngineCommand::SetNoteClipLoop {
+                enabled: true,
+                loop_start_beats: 0.0,
+                loop_end_beats: 8.0,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn extending_a_non_looping_clip_does_not_infer_a_loop_from_note_content() {
+        let (mut tracks, tid, cid) = midi_track_with_clip();
+        let mut piano_roll = PianoRollState::default();
+        let mut engine = RecordingEngine::default();
+
+        piano_roll.update(
+            PianoRollMsg::ResizeNoteClipDuration {
+                track_id: tid,
+                clip_id: cid,
+                new_duration_beats: 8.0,
+            },
+            &mut engine,
+            &mut tracks,
+            PianoRollCtx::default(),
+        );
+
+        let clip = &tracks.get(tid).unwrap().note_clips[0];
+        assert_eq!(clip.duration_beats, 8.0);
+        assert!(!clip.loop_enabled);
+        assert_eq!(clip.loop_start_beats, 0.0);
+        assert_eq!(clip.loop_end_beats, 0.0);
     }
 
     #[test]

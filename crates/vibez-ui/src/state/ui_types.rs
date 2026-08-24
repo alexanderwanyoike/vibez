@@ -49,6 +49,27 @@ pub struct UiClip {
     pub original_audio: Option<Arc<DecodedAudio>>,
 }
 
+impl UiClip {
+    pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        self.loop_start = self.source_offset;
+        self.loop_end = self.source_offset.saturating_add(self.duration);
+    }
+
+    pub(crate) fn enable_loop_over_clip(&mut self) {
+        self.loop_enabled = true;
+        self.reset_loop_region_to_clip();
+    }
+
+    pub(crate) fn clamp_loop_to_clip(&mut self) {
+        let clip_end = self.source_offset.saturating_add(self.duration);
+        self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
+        self.loop_end = self.loop_end.min(clip_end);
+        if self.loop_end <= self.loop_start {
+            self.reset_loop_region_to_clip();
+        }
+    }
+}
+
 /// Editable numeric fields in Audio Clip Inspector V1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AudioClipInspectorField {
@@ -204,6 +225,26 @@ pub struct UiNoteClip {
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub groove_grid: vibez_core::perform::GrooveGrid,
+}
+
+impl UiNoteClip {
+    pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        self.loop_start_beats = 0.0;
+        self.loop_end_beats = self.duration_beats;
+    }
+
+    pub(crate) fn enable_loop_over_clip(&mut self) {
+        self.loop_enabled = true;
+        self.reset_loop_region_to_clip();
+    }
+
+    pub(crate) fn clamp_loop_to_duration(&mut self) {
+        self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
+        self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
+        if self.loop_end_beats <= self.loop_start_beats {
+            self.reset_loop_region_to_clip();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
