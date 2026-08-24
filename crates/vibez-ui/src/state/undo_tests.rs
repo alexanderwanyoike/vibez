@@ -770,6 +770,8 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
         original_audio: None,
     };
     clip.transient_markers.replace_suggestions([500]);
+    let prepared_audio = Arc::clone(&clip.audio);
+    let prepared_source = clip.source.clone().unwrap();
     Arc::make_mut(&mut state.arrangement.timeline)
         .ensure(source_track_id)
         .clips
@@ -782,6 +784,8 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            source: prepared_source,
+            audio: prepared_audio,
         },
         &mut engine,
         ArrangementCtx {

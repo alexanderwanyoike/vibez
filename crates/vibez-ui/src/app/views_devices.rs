@@ -751,7 +751,10 @@ impl App {
                 // Use container + mouse_area so press events reach us and
                 // drag-drop works. iced Button would capture ButtonPressed
                 // and hide it from mouse_area.
-                let pad_note = crate::widgets::piano_roll::pitch_name(36 + pad_index as u8);
+                let pad_note = crate::widgets::piano_roll::pitch_name(
+                    vibez_core::track::drum_rack_pad_pitch(pad_index)
+                        .expect("Drum Rack UI renders only valid pad slots"),
+                );
                 let pad_body = container(
                     column![
                         text(format!("{:02}  {pad_note}", pad_index + 1))

@@ -654,7 +654,9 @@ impl Default for AppState {
 }
 
 pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
-    (0..16).map(|_| UiDrumPad::default()).collect()
+    (0..vibez_core::track::DRUM_RACK_PAD_COUNT)
+        .map(|_| UiDrumPad::default())
+        .collect()
 }
 
 impl AppState {

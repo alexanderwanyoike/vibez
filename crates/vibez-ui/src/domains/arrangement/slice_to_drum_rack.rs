@@ -2,22 +2,20 @@
 
 use std::sync::Arc;
 
+use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_core::perform::GrooveGrid;
+use vibez_core::track::{drum_rack_pad_pitch, MediaSourceRef, DRUM_RACK_PAD_COUNT};
 
 use crate::state::{
-    ArrangementSelection, ProjectTrack, ProjectTracksState, TimelineEditorState, UiDrumPad,
-    UiNoteClip,
+    ArrangementSelection, ProjectTracksState, TimelineEditorState, UiDrumPad, UiNoteClip,
 };
 
-use super::fragment_geometry::audio_fragment_geometry;
-use super::slicing::marker_cut_positions;
-use super::{attach_channel_eq, ArrangementAction, ArrangementCtx, AudioSliceMarkers};
+use super::slicing::{marker_cut_positions, slice_boundaries};
+use super::{ArrangementAction, ArrangementCtx, AudioSliceMarkers};
 
-const MAX_SLICES: usize = 16;
-const FIRST_PAD_NOTE: u8 = 36;
-const SLICE_VELOCITY: u8 = 100;
+const SLICE_VELOCITY: u8 = 127;
 
 impl TimelineEditorState {
     pub(super) fn slice_audio_clip_to_drum_rack(
@@ -25,6 +23,8 @@ impl TimelineEditorState {
         project_tracks: &mut ProjectTracksState,
         source_track_id: TrackId,
         source_clip_id: ClipId,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
         let Some(original) = self
@@ -34,15 +34,14 @@ impl TimelineEditorState {
         else {
             return ArrangementAction::default();
         };
-        let Some(source) = original.source.clone() else {
-            return failure("Slice to Drum Rack needs available Source Media");
-        };
-        if original.audio.num_frames() == 0 || ctx.samples_per_beat <= 0.0 {
+        if usize::try_from(original.duration) != Ok(audio.num_frames())
+            || ctx.samples_per_beat <= 0.0
+        {
             return failure("Slice to Drum Rack needs available audio and a valid tempo");
         }
 
         let transient_cuts = marker_cut_positions(&original, AudioSliceMarkers::Transients);
-        let (mut cuts, marker_kind) = if transient_cuts.is_empty() {
+        let (cuts, marker_kind) = if transient_cuts.is_empty() {
             (
                 marker_cut_positions(&original, AudioSliceMarkers::Warp),
                 AudioSliceMarkers::Warp,
@@ -53,65 +52,58 @@ impl TimelineEditorState {
         if cuts.is_empty() {
             return failure("Add at least one interior Transient or Warp Marker first");
         }
-        cuts.truncate(MAX_SLICES - 1);
-
-        let mut boundaries = Vec::with_capacity(cuts.len() + 2);
-        boundaries.push(0);
-        boundaries.extend(cuts);
-        boundaries.push(original.duration);
-        let source_frames = original.audio.num_frames() as f32;
+        let all_boundaries = slice_boundaries(&original, cuts);
+        let total_regions = all_boundaries.len() - 1;
+        let boundaries = if total_regions > DRUM_RACK_PAD_COUNT {
+            let mut limited = all_boundaries[..DRUM_RACK_PAD_COUNT].to_vec();
+            limited.push(original.duration);
+            limited
+        } else {
+            all_boundaries
+        };
+        let source_frames = audio.num_frames() as f32;
         let mut pads = Vec::with_capacity(boundaries.len() - 1);
         let mut notes = Vec::with_capacity(boundaries.len() - 1);
         for (index, boundary) in boundaries.windows(2).enumerate() {
             let local_start = boundary[0];
             let duration = boundary[1] - boundary[0];
-            let (source_start, _, warp_markers) =
-                audio_fragment_geometry(&original, local_start, duration);
-            let source_end = warp_markers
-                .source_end(source_start.saturating_add(duration))
-                .min(original.audio.num_frames() as u64);
+            let source_start = local_start;
+            let source_end = local_start.saturating_add(duration);
             if source_end <= source_start {
                 return failure("A marker produced an empty Drum Rack slice");
             }
             pads.push(UiDrumPad {
                 name: Some(format!("{} Slice {}", original.name, index + 1)),
                 source: Some(source.clone()),
-                audio: Some(Arc::clone(&original.audio)),
-                gain: original.gain_db.linear().clamp(0.0, 2.0),
+                audio: Some(Arc::clone(&audio)),
+                gain: original.gain_db.linear(),
                 pan: 0.0,
                 start: source_start as f32 / source_frames,
                 end: source_end as f32 / source_frames,
                 coarse_tune: 0,
                 fine_tune: 0.0,
                 one_shot: true,
-                choke_group: Some(1),
+                choke_group: None,
             });
             notes.push(MidiNote {
-                pitch: FIRST_PAD_NOTE + index as u8,
+                pitch: drum_rack_pad_pitch(index).expect("slice count is capped to the rack"),
                 velocity: SLICE_VELOCITY,
                 start_beat: local_start as f64 / ctx.samples_per_beat,
                 duration_beats: duration as f64 / ctx.samples_per_beat,
             });
         }
 
-        let track_number = project_tracks.next_unique_track_number("Slices");
-        project_tracks.next_track_number = track_number + 1;
-        let track_id = TrackId::new();
-        let track_name = format!("Slices {track_number}");
-        let color_index = (track_number.wrapping_sub(1) % 8) as u8;
-        let mut track = ProjectTrack::new_instrument(
-            track_id,
-            track_name.clone(),
-            TrackKind::Midi,
-            color_index,
-        );
+        let mut no_engine = crate::domains::DiscardingEngine;
+        let track_id = project_tracks.add_numbered_track("Slices", TrackKind::Midi, &mut no_engine);
+        let track = project_tracks
+            .find_mut(track_id)
+            .expect("new Project Track");
+        let track_name = track.name.clone();
         track.has_instrument = true;
         track.instrument_kind = Some(InstrumentKind::DrumRack);
         for (slot, pad) in track.drum_rack_pads.iter_mut().zip(pads) {
             *slot = pad;
         }
-        let mut no_engine = crate::domains::DiscardingEngine;
-        attach_channel_eq(&mut no_engine, &mut track);
 
         let note_clip_id = ClipId::new();
         let duration_beats = original.duration as f64 / ctx.samples_per_beat;
@@ -129,7 +121,6 @@ impl TimelineEditorState {
             groove_grid: GrooveGrid::Off,
         };
 
-        project_tracks.tracks.push(track);
         Arc::make_mut(&mut self.timeline)
             .ensure(track_id)
             .note_clips
@@ -142,12 +133,19 @@ impl TimelineEditorState {
         });
         self.selected_note_clip = Some((track_id, note_clip_id));
 
+        let truncation = (total_regions > DRUM_RACK_PAD_COUNT).then(|| {
+            format!(
+                "; {} later marker regions were folded into the last pad",
+                total_regions - DRUM_RACK_PAD_COUNT
+            )
+        });
         ArrangementAction {
             replay_project_track: Some(track_id),
             status: Some(format!(
-                "Created {track_name} with {} {} slices",
+                "Created {track_name} with {} {} slices{}",
                 boundaries.len() - 1,
-                marker_name(marker_kind)
+                marker_name(marker_kind),
+                truncation.as_deref().unwrap_or_default()
             )),
             mark_dirty: true,
             ..ArrangementAction::default()

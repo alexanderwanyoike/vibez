@@ -286,7 +286,8 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
     let source = || MediaSourceRef::LocalFile {
         path: source_path.clone(),
     };
-    let pad = |start, end| DrumPadState {
+    let pad = |name: &str, start, end| DrumPadState {
+        name: Some(name.into()),
         source: Some(source()),
         gain: 1.0,
         pan: 0.0,
@@ -295,13 +296,13 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         coarse_tune: 0,
         fine_tune: 0.0,
         one_shot: true,
-        choke_group: Some(1),
+        choke_group: None,
     };
     let mut track = TrackInfo::new("Slices 1");
     track.kind = TrackKind::Midi;
     track.instrument = Some(InstrumentKind::DrumRack);
     track.native_instrument = Some(InstrumentStateInfo::DrumRack {
-        pads: vec![pad(0.0, 0.4), pad(0.4, 1.0)],
+        pads: vec![pad("Loop Slice 1", 0.0, 0.4), pad("Loop Slice 2", 0.4, 1.0)],
     });
     let note_clip = NoteClipInfo {
         id: ClipId::new(),
@@ -312,13 +313,13 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         notes: vec![
             MidiNote {
                 pitch: 36,
-                velocity: 100,
+                velocity: 127,
                 start_beat: 0.0,
                 duration_beats: 3.2,
             },
             MidiNote {
                 pitch: 37,
-                velocity: 100,
+                velocity: 127,
                 start_beat: 3.2,
                 duration_beats: 4.8,
             },
@@ -353,6 +354,8 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
     };
     assert_eq!((pads[0].start, pads[0].end), (0.0, 0.4));
     assert_eq!((pads[1].start, pads[1].end), (0.4, 1.0));
+    assert_eq!(pads[0].name.as_deref(), Some("Loop Slice 1"));
+    assert_eq!(pads[1].name.as_deref(), Some("Loop Slice 2"));
     let ids: Vec<_> = pads
         .iter()
         .filter_map(|pad| match pad.source.as_ref()? {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::track::ClipTranspose;
+use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
 use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
 
@@ -228,9 +228,15 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         markers: AudioSliceMarkers,
     },
+    RequestSliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
     SliceAudioClipToDrumRack {
         track_id: TrackId,
         clip_id: ClipId,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
     },
     SplitNoteClip {
         track_id: TrackId,
@@ -335,6 +341,7 @@ impl ArrangementMsg {
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
+                | Self::RequestSliceAudioClipToDrumRack { .. }
                 | Self::SliceAudioClipToDrumRack { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
@@ -376,6 +383,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
                 | ArrangementMsg::SelectTransientMarker { .. }
                 | ArrangementMsg::SelectWarpMarker { .. }
+                | ArrangementMsg::RequestSliceAudioClipToDrumRack { .. }
         )
     }
 

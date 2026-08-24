@@ -8,8 +8,12 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
     original.source = Some(MediaSourceRef::LocalFile {
         path: "shared-loop.wav".into(),
     });
+    original.gain_db = vibez_core::track::ClipGainDb::new(12.0).unwrap();
     original.transient_markers.replace_suggestions([250, 600]);
-    let shared_audio = Arc::clone(&original.audio);
+    let shared_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; original.duration as usize]],
+        sample_rate: original.audio.sample_rate,
+    });
     let shared_source = original.source.clone();
     let mut engine = RecordingEngine::default();
 
@@ -17,6 +21,8 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            source: shared_source.clone().unwrap(),
+            audio: Arc::clone(&shared_audio),
         },
         &mut engine,
         ArrangementCtx {
@@ -43,6 +49,7 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
             .is_some_and(|audio| Arc::ptr_eq(audio, &shared_audio))
             && pad.source == shared_source
     }));
+    assert!(loaded_pads.iter().all(|pad| pad.gain > 2.0));
     let source_frames = shared_audio.num_frames() as f32;
     assert_eq!(loaded_pads[0].start, 0.0);
     assert!((loaded_pads[0].end - 250.0 / source_frames).abs() < f32::EPSILON);
@@ -60,9 +67,72 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
             .iter()
             .map(|note| (note.pitch, note.velocity, note.start_beat))
             .collect::<Vec<_>>(),
-        vec![(36, 100, 0.0), (37, 100, 2.5), (38, 100, 6.0)]
+        vec![(36, 127, 0.0), (37, 127, 2.5), (38, 127, 6.0)]
     );
-    assert!(engine.0.is_empty(), "the app replays the complete new Track");
+    assert!(
+        engine.0.is_empty(),
+        "the app replays the complete new Track"
+    );
+}
+
+#[test]
+fn slice_to_drum_rack_turns_loop_wraps_into_distinct_flattened_pad_ranges() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 300);
+    let original = &mut arrangement.tracks[0].clips[0];
+    original.loop_enabled = true;
+    original.loop_start = 0;
+    original.loop_end = 100;
+    original.transient_markers.replace_suggestions([25]);
+    let audio = Arc::clone(&original.audio);
+    let mut engine = RecordingEngine::default();
+
+    let action = arrangement.update(
+        ArrangementMsg::SliceAudioClipToDrumRack {
+            track_id: source_track_id,
+            clip_id: source_clip_id,
+            source: MediaSourceRef::LocalFile {
+                path: "loop-slices.wav".into(),
+            },
+            audio,
+        },
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..ArrangementCtx::default()
+        },
+    );
+
+    let drum_track = arrangement
+        .find_track(action.replay_project_track.unwrap())
+        .unwrap();
+    let pads: Vec<_> = drum_track
+        .drum_rack_pads
+        .iter()
+        .filter(|pad| pad.source.is_some())
+        .map(|pad| (pad.start, pad.end))
+        .collect();
+    assert_eq!(pads.len(), 6);
+    let expected_frames = [
+        (0, 25),
+        (25, 100),
+        (100, 125),
+        (125, 200),
+        (200, 225),
+        (225, 300),
+    ];
+    for ((start, end), (expected_start, expected_end)) in pads.into_iter().zip(expected_frames) {
+        assert!((start - expected_start as f32 / 300.0).abs() < f32::EPSILON);
+        assert!((end - expected_end as f32 / 300.0).abs() < f32::EPSILON);
+    }
+    assert_eq!(
+        drum_track.note_clips[0]
+            .notes
+            .iter()
+            .map(|note| note.start_beat)
+            .collect::<Vec<_>>(),
+        vec![0.0, 0.25, 1.0, 1.25, 2.0, 2.25]
+    );
 }
 
 #[test]
@@ -76,12 +146,16 @@ fn slice_to_drum_rack_falls_back_to_warp_markers_and_caps_the_rack_at_sixteen() 
     for frame in (50..1_000).step_by(50) {
         assert!(original.warp_markers.add(frame, frame, 0, 1_000, 1_000));
     }
+    let source = original.source.clone().unwrap();
+    let audio = Arc::clone(&original.audio);
     let mut engine = RecordingEngine::default();
 
     let action = arrangement.update(
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            source,
+            audio,
         },
         &mut engine,
         ArrangementCtx {
@@ -102,40 +176,27 @@ fn slice_to_drum_rack_falls_back_to_warp_markers_and_caps_the_rack_at_sixteen() 
         16
     );
     assert_eq!(drum_track.note_clips[0].notes.len(), 16);
-    assert!(action.status.unwrap().contains("Warp slices"));
+    let status = action.status.unwrap();
+    assert!(status.contains("Warp slices"));
+    assert!(status.contains("folded into the last pad"));
 }
 
 #[test]
-fn slice_to_drum_rack_missing_media_or_markers_leaves_no_partial_track() {
+fn slice_to_drum_rack_without_markers_leaves_no_partial_track() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
-    arrangement.tracks[0].clips[0]
-        .transient_markers
-        .replace_suggestions([250]);
+    let source = MediaSourceRef::LocalFile {
+        path: "shared-loop.wav".into(),
+    };
+    let audio = Arc::clone(&arrangement.tracks[0].clips[0].audio);
     let mut engine = RecordingEngine::default();
 
-    let missing_media = arrangement.update(
-        ArrangementMsg::SliceAudioClipToDrumRack {
-            track_id: source_track_id,
-            clip_id: source_clip_id,
-        },
-        &mut engine,
-        ArrangementCtx {
-            samples_per_beat: 100.0,
-            ..ArrangementCtx::default()
-        },
-    );
-    assert!(!missing_media.mark_dirty);
-    assert_eq!(arrangement.tracks.len(), 1);
-
-    arrangement.tracks[0].clips[0].source = Some(MediaSourceRef::LocalFile {
-        path: "shared-loop.wav".into(),
-    });
-    arrangement.tracks[0].clips[0].transient_markers = Default::default();
     let missing_markers = arrangement.update(
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            source,
+            audio,
         },
         &mut engine,
         ArrangementCtx {

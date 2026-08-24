@@ -208,6 +208,29 @@ impl App {
                 self.apply_devices_action(action);
             }
             Message::Arrangement(msg) => {
+                if let ArrangementMsg::RequestSliceAudioClipToDrumRack { track_id, clip_id } = &msg
+                {
+                    let (track_id, clip_id) = (*track_id, *clip_id);
+                    let location = self.active_timeline_location();
+                    let Some(clip) = self
+                        .timeline_content_at(location, track_id)
+                        .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                        .cloned()
+                    else {
+                        return Task::none();
+                    };
+                    self.state.status_text = "Preparing Drum Rack slices…".into();
+                    let expected_clip = Box::new(clip.clone());
+                    return Task::perform(prepare_drum_rack_audio_async(clip), move |result| {
+                        Message::AudioClipDrumRackPrepared {
+                            location,
+                            track_id,
+                            clip_id,
+                            expected_clip: expected_clip.clone(),
+                            result,
+                        }
+                    });
+                }
                 let deferred_snapshot = msg.defers_project_edit().then(|| self.take_snapshot());
                 let playhead_beats = self.focused_editor_playhead_beats();
                 let samples_per_beat = if self.state.transport.bpm > 0.0 {
@@ -239,6 +262,38 @@ impl App {
                 return self
                     .apply_arrangement_action_in_transaction(action, owns_project_transaction);
             }
+            Message::AudioClipDrumRackPrepared {
+                location,
+                track_id,
+                clip_id,
+                expected_clip,
+                result,
+            } => match result {
+                Ok(prepared) => {
+                    let current = self
+                        .timeline_content_at(location, track_id)
+                        .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id));
+                    if self.active_timeline_location() != location
+                        || !current
+                            .is_some_and(|clip| clip.has_same_audible_geometry(&expected_clip))
+                    {
+                        self.state.status_text =
+                            "Drum Rack slices cancelled because the Audio Clip changed".into();
+                        return Task::none();
+                    }
+                    return self.update(Message::Arrangement(
+                        ArrangementMsg::SliceAudioClipToDrumRack {
+                            track_id,
+                            clip_id,
+                            source: prepared.source,
+                            audio: prepared.audio,
+                        },
+                    ));
+                }
+                Err(error) => {
+                    self.state.status_text = format!("Slice to Drum Rack failed: {error}");
+                }
+            },
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
                     snap_grid: self

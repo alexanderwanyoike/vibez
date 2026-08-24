@@ -12,7 +12,7 @@ use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
-use crate::state::{AuditionMode, ProjectTrack, SampleBrowserEntry, UiClip, UiDrumPad};
+use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad};
 
 use super::*;
 
@@ -416,16 +416,14 @@ impl App {
             }
         }
 
-        let track_num = self.next_unique_track_number("Audio");
-        Arc::make_mut(&mut self.state.project_tracks).next_track_number = track_num + 1;
-        let id = TrackId::new();
-        let color_index = ((track_num - 1) % 8) as u8;
-        let name = format!("Audio {track_num}");
-
-        self.send_command(EngineCommand::AddTrack(id, name.clone()));
-        Arc::make_mut(&mut self.state.project_tracks)
-            .tracks
-            .push(ProjectTrack::new(id, name, color_index));
+        let id = {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            Arc::make_mut(&mut self.state.project_tracks).add_numbered_track(
+                "Audio",
+                TrackKind::Audio,
+                &mut engine,
+            )
+        };
         self.state.arrange_content_mut(id);
         self.state.arrangement.selected_track = Some(id);
         id
