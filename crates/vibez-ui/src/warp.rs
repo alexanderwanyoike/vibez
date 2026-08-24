@@ -41,6 +41,7 @@ pub struct WarpClipInput {
     pub loop_end: u64,
     pub clip_bpm: f64,
     pub project_bpm: f64,
+    pub transpose_semitones: i8,
 }
 
 /// Intrinsic tempo analysis for a clean production loop.
@@ -269,7 +270,11 @@ pub fn compute_warp(input: WarpClipInput) -> Result<ClipWarpSuccess, String> {
         return Err("Target length collapsed to zero".into());
     }
 
-    let stretched = vibez_dsp::time_stretch::pitch_preserving_stretch(&input.audio, target_total);
+    let stretched = vibez_dsp::time_stretch::pitch_preserving_stretch_transposed(
+        &input.audio,
+        target_total,
+        f32::from(input.transpose_semitones),
+    );
     // Geometry fields are rescaled relative to the buffer they
     // currently reference, so warping an already-warped clip to the
     // same tempo is a no-op on geometry and warping to a new tempo
@@ -304,6 +309,7 @@ pub fn rewarp_for_load(
     raw: &Arc<DecodedAudio>,
     clip_bpm: f64,
     warped_to_bpm: f64,
+    transpose_semitones: i8,
 ) -> Option<Arc<DecodedAudio>> {
     if clip_bpm <= 0.0 || warped_to_bpm <= 0.0 {
         return None;
@@ -320,9 +326,13 @@ pub fn rewarp_for_load(
     if target == 0 {
         return None;
     }
-    Some(Arc::new(vibez_dsp::time_stretch::pitch_preserving_stretch(
-        raw, target,
-    )))
+    Some(Arc::new(
+        vibez_dsp::time_stretch::pitch_preserving_stretch_transposed(
+            raw,
+            target,
+            f32::from(transpose_semitones),
+        ),
+    ))
 }
 
 #[cfg(test)]
@@ -466,6 +476,7 @@ mod tests {
             loop_end: frames,
             clip_bpm,
             project_bpm,
+            transpose_semitones: 0,
         }
     }
 
@@ -527,6 +538,7 @@ mod tests {
             loop_end: first.new_loop_end,
             clip_bpm: 128.0,
             project_bpm: 120.0,
+            transpose_semitones: 0,
         })
         .unwrap();
 
@@ -554,6 +566,7 @@ mod tests {
             loop_end: first.new_loop_end,
             clip_bpm: 128.0,
             project_bpm: 135.0,
+            transpose_semitones: 0,
         })
         .unwrap();
 
@@ -572,19 +585,19 @@ mod tests {
         let saved = compute_warp(first_warp_input(&audio, 128.0, 120.0)).unwrap();
 
         // Simulate reload: raw audio decoded from disk + persisted BPM pair.
-        let reloaded = rewarp_for_load(&saved.original_audio, 128.0, 120.0).unwrap();
+        let reloaded = rewarp_for_load(&saved.original_audio, 128.0, 120.0, 0).unwrap();
         assert_eq!(reloaded.num_frames() as u64, saved.new_duration);
     }
 
     #[test]
     fn load_rewarp_rejects_bad_inputs() {
         let audio = exact_loop(2.0, 128.0);
-        assert!(rewarp_for_load(&audio, 0.0, 120.0).is_none());
-        assert!(rewarp_for_load(&audio, 128.0, 0.0).is_none());
+        assert!(rewarp_for_load(&audio, 0.0, 120.0, 0).is_none());
+        assert!(rewarp_for_load(&audio, 128.0, 0.0, 0).is_none());
         let empty = Arc::new(DecodedAudio {
             channels: vec![Vec::new()],
             sample_rate: SR,
         });
-        assert!(rewarp_for_load(&empty, 128.0, 120.0).is_none());
+        assert!(rewarp_for_load(&empty, 128.0, 120.0, 0).is_none());
     }
 }

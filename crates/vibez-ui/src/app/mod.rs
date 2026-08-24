@@ -187,6 +187,7 @@ mod update_timeline;
 mod update_view;
 mod views_about;
 mod views_arrangement;
+mod views_audio_clip;
 mod views_automation;
 mod views_browser;
 mod views_browser_audition;

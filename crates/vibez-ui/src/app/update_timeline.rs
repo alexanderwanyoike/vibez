@@ -70,6 +70,31 @@ fn focused_section_seek_beat(
 }
 
 impl App {
+    pub(super) fn active_timeline_location(&self) -> vibez_project::TimelineLocation {
+        if self.state.view.workspace == Workspace::Perform {
+            if let Some(section_id) = self.state.perform.selected_section {
+                return vibez_project::TimelineLocation::Section(section_id);
+            }
+        }
+        vibez_project::TimelineLocation::Arrange
+    }
+
+    pub(super) fn timeline_content_at(
+        &self,
+        location: vibez_project::TimelineLocation,
+        track_id: vibez_core::id::TrackId,
+    ) -> Option<&crate::state::TrackTimelineContent> {
+        match location {
+            vibez_project::TimelineLocation::Arrange => self.state.arrange_content(track_id),
+            vibez_project::TimelineLocation::Section(section_id) => self
+                .state
+                .perform
+                .sections
+                .by_id(section_id)
+                .and_then(|section| section.timeline.get(track_id)),
+        }
+    }
+
     pub(super) fn focused_editor_is_section(&self) -> bool {
         clipboard_targets_section(
             self.state.view.workspace,

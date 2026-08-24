@@ -40,7 +40,7 @@ audio_thread_priority = "0.32"
 midir = "0.10"
 
 # GUI
-iced = { version = "0.13", features = ["canvas", "tokio"] }
+iced = { version = "0.13", features = ["advanced", "canvas", "tokio"] }
 
 # Shared
 serde = { version = "1", features = ["derive"] }
