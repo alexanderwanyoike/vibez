@@ -10,9 +10,6 @@ use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use super::{DragAction, PianoRollWidget, KEY_WIDTH};
 
 const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
-const START_HANDLE_TOP: f32 = 10.0;
-const START_HANDLE_BOTTOM: f32 = 21.0;
-const MARKER_HIT_RADIUS: f32 = 8.0;
 
 impl PianoRollWidget {
     pub(super) fn hit_test_loop_marker(
@@ -36,9 +33,7 @@ impl PianoRollWidget {
         let Some(clip) = self.clip.as_ref() else {
             return false;
         };
-        (START_HANDLE_TOP..=START_HANDLE_BOTTOM).contains(&position.y)
-            && (position.x - self.beat_to_x(clip.start_marker_beats, bounds)).abs()
-                <= MARKER_HIT_RADIUS
+        clip_loop_markers::hit_test_start(self.beat_to_x(clip.start_marker_beats, bounds), position)
     }
 
     pub(super) fn begin_marker_drag(

@@ -40,9 +40,6 @@ pub struct AudioClipDetailState {
 
 const AUDIO_RULER_HEIGHT: f32 = 30.0;
 const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
-const START_HANDLE_TOP: f32 = 10.0;
-const START_HANDLE_BOTTOM: f32 = 21.0;
-const MARKER_HIT_RADIUS: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy)]
 enum AudioMarkerDrag {
@@ -122,8 +119,7 @@ impl AudioClipDetailWidget {
     }
 
     fn hit_test_start_marker(&self, position: Point, bounds: &Rectangle) -> bool {
-        (START_HANDLE_TOP..=START_HANDLE_BOTTOM).contains(&position.y)
-            && (position.x - self.source_to_x(self.start_marker, bounds)).abs() <= MARKER_HIT_RADIUS
+        clip_loop_markers::hit_test_start(self.source_to_x(self.start_marker, bounds), position)
     }
 
     fn start_marker_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
@@ -335,37 +331,14 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             );
         }
 
-        // Start is a one-shot playback marker, independent of the loop brace.
-        // It lives on its own row so the default overlap with Loop Start remains
-        // directly editable.
         let start_x = self.source_to_x(self.start_marker, &bounds);
-        let start_color = theme::text();
-        let start_flag = canvas::Path::new(|path| {
-            path.move_to(Point::new(start_x, START_HANDLE_TOP));
-            path.line_to(Point::new(start_x + 8.0, START_HANDLE_TOP));
-            path.line_to(Point::new(start_x, START_HANDLE_BOTTOM));
-            path.close();
-        });
-        frame.fill(&start_flag, start_color);
-        let start_line = canvas::Path::line(
-            Point::new(start_x, START_HANDLE_TOP),
-            Point::new(start_x, h),
+        clip_loop_markers::draw_start(
+            &mut frame,
+            start_x,
+            h,
+            theme::text_dim(),
+            theme::bg_surface(),
         );
-        frame.stroke(
-            &start_line,
-            canvas::Stroke::default()
-                .with_color(theme::with_alpha(start_color, 0.75))
-                .with_width(1.0),
-        );
-        if start_x + 42.0 < w {
-            frame.fill_text(canvas::Text {
-                content: "START".into(),
-                position: Point::new(start_x + 10.0, 19.0),
-                color: start_color,
-                size: iced::Pixels(8.0),
-                ..Default::default()
-            });
-        }
 
         let ruler_border = canvas::Path::line(
             Point::new(0.0, AUDIO_RULER_HEIGHT),
