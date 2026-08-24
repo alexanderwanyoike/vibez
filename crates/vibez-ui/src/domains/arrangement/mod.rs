@@ -429,6 +429,12 @@ impl TimelineEditorState {
             | ArrangementMsg::ReplaceDetectedTransientMarkers { .. }) => {
                 return self.update_transient_markers(message);
             }
+            message @ (ArrangementMsg::SelectWarpMarker { .. }
+            | ArrangementMsg::AddWarpMarker { .. }
+            | ArrangementMsg::MoveWarpMarker { .. }
+            | ArrangementMsg::RemoveWarpMarker { .. }) => {
+                return self.update_warp_markers(engine, message);
+            }
             ArrangementMsg::SetClipLoopRegion {
                 track_id,
                 clip_id,
@@ -678,6 +684,7 @@ impl TimelineEditorState {
                             linear_gain: clip.gain_db.linear(),
                             fades: clip.fades,
                             playback_direction: clip.playback_direction,
+                            warp_markers: clip.warp_markers.clone(),
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -764,6 +771,7 @@ impl TimelineEditorState {
                                         linear_gain: duplicate.gain_db.linear(),
                                         fades: duplicate.fades,
                                         playback_direction: duplicate.playback_direction,
+                                        warp_markers: duplicate.warp_markers.clone(),
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -1166,6 +1174,8 @@ mod fragment_geometry;
 mod media_ops;
 mod ops;
 mod transient_markers;
+mod warp_markers;
+mod warp_ops;
 
 #[cfg(test)]
 mod clipboard_tests;

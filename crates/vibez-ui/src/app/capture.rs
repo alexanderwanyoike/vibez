@@ -508,6 +508,7 @@ fn add_audio_clip_command(
         linear_gain: clip.gain_db.linear(),
         fades: clip.fades,
         playback_direction: clip.playback_direction,
+        warp_markers: clip.warp_markers.clone(),
     }
 }
 
@@ -607,6 +608,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

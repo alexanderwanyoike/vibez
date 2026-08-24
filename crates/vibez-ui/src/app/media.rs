@@ -596,6 +596,7 @@ impl App {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if self.state.find_track(track_id).is_some() {
             self.state.arrange_content_mut(track_id).clips.push(UiClip {
@@ -614,6 +615,7 @@ impl App {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm,
                 warped,
@@ -693,6 +695,7 @@ impl App {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm,
             warped,

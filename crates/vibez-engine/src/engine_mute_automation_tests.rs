@@ -35,6 +35,7 @@ fn add_constant_track(commands: &mut rtrb::Producer<EngineCommand>, track_id: Tr
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
 }
@@ -213,6 +214,7 @@ fn perform_gesture_uses_the_active_section_lane_not_arrange_automation() {
                             linear_gain: 1.0,
                             fades: Default::default(),
                             playback_direction: Default::default(),
+                            warp_markers: Default::default(),
                         }],
                         Vec::new(),
                         vec![section_pan],

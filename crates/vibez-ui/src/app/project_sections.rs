@@ -36,6 +36,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
             fades: clip.fades,
             playback_direction: clip.playback_direction,
             transient_markers: clip.transient_markers.clone(),
+            warp_markers: clip.warp_markers.clone(),
             transpose: clip.transpose,
             original_bpm: clip.original_bpm,
             warped: clip.warped,
@@ -141,9 +142,20 @@ pub(super) fn install_loaded_clip(
     let start_marker = loaded
         .info
         .resolved_start_marker(loaded.audio.num_frames() as u64);
-    let source_end = source_offset
+    let identity_source_end = source_offset
         .saturating_add(loaded.info.duration)
         .min(loaded.audio.num_frames() as u64);
+    let mut warp_markers = loaded.info.warp_markers;
+    let identity_timeline_end = loaded
+        .info
+        .duration
+        .min((loaded.audio.num_frames() as u64).saturating_sub(source_offset));
+    warp_markers.sanitize_for_clip(
+        source_offset,
+        loaded.audio.num_frames() as u64,
+        identity_timeline_end,
+    );
+    let source_end = warp_markers.source_end(identity_source_end);
     let mut transient_markers = loaded.info.transient_markers;
     transient_markers.retain_source_range(source_offset, source_end);
     timeline.ensure(loaded.info.track_id).clips.push(UiClip {
@@ -162,6 +174,7 @@ pub(super) fn install_loaded_clip(
         fades: loaded.info.fades.clamped_to(loaded.info.duration),
         playback_direction: loaded.info.playback_direction,
         transient_markers,
+        warp_markers,
         transpose: loaded.info.transpose,
         original_bpm: loaded.info.original_bpm,
         warped: loaded.info.warped,
@@ -312,6 +325,7 @@ mod tests {
                     fades,
                     playback_direction: Default::default(),
                     transient_markers: Default::default(),
+                    warp_markers: Default::default(),
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,

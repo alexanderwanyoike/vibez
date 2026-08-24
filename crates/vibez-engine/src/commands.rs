@@ -91,6 +91,7 @@ pub enum EngineCommand {
         linear_gain: f32,
         fades: vibez_core::track::ClipFades,
         playback_direction: vibez_core::track::ClipPlaybackDirection,
+        warp_markers: vibez_core::warp_marker::WarpMarkers,
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
@@ -140,6 +141,12 @@ pub enum EngineCommand {
         track_id: TrackId,
         clip_id: ClipId,
         direction: vibez_core::track::ClipPlaybackDirection,
+    },
+    /// Replace one resident Audio Clip's prepared piecewise timing map.
+    SetClipWarpMarkers {
+        track_id: TrackId,
+        clip_id: ClipId,
+        warp_markers: vibez_core::warp_marker::WarpMarkers,
     },
     /// Commit source and loop boundaries without replacing Clip media.
     SetClipBounds {
@@ -475,6 +482,7 @@ mod tests {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         };
         let _remove_clip = EngineCommand::RemoveClip(tid, cid);
         let _move_clip = EngineCommand::MoveClip {

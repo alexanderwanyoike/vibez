@@ -72,6 +72,7 @@ fn source(
                     linear_gain: 1.0,
                     fades: Default::default(),
                     playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 }],
                 Vec::new(),
                 Vec::new(),
@@ -211,6 +212,7 @@ fn stopped_count_in_does_not_play_arrangement_content() {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     commands

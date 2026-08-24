@@ -207,6 +207,7 @@ impl Section {
                         linear_gain: clip.gain_db.linear(),
                         fades: clip.fades.clamped_to(clip.duration),
                         playback_direction: clip.playback_direction,
+                        warp_markers: clip.warp_markers.clone(),
                     })
                     .collect();
                 let note_clips = content
@@ -342,6 +343,7 @@ mod tests {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -384,6 +386,7 @@ mod tests {
                 fades: Default::default(),
                 playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

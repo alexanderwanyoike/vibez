@@ -145,6 +145,28 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         source_frames: Vec<u64>,
     },
+    SelectWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: Option<u64>,
+    },
+    AddWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        timeline_frame: u64,
+    },
+    MoveWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        timeline_frame: u64,
+    },
+    RemoveWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
     SetClipLoopRegion {
         track_id: TrackId,
         clip_id: ClipId,
@@ -276,6 +298,10 @@ impl ArrangementMsg {
                 | Self::MoveTransientMarker { .. }
                 | Self::RemoveTransientMarker { .. }
                 | Self::ReplaceDetectedTransientMarkers { .. }
+                | Self::SelectWarpMarker { .. }
+                | Self::AddWarpMarker { .. }
+                | Self::MoveWarpMarker { .. }
+                | Self::RemoveWarpMarker { .. }
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }
@@ -332,6 +358,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::DiscardAudioClipInspectorEdit { .. }
                 | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
                 | ArrangementMsg::SelectTransientMarker { .. }
+                | ArrangementMsg::SelectWarpMarker { .. }
         )
     }
 
@@ -358,6 +385,9 @@ impl ArrangementMsg {
                     | Self::MoveTransientMarker { .. }
                     | Self::RemoveTransientMarker { .. }
                     | Self::ReplaceDetectedTransientMarkers { .. }
+                    | Self::AddWarpMarker { .. }
+                    | Self::MoveWarpMarker { .. }
+                    | Self::RemoveWarpMarker { .. }
             )
     }
 }

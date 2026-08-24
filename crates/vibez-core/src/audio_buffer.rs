@@ -63,6 +63,21 @@ impl DecodedAudio {
             .unwrap_or(0.0)
     }
 
+    /// Read a fractional frame with linear interpolation and no allocation.
+    pub fn sample_linear(&self, channel: usize, frame: f64) -> f32 {
+        if !frame.is_finite() || frame < 0.0 {
+            return 0.0;
+        }
+        let floor = frame.floor() as usize;
+        let mix = (frame - floor as f64) as f32;
+        let start = self.sample(channel, floor);
+        if mix <= f32::EPSILON {
+            return start;
+        }
+        let end = self.sample(channel, floor.saturating_add(1));
+        start + (end - start) * mix
+    }
+
     /// Get peak amplitude for a range of frames (for waveform rendering).
     pub fn peak_in_range(&self, channel: usize, start: usize, end: usize) -> (f32, f32) {
         let ch = match self.channels.get(channel) {
@@ -127,6 +142,17 @@ mod tests {
         assert_eq!(audio.sample(0, 0), 1.0);
         assert_eq!(audio.sample(0, 999), 0.0);
         assert_eq!(audio.sample(5, 0), 0.0);
+    }
+
+    #[test]
+    fn decoded_audio_linearly_interpolates_fractional_frames() {
+        let audio = DecodedAudio {
+            channels: vec![vec![0.0, 1.0, 0.0]],
+            sample_rate: 44_100,
+        };
+        assert_eq!(audio.sample_linear(0, 0.5), 0.5);
+        assert_eq!(audio.sample_linear(0, 1.25), 0.75);
+        assert_eq!(audio.sample_linear(0, -1.0), 0.0);
     }
 
     #[test]

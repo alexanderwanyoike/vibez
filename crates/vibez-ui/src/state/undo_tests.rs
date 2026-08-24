@@ -487,6 +487,7 @@ fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: Some(128.0),
             warped: false,
@@ -542,6 +543,7 @@ fn add_move_and_delete_transient_markers_each_restore_through_undo() {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -617,6 +619,47 @@ fn add_move_and_delete_transient_markers_each_restore_through_undo() {
             .source_frame(),
         100
     );
+
+    edit(
+        &mut state,
+        ArrangementMsg::AddWarpMarker {
+            track_id,
+            clip_id,
+            source_frame: 250,
+            timeline_frame: 250,
+        },
+    );
+    undo_once(&mut state);
+    assert!(state.arrangement.timeline.get(track_id).unwrap().clips[0]
+        .warp_markers
+        .is_empty());
+
+    edit(
+        &mut state,
+        ArrangementMsg::AddWarpMarker {
+            track_id,
+            clip_id,
+            source_frame: 250,
+            timeline_frame: 250,
+        },
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::MoveWarpMarker {
+            track_id,
+            clip_id,
+            source_frame: 250,
+            timeline_frame: 500,
+        },
+    );
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0]
+            .warp_markers
+            .interior()[0]
+            .timeline_frame(),
+        250
+    );
 }
 
 #[test]
@@ -649,6 +692,7 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

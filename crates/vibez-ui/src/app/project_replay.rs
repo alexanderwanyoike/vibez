@@ -330,6 +330,7 @@ impl App {
                 linear_gain: clip.gain_db.linear(),
                 fades: clip.fades,
                 playback_direction: clip.playback_direction,
+                warp_markers: clip.warp_markers.clone(),
             });
         }
 

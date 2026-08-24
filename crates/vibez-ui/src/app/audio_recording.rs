@@ -350,6 +350,7 @@ impl App {
                     linear_gain: 1.0,
                     fades: Default::default(),
                     playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 });
                 self.state
                     .arrange_content_mut(outcome.track_id)
@@ -370,6 +371,7 @@ impl App {
                         fades: Default::default(),
                         playback_direction: Default::default(),
                         transient_markers: Default::default(),
+                        warp_markers: Default::default(),
                         transpose: Default::default(),
                         original_bpm: None,
                         warped: false,

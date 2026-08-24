@@ -16,6 +16,7 @@ use vibez_core::track::{
     InputMonitoring, MediaSourceRef,
 };
 use vibez_core::transient::TransientMarkers;
+use vibez_core::warp_marker::WarpMarkers;
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ pub struct UiClip {
     pub fades: ClipFades,
     pub playback_direction: ClipPlaybackDirection,
     pub transient_markers: TransientMarkers,
+    pub warp_markers: WarpMarkers,
     pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.
@@ -59,6 +61,21 @@ pub struct UiClip {
 }
 
 impl UiClip {
+    pub(crate) fn source_end(&self) -> u64 {
+        self.warp_markers.source_end(
+            self.source_offset
+                .saturating_add(self.duration)
+                .min(self.audio.num_frames() as u64),
+        )
+    }
+
+    pub(crate) fn warp_timeline_end(&self) -> u64 {
+        let identity_end = self
+            .duration
+            .min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
+        self.warp_markers.timeline_end(identity_end)
+    }
+
     pub(crate) fn timeline(&self) -> FrameClipTimeline {
         FrameClipTimeline::new(
             self.start_marker,
@@ -133,10 +150,58 @@ impl UiClip {
     }
 
     pub(crate) fn source_frame_at(&self, clip_frame: u64) -> u64 {
-        self.timeline().source_at(
+        let timeline_frame = self.timeline().source_at(
             self.playback_direction
                 .map_clip_frame(clip_frame, self.duration),
-        )
+        );
+        if self.warp_markers.is_empty() {
+            return timeline_frame;
+        }
+        self.warp_markers
+            .source_at_timeline(
+                timeline_frame.saturating_sub(self.source_offset) as f64,
+                self.source_offset,
+                self.warp_timeline_end(),
+            )
+            .round() as u64
+    }
+
+    pub(crate) fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
+        self.warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64
+    }
+
+    pub(crate) fn warp_geometry_for_fragment(
+        &self,
+        local_start: u64,
+        duration: u64,
+    ) -> (u64, u64, WarpMarkers) {
+        let phase = match self.playback_direction {
+            ClipPlaybackDirection::Forward => local_start,
+            ClipPlaybackDirection::Reverse => self
+                .duration
+                .saturating_sub(local_start)
+                .saturating_sub(duration),
+        };
+        let timeline_start = self.timeline().source_at(phase);
+        if self.warp_markers.is_empty() {
+            return (timeline_start, timeline_start, WarpMarkers::default());
+        }
+        if self.timeline().is_looping() {
+            return (
+                self.source_offset,
+                timeline_start,
+                self.warp_markers.clone(),
+            );
+        }
+        let (source_offset, markers) = self.warp_markers.for_fragment(
+            timeline_start.saturating_sub(self.source_offset),
+            duration,
+            self.source_offset,
+            self.warp_timeline_end(),
+        );
+        (source_offset, source_offset, markers)
     }
 }
 
