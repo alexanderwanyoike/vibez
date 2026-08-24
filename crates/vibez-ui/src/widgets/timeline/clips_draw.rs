@@ -401,35 +401,9 @@ impl TrackClipCanvas {
                     note_clip_color,
                 );
 
-                // Draw note blocks inside the clip (below title bar)
-                if !note_clip.notes.is_empty() && clip_w > 4.0 {
-                    let clip_geometry =
-                        TimelineGeometry::fitted(note_clip.duration_beats, clip_w, 0.0);
-                    let body_top = clip_y + CLIP_TITLE_HEIGHT;
-                    let body_h = clip_h - CLIP_TITLE_HEIGHT;
-                    let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
-                    let min_pitch = *pitches.iter().min().unwrap_or(&60);
-                    let max_pitch = *pitches.iter().max().unwrap_or(&72);
-                    let pitch_range = (max_pitch - min_pitch + 1).max(12) as f32;
-
-                    for &(pitch, start_beat, duration_beats) in &note_clip.notes {
-                        // start_beat is clip-local (0.0 = clip start)
-                        let note_x = clip_x + clip_geometry.beat_to_x(start_beat);
-                        let note_w = clip_geometry.width_for_beats(duration_beats);
-                        let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;
-                        let note_y = body_top + 2.0 + note_y_frac * (body_h - 4.0);
-                        let note_h = ((body_h - 4.0) / pitch_range).clamp(2.0, 6.0);
-
-                        frame.fill_rectangle(
-                            iced::Point::new(note_x, note_y),
-                            iced::Size::new(note_w.max(2.0), note_h),
-                            note_block_color,
-                        );
-                    }
-                }
-
-                // Loop markers for note clips
-                if note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats {
+                let looping =
+                    note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
+                if looping {
                     let loop_len = note_clip.loop_end_beats - note_clip.loop_start_beats;
                     let repeat_color = theme::with_alpha(self.track_color, 0.2);
                     let mut repeat_beat = note_clip.position_beats + note_clip.loop_end_beats
@@ -444,19 +418,50 @@ impl TrackClipCanvas {
                                 repeat_color,
                             );
                         }
-
                         repeat_beat += loop_len;
                     }
+                }
 
-                    if clip_w > 20.0 {
-                        frame.fill_text(canvas::Text {
-                            content: "L".to_string(),
-                            position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
-                            color: theme::accent(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
+                // Draw note blocks inside the clip (below title bar)
+                if !note_clip.notes.is_empty() && clip_w > 4.0 {
+                    let clip_geometry =
+                        TimelineGeometry::fitted(note_clip.duration_beats, clip_w, 0.0);
+                    let body_top = clip_y + CLIP_TITLE_HEIGHT;
+                    let body_h = clip_h - CLIP_TITLE_HEIGHT;
+                    let pitches: Vec<u8> = note_clip.notes.iter().map(|n| n.0).collect();
+                    let min_pitch = *pitches.iter().min().unwrap_or(&60);
+                    let max_pitch = *pitches.iter().max().unwrap_or(&72);
+                    let pitch_range = (max_pitch - min_pitch + 1).max(12) as f32;
+
+                    for &(pitch, start_beat, duration_beats, repeated) in &note_clip.notes {
+                        // start_beat is clip-local (0.0 = clip start)
+                        let note_x = clip_x + clip_geometry.beat_to_x(start_beat);
+                        let note_w = clip_geometry.width_for_beats(duration_beats);
+                        let note_y_frac = (max_pitch.saturating_sub(pitch)) as f32 / pitch_range;
+                        let note_y = body_top + 2.0 + note_y_frac * (body_h - 4.0);
+                        let note_h = ((body_h - 4.0) / pitch_range).clamp(2.0, 6.0);
+
+                        frame.fill_rectangle(
+                            iced::Point::new(note_x, note_y),
+                            iced::Size::new(note_w.max(2.0), note_h),
+                            if repeated {
+                                theme::with_alpha(self.track_color, 0.5)
+                            } else {
+                                note_block_color
+                            },
+                        );
                     }
+                }
+
+                // Loop markers for note clips
+                if looping && clip_w > 20.0 {
+                    frame.fill_text(canvas::Text {
+                        content: "L".to_string(),
+                        position: iced::Point::new(clip_x + clip_w - 14.0, clip_y + 3.0),
+                        color: theme::accent(),
+                        size: iced::Pixels(9.0),
+                        ..Default::default()
+                    });
                 }
 
                 // Selection highlight

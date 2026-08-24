@@ -118,6 +118,36 @@ fn track_canvas_materialises_only_the_visible_note_clips() {
 }
 
 #[test]
+fn looped_note_previews_keep_initial_notes_solid_and_repeats_ghosted() {
+    let mut clip = note_clip(0.0);
+    clip.duration_beats = 8.0;
+    clip.notes = vec![MidiNote {
+        pitch: 60,
+        velocity: 100,
+        start_beat: 2.0,
+        duration_beats: 0.5,
+    }];
+    clip.start_marker_beats = 2.0;
+    clip.loop_enabled = true;
+    clip.loop_start_beats = 1.0;
+    clip.loop_end_beats = 3.0;
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(clip);
+
+    let canvas = track_canvas(&content, 1.0);
+
+    assert_eq!(
+        canvas.note_clips[0].notes,
+        vec![
+            (60, 0.0, 0.5, false),
+            (60, 2.0, 0.5, true),
+            (60, 4.0, 0.5, true),
+            (60, 6.0, 0.5, true),
+        ]
+    );
+}
+
+#[test]
 fn scrolled_long_section_materializes_visible_split_midi_fragments() {
     let mut content = TrackTimelineContent::default();
     content.note_clips.push(note_clip(0.0));
@@ -376,7 +406,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         position_beats: 0.0,
         duration_beats: 4.0,
         name: "● RECORDING LIVE".into(),
-        notes: vec![(60, 0.0, 0.5)],
+        notes: vec![(60, 0.0, 0.5, false)],
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,

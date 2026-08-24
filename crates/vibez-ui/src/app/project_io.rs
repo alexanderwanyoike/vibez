@@ -777,24 +777,9 @@ impl App {
             let location = loaded_clip.location;
             let clip = loaded_clip.clip;
             if location == TimelineLocation::Arrange {
-                let source_end = clip
-                    .info
-                    .source_offset
-                    .saturating_add(clip.info.duration)
-                    .min(clip.audio.num_frames() as u64);
-                let marker_end = if clip.info.loop_enabled {
-                    source_end.min(clip.info.loop_end)
-                } else {
-                    source_end
-                };
                 let start_marker = clip
                     .info
-                    .start_marker
-                    .unwrap_or(clip.info.source_offset)
-                    .clamp(
-                        clip.info.source_offset,
-                        marker_end.saturating_sub(1).max(clip.info.source_offset),
-                    );
+                    .resolved_start_marker(clip.audio.num_frames() as u64);
                 self.send_command(EngineCommand::AddClip {
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
@@ -819,15 +804,7 @@ impl App {
         }
 
         for note_clip in &loaded.project.arrange.note_clips {
-            let marker_end = if note_clip.loop_enabled {
-                note_clip.duration_beats.min(note_clip.loop_end_beats)
-            } else {
-                note_clip.duration_beats
-            };
-            let start_marker_beats = note_clip
-                .start_marker_beats
-                .unwrap_or(note_clip.loop_start_beats)
-                .clamp(0.0, (marker_end - 0.01).max(0.0));
+            let start_marker_beats = note_clip.resolved_start_marker_beats();
             self.send_command(EngineCommand::AddNoteClip {
                 start_marker_beats,
                 track_id: note_clip.track_id,

@@ -42,6 +42,21 @@ pub struct NoteClipInfo {
     pub groove_grid: GrooveGrid,
 }
 
+impl NoteClipInfo {
+    /// Resolve the persisted Start marker into the playable clip window.
+    /// Legacy projects begin at Loop Start, matching pre-marker playback.
+    pub fn resolved_start_marker_beats(&self) -> f64 {
+        let marker_end = if self.loop_enabled {
+            self.duration_beats.min(self.loop_end_beats)
+        } else {
+            self.duration_beats
+        };
+        self.start_marker_beats
+            .unwrap_or(self.loop_start_beats)
+            .clamp(0.0, (marker_end - 0.01).max(0.0))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstrumentKind {
     SubtractiveSynth,
@@ -159,6 +174,7 @@ mod tests {
         assert_eq!(loaded.notes.len(), 2);
         assert_eq!(loaded.notes[0].pitch, 60);
         assert_eq!(loaded.start_marker_beats, Some(1.0));
+        assert_eq!(loaded.resolved_start_marker_beats(), 1.0);
         assert_eq!(loaded.groove_grid, GrooveGrid::Sixteenth);
     }
 
@@ -183,6 +199,25 @@ mod tests {
         let loaded: NoteClipInfo = serde_json::from_value(json).unwrap();
         assert_eq!(loaded.groove_grid, GrooveGrid::Off);
         assert_eq!(loaded.start_marker_beats, None);
+        assert_eq!(loaded.resolved_start_marker_beats(), 0.0);
+    }
+
+    #[test]
+    fn resolved_start_marker_is_clamped_before_loop_end() {
+        let clip = NoteClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "Loop".into(),
+            position_beats: 0.0,
+            duration_beats: 8.0,
+            notes: Vec::new(),
+            start_marker_beats: Some(7.0),
+            loop_enabled: true,
+            loop_start_beats: 1.0,
+            loop_end_beats: 4.0,
+            groove_grid: GrooveGrid::Off,
+        };
+        assert_eq!(clip.resolved_start_marker_beats(), 3.99);
     }
 
     #[test]

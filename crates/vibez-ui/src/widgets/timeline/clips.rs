@@ -225,9 +225,17 @@ impl TrackClipCanvas {
                     c.notes
                         .iter()
                         .flat_map(|note| {
+                            let first_repeat = c.loop_end_beats - c.start_marker_beats;
                             c.note_occurrences(note.start_beat)
                                 .into_iter()
-                                .map(|occurrence| (note.pitch, occurrence, note.duration_beats))
+                                .map(move |occurrence| {
+                                    (
+                                        note.pitch,
+                                        occurrence,
+                                        note.duration_beats,
+                                        c.loop_enabled && occurrence + f64::EPSILON >= first_repeat,
+                                    )
+                                })
                         })
                         .collect()
                 } else {

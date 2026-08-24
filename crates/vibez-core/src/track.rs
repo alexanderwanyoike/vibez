@@ -401,6 +401,24 @@ impl ClipInfo {
         self.position.saturating_add(self.duration)
     }
 
+    /// Resolve the persisted Start marker into the playable source window.
+    /// Legacy projects begin at Source In, matching pre-marker playback.
+    pub fn resolved_start_marker(&self, source_frames: u64) -> u64 {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(source_frames);
+        let marker_end = if self.loop_enabled {
+            source_end.min(self.loop_end)
+        } else {
+            source_end
+        };
+        self.start_marker.unwrap_or(self.source_offset).clamp(
+            self.source_offset,
+            marker_end.saturating_sub(1).max(self.source_offset),
+        )
+    }
+
     pub fn resolved_source(&self) -> Option<&MediaSourceRef> {
         self.source.as_ref()
     }
@@ -555,6 +573,18 @@ mod tests {
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
+    }
+
+    #[test]
+    fn resolved_start_marker_defaults_and_clamps_to_the_playable_window() {
+        let mut clip = test_clip(0, 100);
+        clip.source_offset = 10;
+        clip.loop_enabled = true;
+        clip.loop_end = 80;
+        assert_eq!(clip.resolved_start_marker(200), 10);
+
+        clip.start_marker = Some(120);
+        assert_eq!(clip.resolved_start_marker(200), 79);
     }
 
     #[test]

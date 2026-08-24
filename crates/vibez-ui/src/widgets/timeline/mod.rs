@@ -33,7 +33,7 @@ pub struct TimelineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,
-    pub notes: Vec<(u8, f64, f64)>, // (pitch, start_beat, duration_beats)
+    pub notes: Vec<(u8, f64, f64, bool)>, // (pitch, start, duration, repeated)
     pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
