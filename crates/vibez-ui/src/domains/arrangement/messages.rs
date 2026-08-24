@@ -8,6 +8,12 @@ use vibez_core::track::ClipTranspose;
 
 use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSliceMarkers {
+    Transients,
+    Warp,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClipTransposeRenderRequest {
     pub track_id: TrackId,
@@ -217,6 +223,11 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         split_position: u64,
     },
+    SliceAudioClipAtMarkers {
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: AudioSliceMarkers,
+    },
     SplitNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -319,6 +330,7 @@ impl ArrangementMsg {
                 | Self::ResizeSelectedClips { .. }
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
+                | Self::SliceAudioClipAtMarkers { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
@@ -388,6 +400,7 @@ impl ArrangementMsg {
                     | Self::AddWarpMarker { .. }
                     | Self::MoveWarpMarker { .. }
                     | Self::RemoveWarpMarker { .. }
+                    | Self::SliceAudioClipAtMarkers { .. }
             )
     }
 }

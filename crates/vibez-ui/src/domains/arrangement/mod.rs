@@ -23,11 +23,12 @@ use crate::state::{
 
 mod messages;
 pub use messages::{
-    ArrangementAction, ArrangementCtx, ArrangementMsg, ClipRenderedGeometry,
+    ArrangementAction, ArrangementCtx, ArrangementMsg, AudioSliceMarkers, ClipRenderedGeometry,
     ClipTransposeRenderRequest,
 };
 mod clipboard;
 mod crossfades;
+mod slicing;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -777,6 +778,13 @@ impl TimelineEditorState {
                 split_position,
             } => {
                 return self.op_split_audio_clip(engine, ctx, track_id, clip_id, split_position);
+            }
+            ArrangementMsg::SliceAudioClipAtMarkers {
+                track_id,
+                clip_id,
+                markers,
+            } => {
+                return self.slice_audio_clip_at_markers(engine, track_id, clip_id, markers);
             }
             ArrangementMsg::SplitNoteClip {
                 track_id,

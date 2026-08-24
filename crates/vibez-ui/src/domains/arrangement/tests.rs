@@ -741,6 +741,148 @@ fn splitting_a_looped_piecewise_warp_preserves_repetitions_and_phase() {
 }
 
 #[test]
+fn slicing_at_transients_creates_selected_shared_media_clips_with_exact_playback() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 100, 1_000);
+    let original = &mut arrangement.tracks[0].clips[0];
+    original
+        .transient_markers
+        .replace_suggestions([0, 250, 600, 1_000]);
+    let shared_audio = Arc::clone(&original.audio);
+    let shared_source = original.source.clone();
+    let expected: Vec<_> = (0..original.duration)
+        .map(|frame| original.source_frame_at(frame))
+        .collect();
+    let mut engine = RecordingEngine::default();
+
+    let action = arrangement.update(
+        ArrangementMsg::SliceAudioClipAtMarkers {
+            track_id,
+            clip_id,
+            markers: AudioSliceMarkers::Transients,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let mut slices: Vec<_> = arrangement.tracks[0].clips.iter().collect();
+    slices.sort_by_key(|clip| clip.position);
+    assert!(action.mark_dirty);
+    assert_eq!(slices.len(), 3);
+    assert_eq!(
+        slices
+            .iter()
+            .map(|clip| (clip.position, clip.duration))
+            .collect::<Vec<_>>(),
+        vec![(100, 250), (350, 350), (700, 400)]
+    );
+    assert!(slices
+        .iter()
+        .all(|clip| Arc::ptr_eq(&clip.audio, &shared_audio) && clip.source == shared_source));
+    assert_eq!(arrangement.arrangement.selected_clips.len(), 3);
+    let actual: Vec<_> = slices
+        .iter()
+        .flat_map(|clip| (0..clip.duration).map(|frame| clip.source_frame_at(frame)))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn slicing_a_reversed_piecewise_warp_uses_audible_marker_positions() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
+    let original = &mut arrangement.tracks[0].clips[0];
+    original.playback_direction = ClipPlaybackDirection::Reverse;
+    assert!(original.warp_markers.add(250, 400, 0, 1_000, 1_000));
+    assert!(original.warp_markers.add(700, 800, 0, 1_000, 1_000));
+    let expected: Vec<_> = (0..original.duration)
+        .map(|frame| original.source_frame_at(frame))
+        .collect();
+    let mut engine = RecordingEngine::default();
+
+    arrangement.update(
+        ArrangementMsg::SliceAudioClipAtMarkers {
+            track_id,
+            clip_id,
+            markers: AudioSliceMarkers::Warp,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let mut slices: Vec<_> = arrangement.tracks[0].clips.iter().collect();
+    slices.sort_by_key(|clip| clip.position);
+    assert_eq!(
+        slices.iter().map(|clip| clip.duration).collect::<Vec<_>>(),
+        vec![200, 400, 400]
+    );
+    let actual: Vec<_> = slices
+        .iter()
+        .flat_map(|clip| (0..clip.duration).map(|frame| clip.source_frame_at(frame)))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn slicing_at_a_repeated_loop_marker_cuts_every_audible_occurrence() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 300);
+    let original = &mut arrangement.tracks[0].clips[0];
+    original.loop_enabled = true;
+    original.loop_start = 0;
+    original.loop_end = 100;
+    original.transient_markers.replace_suggestions([25]);
+    let mut engine = RecordingEngine::default();
+
+    arrangement.update(
+        ArrangementMsg::SliceAudioClipAtMarkers {
+            track_id,
+            clip_id,
+            markers: AudioSliceMarkers::Transients,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let mut slices: Vec<_> = arrangement.tracks[0].clips.iter().collect();
+    slices.sort_by_key(|clip| clip.position);
+    assert_eq!(
+        slices.iter().map(|clip| clip.duration).collect::<Vec<_>>(),
+        vec![25, 100, 100, 75]
+    );
+}
+
+#[test]
+fn slicing_without_an_interior_marker_is_a_clean_noop() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
+    arrangement.tracks[0].clips[0]
+        .transient_markers
+        .replace_suggestions([0, 1_000]);
+    let mut engine = RecordingEngine::default();
+
+    let action = arrangement.update(
+        ArrangementMsg::SliceAudioClipAtMarkers {
+            track_id,
+            clip_id,
+            markers: AudioSliceMarkers::Transients,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert_eq!(arrangement.tracks[0].clips.len(), 1);
+    assert!(engine.0.is_empty());
+    assert!(ArrangementMsg::SliceAudioClipAtMarkers {
+        track_id,
+        clip_id,
+        markers: AudioSliceMarkers::Transients,
+    }
+    .defers_project_edit());
+}
+
+#[test]
 fn split_outside_clip_bounds_is_a_noop() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 100, 500);

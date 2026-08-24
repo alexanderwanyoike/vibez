@@ -682,14 +682,17 @@ impl TimelineEditorState {
     /// engine and UI state. Every op that fragments a clip (split, trim) must
     /// route through here so the engine command list stays in one place;
     /// selection bookkeeping stays with the caller.
-    fn replace_audio_clip(
+    pub(super) fn replace_audio_clip(
         &mut self,
         engine: &mut impl EngineHandle,
         track_id: TrackId,
         original_id: ClipId,
-        fragments: Vec<UiClip>,
+        mut fragments: Vec<UiClip>,
     ) {
         self.unlink_crossfades_for_clip(engine, track_id, original_id);
+        for fragment in &mut fragments {
+            fragment.fades = fragment.fades.unlinked();
+        }
         engine.send(EngineCommand::RemoveClip(track_id, original_id));
         if let Some(content) = self.find_content_mut(track_id) {
             content.clips.retain(|clip| clip.id != original_id);
