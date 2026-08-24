@@ -502,6 +502,7 @@ fn add_audio_clip_command(
         loop_enabled: clip.loop_enabled,
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
+        linear_gain: clip.gain_db.linear(),
     }
 }
 
@@ -595,6 +596,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,

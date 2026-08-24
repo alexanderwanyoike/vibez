@@ -391,6 +391,18 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
+        if !self
+            .state
+            .active_timeline_editor()
+            .audio_clip_inspector_edits
+            .is_empty()
+        {
+            self.state
+                .active_timeline_editor_mut()
+                .discard_audio_clip_inspector_edits();
+            self.state.status_text = "Audio Clip edit cancelled".into();
+            return Task::none();
+        }
         if let Some(overlay) = menu_lifecycle::visible(&self.state) {
             menu_lifecycle::dismiss(&mut self.state, overlay);
             return Task::none();

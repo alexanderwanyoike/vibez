@@ -63,6 +63,77 @@ pub enum InputMonitoring {
     On,
 }
 
+/// Nondestructive gain applied by one Audio Clip before its Project Track.
+///
+/// Keeping the range in a value object prevents project files and editor
+/// messages from creating gains the Inspector cannot represent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ClipGainDb(f32);
+
+impl ClipGainDb {
+    pub const MIN: f32 = -70.0;
+    pub const MAX: f32 = 24.0;
+
+    pub fn new(db: f32) -> Option<Self> {
+        db.is_finite().then(|| Self(db.clamp(Self::MIN, Self::MAX)))
+    }
+
+    pub const fn db(self) -> f32 {
+        self.0
+    }
+
+    pub fn linear(self) -> f32 {
+        10.0_f32.powf(self.0 / 20.0)
+    }
+
+    pub fn is_neutral(value: &Self) -> bool {
+        value.0 == 0.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipGainDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let db = f32::deserialize(deserializer)?;
+        Self::new(db).ok_or_else(|| serde::de::Error::custom("clip gain must be finite"))
+    }
+}
+
+/// Nondestructive, duration-preserving Audio Clip pitch offset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct ClipTranspose(i8);
+
+impl ClipTranspose {
+    pub const MIN: i8 = -48;
+    pub const MAX: i8 = 48;
+
+    pub fn new(semitones: i8) -> Self {
+        Self(semitones.clamp(Self::MIN, Self::MAX))
+    }
+
+    pub const fn semitones(self) -> i8 {
+        self.0
+    }
+
+    pub const fn is_neutral(value: &Self) -> bool {
+        value.0 == 0
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipTranspose {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let semitones = i8::deserialize(deserializer)?;
+        Ok(Self::new(semitones))
+    }
+}
+
 impl InputMonitoring {
     pub const ALL: [Self; 3] = [Self::Off, Self::Auto, Self::On];
 }
@@ -295,6 +366,12 @@ pub struct ClipInfo {
     pub loop_start: u64,
     #[serde(default)]
     pub loop_end: u64,
+    /// Nondestructive per-Clip gain before the Project Track channel strip.
+    #[serde(default, skip_serializing_if = "ClipGainDb::is_neutral")]
+    pub gain_db: ClipGainDb,
+    /// Duration-preserving pitch offset in semitones.
+    #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
+    pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample, set either by BPM
     /// detection or manually. Drives warp ratio calculations and is
     /// independent of the project tempo.
@@ -336,6 +413,15 @@ impl ClipInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clip_property_value_objects_enforce_the_inspector_ranges() {
+        assert_eq!(ClipGainDb::new(30.0).unwrap().db(), ClipGainDb::MAX);
+        assert_eq!(ClipGainDb::new(-80.0).unwrap().db(), ClipGainDb::MIN);
+        assert!(ClipGainDb::new(f32::NAN).is_none());
+        assert_eq!(ClipTranspose::new(60).semitones(), ClipTranspose::MAX);
+        assert_eq!(ClipTranspose::new(-60).semitones(), ClipTranspose::MIN);
+    }
 
     #[test]
     fn track_info_defaults() {
@@ -398,6 +484,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -443,6 +531,8 @@ mod tests {
         });
         clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
         clip.original_bpm = Some(174.0);
+        clip.gain_db = ClipGainDb::new(-3.5).unwrap();
+        clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
         let json = serde_json::to_string(&clip).unwrap();
@@ -454,6 +544,8 @@ mod tests {
         assert_eq!(clip.file_path, deserialized.file_path);
         assert_eq!(clip.source, deserialized.source);
         assert_eq!(clip.original_bpm, deserialized.original_bpm);
+        assert_eq!(clip.gain_db, deserialized.gain_db);
+        assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
     }
@@ -472,5 +564,7 @@ mod tests {
         let clip: ClipInfo = serde_json::from_str(json).unwrap();
         assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
         assert!(clip.source.is_none());
+        assert_eq!(clip.gain_db, ClipGainDb::default());
+        assert_eq!(clip.transpose, ClipTranspose::default());
     }
 }

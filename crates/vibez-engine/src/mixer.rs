@@ -435,6 +435,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
 
         let rendered = track.render(0, 8, 2, None);
@@ -466,6 +467,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
 
         let rendered = track.render(0, 4, 2, None);
@@ -507,6 +509,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         };
         // Requesting frames 0..50 — clip starts at 100, not active
         assert!(!clip.is_active(0, 50));
@@ -524,6 +527,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         };
         // Requesting frames 30..60 — clip is at 40..90, overlaps
         assert!(clip.is_active(30, 30));
@@ -542,6 +546,7 @@ mod tests {
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         });
 
         // Render frames 100..108 (in looped region, past source length)
@@ -579,6 +584,7 @@ mod tests {
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         });
 
         // Render all 250 frames
@@ -623,6 +629,7 @@ mod tests {
             loop_enabled: true,
             loop_start: 20,
             loop_end: 100,
+            linear_gain: 1.0,
         });
 
         let rendered = track.render(0, 200, 2, None);
@@ -661,6 +668,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
 
         // Render frames 100..108 (past source, no loop)
@@ -703,6 +711,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
 
         // Loop is [0, 100), clip extends to 200.
@@ -757,6 +766,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
         let rendered = track.render(10, 20, 2, Some((0, 100)));
         assert!(rendered);

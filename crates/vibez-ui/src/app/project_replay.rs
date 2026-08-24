@@ -84,6 +84,15 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        self.state
+            .arrangement
+            .editor
+            .discard_audio_clip_inspector_edits();
+        self.state
+            .perform
+            .section_editor
+            .editor_mut()
+            .discard_audio_clip_inspector_edits();
         // Plugin devices cannot live inside snapshots; strip them
         // into reload requests first, capturing the live state of
         // instances that still exist so undo keeps their exact
@@ -317,6 +326,7 @@ impl App {
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                linear_gain: clip.gain_db.linear(),
             });
         }
 

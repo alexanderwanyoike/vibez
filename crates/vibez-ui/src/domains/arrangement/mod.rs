@@ -22,7 +22,10 @@ use crate::state::{
 };
 
 mod messages;
-pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+pub use messages::{
+    ArrangementAction, ArrangementCtx, ArrangementMsg, ClipRenderedGeometry,
+    ClipTransposeRenderRequest,
+};
 mod clipboard;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
@@ -373,7 +376,7 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end == 0 {
+                        if clip.loop_enabled && clip.loop_end <= clip.loop_start {
                             clip.loop_start = clip.source_offset;
                             clip.loop_end = clip.source_offset + clip.duration;
                         }
@@ -416,6 +419,7 @@ impl TimelineEditorState {
                 selection,
                 shift_held,
             } => {
+                self.discard_audio_clip_inspector_edits();
                 // Clicking a clip switches the editor back to clip selection.
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
@@ -484,6 +488,7 @@ impl TimelineEditorState {
                 clip_id,
                 new_duration,
             } => {
+                self.discard_audio_clip_inspector_edits_for(clip_id);
                 return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
             ArrangementMsg::MoveClipToTrack {
@@ -559,6 +564,7 @@ impl TimelineEditorState {
                             loop_enabled: clip.loop_enabled,
                             loop_start: clip.loop_start,
                             loop_end: clip.loop_end,
+                            linear_gain: clip.gain_db.linear(),
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -639,6 +645,7 @@ impl TimelineEditorState {
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start: duplicate.loop_start,
                                         loop_end: duplicate.loop_end,
+                                        linear_gain: duplicate.gain_db.linear(),
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -973,28 +980,38 @@ impl TimelineEditorState {
                     track_id,
                 );
             }
-            ArrangementMsg::ClipBpmInputChanged {
-                track_id: _,
+            ArrangementMsg::AudioClipInspectorInputChanged {
                 clip_id,
+                field,
                 text,
             } => {
-                self.clip_bpm_edit.insert(clip_id, text);
+                self.audio_clip_inspector_edits
+                    .insert((clip_id, field), text);
             }
-            ArrangementMsg::SubmitClipBpm { track_id, clip_id } => {
-                let parsed = self
-                    .clip_bpm_edit
-                    .remove(&clip_id)
-                    .and_then(|t| t.parse::<f64>().ok())
-                    .filter(|b| *b > 0.0 && *b < 1_000.0);
-                if let Some(bpm) = parsed {
-                    if let Some(track) = self.find_content_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(bpm);
-                        }
-                    }
-                    action.status = Some(format!("Clip BPM set to {:.1}", bpm));
-                    action.mark_dirty = true;
+            ArrangementMsg::DiscardAudioClipInspectorEdit { clip_id, field } => {
+                self.audio_clip_inspector_edits.remove(&(clip_id, field));
+                if field == crate::state::AudioClipInspectorField::Transpose {
+                    self.audio_clip_transpose_debounce.remove(&clip_id);
                 }
+            }
+            ArrangementMsg::SubmitAudioClipInspectorField {
+                track_id,
+                clip_id,
+                field,
+            } => return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field),
+            ArrangementMsg::SetAudioClipRotaryValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => return self.set_audio_clip_rotary_value(engine, track_id, clip_id, field, value),
+            ArrangementMsg::PreviewAudioClipRotaryValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => {
+                return self.preview_audio_clip_rotary_value(track_id, clip_id, field, value);
             }
             ArrangementMsg::SetClipNominalBpm {
                 track_id,
@@ -1018,6 +1035,7 @@ impl TimelineEditorState {
     }
 }
 
+mod audio_clip_inspector;
 mod media_ops;
 mod ops;
 

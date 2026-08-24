@@ -466,6 +466,7 @@ fn add_clip_and_play() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -494,6 +495,45 @@ fn add_clip_and_play() {
 }
 
 #[test]
+fn clip_gain_is_applied_before_the_track_channel_strip() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id,
+            clip_id,
+            audio: make_constant_audio(32, 1.0),
+            position: 0,
+            source_offset: 0,
+            duration: 32,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetClipGain {
+            track_id,
+            clip_id,
+            linear_gain: 0.5,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 8];
+    engine.process(&mut output, 2);
+    let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(output
+        .iter()
+        .all(|sample| (*sample - expected).abs() < 1e-4));
+}
+
+#[test]
 fn mute_silences_track() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
@@ -514,6 +554,7 @@ fn mute_silences_track() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackMute(tid, true)).unwrap();
@@ -553,6 +594,7 @@ fn solo_isolates_track() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -566,6 +608,7 @@ fn solo_isolates_track() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // Solo track 1 only
@@ -611,6 +654,7 @@ fn gain_scaling() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackGain(tid, 0.5)).unwrap();
@@ -644,6 +688,7 @@ fn pan_hard_left() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackPan(tid, 0.0)).unwrap();
@@ -685,6 +730,7 @@ fn multi_track_summing() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -698,6 +744,7 @@ fn multi_track_summing() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -756,6 +803,7 @@ fn per_track_metering_events() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -802,6 +850,7 @@ fn transport_auto_stop_multitrack() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -835,6 +884,7 @@ fn move_clip_changes_position() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -873,6 +923,7 @@ fn add_clip_with_loop_plays_looped_audio() {
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -913,6 +964,7 @@ fn resize_clip_preserves_loop_state() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // Enable loop via SetClipLoop
@@ -942,6 +994,7 @@ fn resize_clip_preserves_loop_state() {
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Seek(0)).unwrap();
@@ -1454,6 +1507,7 @@ fn constant_clip_track(
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     (tid, cid)
@@ -1509,6 +1563,7 @@ fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1576,6 +1631,7 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1847,6 +1903,7 @@ fn master_gain_scales_the_summed_mix() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1885,6 +1942,7 @@ fn master_effect_chain_processes_the_summed_mix() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // A master EQ with the LF shelf slammed down should attenuate a
@@ -1966,6 +2024,7 @@ fn spectrum_tap_streams_track_samples() {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -2021,6 +2080,7 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::AddBus(bus, "A".into())).unwrap();

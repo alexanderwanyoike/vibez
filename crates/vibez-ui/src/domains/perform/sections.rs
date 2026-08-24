@@ -203,6 +203,7 @@ impl Section {
                         loop_enabled: clip.loop_enabled,
                         loop_start: clip.loop_start,
                         loop_end: clip.loop_end,
+                        linear_gain: clip.gain_db.linear(),
                     })
                     .collect();
                 let note_clips = content
@@ -308,7 +309,45 @@ impl SectionStore {
 mod tests {
     use super::*;
     use crate::domains::timeline_editor::conformance::assert_timeline_editor_conformance;
-    use crate::state::{ArrangementState, TrackTimelineContent, UiNoteClip};
+    use crate::state::{ArrangementState, TrackTimelineContent, UiClip, UiNoteClip};
+
+    #[test]
+    fn section_playback_keeps_audio_clip_gain() {
+        let track_id = TrackId::new();
+        let mut section = Section::new(0);
+        let gain_db = vibez_core::track::ClipGainDb::new(-6.0).unwrap();
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .clips
+            .push(UiClip {
+                id: ClipId::new(),
+                name: "Loop".into(),
+                audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                    channels: vec![vec![1.0; 64]],
+                    sample_rate: 48_000,
+                }),
+                source: None,
+                position: 0,
+                source_offset: 0,
+                duration: 64,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 64,
+                gain_db,
+                transpose: Default::default(),
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
+            });
+
+        let prepared = section.prepare_playback_source_for_tracks(&[track_id]);
+        assert_eq!(prepared.tracks()[0].source.clips.len(), 1);
+        assert!(
+            (prepared.tracks()[0].source.clips[0].linear_gain - gain_db.linear()).abs()
+                < f32::EPSILON
+        );
+    }
 
     #[test]
     fn duplicate_remints_every_editable_identity() {

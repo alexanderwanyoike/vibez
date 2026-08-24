@@ -12,6 +12,7 @@ pub mod knob;
 pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
+pub mod on_blur;
 pub mod piano_roll;
 mod playhead;
 pub mod swing_knob;
