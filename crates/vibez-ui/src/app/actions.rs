@@ -201,6 +201,47 @@ impl App {
         &mut self,
         action: crate::domains::arrangement::ArrangementAction,
     ) -> Task<Message> {
+        self.apply_arrangement_action_at(action, self.active_timeline_location())
+    }
+
+    /// Apply follow-up work against the timeline that originated an async
+    /// result, even if the producer selected a different Section meanwhile.
+    pub(super) fn apply_arrangement_action_at(
+        &mut self,
+        mut action: crate::domains::arrangement::ArrangementAction,
+        location: vibez_project::TimelineLocation,
+    ) -> Task<Message> {
+        let transpose_task = action.transpose_render.take().map(|request| {
+            let track_id = request.track_id;
+            let clip_id = request.clip_id;
+            Task::perform(super::transpose_clip_async(request), move |result| {
+                Message::ClipTransposeReady {
+                    location,
+                    track_id,
+                    clip_id,
+                    result,
+                }
+            })
+        });
+        let transpose_debounce_task = action.transpose_debounce.take().map(
+            |(track_id, clip_id, expected_semitones, expected_revision)| {
+                Task::perform(
+                    async {
+                        tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+                    },
+                    move |()| Message::CommitAudioClipTransposeAfterDelay {
+                        location,
+                        track_id,
+                        clip_id,
+                        expected_semitones,
+                        expected_revision,
+                    },
+                )
+            },
+        );
+        let warp_task = action.warp_refresh.take().map(|(track_id, clip_id)| {
+            self.dispatch_warp_clip_to_project(location, track_id, clip_id, false)
+        });
         if action.focus_clip_tab {
             self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
@@ -263,7 +304,12 @@ impl App {
         if action.mark_dirty {
             self.mark_project_dirty();
         }
-        Task::none()
+        Task::batch(
+            transpose_task
+                .into_iter()
+                .chain(transpose_debounce_task)
+                .chain(warp_task),
+        )
     }
 
     /// Route cross-domain effects requested by the view domain.
@@ -278,6 +324,10 @@ impl App {
                 ArrangementSelection::AudioClip { track_id, clip_id }
             };
             if !self.state.arrangement.selected_clips.contains(&selection) {
+                self.state
+                    .arrangement
+                    .editor
+                    .discard_audio_clip_inspector_edits();
                 self.state.arrangement.selected_clips.clear();
                 self.state.arrangement.selected_clips.insert(selection);
             }

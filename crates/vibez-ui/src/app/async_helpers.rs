@@ -172,13 +172,40 @@ pub(super) async fn detect_clip_bpm_async(
         .unwrap_or(None)
 }
 
+pub(super) async fn transpose_clip_async(
+    request: crate::domains::arrangement::ClipTransposeRenderRequest,
+) -> Result<crate::message::ClipTransposeSuccess, String> {
+    run_off_ui_thread("clip transpose", move || {
+        let (audio, transpose_fallback) =
+            vibez_dsp::time_stretch::pitch_preserving_stretch_transposed_checked(
+                &request.source_audio,
+                request.target_frames,
+                f32::from(request.transpose.semitones()),
+            );
+        crate::message::ClipTransposeSuccess {
+            audio: Arc::new(audio),
+            source_audio: request.source_audio,
+            transpose: request.transpose,
+            expected_warped: request.expected_warped,
+            expected_audio: request.expected_audio,
+            expected_geometry: request.expected_geometry,
+            geometry: request.geometry,
+            warning: transpose_fallback.then(|| {
+                "Signalsmith declined this render; timing was restored but Transpose was not applied"
+                    .to_string()
+            }),
+        }
+    })
+    .await
+}
+
 pub(super) async fn warp_browser_audition_async(
     audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     source_bpm: f64,
     project_bpm: f64,
 ) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
     tokio::task::spawn_blocking(move || {
-        crate::warp::rewarp_for_load(&audio, source_bpm, project_bpm)
+        crate::warp::rewarp_for_load(&audio, source_bpm, project_bpm, 0)
             .ok_or_else(|| "Could not create pitch-preserving WARP Audition".to_string())
     })
     .await
@@ -211,11 +238,13 @@ pub(super) async fn prepare_browser_import_audio_async(
         audio: Arc::clone(&raw),
         fields_frames: frames,
         source_offset: 0,
+        start_marker: 0,
         duration: frames,
         loop_start: 0,
         loop_end: frames,
         clip_bpm: source_bpm,
         project_bpm,
+        transpose_semitones: 0,
     })
     .await?;
     let device_target = matches!(
@@ -314,11 +343,13 @@ pub(super) async fn auto_warp_clip_async(input: AutoWarpInput) -> crate::message
         audio: input.audio,
         fields_frames: num_frames as u64,
         source_offset: 0,
+        start_marker: 0,
         duration: num_frames as u64,
         loop_start: 0,
         loop_end: 0,
         clip_bpm: est.bpm,
         project_bpm: input.project_bpm,
+        transpose_semitones: 0,
     };
     match crate::warp::warp_clip_async(warp_input).await {
         Ok(success) => AutoWarpOutcome::Warped {
@@ -618,11 +649,12 @@ pub(super) async fn finish_loaded_clip(
     info: ClipInfo,
     raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
 ) -> LoadedClipData {
+    let transpose = info.transpose.semitones();
     if info.warped {
         if let (Some(clip_bpm), Some(warped_to_bpm)) = (info.original_bpm, info.warped_to_bpm) {
             let stretch_src = Arc::clone(&raw);
             let warped = tokio::task::spawn_blocking(move || {
-                crate::warp::rewarp_for_load(&stretch_src, clip_bpm, warped_to_bpm)
+                crate::warp::rewarp_for_load(&stretch_src, clip_bpm, warped_to_bpm, transpose)
             })
             .await
             .unwrap_or(None);
@@ -634,6 +666,25 @@ pub(super) async fn finish_loaded_clip(
                 };
             }
         }
+    }
+    if transpose != 0 {
+        let source = Arc::clone(&raw);
+        let rendered = tokio::task::spawn_blocking(move || {
+            Arc::new(
+                vibez_dsp::time_stretch::pitch_preserving_stretch_transposed(
+                    &source,
+                    source.num_frames(),
+                    f32::from(transpose),
+                ),
+            )
+        })
+        .await
+        .unwrap_or_else(|_| Arc::clone(&raw));
+        return LoadedClipData {
+            info,
+            audio: rendered,
+            original_audio: Some(raw),
+        };
     }
     LoadedClipData {
         info,

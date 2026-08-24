@@ -83,10 +83,12 @@ pub enum EngineCommand {
         audio: Arc<DecodedAudio>,
         position: u64,
         source_offset: u64,
+        start_marker: u64,
         duration: u64,
         loop_enabled: bool,
         loop_start: u64,
         loop_end: u64,
+        linear_gain: f32,
     },
     /// Remove a clip from a track.
     RemoveClip(TrackId, ClipId),
@@ -102,14 +104,38 @@ pub enum EngineCommand {
         audio: Arc<DecodedAudio>,
         duration: u64,
         source_offset: u64,
+        start_marker: u64,
         loop_start: u64,
         loop_end: u64,
+    },
+    /// Replace only the rendered buffer while preserving Clip geometry.
+    /// Used by duration-preserving Transpose renders.
+    ReplaceClipBuffer {
+        track_id: TrackId,
+        clip_id: ClipId,
+        audio: Arc<DecodedAudio>,
     },
     /// Move a clip to a new position on the timeline.
     MoveClip {
         track_id: TrackId,
         clip_id: ClipId,
         new_position: u64,
+    },
+    /// Update one resident Audio Clip's pre-channel gain.
+    SetClipGain {
+        track_id: TrackId,
+        clip_id: ClipId,
+        linear_gain: f32,
+    },
+    /// Commit source and loop boundaries without replacing Clip media.
+    SetClipBounds {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_offset: u64,
+        start_marker: u64,
+        duration: u64,
+        loop_start: u64,
+        loop_end: u64,
     },
     /// Set the gain for a track.
     SetTrackGain(TrackId, f32),
@@ -226,6 +252,7 @@ pub enum EngineCommand {
         clip_id: ClipId,
         position_beats: f64,
         duration_beats: f64,
+        start_marker_beats: f64,
         loop_enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
@@ -298,12 +325,23 @@ pub enum EngineCommand {
         loop_start: u64,
         loop_end: u64,
     },
+    /// Move the one-shot playback start independently of the loop region.
+    SetClipStartMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        start_marker: u64,
+    },
     SetNoteClipLoop {
         track_id: TrackId,
         clip_id: ClipId,
         enabled: bool,
         loop_start_beats: f64,
         loop_end_beats: f64,
+    },
+    SetNoteClipStartMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        start_marker_beats: f64,
     },
 
     // -- Dedicated Audition Bus --
@@ -415,10 +453,12 @@ mod tests {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         };
         let _remove_clip = EngineCommand::RemoveClip(tid, cid);
         let _move_clip = EngineCommand::MoveClip {

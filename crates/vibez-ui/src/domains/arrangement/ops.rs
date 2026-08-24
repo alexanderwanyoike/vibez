@@ -285,12 +285,14 @@ impl TimelineEditorState {
             duration_beats,
             notes: Vec::new(),
             selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
         });
         engine.send(EngineCommand::AddNoteClip {
+            start_marker_beats: 0.0,
             track_id,
             clip_id,
             position_beats,
@@ -366,10 +368,11 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        clip.loop_enabled = enable;
-                        if enable && clip.loop_end <= clip.loop_start {
-                            clip.loop_start = clip.source_offset;
-                            clip.loop_end = clip.source_offset.saturating_add(clip.duration);
+                        let was_enabled = clip.loop_enabled;
+                        if enable && !was_enabled {
+                            clip.enable_loop_over_clip();
+                        } else {
+                            clip.loop_enabled = enable;
                         }
                         command = Some((clip.loop_start, clip.loop_end));
                         changed += 1;
@@ -390,10 +393,11 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        clip.loop_enabled = enable;
-                        if enable && clip.loop_end_beats <= clip.loop_start_beats {
-                            clip.loop_start_beats = 0.0;
-                            clip.loop_end_beats = clip.duration_beats;
+                        let was_enabled = clip.loop_enabled;
+                        if enable && !was_enabled {
+                            clip.enable_loop_over_clip();
+                        } else {
+                            clip.loop_enabled = enable;
                         }
                         command = Some((clip.loop_start_beats, clip.loop_end_beats));
                         changed += 1;
@@ -483,11 +487,9 @@ impl TimelineEditorState {
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
                         clip.duration_beats = (clip.duration_beats + delta).max(0.25);
-                        if clip.loop_enabled && clip.loop_end_beats > clip.duration_beats {
-                            clip.loop_end_beats = clip.duration_beats;
-                            if clip.loop_start_beats >= clip.loop_end_beats {
-                                clip.loop_start_beats = 0.0;
-                            }
+                        clip.clamp_start_to_duration();
+                        if clip.loop_enabled {
+                            clip.clamp_loop_to_duration();
                         }
                         sync = Some(clip.clone());
                         max_end = Some(
@@ -499,6 +501,7 @@ impl TimelineEditorState {
                     if let Some(clip) = sync {
                         engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
                         engine.send(EngineCommand::AddNoteClip {
+                            start_marker_beats: clip.start_marker_beats,
                             track_id,
                             clip_id,
                             position_beats: clip.position_beats,

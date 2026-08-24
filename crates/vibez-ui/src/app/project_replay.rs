@@ -84,6 +84,15 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        self.state
+            .arrangement
+            .editor
+            .discard_audio_clip_inspector_edits();
+        self.state
+            .perform
+            .section_editor
+            .editor_mut()
+            .discard_audio_clip_inspector_edits();
         // Plugin devices cannot live inside snapshots; strip them
         // into reload requests first, capturing the live state of
         // instances that still exist so undo keeps their exact
@@ -313,15 +322,18 @@ impl App {
                 audio: Arc::clone(&clip.audio),
                 position: clip.position,
                 source_offset: clip.source_offset,
+                start_marker: clip.start_marker,
                 duration: clip.duration,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                linear_gain: clip.gain_db.linear(),
             });
         }
 
         for clip in &content.note_clips {
             self.send_command(EngineCommand::AddNoteClip {
+                start_marker_beats: clip.start_marker_beats,
                 track_id: track.id,
                 clip_id: clip.id,
                 position_beats: clip.position_beats,

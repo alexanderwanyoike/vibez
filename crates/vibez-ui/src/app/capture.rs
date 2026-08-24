@@ -391,6 +391,7 @@ fn preserve_audio_outside_interval(
         let delta = end.saturating_sub(clip.position);
         after.position = end;
         after.source_offset = crate::domains::perform::capture::captured_audio_offset(clip, delta);
+        after.start_marker = after.source_offset;
         after.duration = clip_end - end;
         fragments.push(after);
     }
@@ -440,6 +441,7 @@ fn note_clip_window(
             local_end,
         ),
         selected_notes: Default::default(),
+        start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
@@ -498,10 +500,12 @@ fn add_audio_clip_command(
         audio: Arc::clone(&clip.audio),
         position: clip.position,
         source_offset: clip.source_offset,
+        start_marker: clip.start_marker,
         duration: clip.duration,
         loop_enabled: clip.loop_enabled,
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
+        linear_gain: clip.gain_db.linear(),
     }
 }
 
@@ -510,6 +514,7 @@ fn add_note_clip_commands(
     clip: &crate::state::UiNoteClip,
 ) -> Vec<EngineCommand> {
     let mut commands = vec![EngineCommand::AddNoteClip {
+        start_marker_beats: clip.start_marker_beats,
         track_id,
         clip_id: clip.id,
         position_beats: clip.position_beats,
@@ -591,10 +596,13 @@ mod tests {
             source: None,
             position,
             source_offset: 0,
+            start_marker: 0,
             duration,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -648,6 +656,7 @@ mod tests {
             duration_beats: 2.0,
             notes: Vec::new(),
             selected_notes: Default::default(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -693,6 +702,7 @@ mod tests {
                 },
             ],
             selected_notes: Default::default(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -775,6 +785,7 @@ mod tests {
             duration_beats: 4.0,
             notes: Vec::new(),
             selected_notes: Default::default(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -852,6 +863,7 @@ mod tests {
                 })
                 .collect(),
             selected_notes: Default::default(),
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,

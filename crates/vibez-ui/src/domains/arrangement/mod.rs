@@ -22,7 +22,10 @@ use crate::state::{
 };
 
 mod messages;
-pub use messages::{ArrangementAction, ArrangementCtx, ArrangementMsg};
+pub use messages::{
+    ArrangementAction, ArrangementCtx, ArrangementMsg, ClipRenderedGeometry,
+    ClipTransposeRenderRequest,
+};
 mod clipboard;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
@@ -373,9 +376,8 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled && clip.loop_end == 0 {
-                            clip.loop_start = clip.source_offset;
-                            clip.loop_end = clip.source_offset + clip.duration;
+                        if clip.loop_enabled {
+                            clip.reset_loop_region_to_clip();
                         }
                         cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
                     }
@@ -396,26 +398,48 @@ impl TimelineEditorState {
                 loop_start,
                 loop_end,
             } => {
-                let mut enabled = false;
+                let mut command = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_start = loop_start;
-                        clip.loop_end = loop_end;
-                        enabled = clip.loop_enabled;
+                        if clip.set_loop_region(loop_start, loop_end) {
+                            command = Some(clip.loop_enabled);
+                        }
                     }
                 }
-                engine.send(EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start,
-                    loop_end,
-                });
+                if let Some(enabled) = command {
+                    engine.send(EngineCommand::SetClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start,
+                        loop_end,
+                    });
+                }
+            }
+            ArrangementMsg::SetClipStartMarker {
+                track_id,
+                clip_id,
+                start_marker,
+            } => {
+                let mut changed = false;
+                if let Some(track) = self.find_content_mut(track_id) {
+                    if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                        changed = clip.set_start_marker(start_marker);
+                    }
+                }
+                if changed {
+                    engine.send(EngineCommand::SetClipStartMarker {
+                        track_id,
+                        clip_id,
+                        start_marker,
+                    });
+                }
             }
             ArrangementMsg::SelectArrangementClip {
                 selection,
                 shift_held,
             } => {
+                self.discard_audio_clip_inspector_edits();
                 // Clicking a clip switches the editor back to clip selection.
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
@@ -484,6 +508,7 @@ impl TimelineEditorState {
                 clip_id,
                 new_duration,
             } => {
+                self.discard_audio_clip_inspector_edits_for(clip_id);
                 return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
             ArrangementMsg::MoveClipToTrack {
@@ -505,6 +530,7 @@ impl TimelineEditorState {
                         engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                         // Add to engine target track
                         engine.send(EngineCommand::AddNoteClip {
+                            start_marker_beats: clip.start_marker_beats,
                             track_id: target_track,
                             clip_id,
                             position_beats: clip.position_beats,
@@ -555,10 +581,12 @@ impl TimelineEditorState {
                             audio: Arc::clone(&clip.audio),
                             position: clip.position,
                             source_offset: clip.source_offset,
+                            start_marker: clip.start_marker,
                             duration: clip.duration,
                             loop_enabled: clip.loop_enabled,
                             loop_start: clip.loop_start,
                             loop_end: clip.loop_end,
+                            linear_gain: clip.gain_db.linear(),
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -635,10 +663,12 @@ impl TimelineEditorState {
                                         audio: Arc::clone(&duplicate.audio),
                                         position: duplicate.position,
                                         source_offset: duplicate.source_offset,
+                                        start_marker: duplicate.start_marker,
                                         duration: duplicate.duration,
                                         loop_enabled: duplicate.loop_enabled,
                                         loop_start: duplicate.loop_start,
                                         loop_end: duplicate.loop_end,
+                                        linear_gain: duplicate.gain_db.linear(),
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -667,6 +697,7 @@ impl TimelineEditorState {
                                     });
                                 if let Some(duplicate) = duplicate {
                                     engine.send(EngineCommand::AddNoteClip {
+                                        start_marker_beats: duplicate.start_marker_beats,
                                         track_id: *track_id,
                                         clip_id: duplicate.id,
                                         position_beats: duplicate.position_beats,
@@ -819,6 +850,7 @@ impl TimelineEditorState {
                                 duration_beats: clip.duration_beats,
                                 notes: clip.notes.clone(),
                                 selected_notes: HashSet::new(),
+                                start_marker_beats: clip.start_marker_beats,
                                 loop_enabled: clip.loop_enabled,
                                 loop_start_beats: clip.loop_start_beats,
                                 loop_end_beats: clip.loop_end_beats,
@@ -827,6 +859,7 @@ impl TimelineEditorState {
                             new_pos,
                             clip.duration_beats,
                             clip.notes.clone(),
+                            clip.start_marker_beats,
                             clip.loop_enabled,
                             clip.loop_start_beats,
                             clip.loop_end_beats,
@@ -840,6 +873,7 @@ impl TimelineEditorState {
                     pos,
                     dur,
                     notes,
+                    start_marker_beats,
                     loop_enabled,
                     loop_start,
                     loop_end,
@@ -850,6 +884,7 @@ impl TimelineEditorState {
                         track.note_clips.push(new_clip);
                     }
                     engine.send(EngineCommand::AddNoteClip {
+                        start_marker_beats,
                         track_id,
                         clip_id: new_clip_id,
                         position_beats: pos,
@@ -973,28 +1008,38 @@ impl TimelineEditorState {
                     track_id,
                 );
             }
-            ArrangementMsg::ClipBpmInputChanged {
-                track_id: _,
+            ArrangementMsg::AudioClipInspectorInputChanged {
                 clip_id,
+                field,
                 text,
             } => {
-                self.clip_bpm_edit.insert(clip_id, text);
+                self.audio_clip_inspector_edits
+                    .insert((clip_id, field), text);
             }
-            ArrangementMsg::SubmitClipBpm { track_id, clip_id } => {
-                let parsed = self
-                    .clip_bpm_edit
-                    .remove(&clip_id)
-                    .and_then(|t| t.parse::<f64>().ok())
-                    .filter(|b| *b > 0.0 && *b < 1_000.0);
-                if let Some(bpm) = parsed {
-                    if let Some(track) = self.find_content_mut(track_id) {
-                        if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                            clip.original_bpm = Some(bpm);
-                        }
-                    }
-                    action.status = Some(format!("Clip BPM set to {:.1}", bpm));
-                    action.mark_dirty = true;
+            ArrangementMsg::DiscardAudioClipInspectorEdit { clip_id, field } => {
+                self.audio_clip_inspector_edits.remove(&(clip_id, field));
+                if field == crate::state::AudioClipInspectorField::Transpose {
+                    self.audio_clip_transpose_debounce.remove(&clip_id);
                 }
+            }
+            ArrangementMsg::SubmitAudioClipInspectorField {
+                track_id,
+                clip_id,
+                field,
+            } => return self.commit_audio_clip_inspector_field(engine, track_id, clip_id, field),
+            ArrangementMsg::SetAudioClipRotaryValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => return self.set_audio_clip_rotary_value(engine, track_id, clip_id, field, value),
+            ArrangementMsg::PreviewAudioClipRotaryValue {
+                track_id,
+                clip_id,
+                field,
+                value,
+            } => {
+                return self.preview_audio_clip_rotary_value(track_id, clip_id, field, value);
             }
             ArrangementMsg::SetClipNominalBpm {
                 track_id,
@@ -1018,6 +1063,7 @@ impl TimelineEditorState {
     }
 }
 
+mod audio_clip_inspector;
 mod media_ops;
 mod ops;
 

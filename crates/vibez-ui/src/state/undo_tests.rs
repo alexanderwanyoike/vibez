@@ -130,6 +130,7 @@ fn clip_resize_does_not_hide_the_preceding_automation_undo_step() {
                     duration_beats: 4.0,
                     notes: Vec::new(),
                     selected_notes: Default::default(),
+                    start_marker_beats: 0.0,
                     loop_enabled: false,
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
@@ -458,6 +459,57 @@ fn empty_transaction_does_not_create_an_undo_step() {
 }
 
 #[test]
+fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Audio".into(), 0));
+    Arc::make_mut(&mut state.arrangement.timeline)
+        .ensure(track_id)
+        .clips
+        .push(UiClip {
+            id: ClipId::new(),
+            name: "Loop".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; 48_000]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 48_000,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
+            original_bpm: Some(128.0),
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        });
+
+    state.project.history.push_edit(snapshot(&state), None);
+    let clip = &mut Arc::make_mut(&mut state.arrangement.timeline)
+        .get_mut(track_id)
+        .unwrap()
+        .clips[0];
+    clip.gain_db = vibez_core::track::ClipGainDb::new(6.0).unwrap();
+    clip.transpose = vibez_core::track::ClipTranspose::new(12);
+    clip.source_offset = 12_000;
+    clip.duration = 24_000;
+
+    undo_once(&mut state);
+    let clip = &state.arrangement.timeline.get(track_id).unwrap().clips[0];
+    assert_eq!(clip.gain_db, Default::default());
+    assert_eq!(clip.transpose, Default::default());
+    assert_eq!(clip.source_offset, 0);
+    assert_eq!(clip.duration, 48_000);
+}
+
+#[test]
 fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
     let mut state = AppState::default();
     let track_id = TrackId::new();
@@ -478,10 +530,13 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
             source: None,
             position: 200,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,

@@ -291,6 +291,7 @@ impl CompletedPerformanceLog {
                     duration_beats: clip_duration_beats,
                     notes,
                     selected_notes: Default::default(),
+                    start_marker_beats: 0.0,
                     loop_enabled: false,
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,

@@ -342,10 +342,12 @@ impl App {
                     audio: Arc::clone(&outcome.audio),
                     position: outcome.start_position_samples,
                     source_offset: 0,
+                    start_marker: 0,
                     duration,
                     loop_enabled: false,
                     loop_start: 0,
                     loop_end: duration,
+                    linear_gain: 1.0,
                 });
                 self.state
                     .arrange_content_mut(outcome.track_id)
@@ -357,10 +359,13 @@ impl App {
                         source: Some(outcome.source),
                         position: outcome.start_position_samples,
                         source_offset: 0,
+                        start_marker: 0,
                         duration,
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: duration,
+                        gain_db: Default::default(),
+                        transpose: Default::default(),
                         original_bpm: None,
                         warped: false,
                         warped_to_bpm: None,

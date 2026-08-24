@@ -93,6 +93,10 @@ impl App {
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
+        self.state
+            .arrangement
+            .editor
+            .discard_audio_clip_inspector_edits();
         self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
         self.state.perform.selected_section = None;
         self.state.perform.section_editor.clear();
@@ -773,16 +777,21 @@ impl App {
             let location = loaded_clip.location;
             let clip = loaded_clip.clip;
             if location == TimelineLocation::Arrange {
+                let start_marker = clip
+                    .info
+                    .resolved_start_marker(clip.audio.num_frames() as u64);
                 self.send_command(EngineCommand::AddClip {
                     track_id: clip.info.track_id,
                     clip_id: clip.info.id,
                     audio: Arc::clone(&clip.audio),
                     position: clip.info.position,
                     source_offset: clip.info.source_offset,
+                    start_marker,
                     duration: clip.info.duration,
                     loop_enabled: clip.info.loop_enabled,
                     loop_start: clip.info.loop_start,
                     loop_end: clip.info.loop_end,
+                    linear_gain: clip.info.gain_db.linear(),
                 });
             }
             if self.state.find_track(clip.info.track_id).is_some() {
@@ -795,7 +804,9 @@ impl App {
         }
 
         for note_clip in &loaded.project.arrange.note_clips {
+            let start_marker_beats = note_clip.resolved_start_marker_beats();
             self.send_command(EngineCommand::AddNoteClip {
+                start_marker_beats,
                 track_id: note_clip.track_id,
                 clip_id: note_clip.id,
                 position_beats: note_clip.position_beats,
@@ -823,6 +834,7 @@ impl App {
                         duration_beats: note_clip.duration_beats,
                         notes: note_clip.notes.clone(),
                         selected_notes: HashSet::new(),
+                        start_marker_beats,
                         loop_enabled: note_clip.loop_enabled,
                         loop_start_beats: note_clip.loop_start_beats,
                         loop_end_beats: note_clip.loop_end_beats,

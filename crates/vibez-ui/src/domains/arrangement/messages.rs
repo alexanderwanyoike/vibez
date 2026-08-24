@@ -1,8 +1,51 @@
 //! Arrange messages, cross-domain actions, and read-only update context.
 
-use vibez_core::id::{ClipId, TrackId};
+use std::sync::Arc;
 
-use crate::state::ArrangementSelection;
+use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::ClipTranspose;
+
+use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
+
+#[derive(Debug, Clone)]
+pub struct ClipTransposeRenderRequest {
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub source_audio: Arc<DecodedAudio>,
+    pub target_frames: usize,
+    pub transpose: ClipTranspose,
+    pub expected_warped: bool,
+    /// Audio buffer the clip still held when this render was requested.
+    pub expected_audio: Arc<DecodedAudio>,
+    /// Geometry the render was calculated from. `None` means geometry is not
+    /// replaced by this render and therefore does not make the result stale.
+    pub expected_geometry: Option<ClipRenderedGeometry>,
+    pub geometry: Option<ClipRenderedGeometry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipRenderedGeometry {
+    pub source_offset: u64,
+    pub start_marker: u64,
+    pub duration: u64,
+    pub loop_start: u64,
+    pub loop_end: u64,
+}
+
+impl PartialEq for ClipTransposeRenderRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.track_id == other.track_id
+            && self.clip_id == other.clip_id
+            && self.target_frames == other.target_frames
+            && self.transpose == other.transpose
+            && self.expected_warped == other.expected_warped
+            && Arc::ptr_eq(&self.expected_audio, &other.expected_audio)
+            && self.expected_geometry == other.expected_geometry
+            && self.geometry == other.geometry
+            && Arc::ptr_eq(&self.source_audio, &other.source_audio)
+    }
+}
 
 /// Messages the arrangement domain handles (track tranche).
 #[derive(Debug, Clone)]
@@ -75,6 +118,11 @@ pub enum ArrangementMsg {
         loop_start: u64,
         loop_end: u64,
     },
+    SetClipStartMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        start_marker: u64,
+    },
     SetTimeSelection {
         start_beats: f64,
         end_beats: f64,
@@ -136,14 +184,33 @@ pub enum ArrangementMsg {
     },
     CreateClipFromSelection,
     CreateNoteClipFromSelection(TrackId),
-    ClipBpmInputChanged {
-        track_id: TrackId,
+    AudioClipInspectorInputChanged {
         clip_id: ClipId,
+        field: AudioClipInspectorField,
         text: String,
     },
-    SubmitClipBpm {
+    DiscardAudioClipInspectorEdit {
+        clip_id: ClipId,
+        field: AudioClipInspectorField,
+    },
+    SubmitAudioClipInspectorField {
         track_id: TrackId,
         clip_id: ClipId,
+        field: AudioClipInspectorField,
+    },
+    SetAudioClipRotaryValue {
+        track_id: TrackId,
+        clip_id: ClipId,
+        field: AudioClipRotaryField,
+        value: f32,
+    },
+    /// Update a rotary readout and schedule one Transpose commit after wheel
+    /// input settles. Gain never uses this path because it is real-time safe.
+    PreviewAudioClipRotaryValue {
+        track_id: TrackId,
+        clip_id: ClipId,
+        field: AudioClipRotaryField,
+        value: f32,
     },
     SetClipNominalBpm {
         track_id: TrackId,
@@ -169,6 +236,7 @@ impl ArrangementMsg {
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::SetClipLoopRegion { .. }
+                | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }
                 | Self::SelectAllClips
                 | Self::SetTimeSelectionActive(_)
@@ -192,8 +260,11 @@ impl ArrangementMsg {
                 | Self::SplitClipsAtRegion { .. }
                 | Self::CreateClipFromSelection
                 | Self::CreateNoteClipFromSelection(_)
-                | Self::ClipBpmInputChanged { .. }
-                | Self::SubmitClipBpm { .. }
+                | Self::AudioClipInspectorInputChanged { .. }
+                | Self::DiscardAudioClipInspectorEdit { .. }
+                | Self::SubmitAudioClipInspectorField { .. }
+                | Self::SetAudioClipRotaryValue { .. }
+                | Self::PreviewAudioClipRotaryValue { .. }
                 | Self::SetClipNominalBpm { .. }
                 | Self::ClearClipWarp { .. }
         )
@@ -215,7 +286,9 @@ impl ArrangementMsg {
                 | ArrangementMsg::EndMarqueeSelect
                 | ArrangementMsg::SetSelectionAsLoop
                 | ArrangementMsg::CopySelectedClips
-                | ArrangementMsg::ClipBpmInputChanged { .. }
+                | ArrangementMsg::AudioClipInspectorInputChanged { .. }
+                | ArrangementMsg::DiscardAudioClipInspectorEdit { .. }
+                | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
         )
     }
 
@@ -249,6 +322,13 @@ pub struct ArrangementAction {
     pub scroll_to_beat: Option<f64>,
     /// The project content changed outside the undo-snapshot path.
     pub mark_dirty: bool,
+    /// Duration-preserving pitch render requested by a committed Transpose.
+    pub transpose_render: Option<ClipTransposeRenderRequest>,
+    /// Transpose wheel preview to commit after input has settled.
+    pub transpose_debounce: Option<(TrackId, ClipId, i8, u64)>,
+    /// A changed source tempo must immediately rebuild an already-warped Clip
+    /// against the current Project tempo.
+    pub warp_refresh: Option<(TrackId, ClipId)>,
 }
 
 /// Read-only cross-domain facts for arrangement updates.

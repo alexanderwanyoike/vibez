@@ -7,10 +7,13 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use vibez_core::audio_buffer::DecodedAudio;
+use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
-use vibez_core::track::{AudioInputRoute, DrumPadState, InputMonitoring, MediaSourceRef};
+use vibez_core::track::{
+    AudioInputRoute, ClipGainDb, ClipTranspose, DrumPadState, InputMonitoring, MediaSourceRef,
+};
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -23,12 +26,17 @@ pub struct UiClip {
     pub position: u64,
     /// Offset into the source audio in samples.
     pub source_offset: u64,
+    /// Initial playback position. This may differ from `loop_start`, allowing
+    /// an intro or pickup to play once before the loop repeats.
+    pub start_marker: u64,
     /// Duration in samples.
     pub duration: u64,
     // Looping
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub gain_db: ClipGainDb,
+    pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.
     pub original_bpm: Option<f64>,
@@ -43,6 +51,109 @@ pub struct UiClip {
     /// import or on first warp. Not persisted: on reload the UI
     /// re-decodes from the source and re-warps.
     pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+impl UiClip {
+    pub(crate) fn timeline(&self) -> FrameClipTimeline {
+        FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration,
+            self.loop_enabled,
+        )
+    }
+
+    pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        self.loop_start = self.start_marker;
+        self.loop_end = self.source_offset.saturating_add(self.duration);
+    }
+
+    pub(crate) fn enable_loop_over_clip(&mut self) {
+        self.loop_enabled = true;
+        self.reset_loop_region_to_clip();
+    }
+
+    pub(crate) fn clamp_loop_to_clip(&mut self) {
+        let clip_end = self.source_offset.saturating_add(self.duration);
+        self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
+        self.loop_end = self.loop_end.min(clip_end);
+        if self.loop_end <= self.loop_start || self.start_marker >= self.loop_end {
+            self.reset_loop_region_to_clip();
+        }
+    }
+
+    pub(crate) fn clamp_start_to_source(&mut self) {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        self.start_marker =
+            self.timeline()
+                .clamp_start(self.start_marker, self.source_offset, source_end);
+    }
+
+    pub(crate) fn set_start_marker(&mut self, start_marker: u64) -> bool {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        let valid = self
+            .timeline()
+            .accepts_start(start_marker, self.source_offset, source_end);
+        if !valid || start_marker == self.start_marker {
+            return false;
+        }
+        self.start_marker = start_marker;
+        true
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
+        let clip_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        let valid = start >= self.source_offset && start < end && end <= clip_end;
+        let valid = valid && self.start_marker < end;
+        if !valid || (start, end) == (self.loop_start, self.loop_end) {
+            return false;
+        }
+        self.loop_start = start;
+        self.loop_end = end;
+        true
+    }
+}
+
+/// Editable numeric fields in Audio Clip Inspector V1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AudioClipInspectorField {
+    Gain,
+    SourceBpm,
+    SourceStart,
+    SourceEnd,
+    Start,
+    LoopStart,
+    LoopEnd,
+    Transpose,
+}
+
+/// Inspector fields that can be controlled by a rotary widget.
+///
+/// Keeping this narrower than [`AudioClipInspectorField`] makes it impossible
+/// for a knob to emit a source or loop-bound edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClipRotaryField {
+    Gain,
+    Transpose,
+}
+
+impl AudioClipRotaryField {
+    pub const fn inspector_field(self) -> AudioClipInspectorField {
+        match self {
+            Self::Gain => AudioClipInspectorField::Gain,
+            Self::Transpose => AudioClipInspectorField::Transpose,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -164,11 +275,81 @@ pub struct UiNoteClip {
     pub duration_beats: f64,
     pub notes: Vec<MidiNote>,
     pub selected_notes: HashSet<usize>,
+    pub start_marker_beats: f64,
     // Looping
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub groove_grid: vibez_core::perform::GrooveGrid,
+}
+
+impl UiNoteClip {
+    pub(crate) fn timeline(&self) -> BeatClipTimeline {
+        BeatClipTimeline::new(
+            self.start_marker_beats,
+            self.loop_start_beats,
+            self.loop_end_beats,
+            self.duration_beats,
+            self.loop_enabled,
+        )
+    }
+
+    pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        self.loop_start_beats = self.start_marker_beats;
+        self.loop_end_beats = self.duration_beats;
+    }
+
+    pub(crate) fn enable_loop_over_clip(&mut self) {
+        self.loop_enabled = true;
+        self.reset_loop_region_to_clip();
+    }
+
+    pub(crate) fn clamp_loop_to_duration(&mut self) {
+        self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
+        self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
+        if self.loop_end_beats <= self.loop_start_beats
+            || self.start_marker_beats >= self.loop_end_beats
+        {
+            self.reset_loop_region_to_clip();
+        }
+    }
+
+    pub(crate) fn clamp_start_to_duration(&mut self) {
+        self.start_marker_beats =
+            self.timeline()
+                .clamp_start(self.start_marker_beats, 0.0, self.duration_beats);
+    }
+
+    pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
+        let valid = self
+            .timeline()
+            .accepts_start(start_marker_beats, 0.0, self.duration_beats);
+        if !valid || start_marker_beats == self.start_marker_beats {
+            return false;
+        }
+        self.start_marker_beats = start_marker_beats;
+        true
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
+        let valid = start.is_finite()
+            && end.is_finite()
+            && start >= 0.0
+            && start < end
+            && end <= self.duration_beats
+            && self.start_marker_beats < end;
+        if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
+            return false;
+        }
+        self.loop_start_beats = start;
+        self.loop_end_beats = end;
+        true
+    }
+
+    /// Timeline-local occurrences of one source note onset, including repeats.
+    pub(crate) fn note_occurrences(&self, source_beat: f64) -> Vec<f64> {
+        self.timeline().occurrences_of(source_beat).collect()
+    }
 }
 
 #[derive(Debug, Clone)]

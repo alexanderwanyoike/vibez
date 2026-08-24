@@ -11,27 +11,22 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
+use super::audio_clip_inspector::clear_warp_request;
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, TimelineEditorState, UiClip, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
+};
 
 use super::*;
 
 fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    let raw = clip.source_offset.saturating_add(local_frame);
-    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
-        let loop_len = clip.loop_end - clip.loop_start;
-        (clip.loop_start + (raw - clip.loop_start) % loop_len) as usize
-    } else {
-        raw as usize
-    }
+    clip.timeline().source_at(local_frame) as usize
 }
 
 fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
-    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
     let mut visible = Vec::new();
     for note in &clip.notes {
-        let mut occurrence = note.start_beat;
-        loop {
+        for occurrence in clip.note_occurrences(note.start_beat) {
             let note_end = occurrence + note.duration_beats;
             let kept_start = occurrence.max(local_start);
             let kept_end = note_end.min(local_end);
@@ -41,16 +36,6 @@ fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<Mid
                     duration_beats: kept_end - kept_start,
                     ..*note
                 });
-            }
-            if !looping
-                || note.start_beat < clip.loop_start_beats
-                || note.start_beat >= clip.loop_end_beats
-            {
-                break;
-            }
-            occurrence += clip.loop_end_beats - clip.loop_start_beats;
-            if occurrence >= local_end {
-                break;
             }
         }
     }
@@ -167,6 +152,7 @@ impl TimelineEditorState {
                                 fragment.position = start_sample;
                                 fragment.source_offset =
                                     audio_source_frame(clip, local_start) as u64;
+                                fragment.start_marker = fragment.source_offset;
                                 fragment.duration = end_sample - start_sample;
                                 fragment
                             })
@@ -200,9 +186,9 @@ impl TimelineEditorState {
                             fragment.duration_beats = end - start;
                             fragment.notes = visible_notes(clip, local_start, local_end);
                             fragment.selected_notes.clear();
+                            fragment.start_marker_beats = 0.0;
                             if fragment.loop_enabled {
-                                fragment.loop_start_beats = 0.0;
-                                fragment.loop_end_beats = fragment.duration_beats;
+                                fragment.reset_loop_region_to_clip();
                             }
                             fragment
                         })
@@ -296,22 +282,22 @@ impl TimelineEditorState {
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
-                let source_len = clip.audio.num_frames() as u64 - clip.source_offset;
                 clip.duration = new_duration;
-                if new_duration > source_len && !clip.loop_enabled {
-                    clip.loop_enabled = true;
-                    clip.loop_start = clip.source_offset;
-                    clip.loop_end = clip.source_offset + source_len;
+                clip.clamp_start_to_source();
+                if clip.loop_enabled {
+                    clip.clamp_loop_to_clip();
                 }
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 sync_data = Some((
                     Arc::clone(&clip.audio),
                     clip.position,
                     clip.source_offset,
+                    clip.start_marker,
                     clip.duration,
                     clip.loop_enabled,
                     clip.loop_start,
                     clip.loop_end,
+                    clip.gain_db.linear(),
                 ));
             }
         }
@@ -319,10 +305,12 @@ impl TimelineEditorState {
             audio,
             position,
             source_offset,
+            start_marker,
             duration,
             loop_enabled,
             loop_start,
             loop_end,
+            linear_gain,
         )) = sync_data
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
@@ -332,10 +320,12 @@ impl TimelineEditorState {
                 audio,
                 position,
                 source_offset,
+                start_marker,
                 duration,
                 loop_enabled,
                 loop_start,
                 loop_end,
+                linear_gain,
             });
         }
         action.scroll_to_beat = clip_end_beat;
@@ -359,6 +349,7 @@ impl TimelineEditorState {
             audio: Arc::clone(&success.audio),
             duration: success.new_duration,
             source_offset: success.new_source_offset,
+            start_marker: success.new_start_marker,
             loop_start: success.new_loop_start,
             loop_end: success.new_loop_end,
         });
@@ -367,6 +358,7 @@ impl TimelineEditorState {
                 clip.audio = Arc::clone(&success.audio);
                 clip.duration = success.new_duration;
                 clip.source_offset = success.new_source_offset;
+                clip.start_marker = success.new_start_marker;
                 clip.loop_start = success.new_loop_start;
                 clip.loop_end = success.new_loop_end;
                 clip.original_bpm = Some(success.detected_bpm);
@@ -375,6 +367,7 @@ impl TimelineEditorState {
                 clip.original_audio = Some(Arc::clone(&success.original_audio));
             }
         }
+        self.discard_audio_clip_inspector_edits_for(clip_id);
         action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
         action.mark_dirty = true;
         action
@@ -423,45 +416,26 @@ impl TimelineEditorState {
     /// flags when the original is gone).
     pub fn apply_clear_clip_warp(
         &mut self,
-        engine: &mut impl EngineHandle,
+        _engine: &mut impl EngineHandle,
         track_id: TrackId,
         clip_id: ClipId,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
-        let restore = self
-            .find_content(track_id)
-            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
-            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
-        if let Some(original) = restore {
-            let original_frames = original.num_frames() as u64;
-            engine.send(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&original),
-                duration: original_frames,
-                source_offset: 0,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.find_content_mut(track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                    clip.audio = original;
-                    clip.duration = original_frames;
-                    clip.source_offset = 0;
-                    clip.loop_start = 0;
-                    clip.loop_end = 0;
-                    clip.warped = false;
-                    clip.warped_to_bpm = None;
-                    clip.original_audio = None;
-                }
-            }
-        } else if let Some(track) = self.find_content_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+        if let Some(clip) = self
+            .find_content_mut(track_id)
+            .and_then(|track| track.clips.iter_mut().find(|clip| clip.id == clip_id))
+        {
+            if clip.original_audio.is_some() {
                 clip.warped = false;
                 clip.warped_to_bpm = None;
+                action.transpose_render = clear_warp_request(track_id, clip);
+                action.status = Some("Returning Clip to raw timing...".into());
+            } else {
+                clip.warped = false;
+                clip.warped_to_bpm = None;
+                action.status = Some("Clip uses raw timing".into());
             }
         }
-        action.status = Some("Cleared clip warp".to_string());
         action.mark_dirty = true;
         action
     }
@@ -477,6 +451,11 @@ impl TimelineEditorState {
         sample_rate: u32,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
+        let gain_db = self
+            .find_content(track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == old_clip_id))
+            .map(|clip| clip.gain_db)
+            .unwrap_or_default();
         engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.retain(|c| c.id != old_clip_id);
@@ -488,6 +467,7 @@ impl TimelineEditorState {
             } => !(*tid == track_id && *cid == old_clip_id),
             _ => true,
         });
+        self.discard_audio_clip_inspector_edits_for(old_clip_id);
 
         engine.send(EngineCommand::AddClip {
             track_id,
@@ -495,10 +475,12 @@ impl TimelineEditorState {
             audio: Arc::clone(&success.new_audio),
             position: success.new_position,
             source_offset: 0,
+            start_marker: 0,
             duration: success.new_duration,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: gain_db.linear(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -508,10 +490,13 @@ impl TimelineEditorState {
                 source: None,
                 position: success.new_position,
                 source_offset: 0,
+                start_marker: 0,
                 duration: success.new_duration,
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                gain_db,
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -528,6 +513,7 @@ impl TimelineEditorState {
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
         ));
+        action.mark_dirty = true;
         action
     }
 
@@ -545,9 +531,13 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.original_bpm = Some(b);
+                        if clip.warped {
+                            action.warp_refresh = Some((track_id, clip_id));
+                        }
                     }
                 }
-                self.clip_bpm_edit.remove(&clip_id);
+                self.audio_clip_inspector_edits
+                    .remove(&(clip_id, AudioClipInspectorField::SourceBpm));
                 action.status = Some(format!(
                     "Detected {:.1} BPM (confidence {:.2})",
                     b, confidence
@@ -628,7 +618,7 @@ impl TimelineEditorState {
                     }
                     let source_frame = audio_source_frame(clip, local as u64);
                     if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] = *sample;
+                        dst[dst_frame] = *sample * clip.gain_db.linear();
                     }
                 }
             }
@@ -656,10 +646,12 @@ impl TimelineEditorState {
             audio: Arc::clone(&joined_audio),
             position: start_pos,
             source_offset: 0,
+            start_marker: 0,
             duration: total_duration,
             loop_enabled: joined_loop_enabled,
             loop_start: 0,
             loop_end: total_duration,
+            linear_gain: 1.0,
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -669,10 +661,13 @@ impl TimelineEditorState {
                 source: None,
                 position: start_pos,
                 source_offset: 0,
+                start_marker: 0,
                 duration: total_duration,
                 loop_enabled: joined_loop_enabled,
                 loop_start: 0,
                 loop_end: total_duration,
+                gain_db: Default::default(),
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -753,6 +748,7 @@ impl TimelineEditorState {
         // Add joined clip
         let new_id = ClipId::new();
         engine.send(EngineCommand::AddNoteClip {
+            start_marker_beats: 0.0,
             track_id,
             clip_id: new_id,
             position_beats: start_pos,
@@ -777,6 +773,7 @@ impl TimelineEditorState {
                 duration_beats: total_duration,
                 notes: merged_notes,
                 selected_notes: HashSet::new(),
+                start_marker_beats: 0.0,
                 loop_enabled: joined_loop_enabled,
                 loop_start_beats: 0.0,
                 loop_end_beats: total_duration,
@@ -815,10 +812,12 @@ impl TimelineEditorState {
                 audio: Arc::clone(&clip.audio),
                 position: clip.position,
                 source_offset: clip.source_offset,
+                start_marker: clip.start_marker,
                 duration: clip.duration,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                linear_gain: clip.gain_db.linear(),
             });
         }
         if let Some(content) = self.find_content_mut(track_id) {
@@ -840,6 +839,7 @@ impl TimelineEditorState {
         }
         for clip in &fragments {
             engine.send(EngineCommand::AddNoteClip {
+                start_marker_beats: clip.start_marker_beats,
                 track_id,
                 clip_id: clip.id,
                 position_beats: clip.position_beats,
@@ -891,6 +891,7 @@ impl TimelineEditorState {
                 right.position = split_position;
                 right.duration = clip.duration - left_duration;
                 right.source_offset = audio_source_frame(clip, left_duration) as u64;
+                right.start_marker = right.source_offset;
                 (left, right)
             });
         if let Some((left, right)) = split {
@@ -932,6 +933,7 @@ impl TimelineEditorState {
                 left.duration_beats = local_split;
                 left.notes = visible_notes(clip, 0.0, local_split);
                 left.selected_notes.clear();
+                left.start_marker_beats = 0.0;
 
                 let mut right = clip.clone();
                 right.id = ClipId::new();
@@ -940,12 +942,11 @@ impl TimelineEditorState {
                 right.duration_beats = clip.duration_beats - local_split;
                 right.notes = visible_notes(clip, local_split, clip.duration_beats);
                 right.selected_notes.clear();
+                right.start_marker_beats = 0.0;
 
                 if clip.loop_enabled {
-                    left.loop_start_beats = 0.0;
-                    left.loop_end_beats = left.duration_beats;
-                    right.loop_start_beats = 0.0;
-                    right.loop_end_beats = right.duration_beats;
+                    left.reset_loop_region_to_clip();
+                    right.reset_loop_region_to_clip();
                 }
                 (left, right)
             });

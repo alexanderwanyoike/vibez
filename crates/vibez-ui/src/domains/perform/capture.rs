@@ -589,17 +589,21 @@ fn append_timeline_window(
                 continue;
             }
             let delta = overlap_start - clip.position;
+            let fragment_start = captured_audio_offset(clip, delta);
             let mut fragment = UiClip {
                 id: ClipId::new(),
                 name: format!("Capture · {} · {}", source.name, clip.name),
                 audio: Arc::clone(&clip.audio),
                 source: clip.source.clone(),
                 position: destination_start_samples + (overlap_start - window_start_samples),
-                source_offset: captured_audio_offset(clip, delta),
+                source_offset: fragment_start,
+                start_marker: fragment_start,
                 duration: overlap_end - overlap_start,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                gain_db: clip.gain_db,
+                transpose: clip.transpose,
                 original_bpm: clip.original_bpm,
                 warped: clip.warped,
                 warped_to_bpm: clip.warped_to_bpm,
@@ -632,6 +636,7 @@ fn append_timeline_window(
                 duration_beats: overlap_end - overlap_start,
                 notes,
                 selected_notes: Default::default(),
+                start_marker_beats: 0.0,
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
@@ -654,12 +659,7 @@ fn append_timeline_window(
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
-    let raw = clip.source_offset.saturating_add(timeline_delta);
-    if clip.loop_enabled && clip.loop_end > clip.loop_start && raw >= clip.loop_end {
-        clip.loop_start + (raw - clip.loop_start) % (clip.loop_end - clip.loop_start)
-    } else {
-        raw
-    }
+    clip.timeline().source_at(timeline_delta)
 }
 
 pub(crate) fn captured_visible_notes(
@@ -667,11 +667,9 @@ pub(crate) fn captured_visible_notes(
     local_start: f64,
     local_end: f64,
 ) -> Vec<MidiNote> {
-    let looping = clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats;
     let mut visible = Vec::new();
     for note in &clip.notes {
-        let mut occurrence = note.start_beat;
-        loop {
+        for occurrence in clip.note_occurrences(note.start_beat) {
             let note_end = occurrence + note.duration_beats;
             let kept_start = occurrence.max(local_start);
             let kept_end = note_end.min(local_end);
@@ -681,16 +679,6 @@ pub(crate) fn captured_visible_notes(
                     duration_beats: kept_end - kept_start,
                     ..*note
                 });
-            }
-            if !looping
-                || note.start_beat < clip.loop_start_beats
-                || note.start_beat >= clip.loop_end_beats
-            {
-                break;
-            }
-            occurrence += clip.loop_end_beats - clip.loop_start_beats;
-            if occurrence >= local_end {
-                break;
             }
         }
     }
@@ -726,10 +714,13 @@ mod tests {
                 source: None,
                 position: 0,
                 source_offset: 0,
+                start_marker: 0,
                 duration: frames,
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                gain_db: Default::default(),
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -757,6 +748,7 @@ mod tests {
                     duration_beats: 0.25,
                 }],
                 selected_notes: Default::default(),
+                start_marker_beats: 0.0,
                 loop_enabled: false,
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,

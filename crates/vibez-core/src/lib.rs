@@ -1,6 +1,7 @@
 pub mod audio_buffer;
 pub mod audio_format;
 pub mod automation;
+pub mod clip_timeline;
 pub mod constants;
 pub mod effect;
 pub mod id;

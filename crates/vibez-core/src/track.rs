@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::clip_timeline::FrameClipTimeline;
 use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
@@ -61,6 +62,77 @@ pub enum InputMonitoring {
     Off,
     Auto,
     On,
+}
+
+/// Nondestructive gain applied by one Audio Clip before its Project Track.
+///
+/// Keeping the range in a value object prevents project files and editor
+/// messages from creating gains the Inspector cannot represent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ClipGainDb(f32);
+
+impl ClipGainDb {
+    pub const MIN: f32 = -70.0;
+    pub const MAX: f32 = 24.0;
+
+    pub fn new(db: f32) -> Option<Self> {
+        db.is_finite().then(|| Self(db.clamp(Self::MIN, Self::MAX)))
+    }
+
+    pub const fn db(self) -> f32 {
+        self.0
+    }
+
+    pub fn linear(self) -> f32 {
+        10.0_f32.powf(self.0 / 20.0)
+    }
+
+    pub fn is_neutral(value: &Self) -> bool {
+        value.0 == 0.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipGainDb {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let db = f32::deserialize(deserializer)?;
+        Self::new(db).ok_or_else(|| serde::de::Error::custom("clip gain must be finite"))
+    }
+}
+
+/// Nondestructive, duration-preserving Audio Clip pitch offset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct ClipTranspose(i8);
+
+impl ClipTranspose {
+    pub const MIN: i8 = -48;
+    pub const MAX: i8 = 48;
+
+    pub fn new(semitones: i8) -> Self {
+        Self(semitones.clamp(Self::MIN, Self::MAX))
+    }
+
+    pub const fn semitones(self) -> i8 {
+        self.0
+    }
+
+    pub const fn is_neutral(value: &Self) -> bool {
+        value.0 == 0
+    }
+}
+
+impl<'de> Deserialize<'de> for ClipTranspose {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let semitones = i8::deserialize(deserializer)?;
+        Ok(Self::new(semitones))
+    }
 }
 
 impl InputMonitoring {
@@ -281,6 +353,10 @@ pub struct ClipInfo {
     pub position: u64,
     /// Offset into the source audio in samples.
     pub source_offset: u64,
+    /// Initial playback position inside the source window. Older projects
+    /// omit it and inherit `source_offset` when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_marker: Option<u64>,
     /// Duration in samples.
     pub duration: u64,
     /// Canonical external media source reference.
@@ -295,6 +371,12 @@ pub struct ClipInfo {
     pub loop_start: u64,
     #[serde(default)]
     pub loop_end: u64,
+    /// Nondestructive per-Clip gain before the Project Track channel strip.
+    #[serde(default, skip_serializing_if = "ClipGainDb::is_neutral")]
+    pub gain_db: ClipGainDb,
+    /// Duration-preserving pitch offset in semitones.
+    #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
+    pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample, set either by BPM
     /// detection or manually. Drives warp ratio calculations and is
     /// independent of the project tempo.
@@ -320,6 +402,27 @@ impl ClipInfo {
         self.position.saturating_add(self.duration)
     }
 
+    /// Resolve the persisted Start marker into the playable source window.
+    /// Legacy projects begin at Source In, matching pre-marker playback.
+    pub fn resolved_start_marker(&self, source_frames: u64) -> u64 {
+        let source_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(source_frames);
+        FrameClipTimeline::new(
+            self.start_marker.unwrap_or(self.source_offset),
+            self.loop_start,
+            self.loop_end,
+            self.duration,
+            self.loop_enabled,
+        )
+        .clamp_start(
+            self.start_marker.unwrap_or(self.source_offset),
+            self.source_offset,
+            source_end,
+        )
+    }
+
     pub fn resolved_source(&self) -> Option<&MediaSourceRef> {
         self.source.as_ref()
     }
@@ -336,6 +439,15 @@ impl ClipInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clip_property_value_objects_enforce_the_inspector_ranges() {
+        assert_eq!(ClipGainDb::new(30.0).unwrap().db(), ClipGainDb::MAX);
+        assert_eq!(ClipGainDb::new(-80.0).unwrap().db(), ClipGainDb::MIN);
+        assert!(ClipGainDb::new(f32::NAN).is_none());
+        assert_eq!(ClipTranspose::new(60).semitones(), ClipTranspose::MAX);
+        assert_eq!(ClipTranspose::new(-60).semitones(), ClipTranspose::MIN);
+    }
 
     #[test]
     fn track_info_defaults() {
@@ -390,6 +502,7 @@ mod tests {
             name: "test".into(),
             position,
             source_offset: 0,
+            start_marker: None,
             duration,
             source: Some(MediaSourceRef::LocalFile {
                 path: PathBuf::from("test.wav"),
@@ -398,6 +511,8 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm: None,
             warped: false,
             warped_to_bpm: None,
@@ -438,11 +553,14 @@ mod tests {
         let mut clip = test_clip(44_100, 88_200);
         clip.name = "vocal.wav".into();
         clip.source_offset = 1_000;
+        clip.start_marker = Some(2_000);
         clip.source = Some(MediaSourceRef::LocalFile {
             path: PathBuf::from("/audio/vocal.wav"),
         });
         clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
         clip.original_bpm = Some(174.0);
+        clip.gain_db = ClipGainDb::new(-3.5).unwrap();
+        clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
         let json = serde_json::to_string(&clip).unwrap();
@@ -450,12 +568,27 @@ mod tests {
         assert_eq!(clip.id, deserialized.id);
         assert_eq!(clip.position, deserialized.position);
         assert_eq!(clip.source_offset, deserialized.source_offset);
+        assert_eq!(clip.start_marker, deserialized.start_marker);
         assert_eq!(clip.duration, deserialized.duration);
         assert_eq!(clip.file_path, deserialized.file_path);
         assert_eq!(clip.source, deserialized.source);
         assert_eq!(clip.original_bpm, deserialized.original_bpm);
+        assert_eq!(clip.gain_db, deserialized.gain_db);
+        assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
+    }
+
+    #[test]
+    fn resolved_start_marker_defaults_and_clamps_to_the_playable_window() {
+        let mut clip = test_clip(0, 100);
+        clip.source_offset = 10;
+        clip.loop_enabled = true;
+        clip.loop_end = 80;
+        assert_eq!(clip.resolved_start_marker(200), 10);
+
+        clip.start_marker = Some(120);
+        assert_eq!(clip.resolved_start_marker(200), 79);
     }
 
     #[test]
@@ -472,5 +605,8 @@ mod tests {
         let clip: ClipInfo = serde_json::from_str(json).unwrap();
         assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
         assert!(clip.source.is_none());
+        assert_eq!(clip.gain_db, ClipGainDb::default());
+        assert_eq!(clip.transpose, ClipTranspose::default());
+        assert_eq!(clip.start_marker, None);
     }
 }

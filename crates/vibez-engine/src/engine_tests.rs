@@ -92,6 +92,7 @@ fn midi_clip_commands_keep_project_length_in_sync() {
             clip_id,
             position_beats: 2.0,
             duration_beats: 4.0,
+            start_marker_beats: 0.0,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
@@ -462,10 +463,12 @@ fn add_clip_and_play() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -494,6 +497,46 @@ fn add_clip_and_play() {
 }
 
 #[test]
+fn clip_gain_is_applied_before_the_track_channel_strip() {
+    let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+    cmd_tx
+        .push(EngineCommand::AddTrack(track_id, "Audio".into()))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddClip {
+            track_id,
+            clip_id,
+            audio: make_constant_audio(32, 1.0),
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 32,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::SetClipGain {
+            track_id,
+            clip_id,
+            linear_gain: 0.5,
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 8];
+    engine.process(&mut output, 2);
+    let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(output
+        .iter()
+        .all(|sample| (*sample - expected).abs() < 1e-4));
+}
+
+#[test]
 fn mute_silences_track() {
     let (mut engine, mut cmd_tx, _event_rx) = AudioEngine::new();
     let tid = TrackId::new();
@@ -510,10 +553,12 @@ fn mute_silences_track() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackMute(tid, true)).unwrap();
@@ -549,10 +594,12 @@ fn solo_isolates_track() {
             audio: audio1,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -562,10 +609,12 @@ fn solo_isolates_track() {
             audio: audio2,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // Solo track 1 only
@@ -607,10 +656,12 @@ fn gain_scaling() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackGain(tid, 0.5)).unwrap();
@@ -640,10 +691,12 @@ fn pan_hard_left() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackPan(tid, 0.0)).unwrap();
@@ -681,10 +734,12 @@ fn multi_track_summing() {
             audio: audio1,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -694,10 +749,12 @@ fn multi_track_summing() {
             audio: audio2,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -752,10 +809,12 @@ fn per_track_metering_events() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -798,10 +857,12 @@ fn transport_auto_stop_multitrack() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 16,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -831,10 +892,12 @@ fn move_clip_changes_position() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -869,10 +932,12 @@ fn add_clip_with_loop_plays_looped_audio() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 200,
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -909,10 +974,12 @@ fn resize_clip_preserves_loop_state() {
             audio: audio.clone(),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // Enable loop via SetClipLoop
@@ -938,10 +1005,12 @@ fn resize_clip_preserves_loop_state() {
             audio,
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 200,
             loop_enabled: true,
             loop_start: 0,
             loop_end: 100,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Seek(0)).unwrap();
@@ -1387,6 +1456,7 @@ fn note_clip_loop_renders() {
             clip_id: cid,
             position_beats: 0.0,
             duration_beats: 4.0,
+            start_marker_beats: 0.0,
             loop_enabled: true,
             loop_start_beats: 0.0,
             loop_end_beats: 2.0,
@@ -1450,10 +1520,12 @@ fn constant_clip_track(
             audio: make_constant_audio(frames, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: frames as u64,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     (tid, cid)
@@ -1505,10 +1577,12 @@ fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
             audio: make_test_audio(32),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 32,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1572,10 +1646,12 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
             audio: make_constant_audio(4096, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 4096,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1843,10 +1919,12 @@ fn master_gain_scales_the_summed_mix() {
             audio: make_constant_audio(100, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 100,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -1881,10 +1959,12 @@ fn master_effect_chain_processes_the_summed_mix() {
             audio: make_constant_audio(4_096, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 4_096,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     // A master EQ with the LF shelf slammed down should attenuate a
@@ -1962,10 +2042,12 @@ fn spectrum_tap_streams_track_samples() {
             audio: make_constant_audio(10_000, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 10_000,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx
@@ -2017,10 +2099,12 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
             audio: make_constant_audio(50_000, 0.5),
             position: 0,
             source_offset: 0,
+            start_marker: 0,
             duration: 50_000,
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         })
         .unwrap();
     cmd_tx.push(EngineCommand::AddBus(bus, "A".into())).unwrap();
