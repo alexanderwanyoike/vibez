@@ -9,6 +9,7 @@ use crate::domains::piano_roll::PianoRollMsg;
 use crate::message::Message;
 use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip};
 use crate::timeline_geometry::TimelineGeometry;
+use crate::widgets::clip_loop_markers::{self, LoopDrag, MARKER_RAIL_HEIGHT};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
@@ -19,7 +20,7 @@ const KEY_WIDTH: f32 = 52.0;
 /// Height of each piano key row.
 const KEY_HEIGHT: f32 = 16.0;
 /// Height of the ruler strip at the top.
-const RULER_HEIGHT: f32 = 20.0;
+const RULER_HEIGHT: f32 = MARKER_RAIL_HEIGHT;
 
 /// Lowest MIDI note displayed (C2 = 36).
 const LOW_NOTE: u8 = 36;
@@ -268,6 +269,10 @@ enum DragAction {
         current: Point,
         additive: bool,
     },
+    Loop {
+        clip_id: ClipId,
+        drag: LoopDrag,
+    },
 }
 
 /// Drag distance before an empty-space press counts as a rubber-band
@@ -320,11 +325,19 @@ impl canvas::Program<Message> for PianoRollWidget {
                 DragAction::ResizeNote { .. } | DragAction::DrawNote { .. } => {
                     mouse::Interaction::ResizingHorizontally
                 }
+                DragAction::Loop { .. } => mouse::Interaction::ResizingHorizontally,
                 DragAction::MarqueeNotes { .. } => mouse::Interaction::Crosshair,
             };
         }
 
-        // Draw mode: always crosshair
+        if let Some(pos) = cursor.position_in(bounds) {
+            if self.hit_test_loop_marker(pos, &bounds).is_some() {
+                return mouse::Interaction::ResizingHorizontally;
+            }
+        }
+
+        // Draw mode: the note grid uses a crosshair, but loop braces
+        // retain their horizontal resize cursor in every edit mode.
         if self.edit_mode == PianoRollEditMode::Draw {
             return mouse::Interaction::Crosshair;
         }
@@ -369,9 +382,13 @@ impl canvas::Program<Message> for PianoRollWidget {
 
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    // Ignore clicks in ruler area
-                    if pos.y < RULER_HEIGHT {
-                        return (canvas::event::Status::Ignored, None);
+                    if pos.y <= RULER_HEIGHT {
+                        let Some(drag) = self.begin_loop_drag(pos, &bounds) else {
+                            return (canvas::event::Status::Ignored, None);
+                        };
+                        state.drag = Some(drag);
+                        state.last_cursor = Some(pos);
+                        return (canvas::event::Status::Captured, None);
                     }
 
                     // Key lane: press auditions the pitch on this
@@ -598,6 +615,12 @@ impl canvas::Program<Message> for PianoRollWidget {
                 if let Some(local) = LocalDrag::unclamped().position(cursor, bounds) {
                     state.last_cursor = Some(local);
 
+                    if let Some(drag) = state.drag.as_ref() {
+                        if let Some(message) = self.loop_drag_message(drag, local, &bounds) {
+                            return (canvas::event::Status::Captured, Some(message));
+                        }
+                    }
+
                     // The rubber-band only grows its rectangle; the
                     // selection is resolved once, on release.
                     if let Some(DragAction::MarqueeNotes { current, .. }) = state.drag.as_mut() {
@@ -728,7 +751,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     }
                                 }
                                 // Handled above, before this borrow.
-                                DragAction::MarqueeNotes { .. } => {}
+                                DragAction::MarqueeNotes { .. } | DragAction::Loop { .. } => {}
                             }
                         }
                     }
@@ -944,83 +967,10 @@ fn is_black_key(pitch: u8) -> bool {
     matches!(pitch % 12, 1 | 3 | 6 | 8 | 10)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn piano_roll_uses_triplet_grid_and_preserves_free_positions_when_snap_is_off() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::EIGHTH.triplet(), true, false, 0);
-        assert!((widget.snapped_beat(0.31, &bounds) - 1.0 / 3.0).abs() < 1e-9);
-
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
-        assert_eq!(widget.snapped_beat(0.31, &bounds), 0.31);
-    }
-
-    #[test]
-    fn creating_a_note_keeps_it_in_the_cell_the_pointer_is_over() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0);
-
-        // Right half of the cell starting at 0.25. Nearest-line snapping
-        // rounds up to 0.5, putting the note in the *next* cell, which is
-        // what made clicks feel offset from the cursor.
-        assert_eq!(widget.snapped_beat(0.4, &bounds), 0.5);
-        assert_eq!(widget.snapped_beat_floor(0.4, &bounds), 0.25);
-
-        // Left half still lands in the same cell either way.
-        assert_eq!(widget.snapped_beat_floor(0.3, &bounds), 0.25);
-        // Exactly on a line is unambiguous.
-        assert_eq!(widget.snapped_beat_floor(0.25, &bounds), 0.25);
-    }
-
-    #[test]
-    fn creation_snapping_is_free_when_snap_is_disabled() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0);
-
-        assert_eq!(widget.snapped_beat_floor(0.4, &bounds), 0.4);
-    }
-
-    #[test]
-    fn overlapping_notes_hit_test_to_the_one_drawn_on_top() {
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
-        let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
-        widget.total_beats = 16.0;
-        widget.scroll_y = 0.0;
-
-        let note = |start: f64| MidiNote {
-            pitch: 60,
-            start_beat: start,
-            duration_beats: 2.0,
-            velocity: 100,
-        };
-        widget.clip = Some(PianoRollClipData {
-            clip_id: ClipId::new(),
-            // Same pitch, overlapping spans: the later note is painted last
-            // and so sits on top.
-            notes: vec![note(0.0), note(0.5)],
-            selected_notes: HashSet::new(),
-            loop_enabled: false,
-            loop_start_beats: 0.0,
-            loop_end_beats: 0.0,
-        });
-
-        // A point inside the overlap must resolve to the top note (index 1).
-        let x = widget.beat_to_x(1.0, &bounds);
-        let y = widget.pitch_to_y(60) + 4.0;
-        assert_eq!(
-            widget.hit_test_note(Point::new(x, y), &bounds).map(|h| h.0),
-            Some(1)
-        );
-    }
-}
-
 mod draw;
+mod loop_drag;
+#[cfg(test)]
+mod tests;
 mod velocity_lane;
 
 pub use velocity_lane::VelocityLaneWidget;

@@ -68,6 +68,20 @@ impl UiClip {
             self.reset_loop_region_to_clip();
         }
     }
+
+    pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
+        let clip_end = self
+            .source_offset
+            .saturating_add(self.duration)
+            .min(self.audio.num_frames() as u64);
+        let valid = start >= self.source_offset && start < end && end <= clip_end;
+        if !valid || (start, end) == (self.loop_start, self.loop_end) {
+            return false;
+        }
+        self.loop_start = start;
+        self.loop_end = end;
+        true
+    }
 }
 
 /// Editable numeric fields in Audio Clip Inspector V1.
@@ -244,6 +258,20 @@ impl UiNoteClip {
         if self.loop_end_beats <= self.loop_start_beats {
             self.reset_loop_region_to_clip();
         }
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
+        let valid = start.is_finite()
+            && end.is_finite()
+            && start >= 0.0
+            && start < end
+            && end <= self.duration_beats;
+        if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
+            return false;
+        }
+        self.loop_start_beats = start;
+        self.loop_end_beats = end;
+        true
     }
 }
 

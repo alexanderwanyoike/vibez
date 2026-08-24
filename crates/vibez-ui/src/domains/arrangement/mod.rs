@@ -398,21 +398,23 @@ impl TimelineEditorState {
                 loop_start,
                 loop_end,
             } => {
-                let mut enabled = false;
+                let mut command = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_start = loop_start;
-                        clip.loop_end = loop_end;
-                        enabled = clip.loop_enabled;
+                        if clip.set_loop_region(loop_start, loop_end) {
+                            command = Some(clip.loop_enabled);
+                        }
                     }
                 }
-                engine.send(EngineCommand::SetClipLoop {
-                    track_id,
-                    clip_id,
-                    enabled,
-                    loop_start,
-                    loop_end,
-                });
+                if let Some(enabled) = command {
+                    engine.send(EngineCommand::SetClipLoop {
+                        track_id,
+                        clip_id,
+                        enabled,
+                        loop_start,
+                        loop_end,
+                    });
+                }
             }
             ArrangementMsg::SelectArrangementClip {
                 selection,

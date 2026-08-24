@@ -65,10 +65,14 @@ impl App {
             .unwrap_or(-1.0);
 
         let waveform_widget = AudioClipDetailWidget {
+            track_id,
+            clip_id: clip.id,
             audio: Arc::clone(&clip.audio),
             duration_samples: clip.duration,
             source_offset: clip.source_offset,
             sample_rate: clip.audio.sample_rate,
+            bpm: self.state.transport.bpm,
+            grid: self.state.view.grid_config(),
             track_color,
             playhead_normalized,
             loop_enabled: clip.loop_enabled,
