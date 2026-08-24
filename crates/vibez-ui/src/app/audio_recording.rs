@@ -346,6 +346,7 @@ impl App {
                     loop_enabled: false,
                     loop_start: 0,
                     loop_end: duration,
+                    linear_gain: 1.0,
                 });
                 self.state
                     .arrange_content_mut(outcome.track_id)
@@ -361,6 +362,8 @@ impl App {
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: duration,
+                        gain_db: Default::default(),
+                        transpose: Default::default(),
                         original_bpm: None,
                         warped: false,
                         warped_to_bpm: None,

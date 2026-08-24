@@ -11,8 +11,11 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
+use super::audio_clip_inspector::clear_warp_request;
 use super::EngineHandle;
-use crate::state::{ArrangementSelection, TimelineEditorState, UiClip, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
+};
 
 use super::*;
 
@@ -308,6 +311,7 @@ impl TimelineEditorState {
                     clip.loop_enabled,
                     clip.loop_start,
                     clip.loop_end,
+                    clip.gain_db.linear(),
                 ));
             }
         }
@@ -319,6 +323,7 @@ impl TimelineEditorState {
             loop_enabled,
             loop_start,
             loop_end,
+            linear_gain,
         )) = sync_data
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
@@ -332,6 +337,7 @@ impl TimelineEditorState {
                 loop_enabled,
                 loop_start,
                 loop_end,
+                linear_gain,
             });
         }
         action.scroll_to_beat = clip_end_beat;
@@ -371,6 +377,7 @@ impl TimelineEditorState {
                 clip.original_audio = Some(Arc::clone(&success.original_audio));
             }
         }
+        self.discard_audio_clip_inspector_edits_for(clip_id);
         action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
         action.mark_dirty = true;
         action
@@ -419,45 +426,26 @@ impl TimelineEditorState {
     /// flags when the original is gone).
     pub fn apply_clear_clip_warp(
         &mut self,
-        engine: &mut impl EngineHandle,
+        _engine: &mut impl EngineHandle,
         track_id: TrackId,
         clip_id: ClipId,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
-        let restore = self
-            .find_content(track_id)
-            .and_then(|track| track.clips.iter().find(|c| c.id == clip_id))
-            .and_then(|clip| clip.original_audio.as_ref().map(Arc::clone));
-        if let Some(original) = restore {
-            let original_frames = original.num_frames() as u64;
-            engine.send(EngineCommand::ReplaceClipAudio {
-                track_id,
-                clip_id,
-                audio: Arc::clone(&original),
-                duration: original_frames,
-                source_offset: 0,
-                loop_start: 0,
-                loop_end: 0,
-            });
-            if let Some(track) = self.find_content_mut(track_id) {
-                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                    clip.audio = original;
-                    clip.duration = original_frames;
-                    clip.source_offset = 0;
-                    clip.loop_start = 0;
-                    clip.loop_end = 0;
-                    clip.warped = false;
-                    clip.warped_to_bpm = None;
-                    clip.original_audio = None;
-                }
-            }
-        } else if let Some(track) = self.find_content_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+        if let Some(clip) = self
+            .find_content_mut(track_id)
+            .and_then(|track| track.clips.iter_mut().find(|clip| clip.id == clip_id))
+        {
+            if clip.original_audio.is_some() {
                 clip.warped = false;
                 clip.warped_to_bpm = None;
+                action.transpose_render = clear_warp_request(track_id, clip);
+                action.status = Some("Returning Clip to raw timing...".into());
+            } else {
+                clip.warped = false;
+                clip.warped_to_bpm = None;
+                action.status = Some("Clip uses raw timing".into());
             }
         }
-        action.status = Some("Cleared clip warp".to_string());
         action.mark_dirty = true;
         action
     }
@@ -473,6 +461,11 @@ impl TimelineEditorState {
         sample_rate: u32,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
+        let gain_db = self
+            .find_content(track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == old_clip_id))
+            .map(|clip| clip.gain_db)
+            .unwrap_or_default();
         engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.retain(|c| c.id != old_clip_id);
@@ -484,6 +477,7 @@ impl TimelineEditorState {
             } => !(*tid == track_id && *cid == old_clip_id),
             _ => true,
         });
+        self.discard_audio_clip_inspector_edits_for(old_clip_id);
 
         engine.send(EngineCommand::AddClip {
             track_id,
@@ -495,6 +489,7 @@ impl TimelineEditorState {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: gain_db.linear(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -508,6 +503,8 @@ impl TimelineEditorState {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                gain_db,
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -524,6 +521,7 @@ impl TimelineEditorState {
             "Quantized {} slice(s) to {} ({:.1}s)",
             success.slice_count, success.grid_label, duration_seconds
         ));
+        action.mark_dirty = true;
         action
     }
 
@@ -541,9 +539,13 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.original_bpm = Some(b);
+                        if clip.warped {
+                            action.warp_refresh = Some((track_id, clip_id));
+                        }
                     }
                 }
-                self.clip_bpm_edit.remove(&clip_id);
+                self.audio_clip_inspector_edits
+                    .remove(&(clip_id, AudioClipInspectorField::SourceBpm));
                 action.status = Some(format!(
                     "Detected {:.1} BPM (confidence {:.2})",
                     b, confidence
@@ -624,7 +626,7 @@ impl TimelineEditorState {
                     }
                     let source_frame = audio_source_frame(clip, local as u64);
                     if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] = *sample;
+                        dst[dst_frame] = *sample * clip.gain_db.linear();
                     }
                 }
             }
@@ -656,6 +658,7 @@ impl TimelineEditorState {
             loop_enabled: joined_loop_enabled,
             loop_start: 0,
             loop_end: total_duration,
+            linear_gain: 1.0,
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -669,6 +672,8 @@ impl TimelineEditorState {
                 loop_enabled: joined_loop_enabled,
                 loop_start: 0,
                 loop_end: total_duration,
+                gain_db: Default::default(),
+                transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
                 warped_to_bpm: None,
@@ -815,6 +820,7 @@ impl TimelineEditorState {
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
+                linear_gain: clip.gain_db.linear(),
             });
         }
         if let Some(content) = self.find_content_mut(track_id) {

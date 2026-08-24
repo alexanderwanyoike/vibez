@@ -93,6 +93,10 @@ impl App {
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
+        self.state
+            .arrangement
+            .editor
+            .discard_audio_clip_inspector_edits();
         self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
         self.state.perform.selected_section = None;
         self.state.perform.section_editor.clear();
@@ -783,6 +787,7 @@ impl App {
                     loop_enabled: clip.info.loop_enabled,
                     loop_start: clip.info.loop_start,
                     loop_end: clip.info.loop_end,
+                    linear_gain: clip.info.gain_db.linear(),
                 });
             }
             if self.state.find_track(clip.info.track_id).is_some() {

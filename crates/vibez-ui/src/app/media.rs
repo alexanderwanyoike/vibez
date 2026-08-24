@@ -592,6 +592,7 @@ impl App {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            linear_gain: 1.0,
         });
         if self.state.find_track(track_id).is_some() {
             self.state.arrange_content_mut(track_id).clips.push(UiClip {
@@ -605,6 +606,8 @@ impl App {
                 loop_enabled: false,
                 loop_start: 0,
                 loop_end: 0,
+                gain_db: Default::default(),
+                transpose: Default::default(),
                 original_bpm,
                 warped,
                 warped_to_bpm,
@@ -673,6 +676,8 @@ impl App {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 0,
+            gain_db: Default::default(),
+            transpose: Default::default(),
             original_bpm,
             warped,
             warped_to_bpm,
