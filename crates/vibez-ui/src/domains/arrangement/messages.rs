@@ -228,6 +228,10 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         markers: AudioSliceMarkers,
     },
+    SliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
     SplitNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -331,6 +335,7 @@ impl ArrangementMsg {
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
+                | Self::SliceAudioClipToDrumRack { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
@@ -401,6 +406,7 @@ impl ArrangementMsg {
                     | Self::MoveWarpMarker { .. }
                     | Self::RemoveWarpMarker { .. }
                     | Self::SliceAudioClipAtMarkers { .. }
+                    | Self::SliceAudioClipToDrumRack { .. }
             )
     }
 }
@@ -413,6 +419,9 @@ pub struct ArrangementAction {
     pub close_track_guis: Option<TrackId>,
     /// Remove this shared identity from every Section timeline too.
     pub remove_track_from_sections: Option<TrackId>,
+    /// Seed one newly-created Project Track and its Arrange content through
+    /// the canonical replay path after all project stores have been updated.
+    pub replay_project_track: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
     /// Selecting a clip focuses the detail panel's Clip tab.

@@ -256,11 +256,12 @@ impl App {
                 ctx,
             );
             self.state.perform.commit_selected_section_timeline();
-            if if deferred_project_edit {
+            let changed = if deferred_project_edit {
                 action.mark_dirty
             } else {
                 section_content_changed
-            } {
+            };
+            if changed && action.replay_project_track.is_none() {
                 if let Some(section_id) = self.state.perform.selected_section {
                     self.refresh_playing_section_after_edit(section_id);
                 }

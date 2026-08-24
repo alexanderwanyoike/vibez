@@ -28,6 +28,7 @@ pub use messages::{
 };
 mod clipboard;
 mod crossfades;
+mod slice_to_drum_rack;
 mod slicing;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
@@ -785,6 +786,9 @@ impl TimelineEditorState {
                 markers,
             } => {
                 return self.slice_audio_clip_at_markers(engine, track_id, clip_id, markers);
+            }
+            ArrangementMsg::SliceAudioClipToDrumRack { track_id, clip_id } => {
+                return self.slice_audio_clip_to_drum_rack(project_tracks, track_id, clip_id, ctx);
             }
             ArrangementMsg::SplitNoteClip {
                 track_id,

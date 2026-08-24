@@ -275,6 +275,17 @@ impl App {
                 );
             }
         }
+        let replayed_project_track = action.replay_project_track.take();
+        if let Some(track_id) = replayed_project_track {
+            if let Some(track) = self.state.find_track(track_id).cloned() {
+                self.replay_track_to_engine(&track);
+            }
+        }
+        if let (Some(_), vibez_project::TimelineLocation::Section(section_id)) =
+            (replayed_project_track, location)
+        {
+            self.refresh_playing_section_after_edit(section_id);
+        }
         if let Some(track_id) = action.close_track_guis {
             if let Some(ref mut mgr) = self.plugin_window_manager {
                 mgr.close_track_effects(track_id);
