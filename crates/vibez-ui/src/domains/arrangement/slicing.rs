@@ -5,8 +5,10 @@ use vibez_core::track::ClipPlaybackDirection;
 
 use crate::state::{ArrangementSelection, TimelineEditorState, UiClip};
 
-use super::fragment_geometry::audio_fragment_geometry;
+use super::fragment_geometry::audio_fragment;
 use super::{ArrangementAction, AudioSliceMarkers, EngineHandle};
+
+pub(super) const MAX_TIMELINE_SLICES: usize = 256;
 
 impl TimelineEditorState {
     pub(super) fn slice_audio_clip_at_markers(
@@ -34,45 +36,44 @@ impl TimelineEditorState {
             };
         }
 
-        let mut boundaries = Vec::with_capacity(cuts.len() + 2);
-        boundaries.push(0);
-        boundaries.extend(cuts);
-        boundaries.push(original.duration);
+        let boundaries = slice_boundaries(&original, cuts);
+        let slice_count = boundaries.len() - 1;
+        if slice_count > MAX_TIMELINE_SLICES {
+            return ArrangementAction {
+                status: Some(format!(
+                    "{} slice regions exceed the maximum of {MAX_TIMELINE_SLICES}",
+                    slice_count
+                )),
+                ..ArrangementAction::default()
+            };
+        }
         let mut slices = Vec::with_capacity(boundaries.len() - 1);
         for (index, boundary) in boundaries.windows(2).enumerate() {
             let local_start = boundary[0];
             let duration = boundary[1] - boundary[0];
-            let mut slice = original.clone();
-            slice.id = ClipId::new();
-            slice.name = format!("{} Slice {}", original.name, index + 1);
-            slice.position = original.position.saturating_add(local_start);
-            slice.duration = duration;
-            (slice.source_offset, slice.start_marker, slice.warp_markers) =
-                audio_fragment_geometry(&original, local_start, duration);
-            slice.fades =
-                original
-                    .fades
-                    .unlinked()
-                    .for_fragment(original.duration, local_start, duration);
-            slice
-                .transient_markers
-                .retain_source_range(slice.source_offset, slice.source_end());
+            let mut slice = audio_fragment(
+                &original,
+                format!("{} Slice {}", original.name, index + 1),
+                local_start,
+                duration,
+            );
+            // Slices are independent one-shots. Loop-wrap positions are added
+            // to `slice_boundaries`, so disabling the inherited loop preserves
+            // the exact audible sequence without leaving stale loop geometry.
+            slice.loop_enabled = false;
+            slice.reset_loop_region_to_clip();
             slices.push(slice);
         }
 
         let slice_ids: Vec<_> = slices.iter().map(|slice| slice.id).collect();
         self.replace_audio_clip(engine, track_id, clip_id, slices);
-        self.selected_clips.clear();
+        self.selected_clips
+            .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
         self.selected_clips.extend(
             slice_ids
                 .into_iter()
                 .map(|clip_id| ArrangementSelection::AudioClip { track_id, clip_id }),
         );
-        self.selected_note_clip = None;
-        self.selected_transient_marker = None;
-        self.selected_warp_marker = None;
-        self.discard_audio_clip_inspector_edits_for(clip_id);
-
         ArrangementAction {
             status: Some(format!(
                 "Sliced Audio Clip into {} Clips at {}",
@@ -85,7 +86,7 @@ impl TimelineEditorState {
     }
 }
 
-fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
+pub(super) fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
     let source_frames: Vec<_> = match markers {
         AudioSliceMarkers::Transients => clip
             .transient_markers
@@ -118,7 +119,9 @@ fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
                 .filter_map(|position| {
                     let cut = match clip.playback_direction {
                         ClipPlaybackDirection::Forward => position,
-                        ClipPlaybackDirection::Reverse => clip.duration.saturating_sub(position),
+                        ClipPlaybackDirection::Reverse => {
+                            clip.duration.saturating_sub(1).saturating_sub(position)
+                        }
                     };
                     (cut > 0 && cut < clip.duration).then_some(cut)
                 }),
@@ -127,6 +130,27 @@ fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
     cuts.sort_unstable();
     cuts.dedup();
     cuts
+}
+
+/// Complete Clip-local boundaries for independently playable slices. Loop
+/// wraps are boundaries even when no marker lands there, because a single
+/// one-shot slice cannot represent a discontinuous source range.
+pub(super) fn slice_boundaries(clip: &UiClip, mut cuts: Vec<u64>) -> Vec<u64> {
+    cuts.extend(clip.timeline().wraps().filter_map(|position| {
+        let cut = match clip.playback_direction {
+            ClipPlaybackDirection::Forward => position,
+            ClipPlaybackDirection::Reverse => clip.duration.saturating_sub(position),
+        };
+        (cut > 0 && cut < clip.duration).then_some(cut)
+    }));
+    cuts.sort_unstable();
+    cuts.dedup();
+
+    let mut boundaries = Vec::with_capacity(cuts.len() + 2);
+    boundaries.push(0);
+    boundaries.extend(cuts);
+    boundaries.push(clip.duration);
+    boundaries
 }
 
 const fn marker_label(markers: AudioSliceMarkers) -> &'static str {

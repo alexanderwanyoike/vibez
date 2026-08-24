@@ -1,6 +1,7 @@
 //! Pure geometry shared by clip split, trim and join operations.
 
 use vibez_core::automation::AutomationLane;
+use vibez_core::id::ClipId;
 use vibez_core::midi::MidiNote;
 use vibez_core::warp_marker::WarpMarkers;
 
@@ -16,6 +17,34 @@ pub(super) fn audio_fragment_geometry(
     duration: u64,
 ) -> (u64, u64, WarpMarkers) {
     clip.warp_geometry_for_fragment(local_start, duration)
+}
+
+/// Build one independently editable view over an audible fragment of an Audio
+/// Clip. All split, slice and Track Mute trim operations use this constructor
+/// so identity, timing, fades, markers and Warp geometry cannot drift apart.
+pub(super) fn audio_fragment(
+    clip: &UiClip,
+    name: String,
+    local_start: u64,
+    duration: u64,
+) -> UiClip {
+    let mut fragment = clip.clone();
+    fragment.id = ClipId::new();
+    fragment.name = name;
+    fragment.position = clip.position.saturating_add(local_start);
+    fragment.duration = duration;
+    (
+        fragment.source_offset,
+        fragment.start_marker,
+        fragment.warp_markers,
+    ) = audio_fragment_geometry(clip, local_start, duration);
+    fragment.fades = clip
+        .fades
+        .for_fragment(clip.duration, local_start, duration);
+    fragment
+        .transient_markers
+        .retain_source_range(fragment.source_offset, fragment.source_end());
+    fragment
 }
 
 pub(super) fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
