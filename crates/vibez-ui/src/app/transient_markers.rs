@@ -15,7 +15,7 @@ impl App {
         location: vibez_project::TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
-        detail: vibez_core::onset::TransientDetectionDetail,
+        sensitivity: vibez_core::onset::TransientSensitivity,
         record_undo: bool,
     ) -> Task<Message> {
         let Some(content) = self.timeline_content_at(location, track_id) else {
@@ -32,7 +32,7 @@ impl App {
             self.state.status_text = format!("Detecting transients in {}...", clip.name);
         }
         Task::perform(
-            detect_clip_transients_async(detection_audio, detail),
+            detect_clip_transients_async(detection_audio, sensitivity),
             move |source_frames| {
                 Message::ClipTransientsDetected(crate::message::ClipTransientDetection {
                     location,
@@ -56,7 +56,7 @@ impl App {
             location,
             track_id,
             clip_id,
-            vibez_core::onset::TransientDetectionDetail::Balanced,
+            vibez_core::onset::TransientSensitivity::DEFAULT,
             false,
         )
     }

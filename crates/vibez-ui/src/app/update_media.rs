@@ -414,6 +414,9 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
+        if self.state.view.transient_analysis_dialog.take().is_some() {
+            return Task::none();
+        }
         if self.state.view.drum_rack_slice_dialog.take().is_some() {
             return Task::none();
         }

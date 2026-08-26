@@ -8,12 +8,14 @@
 //! aubio is licensed under GPL-3.0-or-later. Vibez carries the same compatible
 //! licence. Upstream source: <https://github.com/aubio/aubio/tree/0.4.9>.
 
+use super::TransientSensitivity;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
 
 const DEFAULT_WINDOW_SIZE: usize = 1_024;
 const DEFAULT_HOP_SIZE: usize = 256;
 const DEFAULT_THRESHOLD: f32 = 0.058;
+const DEFAULT_ENERGY_THRESHOLD: f32 = 0.3;
 const DEFAULT_MIN_IOI_MS: f32 = 50.0;
 const DEFAULT_SILENCE_DB: f32 = -70.0;
 const DEFAULT_DELAY_HOPS: f32 = 4.3;
@@ -28,19 +30,20 @@ pub(super) struct Config {
 }
 
 impl Config {
-    pub(super) fn for_sensitivity(sensitivity: f32) -> Self {
-        let sensitivity = sensitivity.clamp(0.25, 5.0);
-        let min_ioi_ms = if sensitivity <= 1.5 {
-            50.0 + ((sensitivity - 0.75) / 0.75).clamp(0.0, 1.0) * 60.0
-        } else {
-            110.0 + ((sensitivity - 1.5) / 3.5).clamp(0.0, 1.0) * 70.0
-        };
+    pub(super) fn for_sensitivity(sensitivity: TransientSensitivity) -> Self {
+        // aubio documents 0.001..=0.900 as the useful peak-threshold range.
+        // Interpolate logarithmically through its HFC default at 50%, giving
+        // useful travel at both ends instead of bunching every result near the
+        // middle of the knob.
         Self {
-            // Aubio's default HFC threshold is 0.058. Keep the existing Vibez
-            // midpoint (1.5) pinned to that reference value and make larger
-            // values progressively more selective.
-            threshold: DEFAULT_THRESHOLD * (sensitivity / 1.5),
-            min_ioi_ms,
+            threshold: sensitivity.peak_threshold(DEFAULT_THRESHOLD),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn for_energy_sensitivity(sensitivity: TransientSensitivity) -> Self {
+        Self {
+            threshold: sensitivity.peak_threshold(DEFAULT_ENERGY_THRESHOLD),
             ..Self::default()
         }
     }
@@ -82,7 +85,36 @@ enum ConfigError {
     ZeroSampleRate,
 }
 
+#[cfg(test)]
 pub(super) fn detect_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
+    detect_onsets_where(mono, sample_rate, config, |_| true)
+}
+
+pub(super) fn detect_onsets_where(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    accepts: impl FnMut(usize) -> bool,
+) -> Vec<u64> {
+    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Hfc, accepts)
+}
+
+pub(super) fn detect_energy_onsets_where(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    accepts: impl FnMut(usize) -> bool,
+) -> Vec<u64> {
+    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Energy, accepts)
+}
+
+fn detect_onsets_with_descriptor(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    descriptor: Descriptor,
+    accepts: impl FnMut(usize) -> bool,
+) -> Vec<u64> {
     let Ok(config) = config.validate(sample_rate) else {
         return Vec::new();
     };
@@ -90,7 +122,13 @@ pub(super) fn detect_onsets(mono: &[f32], sample_rate: u32, config: Config) -> V
         return Vec::new();
     }
 
-    Detector::new(sample_rate, config).process(mono)
+    Detector::new(sample_rate, config, descriptor).process(mono, accepts)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Descriptor {
+    Hfc,
+    Energy,
 }
 
 struct Detector {
@@ -102,46 +140,57 @@ struct Detector {
     last_onset: usize,
     phase_vocoder: PhaseVocoder,
     peak_picker: PeakPicker,
+    descriptor: Descriptor,
 }
 
 impl Detector {
-    fn new(sample_rate: u32, config: Config) -> Self {
+    fn new(sample_rate: u32, config: Config, descriptor: Descriptor) -> Self {
         Self {
             hop_size: config.hop_size,
-            min_ioi: ((config.min_ioi_ms / 1_000.0) * sample_rate as f32).round() as usize,
+            min_ioi: super::frames_for_ms(sample_rate, config.min_ioi_ms),
             delay: (DEFAULT_DELAY_HOPS * config.hop_size as f32) as usize,
             silence_db: config.silence_db,
             total_frames: 0,
             last_onset: 0,
             phase_vocoder: PhaseVocoder::new(config.window_size, config.hop_size),
             peak_picker: PeakPicker::new(config.threshold),
+            descriptor,
         }
     }
 
-    fn process(mut self, mono: &[f32]) -> Vec<u64> {
+    fn process(mut self, mono: &[f32], mut accepts: impl FnMut(usize) -> bool) -> Vec<u64> {
         let mut onsets = Vec::new();
         let mut hop = vec![0.0; self.hop_size];
 
         for chunk in mono.chunks(self.hop_size) {
             hop.fill(0.0);
             hop[..chunk.len()].copy_from_slice(chunk);
-            if let Some(frame) = self.process_hop(&hop) {
+            if let Some(frame) = self.process_hop(&hop, &mut accepts) {
                 onsets.push(frame as u64);
             }
         }
         onsets
     }
 
-    fn process_hop(&mut self, input: &[f32]) -> Option<usize> {
+    fn process_hop(
+        &mut self,
+        input: &[f32],
+        accepts: &mut impl FnMut(usize) -> bool,
+    ) -> Option<usize> {
         let magnitudes = self.phase_vocoder.spectrum(input);
-        let descriptor = high_frequency_content(&magnitudes);
+        let descriptor = match self.descriptor {
+            Descriptor::Hfc => high_frequency_content(&magnitudes),
+            Descriptor::Energy => spectral_energy(&magnitudes),
+        };
         let peak = self.peak_picker.process(descriptor);
         let silent = db_spl(input) < self.silence_db;
         let mut accepted = false;
 
         if peak > 0.0 && !silent {
             let new_onset = self.total_frames + (peak * self.hop_size as f32).round() as usize;
-            if self.last_onset + self.min_ioi < new_onset
+            let reported_onset = self.delay.max(new_onset).saturating_sub(self.delay);
+            if accepts(reported_onset)
+                && self.last_onset + self.min_ioi < new_onset
                 && !(self.last_onset > 0 && self.delay > new_onset)
             {
                 self.last_onset = self.delay.max(new_onset);
@@ -149,7 +198,10 @@ impl Detector {
             }
         } else if peak <= 0.0 && self.total_frames <= self.delay && !silent {
             let new_onset = self.total_frames;
-            if self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset {
+            let reported_onset = self.total_frames;
+            if accepts(reported_onset)
+                && (self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset)
+            {
                 self.last_onset = self.total_frames + self.delay;
                 accepted = true;
             }
@@ -213,16 +265,23 @@ impl PhaseVocoder {
 
         self.fft_buffer[..=self.window_size / 2]
             .iter()
-            .map(|bin| bin.norm().ln_1p())
+            .map(|bin| bin.norm())
             .collect()
     }
+}
+
+fn spectral_energy(magnitudes: &[f32]) -> f32 {
+    magnitudes
+        .iter()
+        .map(|magnitude| magnitude * magnitude)
+        .sum()
 }
 
 fn high_frequency_content(magnitudes: &[f32]) -> f32 {
     magnitudes
         .iter()
         .enumerate()
-        .map(|(index, magnitude)| (index + 1) as f32 * magnitude)
+        .map(|(index, magnitude)| (index + 1) as f32 * magnitude.ln_1p())
         .sum()
 }
 
@@ -358,14 +417,21 @@ mod tests {
         assert_eq!(high_frequency_content(&vec![0.0; 513]), 0.0);
     }
 
+    // Port of the energy zero-spectrum case in
+    // tests/src/spectral/test-specdesc.c.
     #[test]
-    fn producer_detail_presets_increase_the_minimum_hit_spacing() {
-        let more = Config::for_sensitivity(0.75);
-        let balanced = Config::for_sensitivity(1.5);
-        let fewer = Config::for_sensitivity(3.0);
-        assert_eq!(more.min_ioi_ms, 50.0);
-        assert_eq!(balanced.min_ioi_ms, 110.0);
-        assert_eq!(fewer.min_ioi_ms, 140.0);
+    fn ported_upstream_energy_zero_spectrum_is_zero() {
+        assert_eq!(spectral_energy(&vec![0.0; 513]), 0.0);
+    }
+
+    #[test]
+    fn sensitivity_never_changes_the_minimum_hit_spacing() {
+        let fewer = Config::for_sensitivity(TransientSensitivity::new(0));
+        let balanced = Config::for_sensitivity(TransientSensitivity::new(50));
+        let more = Config::for_sensitivity(TransientSensitivity::new(100));
+        assert_eq!(more.min_ioi_ms, DEFAULT_MIN_IOI_MS);
+        assert_eq!(balanced.min_ioi_ms, DEFAULT_MIN_IOI_MS);
+        assert_eq!(fewer.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert!(more.threshold < balanced.threshold);
         assert!(balanced.threshold < fewer.threshold);
     }

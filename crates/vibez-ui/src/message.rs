@@ -462,6 +462,16 @@ pub enum Message {
     SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
     ConfirmDrumRackSlice,
     CancelDrumRackSlice,
+    OpenTransientAnalysisDialog {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SetTransientAnalysisSensitivity(u8),
+    TransientAnalysisSensitivityInputChanged(String),
+    SubmitTransientAnalysisSensitivity,
+    ConfirmTransientAnalysis,
+    CancelTransientAnalysis,
     AudioClipDrumRackPrepared {
         location: TimelineLocation,
         track_id: TrackId,
@@ -754,7 +764,7 @@ pub enum Message {
         location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
-        detail: vibez_core::onset::TransientDetectionDetail,
+        sensitivity: vibez_core::onset::TransientSensitivity,
     },
     ClipTransientsDetected(ClipTransientDetection),
     /// Background BPM detection result. `bpm` is `None` when the

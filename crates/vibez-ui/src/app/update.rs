@@ -215,6 +215,69 @@ impl App {
             Message::CancelDrumRackSlice => {
                 self.state.view.drum_rack_slice_dialog = None;
             }
+            Message::OpenTransientAnalysisDialog {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                let clip_exists = self
+                    .timeline_content_at(location, track_id)
+                    .is_some_and(|content| content.clips.iter().any(|clip| clip.id == clip_id));
+                if clip_exists {
+                    self.state.view.transient_analysis_dialog =
+                        Some(crate::state::TransientAnalysisDialog {
+                            location,
+                            track_id,
+                            clip_id,
+                            sensitivity: vibez_core::onset::TransientSensitivity::DEFAULT,
+                            sensitivity_input: vibez_core::onset::TransientSensitivity::DEFAULT
+                                .percent()
+                                .to_string(),
+                        });
+                } else {
+                    self.state.status_text = "The Audio Clip is no longer available".into();
+                }
+            }
+            Message::SetTransientAnalysisSensitivity(percent) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.set_sensitivity(percent);
+                }
+            }
+            Message::TransientAnalysisSensitivityInputChanged(input) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.edit_sensitivity_input(input);
+                }
+            }
+            Message::SubmitTransientAnalysisSensitivity => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.normalize_sensitivity_input();
+                }
+            }
+            Message::CancelTransientAnalysis => {
+                self.state.view.transient_analysis_dialog = None;
+            }
+            Message::ConfirmTransientAnalysis => {
+                let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() else {
+                    return Task::none();
+                };
+                if !dialog.commit_sensitivity_input() {
+                    self.state.status_text = "Enter a sensitivity from 0 to 100%".into();
+                    return Task::none();
+                }
+                let dialog = self
+                    .state
+                    .view
+                    .transient_analysis_dialog
+                    .take()
+                    .expect("validated dialog remains open");
+                return self.dispatch_detect_clip_transients(
+                    dialog.location,
+                    dialog.track_id,
+                    dialog.clip_id,
+                    dialog.sensitivity,
+                    true,
+                );
+            }
             Message::ConfirmDrumRackSlice => {
                 let Some(dialog) = self.state.view.drum_rack_slice_dialog.take() else {
                     return Task::none();
@@ -255,6 +318,22 @@ impl App {
                 });
             }
             Message::Arrangement(msg) => {
+                if matches!(msg, ArrangementMsg::DeleteSelectedClip) {
+                    let location = self.active_timeline_location();
+                    let deleted: std::collections::HashSet<_> = self
+                        .state
+                        .active_timeline_editor()
+                        .selected_clips
+                        .iter()
+                        .filter_map(|selection| match selection {
+                            crate::state::ArrangementSelection::AudioClip { track_id, clip_id } => {
+                                Some((*track_id, *clip_id))
+                            }
+                            crate::state::ArrangementSelection::NoteClip { .. } => None,
+                        })
+                        .collect();
+                    self.state.view.dismiss_clip_dialogs_for(location, &deleted);
+                }
                 if let ArrangementMsg::RequestSliceAudioClipToDrumRack { track_id, clip_id } = &msg
                 {
                     let (track_id, clip_id) = (*track_id, *clip_id);
@@ -754,10 +833,15 @@ impl App {
                 location,
                 track_id,
                 clip_id,
-                detail,
+                sensitivity,
             } => {
-                return self
-                    .dispatch_detect_clip_transients(location, track_id, clip_id, detail, true);
+                return self.dispatch_detect_clip_transients(
+                    location,
+                    track_id,
+                    clip_id,
+                    sensitivity,
+                    true,
+                );
             }
             Message::ClipTransientsDetected(completion) => {
                 return self.finish_detect_clip_transients(completion, undo_gesture);

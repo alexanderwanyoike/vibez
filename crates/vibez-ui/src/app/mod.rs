@@ -219,6 +219,7 @@ mod views_settings_perform;
 mod views_settings_project;
 mod views_settings_updates;
 mod views_shell;
+mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
 

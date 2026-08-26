@@ -174,13 +174,11 @@ pub(super) async fn detect_clip_bpm_async(
 
 pub(super) async fn detect_clip_transients_async(
     audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-    detail: vibez_core::onset::TransientDetectionDetail,
+    sensitivity: vibez_core::onset::TransientSensitivity,
 ) -> Vec<u64> {
-    tokio::task::spawn_blocking(move || {
-        vibez_core::onset::detect_onsets(&audio, detail.sensitivity())
-    })
-    .await
-    .unwrap_or_default()
+    tokio::task::spawn_blocking(move || vibez_core::onset::detect_onsets(&audio, sensitivity))
+        .await
+        .unwrap_or_default()
 }
 
 pub(super) async fn transpose_clip_async(
