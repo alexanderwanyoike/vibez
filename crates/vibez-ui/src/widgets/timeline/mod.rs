@@ -5,6 +5,7 @@ use std::sync::{Arc, Weak};
 
 use vibez_core::clip_timeline::BeatClipTimeline;
 use vibez_core::id::ClipId;
+use vibez_core::track::FadeCurve;
 
 // ── Lightweight data types for rendering ──
 
@@ -24,6 +25,8 @@ pub struct TimelineClip {
     pub loop_end: u64,
     pub fade_in_frames: u64,
     pub fade_out_frames: u64,
+    pub fade_in_curve: FadeCurve,
+    pub fade_out_curve: FadeCurve,
     pub crossfade_in: bool,
     pub crossfade_out: bool,
     /// True when this clip is warped but its `warped_to_bpm` no longer

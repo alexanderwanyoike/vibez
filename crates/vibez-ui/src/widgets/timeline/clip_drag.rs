@@ -3,7 +3,7 @@
 use crate::state::UndoGestureId;
 use vibez_core::id::ClipId;
 
-use super::fade_drag::FadeClipDrag;
+use super::fade_drag::{FadeClipDrag, FadeCurveDrag};
 
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
@@ -23,6 +23,7 @@ pub enum ClipDragAction {
         clip_start_beat: f64,
     },
     FadeClip(FadeClipDrag),
+    FadeCurve(FadeCurveDrag),
     PendingSeek {
         beat: f64,
         start_x: f32,
