@@ -68,6 +68,10 @@ impl Config {
         (self.delay_hops * self.hop_size as f32) as u64
     }
 
+    pub(super) fn minimum_inter_onset_frames(self, sample_rate: u32) -> u64 {
+        ((self.min_ioi_ms / 1_000.0) * sample_rate as f32).round() as u64
+    }
+
     fn validate(self, sample_rate: u32) -> Result<Self, ConfigError> {
         if self.hop_size == 0 {
             return Err(ConfigError::ZeroHopSize);

@@ -83,13 +83,13 @@ pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) ->
     if frames < 1_024 || audio.sample_rate == 0 {
         return Vec::new();
     }
+    let config = aubio::Config::for_complex_candidates(audio.sample_rate);
     // Analyse channels independently. Averaging stereo before analysis can
     // erase an attack when channels carry opposite-polarity content.
     let mut candidates = audio
         .channels
         .iter()
         .flat_map(|channel| {
-            let config = aubio::Config::for_complex_candidates(audio.sample_rate);
             let analysis_delay = config.analysis_delay_frames();
             aubio::detect_complex_onsets(channel, audio.sample_rate, config)
                 .into_iter()
@@ -127,12 +127,20 @@ pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) ->
     // non-silent file start as an onset, but showing that as a suggested
     // transient marker adds no editable information.
     onsets.retain(|&frame| frame > 0 && frame < frames as u64);
+    canonicalize_onsets(
+        &mut onsets,
+        config.minimum_inter_onset_frames(audio.sample_rate),
+    )
+}
+
+fn canonicalize_onsets(onsets: &mut [u64], minimum_interval_frames: u64) -> Vec<u64> {
     onsets.sort_unstable();
     let mut canonical = Vec::with_capacity(onsets.len());
-    for onset in onsets {
-        if canonical.last().is_none_or(|previous: &u64| {
-            onset.abs_diff(*previous) > frames_for_ms(audio.sample_rate, BACKTRACK_HOP_MS) as u64
-        }) {
+    for &onset in onsets.iter() {
+        if canonical
+            .last()
+            .is_none_or(|previous: &u64| onset.abs_diff(*previous) > minimum_interval_frames)
+        {
             canonical.push(onset);
         }
     }
@@ -728,6 +736,20 @@ mod tests {
         assert!(
             results.windows(2).filter(|pair| pair[0] != pair[1]).count() >= 2,
             "sensitivity must provide more than one useful step: {results:?}"
+        );
+    }
+
+    #[test]
+    fn canonical_onsets_merge_cross_channel_candidates_within_aubio_minimum_interval() {
+        let sample_rate = 44_100u32;
+        let first = 10_000u64;
+        let mut onsets = vec![first, first + frames_for_ms(sample_rate, 7.0) as u64];
+        let minimum_interval = aubio::Config::for_complex_candidates(sample_rate)
+            .minimum_inter_onset_frames(sample_rate);
+
+        assert_eq!(
+            canonicalize_onsets(&mut onsets, minimum_interval),
+            vec![first]
         );
     }
 
