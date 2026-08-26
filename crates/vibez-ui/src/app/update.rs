@@ -229,15 +229,28 @@ impl App {
                             location,
                             track_id,
                             clip_id,
-                            detail: vibez_core::onset::TransientDetectionDetail::Balanced,
+                            sensitivity: vibez_core::onset::TransientSensitivity::DEFAULT,
+                            sensitivity_input: vibez_core::onset::TransientSensitivity::DEFAULT
+                                .percent()
+                                .to_string(),
                         });
                 } else {
                     self.state.status_text = "The Audio Clip is no longer available".into();
                 }
             }
-            Message::SetTransientAnalysisDetail(detail) => {
+            Message::SetTransientAnalysisSensitivity(percent) => {
                 if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
-                    dialog.detail = detail;
+                    dialog.set_sensitivity(percent);
+                }
+            }
+            Message::TransientAnalysisSensitivityInputChanged(input) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.edit_sensitivity_input(input);
+                }
+            }
+            Message::SubmitTransientAnalysisSensitivity => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.normalize_sensitivity_input();
                 }
             }
             Message::CancelTransientAnalysis => {
@@ -251,7 +264,7 @@ impl App {
                     dialog.location,
                     dialog.track_id,
                     dialog.clip_id,
-                    dialog.detail,
+                    dialog.sensitivity,
                     true,
                 );
             }
@@ -794,10 +807,15 @@ impl App {
                 location,
                 track_id,
                 clip_id,
-                detail,
+                sensitivity,
             } => {
-                return self
-                    .dispatch_detect_clip_transients(location, track_id, clip_id, detail, true);
+                return self.dispatch_detect_clip_transients(
+                    location,
+                    track_id,
+                    clip_id,
+                    sensitivity,
+                    true,
+                );
             }
             Message::ClipTransientsDetected(completion) => {
                 return self.finish_detect_clip_transients(completion, undo_gesture);

@@ -18,22 +18,36 @@ use crate::audio_buffer::DecodedAudio;
 
 mod aubio;
 
-/// Producer-facing amount of transient detail to retain during analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TransientDetectionDetail {
-    Fewer,
-    #[default]
-    Balanced,
-    More,
+/// Producer-facing transient sensitivity. Higher percentages retain quieter
+/// attacks; lower percentages keep only the most prominent attacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TransientSensitivity(u8);
+
+impl TransientSensitivity {
+    pub const MIN_PERCENT: u8 = 0;
+    pub const MAX_PERCENT: u8 = 100;
+    pub const DEFAULT: Self = Self(50);
+
+    pub const fn new(percent: u8) -> Self {
+        Self(if percent > Self::MAX_PERCENT {
+            Self::MAX_PERCENT
+        } else {
+            percent
+        })
+    }
+
+    pub const fn percent(self) -> u8 {
+        self.0
+    }
+
+    pub(crate) fn normalized(self) -> f32 {
+        self.0 as f32 / Self::MAX_PERCENT as f32
+    }
 }
 
-impl TransientDetectionDetail {
-    pub fn sensitivity(self) -> f32 {
-        match self {
-            Self::Fewer => 3.0,
-            Self::Balanced => 1.5,
-            Self::More => 0.75,
-        }
+impl Default for TransientSensitivity {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
@@ -49,10 +63,9 @@ const PREEMPHASIS: f32 = 0.97;
 
 /// Detect onsets in `audio` and return sample indices.
 ///
-/// `sensitivity` scales the adaptive threshold: `threshold = mean +
-/// sensitivity * std`. Typical range is `1.0` (loose) to `2.5`
-/// (tight). `1.5` is a reasonable default for drum loops.
-pub fn detect_onsets(audio: &DecodedAudio, sensitivity: f32) -> Vec<u64> {
+/// Sensitivity changes aubio's peak-picking threshold without changing its
+/// minimum inter-onset interval. Higher percentages retain more attacks.
+pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) -> Vec<u64> {
     let frames = audio.num_frames();
     if frames < 1_024 || audio.sample_rate == 0 {
         return Vec::new();
@@ -235,7 +248,7 @@ pub fn detect_bpm(audio: &DecodedAudio, sample_rate: u32) -> Option<BpmEstimate>
     // Gate: sparse clips with weak ACF are rejected rather than
     // guessed. This is the difference between "we detected nothing"
     // and "we detected garbage".
-    let onsets_count = detect_onsets(audio, 1.5).len();
+    let onsets_count = detect_onsets(audio, TransientSensitivity::DEFAULT).len();
     if onsets_count < 8 && confidence_ratio < 1.5 {
         return None;
     }
@@ -361,19 +374,19 @@ mod tests {
     #[test]
     fn empty_audio_returns_no_onsets() {
         let audio = make_audio(vec![], 44_100);
-        assert!(detect_onsets(&audio, 1.5).is_empty());
+        assert!(detect_onsets(&audio, TransientSensitivity::DEFAULT).is_empty());
     }
 
     #[test]
     fn very_short_audio_returns_no_onsets() {
         let audio = make_audio(vec![vec![0.5; 20], vec![0.5; 20]], 44_100);
-        assert!(detect_onsets(&audio, 1.5).is_empty());
+        assert!(detect_onsets(&audio, TransientSensitivity::DEFAULT).is_empty());
     }
 
     #[test]
     fn silence_produces_no_onsets() {
         let audio = make_audio(vec![vec![0.0; 22_050], vec![0.0; 22_050]], 44_100);
-        assert!(detect_onsets(&audio, 1.5).is_empty());
+        assert!(detect_onsets(&audio, TransientSensitivity::DEFAULT).is_empty());
     }
 
     #[test]
@@ -381,7 +394,7 @@ mod tests {
         // A DC step is a legitimate transient at the attack, so we expect at
         // most one onset, located near the start, and none mid-signal.
         let audio = make_audio(vec![vec![0.25; 44_100], vec![0.25; 44_100]], 44_100);
-        let onsets = detect_onsets(&audio, 1.5);
+        let onsets = detect_onsets(&audio, TransientSensitivity::DEFAULT);
         assert!(onsets.len() <= 1, "got {:?}", onsets);
         if let Some(&first) = onsets.first() {
             assert!(first < 4_410, "unexpected mid-signal onset at {first}");
@@ -392,7 +405,7 @@ mod tests {
     fn impulse_train_detects_hits() {
         // 8 hits at 8820-sample spacing = 200ms at 44.1kHz.
         let audio = burst_train(44_100, &[8_820; 8]);
-        let onsets = detect_onsets(&audio, 1.2);
+        let onsets = detect_onsets(&audio, TransientSensitivity::new(60));
         assert!(
             onsets.len() >= 6,
             "expected ~8 detections, got {}: {:?}",
@@ -408,6 +421,19 @@ mod tests {
     }
 
     #[test]
+    fn strong_sixteenth_note_attacks_are_not_suppressed_by_sensitivity() {
+        // Sixteenth notes at 120 BPM are 125 ms apart. Sensitivity may reject
+        // quieter attacks, but it must not impose a longer timing gap that
+        // blindly removes every other strong hit.
+        let audio = burst_train(44_100, &[5_512; 8]);
+        let onsets = detect_onsets(&audio, TransientSensitivity::new(0));
+        assert!(
+            onsets.len() >= 7,
+            "expected the eight strong attacks to survive, got {onsets:?}"
+        );
+    }
+
+    #[test]
     fn refractory_prevents_double_triggers() {
         // Two spikes 10ms apart: should collapse to one onset (refractory 30ms).
         let sr = 44_100u32;
@@ -419,7 +445,7 @@ mod tests {
             }
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
-        let onsets = detect_onsets(&audio, 1.0);
+        let onsets = detect_onsets(&audio, TransientSensitivity::new(70));
         assert!(
             onsets.len() == 1,
             "refractory violated: {} onsets {:?}",
@@ -440,7 +466,7 @@ mod tests {
             }
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
-        let onsets = detect_onsets(&audio, 1.2);
+        let onsets = detect_onsets(&audio, TransientSensitivity::new(60));
         assert!(!onsets.is_empty());
         for exp in expected.iter() {
             let found = onsets.iter().any(|&o| (o as i64 - *exp as i64).abs() < 512);
@@ -455,7 +481,10 @@ mod tests {
     #[test]
     fn onset_detection_is_deterministic_for_identical_audio() {
         let audio = burst_train(44_100, &[8_820; 8]);
-        assert_eq!(detect_onsets(&audio, 1.5), detect_onsets(&audio, 1.5));
+        assert_eq!(
+            detect_onsets(&audio, TransientSensitivity::DEFAULT),
+            detect_onsets(&audio, TransientSensitivity::DEFAULT)
+        );
     }
 
     #[test]
@@ -467,13 +496,11 @@ mod tests {
             buf[i] = 0.05;
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
-        let loose = detect_onsets(&audio, 1.0).len();
-        let tight = detect_onsets(&audio, 3.0).len();
+        let low = detect_onsets(&audio, TransientSensitivity::new(0)).len();
+        let high = detect_onsets(&audio, TransientSensitivity::new(100)).len();
         assert!(
-            tight <= loose,
-            "tight {} should not exceed loose {}",
-            tight,
-            loose
+            high >= low,
+            "high sensitivity {high} should not detect fewer attacks than low sensitivity {low}",
         );
     }
 

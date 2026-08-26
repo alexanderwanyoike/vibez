@@ -8,6 +8,7 @@
 //! aubio is licensed under GPL-3.0-or-later. Vibez carries the same compatible
 //! licence. Upstream source: <https://github.com/aubio/aubio/tree/0.4.9>.
 
+use super::TransientSensitivity;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
 
@@ -28,19 +29,19 @@ pub(super) struct Config {
 }
 
 impl Config {
-    pub(super) fn for_sensitivity(sensitivity: f32) -> Self {
-        let sensitivity = sensitivity.clamp(0.25, 5.0);
-        let min_ioi_ms = if sensitivity <= 1.5 {
-            50.0 + ((sensitivity - 0.75) / 0.75).clamp(0.0, 1.0) * 60.0
+    pub(super) fn for_sensitivity(sensitivity: TransientSensitivity) -> Self {
+        // aubio documents 0.001..=0.900 as the useful peak-threshold range.
+        // Interpolate logarithmically through its HFC default at 50%, giving
+        // useful travel at both ends instead of bunching every result near the
+        // middle of the knob.
+        let normalized = sensitivity.normalized();
+        let threshold = if normalized <= 0.5 {
+            0.9 * (DEFAULT_THRESHOLD / 0.9).powf(normalized / 0.5)
         } else {
-            110.0 + ((sensitivity - 1.5) / 3.5).clamp(0.0, 1.0) * 70.0
+            DEFAULT_THRESHOLD * (0.001 / DEFAULT_THRESHOLD).powf((normalized - 0.5) / 0.5)
         };
         Self {
-            // Aubio's default HFC threshold is 0.058. Keep the existing Vibez
-            // midpoint (1.5) pinned to that reference value and make larger
-            // values progressively more selective.
-            threshold: DEFAULT_THRESHOLD * (sensitivity / 1.5),
-            min_ioi_ms,
+            threshold,
             ..Self::default()
         }
     }
@@ -359,13 +360,13 @@ mod tests {
     }
 
     #[test]
-    fn producer_detail_presets_increase_the_minimum_hit_spacing() {
-        let more = Config::for_sensitivity(0.75);
-        let balanced = Config::for_sensitivity(1.5);
-        let fewer = Config::for_sensitivity(3.0);
-        assert_eq!(more.min_ioi_ms, 50.0);
-        assert_eq!(balanced.min_ioi_ms, 110.0);
-        assert_eq!(fewer.min_ioi_ms, 140.0);
+    fn sensitivity_never_changes_the_minimum_hit_spacing() {
+        let fewer = Config::for_sensitivity(TransientSensitivity::new(0));
+        let balanced = Config::for_sensitivity(TransientSensitivity::new(50));
+        let more = Config::for_sensitivity(TransientSensitivity::new(100));
+        assert_eq!(more.min_ioi_ms, DEFAULT_MIN_IOI_MS);
+        assert_eq!(balanced.min_ioi_ms, DEFAULT_MIN_IOI_MS);
+        assert_eq!(fewer.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert!(more.threshold < balanced.threshold);
         assert!(balanced.threshold < fewer.threshold);
     }

@@ -467,7 +467,9 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
-    SetTransientAnalysisDetail(vibez_core::onset::TransientDetectionDetail),
+    SetTransientAnalysisSensitivity(u8),
+    TransientAnalysisSensitivityInputChanged(String),
+    SubmitTransientAnalysisSensitivity,
     ConfirmTransientAnalysis,
     CancelTransientAnalysis,
     AudioClipDrumRackPrepared {
@@ -762,7 +764,7 @@ pub enum Message {
         location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
-        detail: vibez_core::onset::TransientDetectionDetail,
+        sensitivity: vibez_core::onset::TransientSensitivity,
     },
     ClipTransientsDetected(ClipTransientDetection),
     /// Background BPM detection result. `bpm` is `None` when the

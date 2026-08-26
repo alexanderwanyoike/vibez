@@ -171,12 +171,42 @@ pub struct DrumRackSliceDialog {
     pub markers: crate::domains::arrangement::AudioSliceMarkers,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransientAnalysisDialog {
     pub location: vibez_project::TimelineLocation,
     pub track_id: TrackId,
     pub clip_id: ClipId,
-    pub detail: vibez_core::onset::TransientDetectionDetail,
+    pub sensitivity: vibez_core::onset::TransientSensitivity,
+    pub sensitivity_input: String,
+}
+
+impl TransientAnalysisDialog {
+    pub fn set_sensitivity(&mut self, percent: u8) {
+        self.sensitivity = vibez_core::onset::TransientSensitivity::new(percent);
+        self.sensitivity_input = self.sensitivity.percent().to_string();
+    }
+
+    pub fn edit_sensitivity_input(&mut self, input: String) {
+        if let Some(sensitivity) = parse_transient_sensitivity(&input) {
+            self.sensitivity = sensitivity;
+        }
+        self.sensitivity_input = input;
+    }
+
+    pub fn normalize_sensitivity_input(&mut self) {
+        self.sensitivity_input = self.sensitivity.percent().to_string();
+    }
+}
+
+fn parse_transient_sensitivity(input: &str) -> Option<vibez_core::onset::TransientSensitivity> {
+    let percent = input
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<u8>()
+        .ok()?;
+    (percent <= vibez_core::onset::TransientSensitivity::MAX_PERCENT)
+        .then(|| vibez_core::onset::TransientSensitivity::new(percent))
 }
 
 /// Right-click context menu state.
@@ -1168,20 +1198,36 @@ mod tests {
     }
 
     #[test]
-    fn transient_analysis_is_a_dedicated_modal_with_balanced_default_detail() {
+    fn transient_analysis_accepts_knob_and_exact_percent_edits() {
         let mut state = AppState::default();
-        let dialog = TransientAnalysisDialog {
+        let mut dialog = TransientAnalysisDialog {
             location: vibez_project::TimelineLocation::Arrange,
             track_id: TrackId::new(),
             clip_id: ClipId::new(),
-            detail: vibez_core::onset::TransientDetectionDetail::Balanced,
+            sensitivity: vibez_core::onset::TransientSensitivity::DEFAULT,
+            sensitivity_input: "50".into(),
         };
 
-        state.view.transient_analysis_dialog = Some(dialog);
+        dialog.set_sensitivity(73);
+        assert_eq!(dialog.sensitivity.percent(), 73);
+        assert_eq!(dialog.sensitivity_input, "73");
 
+        dialog.edit_sensitivity_input("84%".into());
+        assert_eq!(dialog.sensitivity.percent(), 84);
+        dialog.edit_sensitivity_input("nope".into());
+        assert_eq!(dialog.sensitivity.percent(), 84);
+        dialog.normalize_sensitivity_input();
+        assert_eq!(dialog.sensitivity_input, "84");
+
+        state.view.transient_analysis_dialog = Some(dialog);
         assert_eq!(
-            state.view.transient_analysis_dialog.unwrap().detail,
-            vibez_core::onset::TransientDetectionDetail::Balanced
+            state
+                .view
+                .transient_analysis_dialog
+                .unwrap()
+                .sensitivity
+                .percent(),
+            84
         );
     }
 
