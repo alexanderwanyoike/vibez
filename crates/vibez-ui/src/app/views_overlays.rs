@@ -48,7 +48,171 @@ fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
     requested_x.clamp(0.0, maximum_x)
 }
 
+fn drum_rack_slice_choice(
+    label: &'static str,
+    count: usize,
+    selected: bool,
+    markers: AudioSliceMarkers,
+) -> Element<'static, Message> {
+    button(
+        column![
+            text(label)
+                .size(13)
+                .color(if selected { th::accent() } else { th::text() }),
+            text(if count == 0 {
+                "No interior slices".into()
+            } else {
+                format!("{count} slices")
+            })
+            .size(10)
+            .color(th::text_dim())
+        ]
+        .spacing(3),
+    )
+    .on_press(Message::SetDrumRackSliceMarkers(markers))
+    .padding([9, 11])
+    .width(Length::Fill)
+    .style(move |_theme: &Theme, status| button::Style {
+        background: Some(
+            if selected {
+                th::accent_dim()
+            } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                th::bg_hover()
+            } else {
+                th::bg_elevated()
+            }
+            .into(),
+        ),
+        text_color: th::text(),
+        border: iced::Border {
+            color: if selected { th::accent() } else { th::border() },
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+fn drum_rack_slice_can_create(slice_count: usize) -> bool {
+    slice_count > 0 && slice_count <= vibez_core::track::DRUM_RACK_PAD_COUNT
+}
+
 impl App {
+    pub(super) fn view_drum_rack_slice_overlay(&self) -> Element<'_, Message> {
+        let dialog = self
+            .state
+            .view
+            .drum_rack_slice_dialog
+            .expect("Drum Rack slice overlay requires a pending request");
+        let clip = self
+            .timeline_content_at(dialog.location, dialog.track_id)
+            .and_then(|content| content.clips.iter().find(|clip| clip.id == dialog.clip_id));
+        let transient_count = clip.map_or(0, |clip| {
+            crate::domains::arrangement::slice_region_count(clip, AudioSliceMarkers::Transients)
+        });
+        let warp_count = clip.map_or(0, |clip| {
+            crate::domains::arrangement::slice_region_count(clip, AudioSliceMarkers::Warp)
+        });
+        let selected_count = match dialog.markers {
+            AudioSliceMarkers::Transients => transient_count,
+            AudioSliceMarkers::Warp => warp_count,
+        };
+        let pad_count = vibez_core::track::DRUM_RACK_PAD_COUNT;
+        let can_create = drum_rack_slice_can_create(selected_count);
+        let guidance = if selected_count == 0 {
+            "This marker type has no interior slices.".to_string()
+        } else if selected_count > pad_count {
+            format!(
+                "{selected_count} slices cannot fit {pad_count} pads. Use fewer markers or choose Warp markers."
+            )
+        } else {
+            format!("{selected_count} slices will fill {selected_count} of {pad_count} pads.")
+        };
+        let cancel = button(text("Cancel").size(12).color(th::text()))
+            .on_press(Message::CancelDrumRackSlice)
+            .padding([7, 14]);
+        let create = button(text("Create Drum Rack").size(12).color(th::bg_dark()))
+            .on_press_maybe(can_create.then_some(Message::ConfirmDrumRackSlice))
+            .padding([7, 14])
+            .style(move |_theme: &Theme, status| {
+                let background = if !can_create {
+                    th::text_muted()
+                } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                    th::accent_dim()
+                } else {
+                    th::accent()
+                };
+                button::Style {
+                    background: Some(background.into()),
+                    text_color: th::bg_dark(),
+                    border: iced::Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+        let card = container(
+            column![
+                text("Slice to Drum Rack").size(18).color(th::text()),
+                text("Choose which timing markers become pads.")
+                    .size(11)
+                    .color(th::text_dim()),
+                row![
+                    drum_rack_slice_choice(
+                        "Transient markers",
+                        transient_count,
+                        dialog.markers == AudioSliceMarkers::Transients,
+                        AudioSliceMarkers::Transients,
+                    ),
+                    drum_rack_slice_choice(
+                        "Warp markers",
+                        warp_count,
+                        dialog.markers == AudioSliceMarkers::Warp,
+                        AudioSliceMarkers::Warp,
+                    ),
+                ]
+                .spacing(8),
+                text(guidance).size(11).color(if can_create {
+                    th::text_dim()
+                } else {
+                    th::danger()
+                }),
+                text("A MIDI clip will be created to reconstruct the original rhythm.")
+                    .size(10)
+                    .color(th::text_muted()),
+                row![horizontal_space(), cancel, create]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            ]
+            .spacing(12),
+        )
+        .width(Length::Fixed(440.0))
+        .padding(18)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            border: iced::Border {
+                color: th::border_light(),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        });
+
+        mouse_area(
+            center(card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
+                    ..Default::default()
+                }),
+        )
+        .on_press(Message::CancelDrumRackSlice)
+        .into()
+    }
+
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
         let track_id = self
             .state
@@ -897,6 +1061,14 @@ impl App {
                         markers: AudioSliceMarkers::Warp,
                     }),
                 ));
+                col = col.push(menu_btn(
+                    icons::MUSIC,
+                    "Slice to Drum Rack…".into(),
+                    Message::Arrangement(ArrangementMsg::RequestSliceAudioClipToDrumRack {
+                        track_id,
+                        clip_id,
+                    }),
+                ));
                 col.into()
             }
             ContextMenuTarget::ArrangementEmpty => column![
@@ -947,7 +1119,10 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{context_menu_x, project_track_deletion_list_height, CONTEXT_MENU_CLIP_WIDTH};
+    use super::{
+        context_menu_x, drum_rack_slice_can_create, project_track_deletion_list_height,
+        CONTEXT_MENU_CLIP_WIDTH,
+    };
 
     #[test]
     fn deletion_location_list_grows_with_content_then_caps() {
@@ -962,5 +1137,13 @@ mod tests {
         let x = context_menu_x(1_862.0, CONTEXT_MENU_CLIP_WIDTH, 1_920.0);
 
         assert_eq!(x, 1_676.0);
+    }
+
+    #[test]
+    fn drum_rack_slice_dialog_never_accepts_empty_or_overflowing_racks() {
+        assert!(!drum_rack_slice_can_create(0));
+        assert!(drum_rack_slice_can_create(1));
+        assert!(drum_rack_slice_can_create(16));
+        assert!(!drum_rack_slice_can_create(17));
     }
 }

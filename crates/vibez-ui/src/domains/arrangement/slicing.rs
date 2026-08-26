@@ -86,7 +86,7 @@ impl TimelineEditorState {
     }
 }
 
-pub(super) fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
+pub(crate) fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) -> Vec<u64> {
     let source_frames: Vec<_> = match markers {
         AudioSliceMarkers::Transients => clip
             .transient_markers
@@ -135,7 +135,7 @@ pub(super) fn marker_cut_positions(clip: &UiClip, markers: AudioSliceMarkers) ->
 /// Complete Clip-local boundaries for independently playable slices. Loop
 /// wraps are boundaries even when no marker lands there, because a single
 /// one-shot slice cannot represent a discontinuous source range.
-pub(super) fn slice_boundaries(clip: &UiClip, mut cuts: Vec<u64>) -> Vec<u64> {
+pub(crate) fn slice_boundaries(clip: &UiClip, mut cuts: Vec<u64>) -> Vec<u64> {
     cuts.extend(clip.timeline().wraps().filter_map(|position| {
         let cut = match clip.playback_direction {
             ClipPlaybackDirection::Forward => position,
@@ -151,6 +151,15 @@ pub(super) fn slice_boundaries(clip: &UiClip, mut cuts: Vec<u64>) -> Vec<u64> {
     boundaries.extend(cuts);
     boundaries.push(clip.duration);
     boundaries
+}
+
+pub(crate) fn slice_region_count(clip: &UiClip, markers: AudioSliceMarkers) -> usize {
+    let cuts = marker_cut_positions(clip, markers);
+    if cuts.is_empty() {
+        0
+    } else {
+        slice_boundaries(clip, cuts).len() - 1
+    }
 }
 
 const fn marker_label(markers: AudioSliceMarkers) -> &'static str {

@@ -784,6 +784,7 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Transients,
             source: prepared_source,
             audio: prepared_audio,
         },

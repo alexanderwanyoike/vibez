@@ -10,7 +10,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
-use vibez_engine::commands::{AuditionStart, EngineCommand};
+use vibez_engine::commands::EngineCommand;
 
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::UiClip;
@@ -731,32 +731,9 @@ impl App {
                 )
             }
             None => {
-                // No active drag: treat release as a click.
-                // Select the pad AND audition its loaded sample
-                // via the engine's Audition Bus (bypasses
-                // transport + mute + solo; one-shot). This is
-                // the fastest way to hear what's on a pad
-                // without drawing notes into the piano roll.
-                let audition = self
-                    .state
-                    .find_track(track_id)
-                    .and_then(|track| track.drum_rack_pads.get(pad_index))
-                    .and_then(|pad| {
-                        pad.audio.as_ref().map(|audio| {
-                            (
-                                Arc::clone(audio),
-                                pad.name.clone().unwrap_or_else(|| "sample".into()),
-                            )
-                        })
-                    });
-                if let Some((audio, name)) = audition {
-                    self.send_command(EngineCommand::StartAudition {
-                        audio,
-                        start: AuditionStart::Immediate,
-                        looped: false,
-                    });
-                    self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
-                }
+                // A click is a note sent through the Drum Rack's own track.
+                // Browser audition is reserved for Browser previews, otherwise
+                // one pad press reaches two independent playback paths.
                 self.update(Message::select_drum_rack_pad(track_id, pad_index))
             }
         }

@@ -207,6 +207,53 @@ impl App {
                 };
                 self.apply_devices_action(action);
             }
+            Message::SetDrumRackSliceMarkers(markers) => {
+                if let Some(dialog) = self.state.view.drum_rack_slice_dialog.as_mut() {
+                    dialog.markers = markers;
+                }
+            }
+            Message::CancelDrumRackSlice => {
+                self.state.view.drum_rack_slice_dialog = None;
+            }
+            Message::ConfirmDrumRackSlice => {
+                let Some(dialog) = self.state.view.drum_rack_slice_dialog.take() else {
+                    return Task::none();
+                };
+                let Some(clip) = self
+                    .timeline_content_at(dialog.location, dialog.track_id)
+                    .and_then(|content| content.clips.iter().find(|clip| clip.id == dialog.clip_id))
+                    .cloned()
+                else {
+                    self.state.status_text = "The Audio Clip is no longer available".into();
+                    return Task::none();
+                };
+                let slice_count =
+                    crate::domains::arrangement::slice_region_count(&clip, dialog.markers);
+                if slice_count == 0 || slice_count > vibez_core::track::DRUM_RACK_PAD_COUNT {
+                    self.state.view.drum_rack_slice_dialog = Some(dialog);
+                    self.state.status_text = if slice_count == 0 {
+                        "The selected marker type has no interior slices".into()
+                    } else {
+                        format!(
+                            "{slice_count} slices will not fit the {}-pad Drum Rack",
+                            vibez_core::track::DRUM_RACK_PAD_COUNT
+                        )
+                    };
+                    return Task::none();
+                }
+                self.state.status_text = "Preparing Drum Rack slices…".into();
+                let expected_clip = Box::new(clip.clone());
+                return Task::perform(prepare_drum_rack_audio_async(clip), move |result| {
+                    Message::AudioClipDrumRackPrepared {
+                        location: dialog.location,
+                        track_id: dialog.track_id,
+                        clip_id: dialog.clip_id,
+                        markers: dialog.markers,
+                        expected_clip: expected_clip.clone(),
+                        result,
+                    }
+                });
+            }
             Message::Arrangement(msg) => {
                 if let ArrangementMsg::RequestSliceAudioClipToDrumRack { track_id, clip_id } = &msg
                 {
@@ -219,17 +266,36 @@ impl App {
                     else {
                         return Task::none();
                     };
-                    self.state.status_text = "Preparing Drum Rack slices…".into();
-                    let expected_clip = Box::new(clip.clone());
-                    return Task::perform(prepare_drum_rack_audio_async(clip), move |result| {
-                        Message::AudioClipDrumRackPrepared {
+                    if clip.source.is_none() {
+                        self.state.status_text =
+                            "Slice to Drum Rack needs available Source Media".into();
+                        return Task::none();
+                    }
+                    let transient_count = crate::domains::arrangement::slice_region_count(
+                        &clip,
+                        crate::domains::arrangement::AudioSliceMarkers::Transients,
+                    );
+                    let warp_count = crate::domains::arrangement::slice_region_count(
+                        &clip,
+                        crate::domains::arrangement::AudioSliceMarkers::Warp,
+                    );
+                    if transient_count == 0 && warp_count == 0 {
+                        self.state.status_text =
+                            "Add an interior Transient or Warp marker before slicing".into();
+                        return Task::none();
+                    }
+                    self.state.view.drum_rack_slice_dialog =
+                        Some(crate::state::DrumRackSliceDialog {
                             location,
                             track_id,
                             clip_id,
-                            expected_clip: expected_clip.clone(),
-                            result,
-                        }
-                    });
+                            markers: if transient_count > 0 {
+                                crate::domains::arrangement::AudioSliceMarkers::Transients
+                            } else {
+                                crate::domains::arrangement::AudioSliceMarkers::Warp
+                            },
+                        });
+                    return Task::none();
                 }
                 let deferred_snapshot = msg.defers_project_edit().then(|| self.take_snapshot());
                 let playhead_beats = self.focused_editor_playhead_beats();
@@ -266,6 +332,7 @@ impl App {
                 location,
                 track_id,
                 clip_id,
+                markers,
                 expected_clip,
                 result,
             } => match result {
@@ -285,6 +352,7 @@ impl App {
                         ArrangementMsg::SliceAudioClipToDrumRack {
                             track_id,
                             clip_id,
+                            markers,
                             source: prepared.source,
                             audio: prepared.audio,
                         },

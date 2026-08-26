@@ -30,6 +30,7 @@ mod clipboard;
 mod crossfades;
 mod slice_to_drum_rack;
 mod slicing;
+pub(crate) use slicing::slice_region_count;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -818,6 +819,7 @@ impl TimelineEditorState {
             ArrangementMsg::SliceAudioClipToDrumRack {
                 track_id,
                 clip_id,
+                markers,
                 source,
                 audio,
             } => {
@@ -825,8 +827,11 @@ impl TimelineEditorState {
                     project_tracks,
                     track_id,
                     clip_id,
-                    source,
-                    audio,
+                    slice_to_drum_rack::DrumRackSliceMaterial {
+                        markers,
+                        source,
+                        audio,
+                    },
                     ctx,
                 );
             }

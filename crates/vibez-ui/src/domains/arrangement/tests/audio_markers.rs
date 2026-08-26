@@ -21,6 +21,7 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Transients,
             source: shared_source.clone().unwrap(),
             audio: Arc::clone(&shared_audio),
         },
@@ -91,6 +92,7 @@ fn slice_to_drum_rack_turns_loop_wraps_into_distinct_flattened_pad_ranges() {
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Transients,
             source: MediaSourceRef::LocalFile {
                 path: "loop-slices.wav".into(),
             },
@@ -136,7 +138,7 @@ fn slice_to_drum_rack_turns_loop_wraps_into_distinct_flattened_pad_ranges() {
 }
 
 #[test]
-fn slice_to_drum_rack_falls_back_to_warp_markers_and_caps_the_rack_at_sixteen() {
+fn slice_to_drum_rack_rejects_more_regions_than_available_pads() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
     let original = &mut arrangement.tracks[0].clips[0];
@@ -154,6 +156,7 @@ fn slice_to_drum_rack_falls_back_to_warp_markers_and_caps_the_rack_at_sixteen() 
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Warp,
             source,
             audio,
         },
@@ -164,21 +167,12 @@ fn slice_to_drum_rack_falls_back_to_warp_markers_and_caps_the_rack_at_sixteen() 
         },
     );
 
-    let drum_track = arrangement
-        .find_track(action.replay_project_track.unwrap())
-        .unwrap();
-    assert_eq!(
-        drum_track
-            .drum_rack_pads
-            .iter()
-            .filter(|pad| pad.source.is_some())
-            .count(),
-        16
-    );
-    assert_eq!(drum_track.note_clips[0].notes.len(), 16);
+    assert!(!action.mark_dirty);
+    assert!(action.replay_project_track.is_none());
+    assert_eq!(arrangement.tracks.len(), 1);
     let status = action.status.unwrap();
-    assert!(status.contains("Warp slices"));
-    assert!(status.contains("folded into the last pad"));
+    assert!(status.contains("20 slices"));
+    assert!(status.contains("will not fit"));
 }
 
 #[test]
@@ -195,6 +189,7 @@ fn slice_to_drum_rack_without_markers_leaves_no_partial_track() {
         ArrangementMsg::SliceAudioClipToDrumRack {
             track_id: source_track_id,
             clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Transients,
             source,
             audio,
         },

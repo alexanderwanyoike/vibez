@@ -111,6 +111,7 @@ pub struct ViewState {
     pub adaptive_grid: bool,
     pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
+    pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub edit_menu_open: bool,
     pub cursor_x: f32, // globally tracked for popup positioning and pane drags
     pub cursor_y: f32,
@@ -136,6 +137,7 @@ impl Default for ViewState {
             adaptive_grid: false,
             adaptive_grid_bias: 0,
             context_menu: None,
+            drum_rack_slice_dialog: None,
             edit_menu_open: false,
             cursor_x: 0.0,
             cursor_y: 0.0,
@@ -157,6 +159,14 @@ impl ViewState {
             self.adaptive_grid_bias,
         )
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrumRackSliceDialog {
+    pub location: vibez_project::TimelineLocation,
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub markers: crate::domains::arrangement::AudioSliceMarkers,
 }
 
 /// Right-click context menu state.

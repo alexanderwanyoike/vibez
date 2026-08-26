@@ -17,16 +17,26 @@ use super::{ArrangementAction, ArrangementCtx, AudioSliceMarkers};
 
 const SLICE_VELOCITY: u8 = 127;
 
+pub(super) struct DrumRackSliceMaterial {
+    pub markers: AudioSliceMarkers,
+    pub source: MediaSourceRef,
+    pub audio: Arc<DecodedAudio>,
+}
+
 impl TimelineEditorState {
     pub(super) fn slice_audio_clip_to_drum_rack(
         &mut self,
         project_tracks: &mut ProjectTracksState,
         source_track_id: TrackId,
         source_clip_id: ClipId,
-        source: MediaSourceRef,
-        audio: Arc<DecodedAudio>,
+        material: DrumRackSliceMaterial,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
+        let DrumRackSliceMaterial {
+            markers,
+            source,
+            audio,
+        } = material;
         let Some(original) = self
             .find_content(source_track_id)
             .and_then(|content| content.clips.iter().find(|clip| clip.id == source_clip_id))
@@ -40,27 +50,20 @@ impl TimelineEditorState {
             return failure("Slice to Drum Rack needs available audio and a valid tempo");
         }
 
-        let transient_cuts = marker_cut_positions(&original, AudioSliceMarkers::Transients);
-        let (cuts, marker_kind) = if transient_cuts.is_empty() {
-            (
-                marker_cut_positions(&original, AudioSliceMarkers::Warp),
-                AudioSliceMarkers::Warp,
-            )
-        } else {
-            (transient_cuts, AudioSliceMarkers::Transients)
-        };
+        let cuts = marker_cut_positions(&original, markers);
         if cuts.is_empty() {
-            return failure("Add at least one interior Transient or Warp Marker first");
+            return failure(&format!(
+                "Add at least one interior {} first",
+                marker_name(markers)
+            ));
         }
-        let all_boundaries = slice_boundaries(&original, cuts);
-        let total_regions = all_boundaries.len() - 1;
-        let boundaries = if total_regions > DRUM_RACK_PAD_COUNT {
-            let mut limited = all_boundaries[..DRUM_RACK_PAD_COUNT].to_vec();
-            limited.push(original.duration);
-            limited
-        } else {
-            all_boundaries
-        };
+        let boundaries = slice_boundaries(&original, cuts);
+        let total_regions = boundaries.len() - 1;
+        if total_regions > DRUM_RACK_PAD_COUNT {
+            return failure(&format!(
+                "{total_regions} slices will not fit the {DRUM_RACK_PAD_COUNT}-pad Drum Rack; reduce the markers first"
+            ));
+        }
         let source_frames = audio.num_frames() as f32;
         let mut pads = Vec::with_capacity(boundaries.len() - 1);
         let mut notes = Vec::with_capacity(boundaries.len() - 1);
@@ -133,19 +136,12 @@ impl TimelineEditorState {
         });
         self.selected_note_clip = Some((track_id, note_clip_id));
 
-        let truncation = (total_regions > DRUM_RACK_PAD_COUNT).then(|| {
-            format!(
-                "; {} later marker regions were folded into the last pad",
-                total_regions - DRUM_RACK_PAD_COUNT
-            )
-        });
         ArrangementAction {
             replay_project_track: Some(track_id),
             status: Some(format!(
-                "Created {track_name} with {} {} slices{}",
+                "Created {track_name} with {} {} slices",
                 boundaries.len() - 1,
-                marker_name(marker_kind),
-                truncation.as_deref().unwrap_or_default()
+                marker_name(markers),
             )),
             mark_dirty: true,
             ..ArrangementAction::default()

@@ -235,6 +235,7 @@ pub enum ArrangementMsg {
     SliceAudioClipToDrumRack {
         track_id: TrackId,
         clip_id: ClipId,
+        markers: AudioSliceMarkers,
         source: MediaSourceRef,
         audio: Arc<DecodedAudio>,
     },

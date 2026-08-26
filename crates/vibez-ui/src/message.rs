@@ -459,10 +459,14 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
+    SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
+    ConfirmDrumRackSlice,
+    CancelDrumRackSlice,
     AudioClipDrumRackPrepared {
         location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
+        markers: crate::domains::arrangement::AudioSliceMarkers,
         expected_clip: Box<crate::state::UiClip>,
         result: Result<PreparedDrumRackAudio, String>,
     },
