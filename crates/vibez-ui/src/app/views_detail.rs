@@ -18,8 +18,8 @@ use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 use super::*;
 
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
-const AUDIO_DETAIL_PANEL_MIN_HEIGHT: f32 = 260.0;
-const MIDI_DETAIL_PANEL_MIN_HEIGHT: f32 = 360.0;
+const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
+const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
 // The transport, workspace tabs and status chrome consume roughly 140 px at
 // the default density. Reserve another 440 px for the actual workspace so a
 // dragged detail panel can never crush Perform or Arrange into a letterbox.
@@ -45,14 +45,14 @@ pub(super) fn resolved_detail_playhead_samples(
 fn effective_detail_panel_height(
     preferred_height: f32,
     window_height: f32,
-    editor_min_height: f32,
+    editor_preferred_height: f32,
 ) -> f32 {
     let maximum_by_workspace = window_height - APP_CHROME_AND_WORKSPACE_MIN_HEIGHT;
     let maximum_by_fraction = window_height * DETAIL_PANEL_MAX_WINDOW_FRACTION;
     let maximum = maximum_by_workspace
         .min(maximum_by_fraction)
         .max(DETAIL_PANEL_MIN_HEIGHT);
-    let preferred_height = preferred_height.max(editor_min_height);
+    let preferred_height = preferred_height.max(editor_preferred_height);
     preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
 }
 
@@ -139,16 +139,16 @@ impl App {
         self.visible_piano_roll_clip().is_some()
     }
 
-    fn detail_editor_min_height(&self) -> f32 {
+    fn detail_editor_preferred_height(&self) -> f32 {
         if self.midi_clip_editor_visible() {
-            return MIDI_DETAIL_PANEL_MIN_HEIGHT;
+            return MIDI_DETAIL_PANEL_PREFERRED_HEIGHT;
         }
         let editor = self.state.active_timeline_editor();
         let audio_selected = editor.selected_track.is_some_and(|track_id| {
             single_selected_audio_clip_for_track(editor, track_id).is_some()
         });
         if audio_selected {
-            AUDIO_DETAIL_PANEL_MIN_HEIGHT
+            AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT
         } else {
             DETAIL_PANEL_MIN_HEIGHT
         }
@@ -268,7 +268,7 @@ impl App {
         let panel_height = effective_detail_panel_height(
             self.state.view.detail_panel_height,
             self.state.view.window_height,
-            self.detail_editor_min_height(),
+            self.detail_editor_preferred_height(),
         );
         container(detail_content)
             .width(Length::Fill)
@@ -289,7 +289,7 @@ impl App {
         effective_detail_panel_height(
             self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
             self.state.view.window_height,
-            self.detail_editor_min_height(),
+            self.detail_editor_preferred_height(),
         )
     }
 
@@ -612,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_midi_clip_keeps_both_note_and_velocity_editors_usable() {
+    fn midi_editor_preference_yields_to_the_workspace_safety_bound() {
         assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 320.0);
         assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 320.0);
         assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
