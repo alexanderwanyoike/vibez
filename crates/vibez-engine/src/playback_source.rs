@@ -780,7 +780,8 @@ mod tests {
         let mut output = vec![0.0; 8];
 
         assert!(source.render_audio(&mut output, 4, 4, 2, None));
-        for frame in output.chunks_exact(2) {
+        let (frames, _) = output.as_chunks::<2>();
+        for frame in frames {
             let power = frame[0].powi(2) + frame[1].powi(2);
             assert!((power - 1.0).abs() < 1e-5, "{frame:?}: {power}");
         }
