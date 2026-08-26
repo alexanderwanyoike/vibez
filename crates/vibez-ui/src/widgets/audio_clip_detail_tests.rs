@@ -53,7 +53,9 @@ fn right_clicking_waveform_opens_transient_context_at_source_frame() {
                 track_id,
                 clip_id,
                 source_frame: 500,
-                marker: None,
+                timeline_frame: 400,
+                transient_marker: None,
+                warp_marker: None,
             },
         })) if x == 420.0 && y == 120.0
             && track_id == widget.track_id && clip_id == widget.clip_id
@@ -204,6 +206,80 @@ fn transient_marker_press_selects_and_drag_authors_a_new_source_position() {
         Some(ArrangementMsg::MoveTransientMarker {
             from: 300,
             to: 450,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn double_clicking_a_transient_promotes_it_to_a_warp_marker() {
+    let mut widget = widget();
+    widget.transient_markers.replace_suggestions([300]);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let marker = Point::new(widget.source_to_x(300, &bounds), 80.0);
+    let mut state = AudioClipDetailState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(marker),
+    );
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(marker),
+    );
+    let promoted = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            bounds,
+            mouse::Cursor::Available(marker),
+        )
+        .1;
+
+    assert!(matches!(
+        arrangement_message(promoted),
+        Some(ArrangementMsg::AddWarpMarker {
+            source_frame: 300,
+            timeline_frame: 200,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn dragging_a_transient_handle_promotes_and_warps_in_one_gesture() {
+    let mut widget = widget();
+    widget.grid.snap_enabled = false;
+    widget.transient_markers.replace_suggestions([300]);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
+    let handle = Point::new(widget.source_to_x(300, &bounds), AUDIO_RULER_HEIGHT + 3.0);
+    let target = Point::new(400.0, AUDIO_RULER_HEIGHT + 3.0);
+    let mut state = AudioClipDetailState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(handle),
+    );
+    let promoted = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    assert!(matches!(
+        arrangement_message(promoted),
+        Some(ArrangementMsg::AddWarpMarker {
+            source_frame: 300,
+            timeline_frame: 400,
             ..
         })
     ));

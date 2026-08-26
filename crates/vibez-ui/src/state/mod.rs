@@ -185,7 +185,9 @@ pub enum ContextMenuTarget {
         track_id: TrackId,
         clip_id: ClipId,
         source_frame: u64,
-        marker: Option<u64>,
+        timeline_frame: u64,
+        transient_marker: Option<u64>,
+        warp_marker: Option<u64>,
     },
     ArrangementEmpty,
 }

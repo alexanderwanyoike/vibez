@@ -63,6 +63,11 @@ enum AudioMarkerDrag {
         current_source_frame: u64,
         undo_gesture: UndoGestureId,
     },
+    TransientWarp {
+        source_frame: u64,
+        current_timeline_frame: u64,
+        undo_gesture: UndoGestureId,
+    },
     Warp {
         source_frame: u64,
         current_timeline_frame: u64,
@@ -71,6 +76,7 @@ enum AudioMarkerDrag {
 }
 
 const TRANSIENT_HIT_RADIUS: f32 = 6.0;
+const TRANSIENT_HANDLE_BOTTOM: f32 = AUDIO_RULER_HEIGHT + 8.0;
 const WARP_MARKER_TOP: f32 = 20.0;
 const WARP_HIT_RADIUS: f32 = 7.0;
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
@@ -222,6 +228,16 @@ impl AudioClipDetailWidget {
                 self.warp_timeline_end(),
             )
             .round() as u64
+    }
+
+    fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
+        self.warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64
+    }
+
+    fn is_transient_handle(position: Point) -> bool {
+        (AUDIO_RULER_HEIGHT..=TRANSIENT_HANDLE_BOTTOM).contains(&position.y)
     }
 
     fn hit_test_transient_marker(&self, position: Point, bounds: &Rectangle) -> Option<u64> {
@@ -659,7 +675,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     return (canvas::event::Status::Ignored, None);
                 };
                 let source_frame = self.transient_source_from_x(position.x, &bounds);
-                let marker = self.hit_test_transient_marker(position, &bounds);
+                let transient_marker = self.hit_test_transient_marker(position, &bounds);
+                let warp_marker = self.hit_test_warp_marker(position, &bounds);
                 (
                     canvas::event::Status::Captured,
                     Some(Message::View(ViewMsg::ShowContextMenu {
@@ -670,7 +687,9 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                             track_id: self.track_id,
                             clip_id: self.clip_id,
                             source_frame,
-                            marker,
+                            timeline_frame: self.timeline_frame_at_source(source_frame),
+                            transient_marker,
+                            warp_marker,
                         },
                     })),
                 )
@@ -703,10 +722,37 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     );
                 }
                 if let Some(source_frame) = self.hit_test_transient_marker(position, &bounds) {
-                    state.double_click.clear();
-                    state.drag = Some(AudioMarkerDrag::Transient {
-                        current_source_frame: source_frame,
-                        undo_gesture: UndoGestureId::new(),
+                    let double = state.double_click.press(
+                        Instant::now(),
+                        position,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(8.0),
+                    );
+                    if double {
+                        state.double_click.clear();
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Arrangement(ArrangementMsg::AddWarpMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame,
+                                timeline_frame: self.timeline_frame_at_source(source_frame),
+                            })),
+                        );
+                    }
+                    let undo_gesture = UndoGestureId::new();
+                    state.drag = Some(if Self::is_transient_handle(position) {
+                        AudioMarkerDrag::TransientWarp {
+                            source_frame,
+                            current_timeline_frame: self.timeline_frame_at_source(source_frame),
+                            undo_gesture,
+                        }
+                    } else {
+                        AudioMarkerDrag::Transient {
+                            current_source_frame: source_frame,
+                            undo_gesture,
+                        }
                     });
                     return (
                         canvas::event::Status::Captured,
@@ -803,6 +849,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                         current_source_frame,
                         undo_gesture,
                     } => {
+                        state.double_click.clear();
                         let to = self.transient_source_from_x(position.x, &bounds);
                         if to == current_source_frame {
                             None
@@ -817,6 +864,32 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                                     clip_id: self.clip_id,
                                     from: current_source_frame,
                                     to,
+                                })
+                                .in_undo_gesture(undo_gesture),
+                            )
+                        }
+                    }
+                    AudioMarkerDrag::TransientWarp {
+                        source_frame,
+                        current_timeline_frame,
+                        undo_gesture,
+                    } => {
+                        state.double_click.clear();
+                        let timeline_frame = self.x_to_local_frame(position.x, &bounds);
+                        if timeline_frame == current_timeline_frame {
+                            None
+                        } else {
+                            state.drag = Some(AudioMarkerDrag::Warp {
+                                source_frame,
+                                current_timeline_frame: timeline_frame,
+                                undo_gesture,
+                            });
+                            Some(
+                                Message::Arrangement(ArrangementMsg::AddWarpMarker {
+                                    track_id: self.track_id,
+                                    clip_id: self.clip_id,
+                                    source_frame,
+                                    timeline_frame,
                                 })
                                 .in_undo_gesture(undo_gesture),
                             )

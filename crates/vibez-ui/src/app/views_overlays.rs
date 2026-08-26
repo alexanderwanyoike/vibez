@@ -788,15 +788,38 @@ impl App {
                 track_id,
                 clip_id,
                 source_frame,
-                marker,
+                timeline_frame,
+                transient_marker,
+                warp_marker,
             } => {
                 let location = *location;
                 let track_id = *track_id;
                 let clip_id = *clip_id;
                 let source_frame = *source_frame;
+                let timeline_frame = *timeline_frame;
                 let mut col = column![].spacing(0).width(Length::Fixed(200.0));
 
-                if let Some(marker) = *marker {
+                if let Some(marker) = *warp_marker {
+                    col = col.push(menu_btn(
+                        icons::TRASH_2,
+                        "Delete Warp marker".into(),
+                        Message::Arrangement(ArrangementMsg::RemoveWarpMarker {
+                            track_id,
+                            clip_id,
+                            source_frame: marker,
+                        }),
+                    ));
+                } else if let Some(marker) = *transient_marker {
+                    col = col.push(menu_btn(
+                        icons::PLUS,
+                        "Make Warp marker".into(),
+                        Message::Arrangement(ArrangementMsg::AddWarpMarker {
+                            track_id,
+                            clip_id,
+                            source_frame: marker,
+                            timeline_frame,
+                        }),
+                    ));
                     col = col.push(menu_btn(
                         icons::TRASH_2,
                         "Delete transient".into(),
