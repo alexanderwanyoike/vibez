@@ -257,9 +257,19 @@ impl App {
                 self.state.view.transient_analysis_dialog = None;
             }
             Message::ConfirmTransientAnalysis => {
-                let Some(dialog) = self.state.view.transient_analysis_dialog.take() else {
+                let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() else {
                     return Task::none();
                 };
+                if !dialog.commit_sensitivity_input() {
+                    self.state.status_text = "Enter a sensitivity from 0 to 100%".into();
+                    return Task::none();
+                }
+                let dialog = self
+                    .state
+                    .view
+                    .transient_analysis_dialog
+                    .take()
+                    .expect("validated dialog remains open");
                 return self.dispatch_detect_clip_transients(
                     dialog.location,
                     dialog.track_id,
@@ -308,6 +318,22 @@ impl App {
                 });
             }
             Message::Arrangement(msg) => {
+                if matches!(msg, ArrangementMsg::DeleteSelectedClip) {
+                    let location = self.active_timeline_location();
+                    let deleted: std::collections::HashSet<_> = self
+                        .state
+                        .active_timeline_editor()
+                        .selected_clips
+                        .iter()
+                        .filter_map(|selection| match selection {
+                            crate::state::ArrangementSelection::AudioClip { track_id, clip_id } => {
+                                Some((*track_id, *clip_id))
+                            }
+                            crate::state::ArrangementSelection::NoteClip { .. } => None,
+                        })
+                        .collect();
+                    self.state.view.dismiss_clip_dialogs_for(location, &deleted);
+                }
                 if let ArrangementMsg::RequestSliceAudioClipToDrumRack { track_id, clip_id } = &msg
                 {
                     let (track_id, clip_id) = (*track_id, *clip_id);

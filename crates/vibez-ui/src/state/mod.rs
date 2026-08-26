@@ -161,6 +161,27 @@ impl ViewState {
             self.adaptive_grid_bias,
         )
     }
+
+    pub fn dismiss_clip_dialogs_for(
+        &mut self,
+        location: vibez_project::TimelineLocation,
+        deleted: &HashSet<(TrackId, ClipId)>,
+    ) {
+        if self.drum_rack_slice_dialog.is_some_and(|dialog| {
+            dialog.location == location && deleted.contains(&(dialog.track_id, dialog.clip_id))
+        }) {
+            self.drum_rack_slice_dialog = None;
+        }
+        if self
+            .transient_analysis_dialog
+            .as_ref()
+            .is_some_and(|dialog| {
+                dialog.location == location && deleted.contains(&(dialog.track_id, dialog.clip_id))
+            })
+        {
+            self.transient_analysis_dialog = None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +217,14 @@ impl TransientAnalysisDialog {
     pub fn normalize_sensitivity_input(&mut self) {
         self.sensitivity_input = self.sensitivity.percent().to_string();
     }
+
+    pub fn commit_sensitivity_input(&mut self) -> bool {
+        let Some(sensitivity) = parse_transient_sensitivity(&self.sensitivity_input) else {
+            return false;
+        };
+        self.set_sensitivity(sensitivity.percent());
+        true
+    }
 }
 
 fn parse_transient_sensitivity(input: &str) -> Option<vibez_core::onset::TransientSensitivity> {
@@ -203,10 +232,11 @@ fn parse_transient_sensitivity(input: &str) -> Option<vibez_core::onset::Transie
         .trim()
         .trim_end_matches('%')
         .trim()
-        .parse::<u8>()
+        .parse::<u16>()
         .ok()?;
-    (percent <= vibez_core::onset::TransientSensitivity::MAX_PERCENT)
-        .then(|| vibez_core::onset::TransientSensitivity::new(percent))
+    Some(vibez_core::onset::TransientSensitivity::new(
+        percent.min(u8::MAX.into()) as u8,
+    ))
 }
 
 /// Right-click context menu state.
@@ -1216,6 +1246,8 @@ mod tests {
         assert_eq!(dialog.sensitivity.percent(), 84);
         dialog.edit_sensitivity_input("nope".into());
         assert_eq!(dialog.sensitivity.percent(), 84);
+        assert!(!dialog.commit_sensitivity_input());
+        assert_eq!(dialog.sensitivity_input, "nope");
         dialog.normalize_sensitivity_input();
         assert_eq!(dialog.sensitivity_input, "84");
 
@@ -1229,6 +1261,32 @@ mod tests {
                 .percent(),
             84
         );
+    }
+
+    #[test]
+    fn deleting_an_audio_clip_dismisses_every_modal_targeting_it() {
+        let mut view = ViewState::default();
+        let location = vibez_project::TimelineLocation::Arrange;
+        let track_id = TrackId::new();
+        let clip_id = ClipId::new();
+        view.drum_rack_slice_dialog = Some(DrumRackSliceDialog {
+            location,
+            track_id,
+            clip_id,
+            markers: crate::domains::arrangement::AudioSliceMarkers::Transients,
+        });
+        view.transient_analysis_dialog = Some(TransientAnalysisDialog {
+            location,
+            track_id,
+            clip_id,
+            sensitivity: vibez_core::onset::TransientSensitivity::DEFAULT,
+            sensitivity_input: "50".into(),
+        });
+
+        view.dismiss_clip_dialogs_for(location, &HashSet::from([(track_id, clip_id)]));
+
+        assert!(view.drum_rack_slice_dialog.is_none());
+        assert!(view.transient_analysis_dialog.is_none());
     }
 
     #[test]

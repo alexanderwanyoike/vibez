@@ -157,9 +157,10 @@ impl canvas::Program<Message> for TransientSensitivityKnob {
                     mouse::ScrollDelta::Lines { y, .. } => y.signum(),
                     mouse::ScrollDelta::Pixels { y, .. } => y.signum(),
                 };
+                let step = if state.shift_held { 1.0 } else { 5.0 };
                 (
                     canvas::event::Status::Captured,
-                    Some(Self::message(self.percent as f32 + direction)),
+                    Some(Self::message(self.percent as f32 + direction * step)),
                 )
             }
             _ => (canvas::event::Status::Ignored, None),

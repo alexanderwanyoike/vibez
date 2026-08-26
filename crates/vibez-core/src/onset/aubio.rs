@@ -36,14 +36,14 @@ impl Config {
         // useful travel at both ends instead of bunching every result near the
         // middle of the knob.
         Self {
-            threshold: sensitivity.threshold_through(DEFAULT_THRESHOLD),
+            threshold: sensitivity.peak_threshold(DEFAULT_THRESHOLD),
             ..Self::default()
         }
     }
 
     pub(super) fn for_energy_sensitivity(sensitivity: TransientSensitivity) -> Self {
         Self {
-            threshold: sensitivity.threshold_through(DEFAULT_ENERGY_THRESHOLD),
+            threshold: sensitivity.peak_threshold(DEFAULT_ENERGY_THRESHOLD),
             ..Self::default()
         }
     }
@@ -85,12 +85,27 @@ enum ConfigError {
     ZeroSampleRate,
 }
 
+#[cfg(test)]
 pub(super) fn detect_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Hfc)
+    detect_onsets_where(mono, sample_rate, config, |_| true)
 }
 
-pub(super) fn detect_energy_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Energy)
+pub(super) fn detect_onsets_where(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    accepts: impl FnMut(usize) -> bool,
+) -> Vec<u64> {
+    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Hfc, accepts)
+}
+
+pub(super) fn detect_energy_onsets_where(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    accepts: impl FnMut(usize) -> bool,
+) -> Vec<u64> {
+    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Energy, accepts)
 }
 
 fn detect_onsets_with_descriptor(
@@ -98,6 +113,7 @@ fn detect_onsets_with_descriptor(
     sample_rate: u32,
     config: Config,
     descriptor: Descriptor,
+    accepts: impl FnMut(usize) -> bool,
 ) -> Vec<u64> {
     let Ok(config) = config.validate(sample_rate) else {
         return Vec::new();
@@ -106,7 +122,7 @@ fn detect_onsets_with_descriptor(
         return Vec::new();
     }
 
-    Detector::new(sample_rate, config, descriptor).process(mono)
+    Detector::new(sample_rate, config, descriptor).process(mono, accepts)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +147,7 @@ impl Detector {
     fn new(sample_rate: u32, config: Config, descriptor: Descriptor) -> Self {
         Self {
             hop_size: config.hop_size,
-            min_ioi: ((config.min_ioi_ms / 1_000.0) * sample_rate as f32).round() as usize,
+            min_ioi: super::frames_for_ms(sample_rate, config.min_ioi_ms),
             delay: (DEFAULT_DELAY_HOPS * config.hop_size as f32) as usize,
             silence_db: config.silence_db,
             total_frames: 0,
@@ -142,21 +158,25 @@ impl Detector {
         }
     }
 
-    fn process(mut self, mono: &[f32]) -> Vec<u64> {
+    fn process(mut self, mono: &[f32], mut accepts: impl FnMut(usize) -> bool) -> Vec<u64> {
         let mut onsets = Vec::new();
         let mut hop = vec![0.0; self.hop_size];
 
         for chunk in mono.chunks(self.hop_size) {
             hop.fill(0.0);
             hop[..chunk.len()].copy_from_slice(chunk);
-            if let Some(frame) = self.process_hop(&hop) {
+            if let Some(frame) = self.process_hop(&hop, &mut accepts) {
                 onsets.push(frame as u64);
             }
         }
         onsets
     }
 
-    fn process_hop(&mut self, input: &[f32]) -> Option<usize> {
+    fn process_hop(
+        &mut self,
+        input: &[f32],
+        accepts: &mut impl FnMut(usize) -> bool,
+    ) -> Option<usize> {
         let magnitudes = self.phase_vocoder.spectrum(input);
         let descriptor = match self.descriptor {
             Descriptor::Hfc => high_frequency_content(&magnitudes),
@@ -168,7 +188,9 @@ impl Detector {
 
         if peak > 0.0 && !silent {
             let new_onset = self.total_frames + (peak * self.hop_size as f32).round() as usize;
-            if self.last_onset + self.min_ioi < new_onset
+            let reported_onset = self.delay.max(new_onset).saturating_sub(self.delay);
+            if accepts(reported_onset)
+                && self.last_onset + self.min_ioi < new_onset
                 && !(self.last_onset > 0 && self.delay > new_onset)
             {
                 self.last_onset = self.delay.max(new_onset);
@@ -176,7 +198,10 @@ impl Detector {
             }
         } else if peak <= 0.0 && self.total_frames <= self.delay && !silent {
             let new_onset = self.total_frames;
-            if self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset {
+            let reported_onset = self.total_frames;
+            if accepts(reported_onset)
+                && (self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset)
+            {
                 self.last_onset = self.total_frames + self.delay;
                 accepted = true;
             }
