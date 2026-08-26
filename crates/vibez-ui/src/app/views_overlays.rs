@@ -9,7 +9,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, Theme};
 
-use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::arrangement::{ArrangementMsg, AudioSliceMarkers};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::effect::EffectType;
@@ -877,6 +877,24 @@ impl App {
                         track_id,
                         clip_id,
                         source_frames: Vec::new(),
+                    }),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Slice Clip at transients".into(),
+                    Message::Arrangement(ArrangementMsg::SliceAudioClipAtMarkers {
+                        track_id,
+                        clip_id,
+                        markers: AudioSliceMarkers::Transients,
+                    }),
+                ));
+                col = col.push(menu_btn(
+                    icons::SCISSORS,
+                    "Slice Clip at Warp markers".into(),
+                    Message::Arrangement(ArrangementMsg::SliceAudioClipAtMarkers {
+                        track_id,
+                        clip_id,
+                        markers: AudioSliceMarkers::Warp,
                     }),
                 ));
                 col.into()
