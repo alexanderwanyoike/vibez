@@ -254,8 +254,10 @@ impl MediaSourceRef {
     }
 }
 
-/// Persisted state for a future native drum rack.
-pub const DRUM_RACK_PAD_COUNT: usize = 16;
+/// The rack stores four banks while the UI exposes one 4x4 bank at a time.
+pub const DRUM_RACK_BANK_SIZE: usize = 16;
+pub const DRUM_RACK_BANK_COUNT: usize = 4;
+pub const DRUM_RACK_PAD_COUNT: usize = DRUM_RACK_BANK_SIZE * DRUM_RACK_BANK_COUNT;
 pub const DRUM_RACK_BASE_NOTE: u8 = 36;
 
 pub const fn drum_rack_pad_pitch(pad_index: usize) -> Option<u8> {
@@ -840,5 +842,16 @@ mod tests {
         let relinked = reopened.linked_fade_out(50, peer, 100);
         assert_eq!(relinked.fade_out_curve(), FadeCurve::new(80));
         assert_eq!(relinked.crossfade_out_to(), Some(peer));
+    }
+
+    #[test]
+    fn drum_rack_maps_four_complete_pad_banks_above_c1() {
+        assert_eq!(DRUM_RACK_PAD_COUNT, 64);
+        assert_eq!(DRUM_RACK_BANK_COUNT, 4);
+        assert_eq!(drum_rack_pad_pitch(0), Some(36));
+        assert_eq!(drum_rack_pad_pitch(16), Some(52));
+        assert_eq!(drum_rack_pad_pitch(63), Some(99));
+        assert_eq!(drum_rack_pad_pitch(64), None);
+        assert_eq!(drum_rack_pad_index(99), Some(63));
     }
 }

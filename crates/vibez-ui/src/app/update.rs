@@ -298,8 +298,8 @@ impl App {
                         "The selected marker type has no interior slices".into()
                     } else {
                         format!(
-                            "{slice_count} slices will not fit the {}-pad Drum Rack",
-                            vibez_core::track::DRUM_RACK_PAD_COUNT
+                            "{slice_count} slices exceed the {}-pad Drum Rack",
+                            vibez_core::track::DRUM_RACK_PAD_COUNT,
                         )
                     };
                     return Task::none();

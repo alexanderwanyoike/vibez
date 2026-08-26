@@ -713,6 +713,10 @@ impl App {
         let selected_pad = track
             .selected_drum_pad
             .min(track.drum_rack_pads.len().saturating_sub(1));
+        let bank_size = vibez_core::track::DRUM_RACK_BANK_SIZE;
+        let bank_count = vibez_core::track::DRUM_RACK_BANK_COUNT;
+        let selected_bank = (selected_pad / bank_size).min(bank_count.saturating_sub(1));
+        let bank_start = selected_bank * bank_size;
         let title = Self::device_title_bar(Self::device_title_row(
             "Drum Rack",
             track_color,
@@ -723,7 +727,7 @@ impl App {
         for row_index in 0..4 {
             let mut pad_row = row![].spacing(4);
             for col_index in 0..4 {
-                let pad_index = row_index * 4 + col_index;
+                let pad_index = bank_start + row_index * 4 + col_index;
                 let pad = &track.drum_rack_pads[pad_index];
                 let active = selected_pad == pad_index;
                 let drop_target = matches!(
@@ -810,6 +814,46 @@ impl App {
             }
             grid = grid.push(pad_row);
         }
+
+        let bank_button = |label: &'static str, bank: Option<usize>| {
+            button(text(label).size(9).color(th::text_dim()))
+                .on_press_maybe(bank.map(|bank| {
+                    Message::Devices(crate::domains::devices::DevicesMsg::SelectDrumRackBank(
+                        track_id, bank,
+                    ))
+                }))
+                .padding([1, 7])
+                .style(move |_theme: &Theme, status| button::Style {
+                    background: Some(
+                        if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                            th::bg_hover()
+                        } else {
+                            th::bg_dark()
+                        }
+                        .into(),
+                    ),
+                    text_color: th::text_dim(),
+                    border: iced::Border {
+                        color: th::border(),
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
+                    ..Default::default()
+                })
+        };
+        let bank_navigation = row![
+            text(format!("BANK {} / {bank_count}", selected_bank + 1))
+                .size(9)
+                .color(th::text_muted()),
+            horizontal_space(),
+            bank_button("‹  [", selected_bank.checked_sub(1)),
+            bank_button(
+                "]  ›",
+                (selected_bank + 1 < bank_count).then_some(selected_bank + 1)
+            ),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         let selected_name = track.drum_rack_pads[selected_pad]
             .name
@@ -1060,20 +1104,11 @@ impl App {
         ]
         .spacing(6);
 
-        // Pads and the selected pad's editor sit side by side in
-        // labeled sections; the panel scrolls horizontally so the
-        // card grows sideways, never past the rack height.
-        // Ableton-style pad bank: the grid lives in its own fixed
-        // vertical viewport with a slim scrollbar; the card height
-        // never depends on the pad count.
-        let pads_view: Element<'a, Message> = scrollable(grid)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new()
-                    .width(4)
-                    .scroller_width(4)
-                    .spacing(2),
-            ))
-            .height(Length::Fixed(132.0))
+        // Pads and the selected pad's editor sit side by side. The rack owns
+        // four banks but renders one fixed 4x4 surface at a time, so adding
+        // pads never changes the device card's footprint.
+        let pads_view: Element<'a, Message> = column![bank_navigation, grid]
+            .spacing(5)
             .width(Length::Fixed(232.0))
             .into();
 

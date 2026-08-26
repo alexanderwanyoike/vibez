@@ -367,11 +367,7 @@ impl App {
                 source: track.sample_source.clone(),
             }),
             Some(InstrumentKind::DrumRack) => Some(InstrumentStateInfo::DrumRack {
-                pads: track
-                    .drum_rack_pads
-                    .iter()
-                    .map(UiDrumPad::to_state)
-                    .collect(),
+                pads: drum_rack_pads_for_save(&track.drum_rack_pads),
             }),
             None => None,
         };
@@ -597,7 +593,7 @@ impl App {
                         }
                     }
                     InstrumentStateInfo::DrumRack { pads } => {
-                        track.drum_rack_pads = pads.iter().map(UiDrumPad::from_state).collect();
+                        track.drum_rack_pads = expand_drum_rack_pads(pads);
                         track.selected_drum_pad = 0;
                         for (pad_index, pad) in pads.iter().cloned().enumerate() {
                             self.send_command(EngineCommand::SetDrumRackPadState {
@@ -1261,6 +1257,26 @@ fn first_remote_provenance_label(project: &Project) -> Option<String> {
         })
 }
 
+fn expand_drum_rack_pads(pads: &[vibez_core::track::DrumPadState]) -> Vec<UiDrumPad> {
+    let mut expanded = crate::state::default_drum_rack_pads();
+    for (slot, saved) in expanded.iter_mut().zip(pads) {
+        *slot = UiDrumPad::from_state(saved);
+    }
+    expanded
+}
+
+fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::track::DrumPadState> {
+    let empty = UiDrumPad::default().to_state();
+    let used = pads
+        .iter()
+        .rposition(|pad| pad.to_state() != empty)
+        .map_or(0, |index| index + 1);
+    let stored = used
+        .max(vibez_core::track::DRUM_RACK_BANK_SIZE)
+        .min(pads.len());
+    pads[..stored].iter().map(UiDrumPad::to_state).collect()
+}
+
 #[cfg(test)]
 mod instrument_invariant_tests {
     use super::*;
@@ -1299,5 +1315,32 @@ mod instrument_invariant_tests {
                 .map(|plugin| plugin.name.as_str()),
             Some("Surge XT")
         );
+    }
+
+    #[test]
+    fn legacy_one_bank_drum_racks_expand_without_moving_saved_pads() {
+        let first = crate::state::UiDrumPad {
+            name: Some("Kick".into()),
+            ..Default::default()
+        };
+        let mut saved = vec![first.to_state()];
+        saved.extend((1..16).map(|_| crate::state::UiDrumPad::default().to_state()));
+
+        let expanded = expand_drum_rack_pads(&saved);
+
+        assert_eq!(expanded.len(), vibez_core::track::DRUM_RACK_PAD_COUNT);
+        assert_eq!(expanded[0].name.as_deref(), Some("Kick"));
+        assert!(expanded[16..].iter().all(|pad| pad.source.is_none()));
+    }
+
+    #[test]
+    fn saving_a_multi_bank_rack_keeps_used_banks_without_serializing_empty_tail_banks() {
+        let mut pads = crate::state::default_drum_rack_pads();
+        pads[19].name = Some("Slice 20".into());
+
+        let saved = drum_rack_pads_for_save(&pads);
+
+        assert_eq!(saved.len(), 20);
+        assert_eq!(saved[19].name.as_deref(), Some("Slice 20"));
     }
 }

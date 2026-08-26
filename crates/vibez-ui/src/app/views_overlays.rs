@@ -119,15 +119,20 @@ impl App {
             AudioSliceMarkers::Warp => warp_count,
         };
         let pad_count = vibez_core::track::DRUM_RACK_PAD_COUNT;
+        let bank_size = vibez_core::track::DRUM_RACK_BANK_SIZE;
+        let bank_count = vibez_core::track::DRUM_RACK_BANK_COUNT;
         let can_create = drum_rack_slice_can_create(selected_count);
         let guidance = if selected_count == 0 {
             "This marker type has no interior slices.".to_string()
         } else if selected_count > pad_count {
             format!(
-                "{selected_count} slices cannot fit {pad_count} pads. Use fewer markers or choose Warp markers."
+                "{selected_count} slices exceed the {pad_count}-pad rack. Use fewer markers or choose Warp markers."
             )
         } else {
-            format!("{selected_count} slices will fill {selected_count} of {pad_count} pads.")
+            let used_banks = selected_count.div_ceil(bank_size);
+            format!(
+                "{selected_count} slices will use {used_banks} of {bank_count} pad banks. Switch banks with [ and ]."
+            )
         };
         let cancel = button(text("Cancel").size(12).color(th::text()))
             .on_press(Message::CancelDrumRackSlice)
@@ -1123,6 +1128,7 @@ mod tests {
         assert!(!drum_rack_slice_can_create(0));
         assert!(drum_rack_slice_can_create(1));
         assert!(drum_rack_slice_can_create(16));
-        assert!(!drum_rack_slice_can_create(17));
+        assert!(drum_rack_slice_can_create(64));
+        assert!(!drum_rack_slice_can_create(65));
     }
 }

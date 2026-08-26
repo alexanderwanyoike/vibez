@@ -299,3 +299,37 @@ fn perform_messages_send_transformed_notes_through_the_existing_engine_path() {
         ]
     ));
 }
+
+#[test]
+fn bracket_navigation_moves_a_drum_rack_by_complete_sixteen_pad_banks() {
+    let mut track = ProjectTrack::new(TrackId::new(), "Drum Rack".into(), 0);
+    track.kind = vibez_core::midi::TrackKind::Midi;
+    track.has_instrument = true;
+    track.instrument_kind = Some(vibez_core::midi::InstrumentKind::DrumRack);
+    let tracks = vec![track];
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(tracks[0].id),
+    };
+    let mut state = PerformState {
+        mode: PerformMode::Instrument,
+        ..PerformState::default()
+    };
+    let mut engine = RecordingEngine::default();
+
+    state.update(PerformMsg::NextBank, &mut engine, ctx);
+
+    assert_eq!(state.instrument_pad_preview(position(0)).pitch, 52);
+    assert_eq!(state.instrument_pad_preview(position(15)).pitch, 67);
+
+    for _ in 0..8 {
+        state.update(PerformMsg::NextBank, &mut engine, ctx);
+    }
+    assert_eq!(state.drum_rack_bank(), 3);
+    assert_eq!(state.instrument_pad_preview(position(15)).pitch, 99);
+
+    state.update(PerformMsg::PreviousBank, &mut engine, ctx);
+    assert_eq!(state.drum_rack_bank(), 2);
+    assert_eq!(state.instrument_pad_preview(position(0)).pitch, 68);
+}

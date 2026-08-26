@@ -138,7 +138,7 @@ fn slice_to_drum_rack_turns_loop_wraps_into_distinct_flattened_pad_ranges() {
 }
 
 #[test]
-fn slice_to_drum_rack_rejects_more_regions_than_available_pads() {
+fn slice_to_drum_rack_spans_beyond_the_first_visible_pad_bank() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
     let original = &mut arrangement.tracks[0].clips[0];
@@ -167,12 +167,59 @@ fn slice_to_drum_rack_rejects_more_regions_than_available_pads() {
         },
     );
 
+    assert!(action.mark_dirty);
+    let drum_track = arrangement
+        .find_track(action.replay_project_track.unwrap())
+        .unwrap();
+    assert_eq!(
+        drum_track
+            .drum_rack_pads
+            .iter()
+            .filter(|pad| pad.source.is_some())
+            .count(),
+        20
+    );
+    assert_eq!(drum_track.note_clips[0].notes.len(), 20);
+    assert_eq!(drum_track.note_clips[0].notes[0].pitch, 36);
+    assert_eq!(drum_track.note_clips[0].notes[19].pitch, 55);
+}
+
+#[test]
+fn slice_to_drum_rack_rejects_more_than_four_pad_banks() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 6_500);
+    let original = &mut arrangement.tracks[0].clips[0];
+    original.source = Some(MediaSourceRef::LocalFile {
+        path: "overfull-loop.wav".into(),
+    });
+    original
+        .transient_markers
+        .replace_suggestions((100..6_500).step_by(100));
+    let source = original.source.clone().unwrap();
+    let audio = Arc::clone(&original.audio);
+    let mut engine = RecordingEngine::default();
+
+    let action = arrangement.update(
+        ArrangementMsg::SliceAudioClipToDrumRack {
+            track_id: source_track_id,
+            clip_id: source_clip_id,
+            markers: AudioSliceMarkers::Transients,
+            source,
+            audio,
+        },
+        &mut engine,
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..ArrangementCtx::default()
+        },
+    );
+
     assert!(!action.mark_dirty);
     assert!(action.replay_project_track.is_none());
-    assert_eq!(arrangement.tracks.len(), 1);
-    let status = action.status.unwrap();
-    assert!(status.contains("20 slices"));
-    assert!(status.contains("will not fit"));
+    assert!(action
+        .status
+        .unwrap()
+        .contains("65 slices exceed the 64-pad"));
 }
 
 #[test]
