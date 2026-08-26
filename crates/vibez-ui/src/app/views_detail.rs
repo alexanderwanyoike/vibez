@@ -20,7 +20,8 @@ use super::*;
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
 const AUDIO_DETAIL_PANEL_MIN_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_MIN_HEIGHT: f32 = 360.0;
-const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 360.0;
+const SHELL_AND_WORKSPACE_MIN_HEIGHT: f32 = 480.0;
+const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.52;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 pub(super) fn resolved_detail_playhead_samples(
@@ -43,7 +44,11 @@ fn effective_detail_panel_height(
     window_height: f32,
     editor_min_height: f32,
 ) -> f32 {
-    let maximum = (window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
+    let maximum_by_workspace = window_height - SHELL_AND_WORKSPACE_MIN_HEIGHT;
+    let maximum_by_fraction = window_height * DETAIL_PANEL_MAX_WINDOW_FRACTION;
+    let maximum = maximum_by_workspace
+        .min(maximum_by_fraction)
+        .max(DETAIL_PANEL_MIN_HEIGHT);
     let preferred_height = preferred_height.max(editor_min_height);
     preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
 }
@@ -593,7 +598,8 @@ mod tests {
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
         assert_eq!(effective_detail_panel_height(80.0, 900.0, 180.0), 180.0);
         assert_eq!(effective_detail_panel_height(360.0, 900.0, 180.0), 360.0);
-        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 540.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 420.0);
+        assert_eq!(effective_detail_panel_height(800.0, 1_000.0, 180.0), 520.0);
         assert_eq!(effective_detail_panel_height(320.0, 520.0, 180.0), 180.0);
     }
 
