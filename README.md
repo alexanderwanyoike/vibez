@@ -90,7 +90,7 @@ selected one.
 
 ## Status
 
-v0.3.0, and still early. Linux is the primary development platform; macOS and
+v0.3.1, and still early. Linux is the primary development platform; macOS and
 Windows build and pass CI on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
 format changes are still possible: treat this as a working alpha rather than a

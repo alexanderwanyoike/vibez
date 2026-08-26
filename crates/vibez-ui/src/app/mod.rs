@@ -9,9 +9,8 @@ use crate::domains::view::ViewMsg;
 use rtrb::Consumer;
 use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
 use vibez_audio_io::audio_stream::AudioOutputStream;
-use vibez_audio_io::file_io;
 use vibez_core::constants::UI_TICK_MS;
-use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef};
+use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::{
     load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry, DropboxSettings,
 };
@@ -21,14 +20,10 @@ use vibez_engine::events::EngineEvent;
 use vibez_plugin_host::gui::PluginGuiKey;
 
 use crate::services::plugin_loader::{PluginInstrumentLoadResult, PluginLoadResult};
-use vibez_project::Project;
 
 use crate::domains::audio_settings::AudioSettingsState;
 use crate::icons;
-use crate::message::{
-    LoadedClipData, LoadedDrumRackPadData, LoadedSamplerData, Message, ProjectLoadResult,
-    ProjectSaveResult, SampleLibraryScanResult,
-};
+use crate::message::{Message, ProjectLoadResult};
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::{AppState, AudioStreamHealth};
 use crate::theme as th;
@@ -153,7 +148,6 @@ pub fn run() -> iced::Result {
 }
 
 mod actions;
-mod async_helpers;
 mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
@@ -165,12 +159,13 @@ mod engine_events;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
+mod tasks;
 mod tracked_request;
 
-use async_helpers::*;
 pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;
 pub(crate) use keyboard::*;
+use tasks::*;
 mod dropbox_io;
 mod media;
 mod media_import;
