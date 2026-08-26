@@ -43,6 +43,15 @@ impl TransientSensitivity {
     pub(crate) fn normalized(self) -> f32 {
         self.0 as f32 / Self::MAX_PERCENT as f32
     }
+
+    fn threshold_through(self, midpoint: f32) -> f32 {
+        let normalized = self.normalized();
+        if normalized <= 0.5 {
+            0.9 * (midpoint / 0.9).powf(normalized / 0.5)
+        } else {
+            midpoint * (0.001 / midpoint).powf((normalized - 0.5) / 0.5)
+        }
+    }
 }
 
 impl Default for TransientSensitivity {
@@ -76,11 +85,92 @@ pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) ->
         audio.sample_rate,
         aubio::Config::for_sensitivity(sensitivity),
     );
+    let energy_onsets = aubio::detect_energy_onsets(
+        &mono,
+        audio.sample_rate,
+        aubio::Config::for_energy_sensitivity(sensitivity),
+    );
+
+    // HFC is precise on bright attacks but can miss bass-heavy hits. Aubio's
+    // energy descriptor covers those. Keep HFC's timing when both descriptors
+    // identify the same attack, and add only genuinely distinct energy hits.
+    let merge_radius = frames_for_ms(audio.sample_rate, 50.0) as u64;
+    for frame in energy_onsets {
+        if !onsets.iter().any(|hfc| hfc.abs_diff(frame) <= merge_radius) {
+            onsets.push(frame);
+        }
+    }
+    onsets.sort_unstable();
+
+    // Aubio's spectral descriptors can report a pitched decay cycle as a new
+    // onset. Transient markers are editing boundaries, so require each
+    // spectral candidate to coincide with a meaningful time-domain attack.
+    let global_peak = audio
+        .channels
+        .iter()
+        .flat_map(|channel| channel.iter())
+        .map(|sample| sample.abs())
+        .fold(0.0f32, f32::max);
+    onsets.retain(|&frame| genuine_attack(audio, frame, sensitivity, global_peak));
     // Clip start is already an explicit boundary in Vibez. Aubio reports a
     // non-silent file start as an onset, but showing that as a suggested
     // transient marker adds no editable information.
     onsets.retain(|&frame| frame > 0 && frame < frames as u64);
     onsets
+}
+
+fn frames_for_ms(sample_rate: u32, milliseconds: f32) -> usize {
+    (sample_rate as f32 * milliseconds / 1_000.0).round() as usize
+}
+
+fn genuine_attack(
+    audio: &DecodedAudio,
+    frame: u64,
+    sensitivity: TransientSensitivity,
+    global_peak: f32,
+) -> bool {
+    if global_peak <= f32::EPSILON {
+        return false;
+    }
+
+    let frame = usize::try_from(frame).unwrap_or(usize::MAX);
+    let pre_start = frame.saturating_sub(frames_for_ms(audio.sample_rate, 35.0));
+    let pre_end = frame.saturating_sub(frames_for_ms(audio.sample_rate, 5.0));
+    let post_end = frame
+        .saturating_add(frames_for_ms(audio.sample_rate, 35.0))
+        .min(audio.num_frames());
+    let (_, pre_rms) = peak_and_rms(audio, pre_start, pre_end);
+    let (post_peak, post_rms) = peak_and_rms(audio, frame, post_end);
+
+    post_peak >= global_peak * attack_prominence_floor(sensitivity) && post_rms > pre_rms * 1.05
+}
+
+fn peak_and_rms(audio: &DecodedAudio, start: usize, end: usize) -> (f32, f32) {
+    let mut peak = 0.0f32;
+    let mut square_sum = 0.0f64;
+    let mut sample_count = 0usize;
+    for channel in &audio.channels {
+        for &sample in channel.get(start..end).unwrap_or_default() {
+            peak = peak.max(sample.abs());
+            square_sum += f64::from(sample) * f64::from(sample);
+            sample_count += 1;
+        }
+    }
+    let rms = if sample_count == 0 {
+        0.0
+    } else {
+        (square_sum / sample_count as f64).sqrt() as f32
+    };
+    (peak, rms)
+}
+
+fn attack_prominence_floor(sensitivity: TransientSensitivity) -> f32 {
+    let normalized = sensitivity.normalized();
+    if normalized <= 0.5 {
+        0.6 * (0.1f32 / 0.6).powf(normalized / 0.5)
+    } else {
+        0.1 * (0.005f32 / 0.1).powf((normalized - 0.5) / 0.5)
+    }
 }
 
 fn mix_to_mono(audio: &DecodedAudio, frames: usize) -> Vec<f32> {
@@ -489,7 +579,8 @@ mod tests {
 
     #[test]
     fn sensitivity_affects_yield() {
-        // Low-amplitude impulses: high sensitivity should reject them.
+        // Low-amplitude impulses: high sensitivity should retain at least as
+        // many as low sensitivity.
         let sr = 44_100u32;
         let mut buf = vec![0.0f32; 44_100];
         for i in (2_000..40_000).step_by(5_000) {
@@ -502,6 +593,42 @@ mod tests {
             high >= low,
             "high sensitivity {high} should not detect fewer attacks than low sensitivity {low}",
         );
+    }
+
+    #[test]
+    fn default_sensitivity_rejects_quiet_decay_ripples() {
+        let sr = 44_100u32;
+        let mut channel = vec![0.0f32; 22_050];
+        let strong = 4_000usize;
+        let ripple = 12_000usize;
+        for (start, amplitude) in [(strong, 1.0f32), (ripple, 0.04f32)] {
+            for offset in 0..1_024 {
+                let phase = std::f32::consts::TAU * 180.0 * offset as f32 / sr as f32;
+                channel[start + offset] =
+                    phase.sin() * (-(offset as f32) / 300.0).exp() * amplitude;
+            }
+        }
+        let audio = make_audio(vec![channel.clone(), channel], sr);
+        let global_peak = 1.0;
+
+        assert!(genuine_attack(
+            &audio,
+            strong as u64,
+            TransientSensitivity::DEFAULT,
+            global_peak,
+        ));
+        assert!(!genuine_attack(
+            &audio,
+            ripple as u64,
+            TransientSensitivity::DEFAULT,
+            global_peak,
+        ));
+        assert!(genuine_attack(
+            &audio,
+            ripple as u64,
+            TransientSensitivity::new(100),
+            global_peak,
+        ));
     }
 
     fn synthetic_kick_track(sr: u32, bpm: f64, duration_sec: f64) -> DecodedAudio {
