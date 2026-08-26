@@ -51,6 +51,10 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
             && pad.source == shared_source
     }));
     assert!(loaded_pads.iter().all(|pad| pad.gain > 2.0));
+    assert!(loaded_pads.iter().all(|pad| {
+        pad.fade_in_ms == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS
+            && pad.fade_out_ms == vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS
+    }));
     let source_frames = shared_audio.num_frames() as f32;
     assert_eq!(loaded_pads[0].start, 0.0);
     assert!((loaded_pads[0].end - 250.0 / source_frames).abs() < f32::EPSILON);

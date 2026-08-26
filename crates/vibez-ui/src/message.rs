@@ -56,6 +56,8 @@ pub enum DrumPadParam {
     Pan,
     Start,
     End,
+    FadeIn,
+    FadeOut,
     CoarseTune,
     FineTune,
 }

@@ -259,6 +259,12 @@ pub const DRUM_RACK_BANK_SIZE: usize = 16;
 pub const DRUM_RACK_BANK_COUNT: usize = 4;
 pub const DRUM_RACK_PAD_COUNT: usize = DRUM_RACK_BANK_SIZE * DRUM_RACK_BANK_COUNT;
 pub const DRUM_RACK_BASE_NOTE: u8 = 36;
+pub const DRUM_PAD_DEFAULT_FADE_MS: f32 = 3.0;
+pub const DRUM_PAD_MAX_FADE_MS: f32 = 250.0;
+
+fn default_drum_pad_fade_ms() -> f32 {
+    DRUM_PAD_DEFAULT_FADE_MS
+}
 
 pub const fn drum_rack_pad_pitch(pad_index: usize) -> Option<u8> {
     if pad_index < DRUM_RACK_PAD_COUNT {
@@ -285,10 +291,35 @@ pub struct DrumPadState {
     pub pan: f32,
     pub start: f32,
     pub end: f32,
+    /// Linear attack fade at the playable pad boundary, in milliseconds.
+    #[serde(default = "default_drum_pad_fade_ms")]
+    pub fade_in_ms: f32,
+    /// Linear release fade used at the pad end, note-off and choke, in milliseconds.
+    #[serde(default = "default_drum_pad_fade_ms")]
+    pub fade_out_ms: f32,
     pub coarse_tune: i8,
     pub fine_tune: f32,
     pub one_shot: bool,
     pub choke_group: Option<u8>,
+}
+
+impl Default for DrumPadState {
+    fn default() -> Self {
+        Self {
+            name: None,
+            source: None,
+            gain: 1.0,
+            pan: 0.0,
+            start: 0.0,
+            end: 1.0,
+            fade_in_ms: DRUM_PAD_DEFAULT_FADE_MS,
+            fade_out_ms: DRUM_PAD_DEFAULT_FADE_MS,
+            coarse_tune: 0,
+            fine_tune: 0.0,
+            one_shot: true,
+            choke_group: None,
+        }
+    }
 }
 
 /// Persisted state for native instruments.
@@ -853,5 +884,26 @@ mod tests {
         assert_eq!(drum_rack_pad_pitch(63), Some(99));
         assert_eq!(drum_rack_pad_pitch(64), None);
         assert_eq!(drum_rack_pad_index(99), Some(63));
+    }
+
+    #[test]
+    fn legacy_drum_pad_state_gets_click_safe_fades() {
+        let json = r#"{
+            "name": "Kick",
+            "source": null,
+            "gain": 1.0,
+            "pan": 0.0,
+            "start": 0.0,
+            "end": 1.0,
+            "coarse_tune": 0,
+            "fine_tune": 0.0,
+            "one_shot": true,
+            "choke_group": null
+        }"#;
+
+        let pad: DrumPadState = serde_json::from_str(json).unwrap();
+
+        assert_eq!(pad.fade_in_ms, DRUM_PAD_DEFAULT_FADE_MS);
+        assert_eq!(pad.fade_out_ms, DRUM_PAD_DEFAULT_FADE_MS);
     }
 }

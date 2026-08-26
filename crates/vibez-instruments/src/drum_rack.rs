@@ -3,7 +3,10 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
+use vibez_core::track::{
+    drum_rack_pad_index, DrumPadState, DRUM_PAD_DEFAULT_FADE_MS, DRUM_PAD_MAX_FADE_MS,
+    DRUM_RACK_PAD_COUNT,
+};
 
 use crate::Instrument;
 
@@ -17,6 +20,8 @@ struct Pad {
     pan: f32,
     start: f32,
     end: f32,
+    fade_in_ms: f32,
+    fade_out_ms: f32,
     coarse_tune: i8,
     fine_tune: f32,
     one_shot: bool,
@@ -32,6 +37,8 @@ impl Default for Pad {
             pan: 0.0,
             start: 0.0,
             end: 1.0,
+            fade_in_ms: DRUM_PAD_DEFAULT_FADE_MS,
+            fade_out_ms: DRUM_PAD_DEFAULT_FADE_MS,
             coarse_tune: 0,
             fine_tune: 0.0,
             one_shot: true,
@@ -48,6 +55,11 @@ struct Voice {
     sample: Arc<DecodedAudio>,
     position: f64,
     end_frame: usize,
+    rendered_frames: usize,
+    total_frames: usize,
+    fade_in_frames: usize,
+    fade_out_frames: usize,
+    release_remaining: Option<usize>,
     speed: f64,
     gain: f32,
     pan: f32,
@@ -68,6 +80,11 @@ impl Voice {
             }),
             position: 0.0,
             end_frame: 0,
+            rendered_frames: 0,
+            total_frames: 0,
+            fade_in_frames: 0,
+            fade_out_frames: 0,
+            release_remaining: None,
             speed: 1.0,
             gain: 0.0,
             pan: 0.0,
@@ -119,6 +136,58 @@ impl DrumRack {
             return &mut self.voices[index];
         }
         &mut self.voices[0]
+    }
+
+    fn fade_frames(&self, milliseconds: f32) -> usize {
+        (milliseconds.clamp(0.0, DRUM_PAD_MAX_FADE_MS) * self.sample_rate / 1_000.0).round()
+            as usize
+    }
+}
+
+fn fit_boundary_fades(total_frames: usize, fade_in: usize, fade_out: usize) -> (usize, usize) {
+    let available = total_frames.saturating_sub(1);
+    let requested = fade_in.saturating_add(fade_out);
+    if requested <= available || requested == 0 {
+        return (fade_in, fade_out);
+    }
+
+    let scale = available as f64 / requested as f64;
+    let scaled_in = (fade_in as f64 * scale).round() as usize;
+    (scaled_in, available.saturating_sub(scaled_in))
+}
+
+fn boundary_fade_gain(voice: &Voice) -> f32 {
+    let fade_in = if voice.fade_in_frames == 0 {
+        1.0
+    } else {
+        voice.rendered_frames as f32 / voice.fade_in_frames as f32
+    };
+    let remaining_after = voice
+        .total_frames
+        .saturating_sub(voice.rendered_frames.saturating_add(1));
+    let fade_out = if voice.fade_out_frames == 0 {
+        1.0
+    } else {
+        remaining_after as f32 / voice.fade_out_frames as f32
+    };
+    fade_in.min(fade_out).clamp(0.0, 1.0)
+}
+
+fn release_fade_gain(voice: &Voice) -> f32 {
+    let Some(remaining) = voice.release_remaining else {
+        return 1.0;
+    };
+    if voice.fade_out_frames <= 1 {
+        return 0.0;
+    }
+    (remaining.saturating_sub(1) as f32 / (voice.fade_out_frames - 1) as f32).clamp(0.0, 1.0)
+}
+
+fn begin_release(voice: &mut Voice) {
+    if voice.fade_out_frames == 0 {
+        voice.active = false;
+    } else if voice.release_remaining.is_none() {
+        voice.release_remaining = Some(voice.fade_out_frames);
     }
 }
 
@@ -175,11 +244,13 @@ impl Instrument for DrumRack {
         let fine_tune = self.pads[pad_index].fine_tune;
         let one_shot = self.pads[pad_index].one_shot;
         let choke_group = self.pads[pad_index].choke_group;
+        let fade_in_frames = self.fade_frames(self.pads[pad_index].fade_in_ms);
+        let fade_out_frames = self.fade_frames(self.pads[pad_index].fade_out_ms);
 
         if let Some(group) = choke_group {
             for voice in &mut self.voices {
                 if voice.active && voice.choke_group == Some(group) {
-                    voice.active = false;
+                    begin_release(voice);
                 }
             }
         }
@@ -187,6 +258,9 @@ impl Instrument for DrumRack {
         let semitones = coarse_tune as f32 + fine_tune / 100.0;
         let speed = 2.0_f64.powf(semitones as f64 / 12.0);
         let velocity_gain = (velocity as f32 / 127.0).clamp(0.0, 1.0);
+        let total_frames = ((end_frame - start_frame) as f64 / speed).ceil() as usize;
+        let (fade_in_frames, fade_out_frames) =
+            fit_boundary_fades(total_frames, fade_in_frames, fade_out_frames);
 
         let voice = self.take_voice_slot();
         *voice = Voice {
@@ -196,6 +270,11 @@ impl Instrument for DrumRack {
             sample,
             position: start_frame as f64,
             end_frame,
+            rendered_frames: 0,
+            total_frames,
+            fade_in_frames,
+            fade_out_frames,
+            release_remaining: None,
             speed,
             gain,
             pan,
@@ -215,7 +294,7 @@ impl Instrument for DrumRack {
                 && voice.pitch == pitch
                 && !voice.one_shot
             {
-                voice.active = false;
+                begin_release(voice);
             }
         }
     }
@@ -237,15 +316,18 @@ impl Instrument for DrumRack {
                     continue;
                 }
 
+                let envelope = boundary_fade_gain(voice) * release_fade_gain(voice);
                 let mono = read_sample(&voice.sample, voice.position, 0)
                     * voice.gain
-                    * voice.velocity_gain;
+                    * voice.velocity_gain
+                    * envelope;
                 let (pan_l, pan_r) = equal_power_pan(voice.pan);
 
                 if channels >= 2 {
                     let right = read_sample(&voice.sample, voice.position, 1)
                         * voice.gain
-                        * voice.velocity_gain;
+                        * voice.velocity_gain
+                        * envelope;
                     buffer[frame_offset] += mono * pan_l;
                     buffer[frame_offset + 1] += right * pan_r;
                     for ch in 2..channels {
@@ -256,6 +338,13 @@ impl Instrument for DrumRack {
                 }
 
                 voice.position += voice.speed;
+                voice.rendered_frames = voice.rendered_frames.saturating_add(1);
+                if let Some(remaining) = voice.release_remaining.as_mut() {
+                    *remaining = remaining.saturating_sub(1);
+                    if *remaining == 0 {
+                        voice.active = false;
+                    }
+                }
                 if voice.position >= voice.end_frame as f64 {
                     voice.active = false;
                 }
@@ -294,6 +383,8 @@ impl Instrument for DrumRack {
             pad.pan = state.pan;
             pad.start = state.start;
             pad.end = state.end;
+            pad.fade_in_ms = state.fade_in_ms.clamp(0.0, DRUM_PAD_MAX_FADE_MS);
+            pad.fade_out_ms = state.fade_out_ms.clamp(0.0, DRUM_PAD_MAX_FADE_MS);
             pad.coarse_tune = state.coarse_tune;
             pad.fine_tune = state.fine_tune;
             pad.one_shot = state.one_shot;
@@ -350,5 +441,85 @@ mod tests {
         rack.render(&mut buffer, 2);
 
         assert!(buffer.iter().any(|sample| sample.abs() > 0.0));
+    }
+
+    #[test]
+    fn pad_fades_start_and_end_at_silence() {
+        let mut rack = DrumRack::new(1_000.0);
+        rack.load_drum_pad_sample(0, make_test_audio(10, 1.0), "click.wav".into());
+        rack.set_drum_pad_state(
+            0,
+            DrumPadState {
+                fade_in_ms: 3.0,
+                fade_out_ms: 3.0,
+                ..DrumPadState::default()
+            },
+        );
+        rack.note_on(36, 127);
+
+        let mut buffer = vec![0.0; 10];
+        rack.render(&mut buffer, 1);
+
+        assert_eq!(buffer[0], 0.0);
+        assert!(buffer[1] > buffer[0]);
+        assert_eq!(buffer[9], 0.0);
+        assert!(buffer[8] > buffer[9]);
+    }
+
+    #[test]
+    fn pad_fade_out_releases_a_gated_voice_without_a_step() {
+        let mut rack = DrumRack::new(1_000.0);
+        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "gate.wav".into());
+        rack.set_drum_pad_state(
+            0,
+            DrumPadState {
+                fade_in_ms: 0.0,
+                fade_out_ms: 3.0,
+                one_shot: false,
+                ..DrumPadState::default()
+            },
+        );
+        rack.note_on(36, 127);
+        let mut attack = vec![0.0; 2];
+        rack.render(&mut attack, 1);
+        rack.note_off(36);
+
+        let mut release = vec![0.0; 4];
+        rack.render(&mut release, 1);
+
+        assert!(release[0] > release[1]);
+        assert!(release[1] > release[2]);
+        assert_eq!(release[2], 0.0);
+        assert_eq!(release[3], 0.0);
+    }
+
+    #[test]
+    fn choke_group_uses_the_pad_fade_out_instead_of_cutting_immediately() {
+        let mut rack = DrumRack::new(1_000.0);
+        rack.load_drum_pad_sample(0, make_test_audio(20, 1.0), "open.wav".into());
+        rack.load_drum_pad_sample(1, make_test_audio(20, 0.0), "closed.wav".into());
+        for pad_index in [0, 1] {
+            rack.set_drum_pad_state(
+                pad_index,
+                DrumPadState {
+                    fade_in_ms: 0.0,
+                    fade_out_ms: 3.0,
+                    choke_group: Some(1),
+                    ..DrumPadState::default()
+                },
+            );
+        }
+        rack.note_on(36, 127);
+        let mut attack = vec![0.0; 2];
+        rack.render(&mut attack, 1);
+
+        rack.note_on(37, 127);
+        let mut release = vec![0.0; 4];
+        rack.render(&mut release, 1);
+
+        assert!(release[0] > release[1]);
+        assert!(release[1] > release[2]);
+        assert_eq!(release[2], 0.0);
+        assert_eq!(release[3], 0.0);
     }
 }
