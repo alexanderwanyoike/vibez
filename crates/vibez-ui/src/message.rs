@@ -462,6 +462,14 @@ pub enum Message {
     SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
     ConfirmDrumRackSlice,
     CancelDrumRackSlice,
+    OpenTransientAnalysisDialog {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SetTransientAnalysisDetail(vibez_core::onset::TransientDetectionDetail),
+    ConfirmTransientAnalysis,
+    CancelTransientAnalysis,
     AudioClipDrumRackPrepared {
         location: TimelineLocation,
         track_id: TrackId,

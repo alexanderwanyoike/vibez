@@ -1006,32 +1006,11 @@ impl App {
                 }
                 col = col.push(menu_btn(
                     icons::SLIDERS_VERTICAL,
-                    "Analyse · fewer markers".into(),
-                    Message::DetectClipTransients {
+                    "Transient analysis…".into(),
+                    Message::OpenTransientAnalysisDialog {
                         location,
                         track_id,
                         clip_id,
-                        detail: vibez_core::onset::TransientDetectionDetail::Fewer,
-                    },
-                ));
-                col = col.push(menu_btn(
-                    icons::SLIDERS_VERTICAL,
-                    "Analyse · balanced".into(),
-                    Message::DetectClipTransients {
-                        location,
-                        track_id,
-                        clip_id,
-                        detail: vibez_core::onset::TransientDetectionDetail::Balanced,
-                    },
-                ));
-                col = col.push(menu_btn(
-                    icons::SLIDERS_VERTICAL,
-                    "Analyse · more markers".into(),
-                    Message::DetectClipTransients {
-                        location,
-                        track_id,
-                        clip_id,
-                        detail: vibez_core::onset::TransientDetectionDetail::More,
                     },
                 ));
                 col = col.push(menu_btn(

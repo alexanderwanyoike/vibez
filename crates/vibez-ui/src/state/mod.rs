@@ -112,6 +112,7 @@ pub struct ViewState {
     pub adaptive_grid_bias: i8,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
+    pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
     pub edit_menu_open: bool,
     pub cursor_x: f32, // globally tracked for popup positioning and pane drags
     pub cursor_y: f32,
@@ -138,6 +139,7 @@ impl Default for ViewState {
             adaptive_grid_bias: 0,
             context_menu: None,
             drum_rack_slice_dialog: None,
+            transient_analysis_dialog: None,
             edit_menu_open: false,
             cursor_x: 0.0,
             cursor_y: 0.0,
@@ -167,6 +169,14 @@ pub struct DrumRackSliceDialog {
     pub track_id: TrackId,
     pub clip_id: ClipId,
     pub markers: crate::domains::arrangement::AudioSliceMarkers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransientAnalysisDialog {
+    pub location: vibez_project::TimelineLocation,
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub detail: vibez_core::onset::TransientDetectionDetail,
 }
 
 /// Right-click context menu state.
@@ -1155,6 +1165,24 @@ mod tests {
     fn app_state_opens_in_perform_workspace() {
         let state = AppState::default();
         assert_eq!(state.view.workspace, Workspace::Perform);
+    }
+
+    #[test]
+    fn transient_analysis_is_a_dedicated_modal_with_balanced_default_detail() {
+        let mut state = AppState::default();
+        let dialog = TransientAnalysisDialog {
+            location: vibez_project::TimelineLocation::Arrange,
+            track_id: TrackId::new(),
+            clip_id: ClipId::new(),
+            detail: vibez_core::onset::TransientDetectionDetail::Balanced,
+        };
+
+        state.view.transient_analysis_dialog = Some(dialog);
+
+        assert_eq!(
+            state.view.transient_analysis_dialog.unwrap().detail,
+            vibez_core::onset::TransientDetectionDetail::Balanced
+        );
     }
 
     #[test]

@@ -215,6 +215,46 @@ impl App {
             Message::CancelDrumRackSlice => {
                 self.state.view.drum_rack_slice_dialog = None;
             }
+            Message::OpenTransientAnalysisDialog {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                let clip_exists = self
+                    .timeline_content_at(location, track_id)
+                    .is_some_and(|content| content.clips.iter().any(|clip| clip.id == clip_id));
+                if clip_exists {
+                    self.state.view.transient_analysis_dialog =
+                        Some(crate::state::TransientAnalysisDialog {
+                            location,
+                            track_id,
+                            clip_id,
+                            detail: vibez_core::onset::TransientDetectionDetail::Balanced,
+                        });
+                } else {
+                    self.state.status_text = "The Audio Clip is no longer available".into();
+                }
+            }
+            Message::SetTransientAnalysisDetail(detail) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.detail = detail;
+                }
+            }
+            Message::CancelTransientAnalysis => {
+                self.state.view.transient_analysis_dialog = None;
+            }
+            Message::ConfirmTransientAnalysis => {
+                let Some(dialog) = self.state.view.transient_analysis_dialog.take() else {
+                    return Task::none();
+                };
+                return self.dispatch_detect_clip_transients(
+                    dialog.location,
+                    dialog.track_id,
+                    dialog.clip_id,
+                    dialog.detail,
+                    true,
+                );
+            }
             Message::ConfirmDrumRackSlice => {
                 let Some(dialog) = self.state.view.drum_rack_slice_dialog.take() else {
                     return Task::none();
