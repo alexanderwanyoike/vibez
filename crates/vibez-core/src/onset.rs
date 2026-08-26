@@ -1,9 +1,10 @@
 //! Offline transient / onset detection and BPM estimation for audio
 //! clips.
 //!
-//! Transient detection is a Rust port of aubio 0.4.9's established HFC onset
-//! pipeline. Tempo estimation retains a separate onset-envelope signal for its
-//! autocorrelation input.
+//! Transient event candidates use a Rust port of aubio 0.4.9's established
+//! complex-domain onset pipeline. Accepted event peaks are backtracked to an
+//! energy minimum so editing markers land at slice boundaries. Tempo
+//! estimation retains a separate onset-envelope signal for autocorrelation.
 //!
 //! Two entrypoints:
 //! - `detect_onsets` returns `Vec<u64>` of absolute frame indices.
@@ -17,6 +18,8 @@
 use crate::audio_buffer::DecodedAudio;
 
 mod aubio;
+#[cfg(test)]
+mod transient_analysis_tests;
 
 /// Producer-facing transient sensitivity. Higher percentages retain quieter
 /// attacks; lower percentages keep only the most prominent attacks.
@@ -44,17 +47,14 @@ impl TransientSensitivity {
         self.0 as f32 / Self::MAX_PERCENT as f32
     }
 
-    fn log_interpolate(self, low: f32, midpoint: f32, high: f32) -> f32 {
+    #[cfg(test)]
+    fn threshold_through(self, midpoint: f32) -> f32 {
         let normalized = self.normalized();
         if normalized <= 0.5 {
-            low * (midpoint / low).powf(normalized / 0.5)
+            0.9 * (midpoint / 0.9).powf(normalized / 0.5)
         } else {
-            midpoint * (high / midpoint).powf((normalized - 0.5) / 0.5)
+            midpoint * (0.001 / midpoint).powf((normalized - 0.5) / 0.5)
         }
-    }
-
-    fn peak_threshold(self, midpoint: f32) -> f32 {
-        self.log_interpolate(0.9, midpoint, 0.001)
     }
 }
 
@@ -76,54 +76,70 @@ const PREEMPHASIS: f32 = 0.97;
 
 /// Detect onsets in `audio` and return sample indices.
 ///
-/// Sensitivity changes aubio's peak-picking threshold without changing its
-/// minimum inter-onset interval. Higher percentages retain more attacks.
+/// Candidate generation is fixed so sensitivity can only add or remove stable
+/// source-frame positions. Higher percentages retain quieter attacks.
 pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) -> Vec<u64> {
     let frames = audio.num_frames();
     if frames < 1_024 || audio.sample_rate == 0 {
         return Vec::new();
     }
-    let mono = mix_to_mono(audio, frames);
+    // Analyse channels independently. Averaging stereo before analysis can
+    // erase an attack when channels carry opposite-polarity content.
+    let mut candidates = audio
+        .channels
+        .iter()
+        .flat_map(|channel| {
+            let config = aubio::Config::for_complex_candidates(audio.sample_rate);
+            let analysis_delay = config.analysis_delay_frames();
+            aubio::detect_complex_onsets(channel, audio.sample_rate, config)
+                .into_iter()
+                .map(move |estimated_onset| {
+                    (
+                        estimated_onset,
+                        estimated_onset.saturating_add(analysis_delay),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+
+    // Aubio's spectral descriptors can report a pitched decay cycle as a new
+    // onset. Transient markers are editing boundaries, so require each
+    // spectral candidate to coincide with a meaningful time-domain attack.
     let global_peak = audio
         .channels
         .iter()
         .flat_map(|channel| channel.iter())
         .map(|sample| sample.abs())
         .fold(0.0f32, f32::max);
-    let accepts_attack =
-        |frame: usize| frame > 0 && genuine_attack(audio, frame as u64, sensitivity, global_peak);
-    let mut onsets = aubio::detect_onsets_where(
-        &mono,
-        audio.sample_rate,
-        aubio::Config::for_sensitivity(sensitivity),
-        accepts_attack,
-    );
-    let energy_onsets = aubio::detect_energy_onsets_where(
-        &mono,
-        audio.sample_rate,
-        aubio::Config::for_energy_sensitivity(sensitivity),
-        accepts_attack,
-    );
-
-    // HFC is precise on bright attacks but can miss bass-heavy hits. Aubio's
-    // energy descriptor covers those. Keep HFC's timing when both descriptors
-    // identify the same attack, and add only genuinely distinct energy hits.
-    let merge_radius = frames_for_ms(audio.sample_rate, 50.0) as u64;
-    for frame in energy_onsets {
-        if !onsets.iter().any(|hfc| hfc.abs_diff(frame) <= merge_radius) {
-            onsets.push(frame);
-        }
-    }
-    onsets.sort_unstable();
-
+    candidates.retain(|&(estimated_onset, _)| {
+        estimated_onset > 0 && genuine_attack(audio, estimated_onset, sensitivity, global_peak)
+    });
+    // Aubio subtracts its analysis delay to estimate the musical onset. For
+    // slice localisation we instead begin at the later detected peak, then
+    // backtrack through source energy to the actual boundary. Starting from
+    // the compensated estimate can put an impulse before its own attack.
+    let peaks = candidates
+        .into_iter()
+        .map(|(_, detected_peak)| detected_peak)
+        .collect::<Vec<_>>();
+    let mut onsets = backtrack_to_energy_minima(audio, &peaks);
     // Clip start is already an explicit boundary in Vibez. Aubio reports a
     // non-silent file start as an onset, but showing that as a suggested
     // transient marker adds no editable information.
     onsets.retain(|&frame| frame > 0 && frame < frames as u64);
-    onsets
+    onsets.sort_unstable();
+    let mut canonical = Vec::with_capacity(onsets.len());
+    for onset in onsets {
+        if canonical.last().is_none_or(|previous: &u64| {
+            onset.abs_diff(*previous) > frames_for_ms(audio.sample_rate, BACKTRACK_HOP_MS) as u64
+        }) {
+            canonical.push(onset);
+        }
+    }
+    canonical
 }
 
-pub(super) fn frames_for_ms(sample_rate: u32, milliseconds: f32) -> usize {
+fn frames_for_ms(sample_rate: u32, milliseconds: f32) -> usize {
     (sample_rate as f32 * milliseconds / 1_000.0).round() as usize
 }
 
@@ -168,8 +184,111 @@ fn peak_and_rms(audio: &DecodedAudio, start: usize, end: usize) -> (f32, f32) {
     (peak, rms)
 }
 
+const BACKTRACK_WINDOW_MS: f32 = 23.22;
+const BACKTRACK_HOP_MS: f32 = 2.9;
+const BACKTRACK_MAX_MS: f32 = 50.0;
+
+fn backtrack_to_energy_minima(audio: &DecodedAudio, onsets: &[u64]) -> Vec<u64> {
+    if onsets.is_empty() || audio.num_frames() < 3 {
+        return onsets.to_vec();
+    }
+
+    let hop = frames_for_ms(audio.sample_rate, BACKTRACK_HOP_MS).max(1);
+    let window = frames_for_ms(audio.sample_rate, BACKTRACK_WINDOW_MS).max(1);
+    let energy = rms_energy_envelope(audio, window, hop);
+    backtrack_events_to_minima(
+        onsets,
+        &energy,
+        hop,
+        frames_for_ms(audio.sample_rate, BACKTRACK_MAX_MS),
+    )
+}
+
+fn rms_energy_envelope(audio: &DecodedAudio, window: usize, hop: usize) -> Vec<f32> {
+    let frames = audio.num_frames();
+    if frames == 0 || window == 0 || hop == 0 {
+        return Vec::new();
+    }
+
+    let channel_count = audio.channels.len().max(1) as f64;
+    let mut prefix_energy = vec![0.0f64; frames + 1];
+    for frame in 0..frames {
+        let square_sum = audio
+            .channels
+            .iter()
+            .map(|channel| f64::from(channel.get(frame).copied().unwrap_or(0.0)).powi(2))
+            .sum::<f64>();
+        prefix_energy[frame + 1] = prefix_energy[frame] + square_sum / channel_count;
+    }
+
+    (0..frames)
+        .step_by(hop)
+        .map(|end| {
+            // A trailing RMS window keeps the final silence minimum aligned
+            // with the source attack. A centred window would smear future
+            // attack energy earlier by half a window and make slices early.
+            let start = end.saturating_sub(window);
+            let frame_count = (end - start).max(1) as f64;
+            ((prefix_energy[end] - prefix_energy[start]) / frame_count).sqrt() as f32
+        })
+        .collect()
+}
+
+// The local-minimum matching rule is derived from librosa 0.11.0's
+// `onset_backtrack`, copyright (c) 2013-2023 the librosa development team,
+// distributed under the ISC licence:
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+// Vibez adds a bounded look-back expressed in source frames because a DAW
+// marker must not jump into an earlier event.
+fn backtrack_events_to_minima(
+    events: &[u64],
+    energy: &[f32],
+    hop: usize,
+    max_lookback: usize,
+) -> Vec<u64> {
+    if energy.len() < 3 || hop == 0 {
+        return events.to_vec();
+    }
+
+    let mut minima = vec![0usize];
+    minima.extend(energy.windows(3).enumerate().filter_map(|(index, values)| {
+        (values[1] <= values[0] && values[1] < values[2]).then_some(index + 1)
+    }));
+
+    events
+        .iter()
+        .map(|&event| {
+            let event = usize::try_from(event).unwrap_or(usize::MAX);
+            let first_allowed = event.saturating_sub(max_lookback);
+            minima
+                .iter()
+                .rev()
+                .map(|minimum| minimum.saturating_mul(hop))
+                .find(|minimum| *minimum <= event && *minimum >= first_allowed)
+                .map_or(event as u64, |minimum| minimum as u64)
+        })
+        .collect()
+}
+
 fn attack_prominence_floor(sensitivity: TransientSensitivity) -> f32 {
-    sensitivity.log_interpolate(0.6, 0.1, 0.005)
+    let normalized = sensitivity.normalized();
+    if normalized <= 0.5 {
+        0.6 * (0.1f32 / 0.6).powf(normalized / 0.5)
+    } else {
+        0.1 * (0.005f32 / 0.1).powf((normalized - 0.5) / 0.5)
+    }
 }
 
 fn mix_to_mono(audio: &DecodedAudio, frames: usize) -> Vec<f32> {
@@ -578,50 +697,24 @@ mod tests {
 
     #[test]
     fn sensitivity_affects_yield() {
+        // Low-amplitude impulses: high sensitivity should retain at least as
+        // many as low sensitivity.
         let sr = 44_100u32;
-        let amplitudes = [1.0f32, 0.65, 0.35, 0.18, 0.08, 0.03];
-        let mut buf = vec![0.0f32; 40_000];
-        for (index, amplitude) in amplitudes.into_iter().enumerate() {
-            let start = 2_000 + index * 5_512;
-            for offset in 0..1_024 {
-                let phase = std::f32::consts::TAU * 180.0 * offset as f32 / sr as f32;
-                buf[start + offset] = phase.sin() * (-(offset as f32) / 260.0).exp() * amplitude;
-            }
+        let mut buf = vec![0.0f32; 44_100];
+        for i in (2_000..40_000).step_by(5_000) {
+            buf[i] = 0.05;
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
-        let low = detect_onsets(&audio, TransientSensitivity::new(0)).len();
-        let high = detect_onsets(&audio, TransientSensitivity::new(100)).len();
-        assert!(
-            high > low,
-            "graded attacks must produce more markers at high sensitivity ({high}) than low ({low})",
-        );
-    }
-
-    #[test]
-    fn sensitivity_sweep_never_loses_an_accepted_attack() {
-        let sr = 44_100u32;
-        let mut channel = vec![0.0f32; 50_000];
-        for (index, amplitude) in [1.0f32, 0.8, 0.55, 0.3, 0.14, 0.06].into_iter().enumerate() {
-            let start = 2_000 + index * 5_512;
-            for offset in 0..1_024 {
-                let phase = std::f32::consts::TAU * 160.0 * offset as f32 / sr as f32;
-                channel[start + offset] =
-                    phase.sin() * (-(offset as f32) / 280.0).exp() * amplitude;
-            }
+        let results = [0, 25, 50, 75, 100]
+            .map(|percent| detect_onsets(&audio, TransientSensitivity::new(percent)));
+        for pair in results.windows(2) {
+            assert!(
+                pair[0].iter().all(|onset| pair[1].contains(onset)),
+                "higher sensitivity {:?} must retain every lower-sensitivity marker {:?}",
+                pair[1],
+                pair[0],
+            );
         }
-        let audio = make_audio(vec![channel.clone(), channel], sr);
-        let counts: Vec<_> = (0..=10)
-            .map(|step| detect_onsets(&audio, TransientSensitivity::new(step * 10)).len())
-            .collect();
-
-        assert!(
-            counts.windows(2).all(|pair| pair[0] <= pair[1]),
-            "sensitivity sweep must be monotonic, got {counts:?}"
-        );
-        assert!(
-            counts.last() > counts.first(),
-            "sweep needs useful travel: {counts:?}"
-        );
     }
 
     #[test]

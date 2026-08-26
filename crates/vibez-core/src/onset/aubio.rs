@@ -8,6 +8,7 @@
 //! aubio is licensed under GPL-3.0-or-later. Vibez carries the same compatible
 //! licence. Upstream source: <https://github.com/aubio/aubio/tree/0.4.9>.
 
+#[cfg(test)]
 use super::TransientSensitivity;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
@@ -15,10 +16,11 @@ use std::sync::Arc;
 const DEFAULT_WINDOW_SIZE: usize = 1_024;
 const DEFAULT_HOP_SIZE: usize = 256;
 const DEFAULT_THRESHOLD: f32 = 0.058;
-const DEFAULT_ENERGY_THRESHOLD: f32 = 0.3;
+const COMPLEX_CANDIDATE_THRESHOLD: f32 = 0.001;
 const DEFAULT_MIN_IOI_MS: f32 = 50.0;
 const DEFAULT_SILENCE_DB: f32 = -70.0;
 const DEFAULT_DELAY_HOPS: f32 = 4.3;
+const COMPLEX_DELAY_HOPS: f32 = 4.6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Config {
@@ -27,25 +29,43 @@ pub(super) struct Config {
     threshold: f32,
     min_ioi_ms: f32,
     silence_db: f32,
+    delay_hops: f32,
 }
 
 impl Config {
+    #[cfg(test)]
     pub(super) fn for_sensitivity(sensitivity: TransientSensitivity) -> Self {
         // aubio documents 0.001..=0.900 as the useful peak-threshold range.
         // Interpolate logarithmically through its HFC default at 50%, giving
         // useful travel at both ends instead of bunching every result near the
         // middle of the knob.
         Self {
-            threshold: sensitivity.peak_threshold(DEFAULT_THRESHOLD),
+            threshold: sensitivity.threshold_through(DEFAULT_THRESHOLD),
             ..Self::default()
         }
     }
 
-    pub(super) fn for_energy_sensitivity(sensitivity: TransientSensitivity) -> Self {
+    pub(super) fn for_complex_candidates(sample_rate: u32) -> Self {
+        let window_size = match sample_rate {
+            0..=33_074 => DEFAULT_WINDOW_SIZE / 2,
+            33_075..=66_149 => DEFAULT_WINDOW_SIZE,
+            66_150..=132_299 => DEFAULT_WINDOW_SIZE * 2,
+            _ => DEFAULT_WINDOW_SIZE * 4,
+        };
         Self {
-            threshold: sensitivity.peak_threshold(DEFAULT_ENERGY_THRESHOLD),
+            // Candidate generation is intentionally fixed and permissive.
+            // Producer sensitivity filters one stable set later in the
+            // pipeline, so retained markers never move between settings.
+            threshold: COMPLEX_CANDIDATE_THRESHOLD,
+            delay_hops: COMPLEX_DELAY_HOPS,
+            window_size,
+            hop_size: window_size / 4,
             ..Self::default()
         }
+    }
+
+    pub(super) fn analysis_delay_frames(self) -> u64 {
+        (self.delay_hops * self.hop_size as f32) as u64
     }
 
     fn validate(self, sample_rate: u32) -> Result<Self, ConfigError> {
@@ -73,6 +93,7 @@ impl Default for Config {
             threshold: DEFAULT_THRESHOLD,
             min_ioi_ms: DEFAULT_MIN_IOI_MS,
             silence_db: DEFAULT_SILENCE_DB,
+            delay_hops: DEFAULT_DELAY_HOPS,
         }
     }
 }
@@ -87,33 +108,18 @@ enum ConfigError {
 
 #[cfg(test)]
 pub(super) fn detect_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
-    detect_onsets_where(mono, sample_rate, config, |_| true)
+    detect_onsets_with_descriptor(mono, sample_rate, config, DescriptorKind::Hfc)
 }
 
-pub(super) fn detect_onsets_where(
-    mono: &[f32],
-    sample_rate: u32,
-    config: Config,
-    accepts: impl FnMut(usize) -> bool,
-) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Hfc, accepts)
-}
-
-pub(super) fn detect_energy_onsets_where(
-    mono: &[f32],
-    sample_rate: u32,
-    config: Config,
-    accepts: impl FnMut(usize) -> bool,
-) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, Descriptor::Energy, accepts)
+pub(super) fn detect_complex_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
+    detect_onsets_with_descriptor(mono, sample_rate, config, DescriptorKind::Complex)
 }
 
 fn detect_onsets_with_descriptor(
     mono: &[f32],
     sample_rate: u32,
     config: Config,
-    descriptor: Descriptor,
-    accepts: impl FnMut(usize) -> bool,
+    descriptor: DescriptorKind,
 ) -> Vec<u64> {
     let Ok(config) = config.validate(sample_rate) else {
         return Vec::new();
@@ -122,13 +128,40 @@ fn detect_onsets_with_descriptor(
         return Vec::new();
     }
 
-    Detector::new(sample_rate, config, descriptor).process(mono, accepts)
+    Detector::new(sample_rate, config, descriptor).process(mono)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Descriptor {
+enum DescriptorKind {
+    #[cfg(test)]
     Hfc,
-    Energy,
+    Complex,
+}
+
+enum Descriptor {
+    #[cfg(test)]
+    Hfc,
+    Complex(ComplexDomain),
+}
+
+impl Descriptor {
+    fn new(kind: DescriptorKind, bins: usize, sample_rate: u32, hop_size: usize) -> Self {
+        match kind {
+            #[cfg(test)]
+            DescriptorKind::Hfc => Self::Hfc,
+            DescriptorKind::Complex => {
+                Self::Complex(ComplexDomain::new(bins, sample_rate, hop_size))
+            }
+        }
+    }
+
+    fn process(&mut self, spectrum: &Spectrum) -> f32 {
+        match self {
+            #[cfg(test)]
+            Self::Hfc => high_frequency_content(&spectrum.magnitudes),
+            Self::Complex(complex) => complex.process(spectrum),
+        }
+    }
 }
 
 struct Detector {
@@ -144,53 +177,45 @@ struct Detector {
 }
 
 impl Detector {
-    fn new(sample_rate: u32, config: Config, descriptor: Descriptor) -> Self {
+    fn new(sample_rate: u32, config: Config, descriptor: DescriptorKind) -> Self {
+        let bins = config.window_size / 2 + 1;
         Self {
             hop_size: config.hop_size,
-            min_ioi: super::frames_for_ms(sample_rate, config.min_ioi_ms),
-            delay: (DEFAULT_DELAY_HOPS * config.hop_size as f32) as usize,
+            min_ioi: ((config.min_ioi_ms / 1_000.0) * sample_rate as f32).round() as usize,
+            delay: (config.delay_hops * config.hop_size as f32) as usize,
             silence_db: config.silence_db,
             total_frames: 0,
             last_onset: 0,
             phase_vocoder: PhaseVocoder::new(config.window_size, config.hop_size),
             peak_picker: PeakPicker::new(config.threshold),
-            descriptor,
+            descriptor: Descriptor::new(descriptor, bins, sample_rate, config.hop_size),
         }
     }
 
-    fn process(mut self, mono: &[f32], mut accepts: impl FnMut(usize) -> bool) -> Vec<u64> {
+    fn process(mut self, mono: &[f32]) -> Vec<u64> {
         let mut onsets = Vec::new();
         let mut hop = vec![0.0; self.hop_size];
 
         for chunk in mono.chunks(self.hop_size) {
             hop.fill(0.0);
             hop[..chunk.len()].copy_from_slice(chunk);
-            if let Some(frame) = self.process_hop(&hop, &mut accepts) {
+            if let Some(frame) = self.process_hop(&hop) {
                 onsets.push(frame as u64);
             }
         }
         onsets
     }
 
-    fn process_hop(
-        &mut self,
-        input: &[f32],
-        accepts: &mut impl FnMut(usize) -> bool,
-    ) -> Option<usize> {
-        let magnitudes = self.phase_vocoder.spectrum(input);
-        let descriptor = match self.descriptor {
-            Descriptor::Hfc => high_frequency_content(&magnitudes),
-            Descriptor::Energy => spectral_energy(&magnitudes),
-        };
+    fn process_hop(&mut self, input: &[f32]) -> Option<usize> {
+        let spectrum = self.phase_vocoder.spectrum(input);
+        let descriptor = self.descriptor.process(&spectrum);
         let peak = self.peak_picker.process(descriptor);
         let silent = db_spl(input) < self.silence_db;
         let mut accepted = false;
 
         if peak > 0.0 && !silent {
             let new_onset = self.total_frames + (peak * self.hop_size as f32).round() as usize;
-            let reported_onset = self.delay.max(new_onset).saturating_sub(self.delay);
-            if accepts(reported_onset)
-                && self.last_onset + self.min_ioi < new_onset
+            if self.last_onset + self.min_ioi < new_onset
                 && !(self.last_onset > 0 && self.delay > new_onset)
             {
                 self.last_onset = self.delay.max(new_onset);
@@ -198,10 +223,7 @@ impl Detector {
             }
         } else if peak <= 0.0 && self.total_frames <= self.delay && !silent {
             let new_onset = self.total_frames;
-            let reported_onset = self.total_frames;
-            if accepts(reported_onset)
-                && (self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset)
-            {
+            if self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset {
                 self.last_onset = self.total_frames + self.delay;
                 accepted = true;
             }
@@ -221,6 +243,11 @@ struct PhaseVocoder {
     fft_buffer: Vec<Complex32>,
     window: Vec<f32>,
     fft: Arc<dyn Fft<f32>>,
+}
+
+struct Spectrum {
+    magnitudes: Vec<f32>,
+    phases: Vec<f32>,
 }
 
 impl PhaseVocoder {
@@ -244,7 +271,7 @@ impl PhaseVocoder {
         }
     }
 
-    fn spectrum(&mut self, input: &[f32]) -> Vec<f32> {
+    fn spectrum(&mut self, input: &[f32]) -> Spectrum {
         debug_assert_eq!(input.len(), self.hop_size);
 
         if self.old_size > 0 {
@@ -263,20 +290,84 @@ impl PhaseVocoder {
         }
         self.fft.process(&mut self.fft_buffer);
 
-        self.fft_buffer[..=self.window_size / 2]
-            .iter()
-            .map(|bin| bin.norm())
-            .collect()
+        let bins = &self.fft_buffer[..=self.window_size / 2];
+        let magnitudes = bins.iter().map(|bin| bin.norm()).collect();
+        let mut phases: Vec<f32> = bins.iter().map(|bin| bin.arg()).collect();
+        // Aubio forces the real-only DC and Nyquist bins to exactly 0 or PI.
+        // Preserving tiny backend imaginary noise here creates false complex-
+        // domain novelty in otherwise stable decays.
+        if let Some(first) = bins.first() {
+            phases[0] = if first.re < 0.0 {
+                std::f32::consts::PI
+            } else {
+                0.0
+            };
+        }
+        if let Some(last) = bins.last() {
+            let last_index = phases.len() - 1;
+            phases[last_index] = if last.re < 0.0 {
+                std::f32::consts::PI
+            } else {
+                0.0
+            };
+        }
+        Spectrum { magnitudes, phases }
     }
 }
 
-fn spectral_energy(magnitudes: &[f32]) -> f32 {
-    magnitudes
-        .iter()
-        .map(|magnitude| magnitude * magnitude)
-        .sum()
+/// Aubio 0.4.9's complex-domain spectral descriptor, including the adaptive
+/// whitening and log-compression defaults used by its `complex` onset mode.
+struct ComplexDomain {
+    previous_magnitudes: Vec<f32>,
+    previous_phases: Vec<f32>,
+    phases_two_frames_back: Vec<f32>,
+    whitening_peaks: Vec<f32>,
+    whitening_decay: f32,
 }
 
+impl ComplexDomain {
+    const WHITENING_FLOOR: f32 = 1.0e-4;
+    const WHITENING_RELAX_SECONDS: f32 = 250.0;
+    const WHITENING_DECAY: f32 = 0.001;
+
+    fn new(bins: usize, sample_rate: u32, hop_size: usize) -> Self {
+        let whitening_decay = Self::WHITENING_DECAY
+            .powf((hop_size as f32 / sample_rate as f32) / Self::WHITENING_RELAX_SECONDS);
+        Self {
+            previous_magnitudes: vec![0.0; bins],
+            previous_phases: vec![0.0; bins],
+            phases_two_frames_back: vec![0.0; bins],
+            whitening_peaks: vec![Self::WHITENING_FLOOR; bins],
+            whitening_decay,
+        }
+    }
+
+    fn process(&mut self, spectrum: &Spectrum) -> f32 {
+        let mut novelty = 0.0f32;
+        for index in 0..spectrum.magnitudes.len() {
+            let decayed_peak =
+                (self.whitening_decay * self.whitening_peaks[index]).max(Self::WHITENING_FLOOR);
+            self.whitening_peaks[index] = spectrum.magnitudes[index].max(decayed_peak);
+            let whitened = spectrum.magnitudes[index] / self.whitening_peaks[index];
+            let magnitude = whitened.ln_1p();
+            let predicted_phase =
+                2.0 * self.previous_phases[index] - self.phases_two_frames_back[index];
+            let squared_distance = self.previous_magnitudes[index].powi(2) + magnitude.powi(2)
+                - 2.0
+                    * self.previous_magnitudes[index]
+                    * magnitude
+                    * (predicted_phase - spectrum.phases[index]).cos();
+            novelty += squared_distance.abs().sqrt();
+
+            self.phases_two_frames_back[index] = self.previous_phases[index];
+            self.previous_phases[index] = spectrum.phases[index];
+            self.previous_magnitudes[index] = magnitude;
+        }
+        novelty
+    }
+}
+
+#[cfg(test)]
 fn high_frequency_content(magnitudes: &[f32]) -> f32 {
     magnitudes
         .iter()
@@ -417,11 +508,19 @@ mod tests {
         assert_eq!(high_frequency_content(&vec![0.0; 513]), 0.0);
     }
 
-    // Port of the energy zero-spectrum case in
-    // tests/src/spectral/test-specdesc.c.
+    // Port of the complex-domain zero-spectrum case in aubio 0.4.9's
+    // tests/src/spectral/test-specdesc.c, strengthened to check repeated
+    // frames because the descriptor retains two frames of phase history.
     #[test]
-    fn ported_upstream_energy_zero_spectrum_is_zero() {
-        assert_eq!(spectral_energy(&vec![0.0; 513]), 0.0);
+    fn ported_upstream_complex_zero_spectrum_is_zero() {
+        let mut descriptor = ComplexDomain::new(513, 44_100, 256);
+        let spectrum = Spectrum {
+            magnitudes: vec![0.0; 513],
+            phases: vec![0.0; 513],
+        };
+        assert_eq!(descriptor.process(&spectrum), 0.0);
+        assert_eq!(descriptor.process(&spectrum), 0.0);
+        assert_eq!(descriptor.process(&spectrum), 0.0);
     }
 
     #[test]
@@ -434,6 +533,13 @@ mod tests {
         assert_eq!(fewer.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert!(more.threshold < balanced.threshold);
         assert!(balanced.threshold < fewer.threshold);
+
+        let candidates = Config::for_complex_candidates(44_100);
+        assert_eq!(candidates.threshold, COMPLEX_CANDIDATE_THRESHOLD);
+        assert_eq!(candidates.min_ioi_ms, DEFAULT_MIN_IOI_MS);
+        assert_eq!(candidates.delay_hops, COMPLEX_DELAY_HOPS);
+        assert_eq!(Config::for_complex_candidates(48_000).window_size, 1_024);
+        assert_eq!(Config::for_complex_candidates(96_000).window_size, 2_048);
     }
 
     #[test]
@@ -472,6 +578,48 @@ mod tests {
             assert!(
                 (*actual as i64 - expected).abs() <= 2,
                 "expected {expected}, got {actual}; all={actual:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn complex_primary_attacks_match_aubio_0_4_9_golden_frames() {
+        let sample_rate = 44_100u32;
+        let mut audio = vec![0.0f32; sample_rate as usize];
+        for start in [2_000usize, 13_000, 24_000, 35_000] {
+            for offset in 0..7_000 {
+                if start + offset >= audio.len() {
+                    break;
+                }
+                let time = offset as f32 / sample_rate as f32;
+                let decay = (-(offset as f32) / 2_500.0).exp();
+                audio[start + offset] += decay
+                    * ((std::f32::consts::TAU * 120.0 * time).sin()
+                        + (std::f32::consts::TAU * 128.0 * time).sin())
+                    * 0.4;
+            }
+        }
+
+        // Generated with aubio 0.4.9's complex mode and its upstream 0.15
+        // threshold. RustFFT can produce additional low-novelty candidates in
+        // a beating decay, which the producer-facing attack validator rejects,
+        // but each upstream primary event must retain its timestamp.
+        let upstream = [1_459i64, 12_710, 23_714, 34_717];
+        let actual = detect_complex_onsets(
+            &audio,
+            sample_rate,
+            Config {
+                threshold: 0.15,
+                delay_hops: COMPLEX_DELAY_HOPS,
+                ..Config::default()
+            },
+        );
+        for expected in upstream {
+            assert!(
+                actual
+                    .iter()
+                    .any(|actual| (*actual as i64 - expected).abs() <= 3),
+                "expected {expected}; all={actual:?}"
             );
         }
     }
