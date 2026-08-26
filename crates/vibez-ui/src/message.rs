@@ -734,6 +734,7 @@ pub enum Message {
         clip_id: ClipId,
         expected_audio: Arc<DecodedAudio>,
         source_frames: Vec<u64>,
+        record_undo: bool,
     },
     /// Background BPM detection result. `bpm` is `None` when the
     /// detector refused to commit (silence, sparse pad, too short).

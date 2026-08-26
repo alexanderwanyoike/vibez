@@ -619,7 +619,14 @@ impl App {
         }
 
         self.state.status_text = format!("Added clip: {name}");
-        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
+        Task::batch([
+            self.schedule_auto_warp_if_enabled(track_id, clip_id, audio),
+            self.schedule_auto_detect_clip_transients(
+                vibez_project::TimelineLocation::Arrange,
+                track_id,
+                clip_id,
+            ),
+        ])
     }
 
     pub(super) fn handle_drum_rack_pad_file_selected(

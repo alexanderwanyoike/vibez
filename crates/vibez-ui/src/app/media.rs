@@ -635,7 +635,11 @@ impl App {
                 .map(|value| format!(" · source {value}"))
                 .unwrap_or_default()
         );
-        Task::none()
+        self.schedule_auto_detect_clip_transients(
+            vibez_project::TimelineLocation::Arrange,
+            track_id,
+            clip_id,
+        )
     }
 
     pub(super) fn add_audio_clip_to_section_at(
@@ -672,8 +676,9 @@ impl App {
             AuditionMode::Raw => (None, false, None),
             AuditionMode::Warp => (treatment.source_bpm, true, Some(self.state.transport.bpm)),
         };
+        let clip_id = ClipId::new();
         let clip = UiClip {
-            id: ClipId::new(),
+            id: clip_id,
             name: name.clone(),
             audio,
             source: Some(source),
@@ -742,7 +747,11 @@ impl App {
                 .map(|value| format!(" · source {value}"))
                 .unwrap_or_default()
         );
-        Task::none()
+        self.schedule_auto_detect_clip_transients(
+            vibez_project::TimelineLocation::Section(section_id),
+            track_id,
+            clip_id,
+        )
     }
 }
 

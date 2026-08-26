@@ -632,7 +632,7 @@ impl App {
                 track_id,
                 clip_id,
             } => {
-                return self.dispatch_detect_clip_transients(location, track_id, clip_id);
+                return self.dispatch_detect_clip_transients(location, track_id, clip_id, true);
             }
             Message::ClipTransientsDetected {
                 location,
@@ -640,6 +640,7 @@ impl App {
                 clip_id,
                 expected_audio,
                 source_frames,
+                record_undo,
             } => {
                 return self.finish_detect_clip_transients(
                     location,
@@ -647,6 +648,7 @@ impl App {
                     clip_id,
                     expected_audio,
                     source_frames,
+                    record_undo,
                     undo_gesture,
                 );
             }
