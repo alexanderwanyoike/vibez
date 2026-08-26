@@ -30,11 +30,17 @@ pub(super) struct Config {
 impl Config {
     pub(super) fn for_sensitivity(sensitivity: f32) -> Self {
         let sensitivity = sensitivity.clamp(0.25, 5.0);
+        let min_ioi_ms = if sensitivity <= 1.5 {
+            50.0 + ((sensitivity - 0.75) / 0.75).clamp(0.0, 1.0) * 60.0
+        } else {
+            110.0 + ((sensitivity - 1.5) / 3.5).clamp(0.0, 1.0) * 70.0
+        };
         Self {
             // Aubio's default HFC threshold is 0.058. Keep the existing Vibez
             // midpoint (1.5) pinned to that reference value and make larger
             // values progressively more selective.
             threshold: DEFAULT_THRESHOLD * (sensitivity / 1.5),
+            min_ioi_ms,
             ..Self::default()
         }
     }
@@ -350,6 +356,18 @@ mod tests {
     #[test]
     fn ported_upstream_hfc_zero_spectrum_is_zero() {
         assert_eq!(high_frequency_content(&vec![0.0; 513]), 0.0);
+    }
+
+    #[test]
+    fn producer_detail_presets_increase_the_minimum_hit_spacing() {
+        let more = Config::for_sensitivity(0.75);
+        let balanced = Config::for_sensitivity(1.5);
+        let fewer = Config::for_sensitivity(3.0);
+        assert_eq!(more.min_ioi_ms, 50.0);
+        assert_eq!(balanced.min_ioi_ms, 110.0);
+        assert_eq!(fewer.min_ioi_ms, 140.0);
+        assert!(more.threshold < balanced.threshold);
+        assert!(balanced.threshold < fewer.threshold);
     }
 
     #[test]

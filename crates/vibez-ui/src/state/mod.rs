@@ -180,6 +180,13 @@ pub enum ContextMenuTarget {
         end_beats: f64,
         track_id: Option<TrackId>,
     },
+    AudioClipDetail {
+        location: vibez_project::TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        marker: Option<u64>,
+    },
     ArrangementEmpty,
 }
 

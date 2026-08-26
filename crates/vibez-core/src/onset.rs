@@ -18,6 +18,25 @@ use crate::audio_buffer::DecodedAudio;
 
 mod aubio;
 
+/// Producer-facing amount of transient detail to retain during analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransientDetectionDetail {
+    Fewer,
+    #[default]
+    Balanced,
+    More,
+}
+
+impl TransientDetectionDetail {
+    pub fn sensitivity(self) -> f32 {
+        match self {
+            Self::Fewer => 3.0,
+            Self::Balanced => 1.5,
+            Self::More => 0.75,
+        }
+    }
+}
+
 /// Sample-count used to measure envelope-level change (onset function).
 const FLUX_WINDOW: usize = 64;
 

@@ -12,8 +12,9 @@ use vibez_core::track::ClipPlaybackDirection;
 use vibez_core::transient::{TransientMarkerKind, TransientMarkers};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{GridConfig, UndoGestureId};
+use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::theme;
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::double_click::DoubleClick;
@@ -21,6 +22,7 @@ use crate::widgets::local_drag::LocalDrag;
 
 /// Canvas widget for showing a detailed waveform of an audio clip in the detail panel.
 pub struct AudioClipDetailWidget {
+    pub location: vibez_project::TimelineLocation,
     pub track_id: TrackId,
     pub clip_id: ClipId,
     pub audio: Arc<DecodedAudio>,
@@ -533,6 +535,27 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                let Some(position) = cursor.position_in(bounds) else {
+                    return (canvas::event::Status::Ignored, None);
+                };
+                let source_frame = self.transient_source_from_x(position.x, &bounds);
+                let marker = self.hit_test_transient_marker(position, &bounds);
+                (
+                    canvas::event::Status::Captured,
+                    Some(Message::View(ViewMsg::ShowContextMenu {
+                        x: bounds.x + position.x,
+                        y: bounds.y + position.y,
+                        target: ContextMenuTarget::AudioClipDetail {
+                            location: self.location,
+                            track_id: self.track_id,
+                            clip_id: self.clip_id,
+                            source_frame,
+                            marker,
+                        },
+                    })),
+                )
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let Some(position) = cursor.position_in(bounds) else {
                     return (canvas::event::Status::Ignored, None);
@@ -677,6 +700,7 @@ mod tests {
 
     fn widget() -> AudioClipDetailWidget {
         AudioClipDetailWidget {
+            location: vibez_project::TimelineLocation::Arrange,
             track_id: TrackId::new(),
             clip_id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
@@ -706,6 +730,37 @@ mod tests {
             Some(Message::Arrangement(message)) => Some(message),
             _ => None,
         }
+    }
+
+    #[test]
+    fn right_clicking_waveform_opens_transient_context_at_source_frame() {
+        let widget = widget();
+        let bounds = Rectangle::new(Point::new(20.0, 40.0), iced::Size::new(800.0, 200.0));
+        let cursor = Point::new(420.0, 120.0);
+        let message = widget
+            .update(
+                &mut AudioClipDetailState::default(),
+                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+                bounds,
+                mouse::Cursor::Available(cursor),
+            )
+            .1;
+
+        assert!(matches!(
+            message,
+            Some(Message::View(ViewMsg::ShowContextMenu {
+                x,
+                y,
+                target: ContextMenuTarget::AudioClipDetail {
+                    location: vibez_project::TimelineLocation::Arrange,
+                    track_id,
+                    clip_id,
+                    source_frame: 500,
+                    marker: None,
+                },
+            })) if x == 420.0 && y == 120.0
+                && track_id == widget.track_id && clip_id == widget.clip_id
+        ));
     }
 
     #[test]

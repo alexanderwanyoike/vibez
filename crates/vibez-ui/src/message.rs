@@ -84,6 +84,16 @@ pub struct LoadedClipData {
 }
 
 #[derive(Debug, Clone)]
+pub struct ClipTransientDetection {
+    pub location: TimelineLocation,
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub expected_audio: Arc<DecodedAudio>,
+    pub source_frames: Vec<u64>,
+    pub record_undo: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClipTransposeSuccess {
     pub audio: Arc<DecodedAudio>,
     pub source_audio: Arc<DecodedAudio>,
@@ -727,15 +737,9 @@ pub enum Message {
         location: TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
+        detail: vibez_core::onset::TransientDetectionDetail,
     },
-    ClipTransientsDetected {
-        location: TimelineLocation,
-        track_id: TrackId,
-        clip_id: ClipId,
-        expected_audio: Arc<DecodedAudio>,
-        source_frames: Vec<u64>,
-        record_undo: bool,
-    },
+    ClipTransientsDetected(ClipTransientDetection),
     /// Background BPM detection result. `bpm` is `None` when the
     /// detector refused to commit (silence, sparse pad, too short).
     ClipBpmDetected {

@@ -15,6 +15,7 @@ impl App {
         location: vibez_project::TimelineLocation,
         track_id: TrackId,
         clip_id: ClipId,
+        detail: vibez_core::onset::TransientDetectionDetail,
         record_undo: bool,
     ) -> Task<Message> {
         let Some(content) = self.timeline_content_at(location, track_id) else {
@@ -31,14 +32,16 @@ impl App {
             self.state.status_text = format!("Detecting transients in {}...", clip.name);
         }
         Task::perform(
-            detect_clip_transients_async(detection_audio),
-            move |source_frames| Message::ClipTransientsDetected {
-                location,
-                track_id,
-                clip_id,
-                expected_audio: Arc::clone(&expected_audio),
-                source_frames,
-                record_undo,
+            detect_clip_transients_async(detection_audio, detail),
+            move |source_frames| {
+                Message::ClipTransientsDetected(crate::message::ClipTransientDetection {
+                    location,
+                    track_id,
+                    clip_id,
+                    expected_audio: Arc::clone(&expected_audio),
+                    source_frames,
+                    record_undo,
+                })
             },
         )
     }
@@ -49,7 +52,13 @@ impl App {
         track_id: TrackId,
         clip_id: ClipId,
     ) -> Task<Message> {
-        self.dispatch_detect_clip_transients(location, track_id, clip_id, false)
+        self.dispatch_detect_clip_transients(
+            location,
+            track_id,
+            clip_id,
+            vibez_core::onset::TransientDetectionDetail::Balanced,
+            false,
+        )
     }
 
     pub(super) fn apply_detected_transients_at(
@@ -72,14 +81,17 @@ impl App {
 
     pub(super) fn finish_detect_clip_transients(
         &mut self,
-        location: vibez_project::TimelineLocation,
-        track_id: TrackId,
-        clip_id: ClipId,
-        expected_audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-        source_frames: Vec<u64>,
-        record_undo: bool,
+        completion: crate::message::ClipTransientDetection,
         undo_gesture: Option<crate::state::UndoGestureId>,
     ) -> Task<Message> {
+        let crate::message::ClipTransientDetection {
+            location,
+            track_id,
+            clip_id,
+            expected_audio,
+            source_frames,
+            record_undo,
+        } = completion;
         let still_current = self
             .timeline_content_at(location, track_id)
             .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))

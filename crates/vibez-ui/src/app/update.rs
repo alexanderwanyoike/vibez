@@ -631,26 +631,13 @@ impl App {
                 location,
                 track_id,
                 clip_id,
+                detail,
             } => {
-                return self.dispatch_detect_clip_transients(location, track_id, clip_id, true);
+                return self
+                    .dispatch_detect_clip_transients(location, track_id, clip_id, detail, true);
             }
-            Message::ClipTransientsDetected {
-                location,
-                track_id,
-                clip_id,
-                expected_audio,
-                source_frames,
-                record_undo,
-            } => {
-                return self.finish_detect_clip_transients(
-                    location,
-                    track_id,
-                    clip_id,
-                    expected_audio,
-                    source_frames,
-                    record_undo,
-                    undo_gesture,
-                );
+            Message::ClipTransientsDetected(completion) => {
+                return self.finish_detect_clip_transients(completion, undo_gesture);
             }
             Message::ClipBpmDetected {
                 location,
