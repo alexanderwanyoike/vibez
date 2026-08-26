@@ -37,6 +37,7 @@ pub const SCISSORS: char = '\u{E152}';
 pub const REPEAT: char = '\u{E146}';
 pub const PENCIL: char = '\u{E131}';
 pub const MOUSE_POINTER: char = '\u{E0F3}';
+pub const FLIP_HORIZONTAL_2: char = '\u{E35D}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {
