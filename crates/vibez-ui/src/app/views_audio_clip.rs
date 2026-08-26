@@ -1,6 +1,8 @@
 //! Audio Clip Inspector panel and waveform controls.
 
-use iced::widget::{button, canvas, column, container, horizontal_space, row, text, text_input};
+use iced::widget::{
+    button, canvas, column, container, horizontal_space, row, text, text_input, tooltip,
+};
 use iced::{Color, Element, Length, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
@@ -315,23 +317,19 @@ impl App {
                 {
                     let reversed = clip.playback_direction
                         == vibez_core::track::ClipPlaybackDirection::Reverse;
-                    button(
-                        text(if reversed {
-                            "REVERSE ON"
-                        } else {
-                            "REVERSE OFF"
-                        })
-                        .size(8)
-                        .color(if reversed {
-                            th::accent()
-                        } else {
-                            th::text_dim()
-                        }),
+                    let reverse_button = button(
+                        icons::icon(icons::FLIP_HORIZONTAL_2)
+                            .size(13)
+                            .color(if reversed {
+                                th::accent()
+                            } else {
+                                th::text_dim()
+                            }),
                     )
                     .on_press(Message::Arrangement(ArrangementMsg::ToggleClipReverse(
                         track_id, clip.id,
                     )))
-                    .padding([3, 6])
+                    .padding([4, 7])
                     .style(move |_theme: &Theme, status| button::Style {
                         background: Some(
                             if reversed {
@@ -361,7 +359,29 @@ impl App {
                             radius: 2.0.into(),
                         },
                         ..Default::default()
-                    })
+                    });
+                    let hint = container(
+                        text(if reversed {
+                            "Reverse playback is on. Click for forward playback."
+                        } else {
+                            "Reverse audio playback"
+                        })
+                        .size(10)
+                        .color(th::text()),
+                    )
+                    .padding([5, 7])
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::bg_elevated().into()),
+                        border: iced::Border {
+                            color: th::border_light(),
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    });
+                    tooltip(reverse_button, hint, tooltip::Position::Top)
+                        .gap(6)
+                        .padding(0)
                 },
             ]
             .align_y(iced::Alignment::Center),
