@@ -417,6 +417,14 @@ impl DevicesState {
                             DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
                             DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
                             DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
+                            DrumPadParam::FadeIn => {
+                                pad.fade_in_ms =
+                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
+                            }
+                            DrumPadParam::FadeOut => {
+                                pad.fade_out_ms =
+                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
+                            }
                             DrumPadParam::CoarseTune => {
                                 pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
                             }
@@ -738,6 +746,31 @@ mod tests {
         assert!(matches!(
             engine.0[0],
             EngineCommand::SetDrumRackPadState { .. }
+        ));
+
+        devices.update(
+            DevicesMsg::SetDrumPadParam {
+                track_id,
+                pad_index: 0,
+                param: DrumPadParam::FadeOut,
+                value: 500.0,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+        assert_eq!(
+            tracks[0].drum_rack_pads[0].fade_out_ms,
+            vibez_core::track::DRUM_PAD_MAX_FADE_MS
+        );
+        assert!(matches!(
+            engine.0[1],
+            EngineCommand::SetDrumRackPadState {
+                ref state,
+                ..
+            } if state.fade_out_ms == vibez_core::track::DRUM_PAD_MAX_FADE_MS
         ));
     }
 

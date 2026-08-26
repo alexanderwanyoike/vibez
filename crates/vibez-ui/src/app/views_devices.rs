@@ -959,6 +959,24 @@ impl App {
                 DrumPadParam::End,
             ),
             (
+                "Fade In",
+                format!("{:.0}ms", selected_pad_state.fade_in_ms),
+                selected_pad_state.fade_in_ms,
+                0.0,
+                vibez_core::track::DRUM_PAD_MAX_FADE_MS,
+                vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
+                DrumPadParam::FadeIn,
+            ),
+            (
+                "Fade Out",
+                format!("{:.0}ms", selected_pad_state.fade_out_ms),
+                selected_pad_state.fade_out_ms,
+                0.0,
+                vibez_core::track::DRUM_PAD_MAX_FADE_MS,
+                vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
+                DrumPadParam::FadeOut,
+            ),
+            (
                 "Coarse",
                 format!("{}st", selected_pad_state.coarse_tune),
                 selected_pad_state.coarse_tune as f32,
@@ -1120,9 +1138,10 @@ impl App {
         .spacing(10)
         .align_y(iced::Alignment::Start);
 
-        // Pads 220 + editor (six knob columns) + chrome.
+        // Pads + eight full-size pad controls + chrome. Keep the card wide
+        // enough that adding controls never compresses either section.
         Self::device_card(
-            column![title, Self::device_body(body.into())].width(Length::Fixed(650.0)),
+            column![title, Self::device_body(body.into())].width(Length::Fixed(780.0)),
         )
     }
 

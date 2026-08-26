@@ -191,6 +191,8 @@ mod tests {
                 pan: 0.0,
                 start: 0.0,
                 end: 1.0,
+                fade_in_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
+                fade_out_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
                 coarse_tune: 0,
                 fine_tune: 0.0,
                 one_shot: true,

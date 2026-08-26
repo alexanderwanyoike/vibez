@@ -293,6 +293,8 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         pan: 0.0,
         start,
         end,
+        fade_in_ms: 4.0,
+        fade_out_ms: 7.0,
         coarse_tune: 0,
         fine_tune: 0.0,
         one_shot: true,
@@ -354,6 +356,7 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
     };
     assert_eq!((pads[0].start, pads[0].end), (0.0, 0.4));
     assert_eq!((pads[1].start, pads[1].end), (0.4, 1.0));
+    assert_eq!((pads[0].fade_in_ms, pads[0].fade_out_ms), (4.0, 7.0));
     assert_eq!(pads[0].name.as_deref(), Some("Loop Slice 1"));
     assert_eq!(pads[1].name.as_deref(), Some("Loop Slice 2"));
     let ids: Vec<_> = pads

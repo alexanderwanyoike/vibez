@@ -83,6 +83,8 @@ impl TimelineEditorState {
                 pan: 0.0,
                 start: source_start as f32 / source_frames,
                 end: source_end as f32 / source_frames,
+                fade_in_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
+                fade_out_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
                 coarse_tune: 0,
                 fine_tune: 0.0,
                 one_shot: true,
