@@ -27,13 +27,22 @@ pub struct TimelineClip {
     pub fade_out_frames: u64,
     pub fade_in_curve: FadeCurve,
     pub fade_out_curve: FadeCurve,
-    pub crossfade_in: bool,
-    pub crossfade_out: bool,
+    pub crossfade_in_from: Option<ClipId>,
+    pub crossfade_out_to: Option<ClipId>,
     /// True when this clip is warped but its `warped_to_bpm` no longer
     /// matches the current project BPM. The canvas draws a diagonal
     /// stripe overlay so the user can see at a glance that a re-warp
     /// is needed.
     pub warp_stale: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TimelineCrossfade {
+    pub outgoing_id: ClipId,
+    pub incoming_id: ClipId,
+    pub overlap_start: u64,
+    pub overlap_end: u64,
+    pub curve: FadeCurve,
 }
 
 /// Lightweight copy of a note clip for timeline rendering.

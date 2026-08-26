@@ -3,6 +3,15 @@
 use super::*;
 
 impl TrackClipCanvas {
+    /// Samples per beat for Audio Clip geometry.
+    pub(crate) fn spb(&self) -> f64 {
+        if self.bpm > 0.0 {
+            self.sample_rate as f64 * 60.0 / self.bpm
+        } else {
+            1.0
+        }
+    }
+
     /// Build the marquee message for a drag from `anchor` to the pointer,
     /// both already in column coordinates.
     pub(super) fn marquee_message(

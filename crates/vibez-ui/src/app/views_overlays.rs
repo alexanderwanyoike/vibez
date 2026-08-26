@@ -856,7 +856,7 @@ impl App {
                     ));
                     col = col.push(menu_btn(
                         icons::AUDIO_WAVEFORM,
-                        "Crossfade Selected Clips".into(),
+                        "Create Crossfade".into(),
                         Message::Arrangement(ArrangementMsg::CrossfadeSelectedAudioClips),
                     ));
                 }

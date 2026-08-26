@@ -18,6 +18,13 @@ pub struct FadeClipDrag {
     clip_width: f32,
     duration_frames: u64,
     handle: Point,
+    snap: Option<FadeSnap>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FadeSnap {
+    x: f32,
+    frames: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +40,54 @@ pub struct FadeCurveDrag {
 pub(super) enum FadeControlDrag {
     Length(FadeClipDrag),
     Curve(FadeCurveDrag),
+    CrossfadeCurve(CrossfadeCurveDrag),
+}
+
+impl FadeControlDrag {
+    fn distance_squared(&self, point: Point) -> f32 {
+        match self {
+            Self::Length(drag) => drag.distance_squared(point),
+            Self::Curve(drag) => drag.distance_squared(point),
+            Self::CrossfadeCurve(drag) => drag.distance_squared(point),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CrossfadeCurveDrag {
+    pub undo_gesture: UndoGestureId,
+    pub outgoing_id: ClipId,
+    pub incoming_id: ClipId,
+    top: f32,
+    bottom: f32,
+    handle: Point,
+}
+
+impl CrossfadeCurveDrag {
+    fn new(outgoing_id: ClipId, incoming_id: ClipId, canvas_height: f32, handle: Point) -> Self {
+        Self {
+            undo_gesture: UndoGestureId::new(),
+            outgoing_id,
+            incoming_id,
+            top: CLIP_Y + CLIP_TITLE_HEIGHT + 2.0,
+            bottom: canvas_height - CLIP_Y - 2.0,
+            handle,
+        }
+    }
+
+    fn distance_squared(&self, point: Point) -> f32 {
+        (point.x - self.handle.x).powi(2) + (point.y - self.handle.y).powi(2)
+    }
+
+    pub(super) fn curve_at_y(&self, y: f32) -> FadeCurve {
+        let height = (self.bottom - self.top).max(1.0);
+        let min_gain = FadeCurve::new(-100).crossfade_gains(0.5).1;
+        let max_gain = FadeCurve::new(100).crossfade_gains(0.5).1;
+        let gain = ((self.bottom - y) / height).clamp(min_gain, max_gain);
+        let warped = gain.asin() / std::f32::consts::FRAC_PI_2;
+        let exponent = warped.ln() / 0.5_f32.ln();
+        FadeCurve::new((-50.0 * exponent.log2()).round() as i16)
+    }
 }
 
 impl FadeCurveDrag {
@@ -70,6 +125,7 @@ impl FadeClipDrag {
         clip_width: f32,
         duration_frames: u64,
         handle: Point,
+        snap: Option<FadeSnap>,
     ) -> Self {
         Self {
             undo_gesture: UndoGestureId::new(),
@@ -79,6 +135,7 @@ impl FadeClipDrag {
             clip_width,
             duration_frames,
             handle,
+            snap,
         }
     }
 
@@ -89,6 +146,11 @@ impl FadeClipDrag {
     /// Use the exact inverse of [`fade_handle_xs`] so a handle drawn at one
     /// frame cannot jitter to an adjacent frame when the pointer has not moved.
     pub(super) fn frames_at_x(&self, x: f32) -> u64 {
+        if let Some(snap) = self.snap {
+            if (x - snap.x).abs() <= FADE_HANDLE_HIT_RADIUS {
+                return snap.frames;
+            }
+        }
         if self.clip_width <= 0.0 || self.duration_frames == 0 {
             return 0;
         }
@@ -121,12 +183,17 @@ pub(super) fn fade_curve_handle(
 ) -> Option<Point> {
     let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_width, clip);
     let (start_x, end_x, curve, linked) = match edge {
-        AudioClipFadeEdge::In => (clip_x, fade_in_x, clip.fade_in_curve, clip.crossfade_in),
+        AudioClipFadeEdge::In => (
+            clip_x,
+            fade_in_x,
+            clip.fade_in_curve,
+            clip.crossfade_in_from.is_some(),
+        ),
         AudioClipFadeEdge::Out => (
             fade_out_x,
             clip_x + clip_width,
             clip.fade_out_curve,
-            clip.crossfade_out,
+            clip.crossfade_out_to.is_some(),
         ),
     };
     if linked || (end_x - start_x).abs() <= f32::EPSILON {
@@ -141,6 +208,83 @@ pub(super) fn fade_curve_handle(
 }
 
 impl TrackClipCanvas {
+    fn crossfade_snap_for(&self, clip: &TimelineClip, edge: AudioClipFadeEdge) -> Option<FadeSnap> {
+        let clip_end = clip.position.saturating_add(clip.duration);
+        match edge {
+            AudioClipFadeEdge::Out => self
+                .clips
+                .iter()
+                .filter(|incoming| {
+                    incoming.clip_id != clip.clip_id
+                        && incoming.position > clip.position
+                        && incoming.position < clip_end
+                        && clip_end <= incoming.position.saturating_add(incoming.duration)
+                })
+                .max_by_key(|incoming| incoming.position)
+                .map(|incoming| FadeSnap {
+                    x: self.beat_to_x(incoming.position as f64 / self.spb()),
+                    frames: clip_end - incoming.position,
+                }),
+            AudioClipFadeEdge::In => self
+                .clips
+                .iter()
+                .filter(|outgoing| {
+                    let outgoing_end = outgoing.position.saturating_add(outgoing.duration);
+                    outgoing.clip_id != clip.clip_id
+                        && outgoing.position < clip.position
+                        && clip.position < outgoing_end
+                        && outgoing_end <= clip_end
+                })
+                .min_by_key(|outgoing| outgoing.position.saturating_add(outgoing.duration))
+                .map(|outgoing| {
+                    let outgoing_end = outgoing.position.saturating_add(outgoing.duration);
+                    FadeSnap {
+                        x: self.beat_to_x(outgoing_end as f64 / self.spb()),
+                        frames: outgoing_end - clip.position,
+                    }
+                }),
+        }
+    }
+
+    pub(super) fn crossfade_curve_handles(
+        &self,
+        canvas_height: f32,
+    ) -> impl Iterator<Item = (ClipId, ClipId, Point)> + '_ {
+        let top = CLIP_Y + CLIP_TITLE_HEIGHT + 2.0;
+        let bottom = canvas_height - CLIP_Y - 2.0;
+        let spb = self.spb();
+        self.crossfades.iter().map(move |crossfade| {
+            let x = (self.beat_to_x(crossfade.overlap_start as f64 / spb)
+                + self.beat_to_x(crossfade.overlap_end as f64 / spb))
+                / 2.0;
+            let incoming_gain = crossfade.curve.crossfade_gains(0.5).1;
+            let y = bottom - (bottom - top) * incoming_gain;
+            (
+                crossfade.outgoing_id,
+                crossfade.incoming_id,
+                Point::new(x, y),
+            )
+        })
+    }
+
+    pub(super) fn crossfade_curve_hit(
+        &self,
+        pos: Point,
+        canvas_height: f32,
+    ) -> Option<CrossfadeCurveDrag> {
+        self.crossfade_curve_handles(canvas_height)
+            .into_iter()
+            .find(|(outgoing_id, incoming_id, handle)| {
+                (self.selected_clips.contains(outgoing_id)
+                    || self.selected_clips.contains(incoming_id))
+                    && (pos.x - handle.x).abs() <= FADE_HANDLE_HIT_RADIUS
+                    && (pos.y - handle.y).abs() <= FADE_HANDLE_HIT_RADIUS
+            })
+            .map(|(outgoing_id, incoming_id, handle)| {
+                CrossfadeCurveDrag::new(outgoing_id, incoming_id, canvas_height, handle)
+            })
+    }
+
     pub(super) fn fade_curve_hit(&self, pos: Point, canvas_height: f32) -> Option<FadeCurveDrag> {
         let spb = self.spb();
         for clip in &self.clips {
@@ -209,6 +353,7 @@ impl TrackClipCanvas {
                     clip_width,
                     clip.duration,
                     Point::new(handle_x, FADE_HANDLE_Y),
+                    self.crossfade_snap_for(clip, edge),
                 ));
             }
         }
@@ -223,21 +368,25 @@ impl TrackClipCanvas {
         pos: Point,
         canvas_height: f32,
     ) -> Option<FadeControlDrag> {
-        match (
-            self.fade_handle_hit(pos),
-            self.fade_curve_hit(pos, canvas_height),
-        ) {
-            (Some(length), Some(curve)) => {
-                if length.distance_squared(pos) <= curve.distance_squared(pos) {
-                    Some(FadeControlDrag::Length(length))
+        let candidates = [
+            self.fade_handle_hit(pos).map(FadeControlDrag::Length),
+            self.fade_curve_hit(pos, canvas_height)
+                .map(FadeControlDrag::Curve),
+            self.crossfade_curve_hit(pos, canvas_height)
+                .map(FadeControlDrag::CrossfadeCurve),
+        ];
+        candidates
+            .into_iter()
+            .flatten()
+            .fold(None, |nearest, candidate| {
+                if nearest.as_ref().is_none_or(|current: &FadeControlDrag| {
+                    candidate.distance_squared(pos) < current.distance_squared(pos)
+                }) {
+                    Some(candidate)
                 } else {
-                    Some(FadeControlDrag::Curve(curve))
+                    nearest
                 }
-            }
-            (Some(length), None) => Some(FadeControlDrag::Length(length)),
-            (None, Some(curve)) => Some(FadeControlDrag::Curve(curve)),
-            (None, None) => None,
-        }
+            })
     }
 }
 
@@ -261,8 +410,8 @@ mod tests {
             fade_out_frames: 6_789,
             fade_in_curve: Default::default(),
             fade_out_curve: Default::default(),
-            crossfade_in: false,
-            crossfade_out: false,
+            crossfade_in_from: None,
+            crossfade_out_to: None,
             warp_stale: false,
         };
         let (fade_in_x, fade_out_x) = fade_handle_xs(37.0, 481.0, &clip);
@@ -274,6 +423,7 @@ mod tests {
             481.0,
             clip.duration,
             Point::new(fade_in_x, FADE_HANDLE_Y),
+            None,
         );
         let fade_out = FadeClipDrag::new(
             clip.clip_id,
@@ -282,9 +432,30 @@ mod tests {
             481.0,
             clip.duration,
             Point::new(fade_out_x, FADE_HANDLE_Y),
+            None,
         );
 
         assert_eq!(fade_in.frames_at_x(fade_in_x), clip.fade_in_frames);
         assert_eq!(fade_out.frames_at_x(fade_out_x), clip.fade_out_frames);
+    }
+
+    #[test]
+    fn fade_drag_magnetically_reaches_a_crossfade_edge() {
+        let drag = FadeClipDrag::new(
+            ClipId::new(),
+            AudioClipFadeEdge::Out,
+            0.0,
+            400.0,
+            1_000,
+            Point::new(400.0, FADE_HANDLE_Y),
+            Some(FadeSnap {
+                x: 300.0,
+                frames: 250,
+            }),
+        );
+
+        assert_eq!(drag.frames_at_x(300.0), 250);
+        assert_eq!(drag.frames_at_x(300.0 + FADE_HANDLE_HIT_RADIUS), 250);
+        assert_ne!(drag.frames_at_x(301.0 + FADE_HANDLE_HIT_RADIUS), 250);
     }
 }

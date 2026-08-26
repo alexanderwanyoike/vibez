@@ -275,7 +275,9 @@ impl TrackClipCanvas {
                             let x = clip_x + (fade_in_x - clip_x) * progress;
                             let y = bottom
                                 - (bottom - top)
-                                    * clip.fade_in_curve.gain_for(progress, clip.crossfade_in);
+                                    * clip
+                                        .fade_in_curve
+                                        .gain_for(progress, clip.crossfade_in_from.is_some());
                             builder.line_to(iced::Point::new(x, y));
                         }
                         builder.line_to(iced::Point::new(fade_out_x, top));
@@ -284,7 +286,7 @@ impl TrackClipCanvas {
                             let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
                             let gain = clip
                                 .fade_out_curve
-                                .gain_for(1.0 - progress, clip.crossfade_out);
+                                .fade_out_gain(progress, clip.crossfade_out_to.is_some());
                             let y = bottom - (bottom - top) * gain;
                             builder.line_to(iced::Point::new(x, y));
                         }
@@ -311,27 +313,6 @@ impl TrackClipCanvas {
                                 frame.fill(&canvas::Path::circle(handle, 3.25), theme::accent());
                             }
                         }
-                    }
-                    for x in [
-                        clip.crossfade_in.then_some((clip_x + fade_in_x) / 2.0),
-                        clip.crossfade_out
-                            .then_some((fade_out_x + clip_x + clip_w) / 2.0),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        let cross = canvas::Path::new(|builder| {
-                            builder.move_to(iced::Point::new(x - 3.0, top + 2.0));
-                            builder.line_to(iced::Point::new(x + 3.0, top + 8.0));
-                            builder.move_to(iced::Point::new(x + 3.0, top + 2.0));
-                            builder.line_to(iced::Point::new(x - 3.0, top + 8.0));
-                        });
-                        frame.stroke(
-                            &cross,
-                            canvas::Stroke::default()
-                                .with_color(theme::accent())
-                                .with_width(1.4),
-                        );
                     }
                 }
                 let border_color = if is_selected {
@@ -435,6 +416,34 @@ impl TrackClipCanvas {
                         offset += stripe_spacing;
                     }
                 }
+            }
+        }
+
+        // Keep one visible marker for every linked relationship. Selecting
+        // either Clip reveals the shared curve handle at its actual height.
+        for (outgoing_id, incoming_id, handle) in self.crossfade_curve_handles(h) {
+            let marker = canvas::Path::new(|builder| {
+                builder.move_to(iced::Point::new(handle.x - 3.0, CLIP_Y + 4.0));
+                builder.line_to(iced::Point::new(handle.x + 3.0, CLIP_Y + 10.0));
+                builder.move_to(iced::Point::new(handle.x + 3.0, CLIP_Y + 4.0));
+                builder.line_to(iced::Point::new(handle.x - 3.0, CLIP_Y + 10.0));
+            });
+            frame.stroke(
+                &marker,
+                canvas::Stroke::default()
+                    .with_color(theme::accent())
+                    .with_width(1.4),
+            );
+            if self.selected_clips.contains(&outgoing_id)
+                || self.selected_clips.contains(&incoming_id)
+            {
+                frame.fill(&canvas::Path::circle(handle, 4.0), theme::accent());
+                frame.stroke(
+                    &canvas::Path::circle(handle, 4.0),
+                    canvas::Stroke::default()
+                        .with_color(theme::text())
+                        .with_width(1.0),
+                );
             }
         }
 

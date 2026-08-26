@@ -1,7 +1,7 @@
 //! Per-track clip lane canvas: clip drawing, drag/resize/split
 //! interaction, sample drop targets.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -68,6 +68,7 @@ pub struct TrackClipCanvas {
     pub marquee: Option<ArrangementMarqueeRect>,
     pub selected_clips: HashSet<ClipId>,
     pub clips: Vec<TimelineClip>,
+    pub crossfades: Vec<TimelineCrossfade>,
     pub note_clips: Vec<TimelineNoteClip>,
     /// Transient Section Record visualization. It is deliberately excluded
     /// from hit testing and edit messages.
@@ -152,7 +153,7 @@ impl TrackClipCanvas {
         } else {
             1.0
         };
-        let clips = content
+        let clips: Vec<_> = content
             .clips
             .iter()
             .filter(|clip| {
@@ -174,12 +175,40 @@ impl TrackClipCanvas {
                 fade_out_frames: c.fades.fade_out_frames(),
                 fade_in_curve: c.fades.fade_in_curve(),
                 fade_out_curve: c.fades.fade_out_curve(),
-                crossfade_in: c.fades.crossfade_in_from().is_some(),
-                crossfade_out: c.fades.crossfade_out_to().is_some(),
+                crossfade_in_from: c.fades.crossfade_in_from(),
+                crossfade_out_to: c.fades.crossfade_out_to(),
                 warp_stale: c.warped
                     && c.warped_to_bpm
                         .map(|b| (b - bpm).abs() > 0.01)
                         .unwrap_or(false),
+            })
+            .collect();
+        let clips_by_id: HashMap<_, _> = clips.iter().map(|clip| (clip.clip_id, clip)).collect();
+        let crossfades = clips
+            .iter()
+            .filter_map(|outgoing| {
+                let incoming_id = outgoing.crossfade_out_to?;
+                let incoming = clips_by_id.get(&incoming_id)?;
+                if incoming.crossfade_in_from != Some(outgoing.clip_id) {
+                    return None;
+                }
+                let overlap_start = incoming.position.max(outgoing.position);
+                let overlap_end = incoming
+                    .position
+                    .saturating_add(incoming.duration)
+                    .min(outgoing.position.saturating_add(outgoing.duration));
+                let overlap = overlap_end.saturating_sub(overlap_start);
+                (overlap > 0
+                    && outgoing.fade_out_frames == overlap
+                    && incoming.fade_in_frames == overlap
+                    && outgoing.fade_out_curve == incoming.fade_in_curve)
+                    .then_some(TimelineCrossfade {
+                        outgoing_id: outgoing.clip_id,
+                        incoming_id,
+                        overlap_start,
+                        overlap_end,
+                        curve: outgoing.fade_out_curve,
+                    })
             })
             .collect();
         let note_clips = content
@@ -231,6 +260,7 @@ impl TrackClipCanvas {
             marquee: None,
             selected_clips,
             clips,
+            crossfades,
             note_clips,
             recording_preview: None,
             audio_recording_preview: None,
@@ -340,15 +370,6 @@ impl TrackClipCanvas {
             .iter()
             .position(|row| column_y >= row.top && column_y < row.bottom())
     }
-
-    /// Samples per beat.
-    pub(super) fn spb(&self) -> f64 {
-        if self.bpm > 0.0 {
-            self.sample_rate as f64 * 60.0 / self.bpm
-        } else {
-            1.0
-        }
-    }
 }
 
 impl canvas::Program<Message> for TrackClipCanvas {
@@ -376,6 +397,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::FadeClip(_) => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::FadeCurve(_) => mouse::Interaction::ResizingVertically,
+                ClipDragAction::CrossfadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
@@ -388,7 +410,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     fade_drag::FadeControlDrag::Length(_) => {
                         mouse::Interaction::ResizingHorizontally
                     }
-                    fade_drag::FadeControlDrag::Curve(_) => mouse::Interaction::ResizingVertically,
+                    fade_drag::FadeControlDrag::Curve(_)
+                    | fade_drag::FadeControlDrag::CrossfadeCurve(_) => {
+                        mouse::Interaction::ResizingVertically
+                    }
                 };
             }
             if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
@@ -444,6 +469,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             }
                             fade_drag::FadeControlDrag::Curve(drag) => {
                                 ClipDragAction::FadeCurve(drag)
+                            }
+                            fade_drag::FadeControlDrag::CrossfadeCurve(drag) => {
+                                ClipDragAction::CrossfadeCurve(drag)
                             }
                         });
                         return (canvas::event::Status::Captured, None);
@@ -772,6 +800,18 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         curve: drag.curve_at_y(local.y),
                                     })
                                     .in_undo_gesture(drag.undo_gesture);
+                                return (canvas::event::Status::Captured, Some(edit));
+                            }
+                            ClipDragAction::CrossfadeCurve(drag) => {
+                                let edit = Message::Arrangement(
+                                    ArrangementMsg::SetAudioClipCrossfadeCurve {
+                                        track_id,
+                                        outgoing_id: drag.outgoing_id,
+                                        incoming_id: drag.incoming_id,
+                                        curve: drag.curve_at_y(local.y),
+                                    },
+                                )
+                                .in_undo_gesture(drag.undo_gesture);
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::PanViewport {

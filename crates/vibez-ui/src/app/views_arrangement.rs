@@ -346,8 +346,8 @@ impl App {
                         fade_out_frames: 0,
                         fade_in_curve: Default::default(),
                         fade_out_curve: Default::default(),
-                        crossfade_in: false,
-                        crossfade_out: false,
+                        crossfade_in_from: None,
+                        crossfade_out_to: None,
                         warp_stale: false,
                     });
             }

@@ -17,6 +17,34 @@ impl TimelineEditorState {
         edge: AudioClipFadeEdge,
         frames: u64,
     ) -> ArrangementAction {
+        if let Some((outgoing_id, incoming_id)) =
+            self.crossfade_candidate_for_fade(track_id, clip_id, edge, frames)
+        {
+            let already_linked = self.find_content(track_id).is_some_and(|content| {
+                let outgoing = content.clips.iter().find(|clip| clip.id == outgoing_id);
+                let incoming = content.clips.iter().find(|clip| clip.id == incoming_id);
+                outgoing.is_some_and(|clip| {
+                    clip.fades.crossfade_out_to() == Some(incoming_id)
+                        && clip.fades.fade_out_frames() == frames
+                }) && incoming.is_some_and(|clip| {
+                    clip.fades.crossfade_in_from() == Some(outgoing_id)
+                        && clip.fades.fade_in_frames() == frames
+                })
+            });
+            if already_linked {
+                return ArrangementAction::default();
+            }
+            if self.link_crossfade_pair(engine, track_id, outgoing_id, incoming_id, frames) {
+                self.discard_audio_clip_inspector_edits_for(outgoing_id);
+                self.discard_audio_clip_inspector_edits_for(incoming_id);
+                return ArrangementAction {
+                    mark_dirty: true,
+                    ..ArrangementAction::default()
+                };
+            }
+            return ArrangementAction::default();
+        }
+
         let changes_audible_fades = self
             .find_content(track_id)
             .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))

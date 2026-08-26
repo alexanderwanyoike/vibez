@@ -123,6 +123,12 @@ pub enum ArrangementMsg {
         edge: crate::state::AudioClipFadeEdge,
         curve: vibez_core::track::FadeCurve,
     },
+    SetAudioClipCrossfadeCurve {
+        track_id: TrackId,
+        outgoing_id: ClipId,
+        incoming_id: ClipId,
+        curve: vibez_core::track::FadeCurve,
+    },
     MoveClipToTrack {
         source_track: TrackId,
         target_track: TrackId,
@@ -319,6 +325,7 @@ impl ArrangementMsg {
                 | Self::ResizeAudioClip { .. }
                 | Self::SetAudioClipFade { .. }
                 | Self::SetAudioClipFadeCurve { .. }
+                | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
@@ -415,6 +422,7 @@ impl ArrangementMsg {
                 Self::SubmitAudioClipInspectorField { .. }
                     | Self::SetAudioClipFade { .. }
                     | Self::SetAudioClipFadeCurve { .. }
+                    | Self::SetAudioClipCrossfadeCurve { .. }
                     | Self::AddTransientMarker { .. }
                     | Self::MoveTransientMarker { .. }
                     | Self::RemoveTransientMarker { .. }

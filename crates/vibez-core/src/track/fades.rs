@@ -57,10 +57,28 @@ impl FadeCurve {
     #[inline]
     pub fn gain_for(self, progress: f32, equal_power: bool) -> f32 {
         if equal_power {
-            (progress.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2).sin()
+            self.crossfade_gains(progress).1
         } else {
             self.gain(progress)
         }
+    }
+
+    /// Gain while moving left-to-right through a fade-out region.
+    #[inline]
+    pub fn fade_out_gain(self, progress: f32, equal_power: bool) -> f32 {
+        if equal_power {
+            self.crossfade_gains(progress).0
+        } else {
+            self.gain(1.0 - progress)
+        }
+    }
+
+    /// Complementary gains for a linked crossfade. The curve moves the
+    /// crossover while the sine/cosine pair keeps total power steady.
+    #[inline]
+    pub fn crossfade_gains(self, progress: f32) -> (f32, f32) {
+        let phase = self.gain(progress) * std::f32::consts::FRAC_PI_2;
+        (phase.cos(), phase.sin())
     }
 }
 
@@ -69,20 +87,73 @@ impl FadeCurve {
 /// Values are expressed in timeline frames. They are deliberately independent
 /// of source and loop positions, so a looped Clip fades only where the Clip
 /// begins and ends instead of on every loop pass.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ClipFades {
-    #[serde(default)]
     fade_in_frames: u64,
-    #[serde(default)]
     fade_out_frames: u64,
-    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
     fade_in_curve: FadeCurve,
-    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
     fade_out_curve: FadeCurve,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    crossfade_in_from: Option<ClipId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    crossfade_out_to: Option<ClipId>,
+    crossfade_in_peer: Option<ClipId>,
+    crossfade_out_peer: Option<ClipId>,
+    crossfade_in_active: bool,
+    crossfade_out_active: bool,
+    previous_crossfade_in_curve: FadeCurve,
+    previous_crossfade_out_curve: FadeCurve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct CrossfadeMemory {
+    peer: ClipId,
+    curve: FadeCurve,
+}
+
+impl Serialize for ClipFades {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct PersistedFades {
+            fade_in_frames: u64,
+            fade_out_frames: u64,
+            #[serde(skip_serializing_if = "FadeCurve::is_linear")]
+            fade_in_curve: FadeCurve,
+            #[serde(skip_serializing_if = "FadeCurve::is_linear")]
+            fade_out_curve: FadeCurve,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            crossfade_in_from: Option<ClipId>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            crossfade_out_to: Option<ClipId>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            previous_crossfade_in: Option<CrossfadeMemory>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            previous_crossfade_out: Option<CrossfadeMemory>,
+        }
+
+        PersistedFades {
+            fade_in_frames: self.fade_in_frames,
+            fade_out_frames: self.fade_out_frames,
+            fade_in_curve: self.fade_in_curve,
+            fade_out_curve: self.fade_out_curve,
+            crossfade_in_from: self.crossfade_in_from(),
+            crossfade_out_to: self.crossfade_out_to(),
+            previous_crossfade_in: (!self.crossfade_in_active)
+                .then_some(self.crossfade_in_peer)
+                .flatten()
+                .map(|peer| CrossfadeMemory {
+                    peer,
+                    curve: self.previous_crossfade_in_curve,
+                }),
+            previous_crossfade_out: (!self.crossfade_out_active)
+                .then_some(self.crossfade_out_peer)
+                .flatten()
+                .map(|peer| CrossfadeMemory {
+                    peer,
+                    curve: self.previous_crossfade_out_curve,
+                }),
+        }
+        .serialize(serializer)
+    }
 }
 
 impl<'de> Deserialize<'de> for ClipFades {
@@ -104,28 +175,52 @@ impl<'de> Deserialize<'de> for ClipFades {
             crossfade_in_from: Option<ClipId>,
             #[serde(default)]
             crossfade_out_to: Option<ClipId>,
+            #[serde(default)]
+            previous_crossfade_in: Option<CrossfadeMemory>,
+            #[serde(default)]
+            previous_crossfade_out: Option<CrossfadeMemory>,
         }
 
         let persisted = PersistedFades::deserialize(deserializer)?;
+        let has_fade_in = persisted.fade_in_frames > 0;
+        let has_fade_out = persisted.fade_out_frames > 0;
+        let crossfade_in_active = has_fade_in && persisted.crossfade_in_from.is_some();
+        let crossfade_out_active = has_fade_out && persisted.crossfade_out_to.is_some();
         Ok(Self {
             fade_in_frames: persisted.fade_in_frames,
             fade_out_frames: persisted.fade_out_frames,
-            fade_in_curve: if persisted.fade_in_frames > 0 {
+            fade_in_curve: if has_fade_in {
                 persisted.fade_in_curve
             } else {
                 FadeCurve::default()
             },
-            fade_out_curve: if persisted.fade_out_frames > 0 {
+            fade_out_curve: if has_fade_out {
                 persisted.fade_out_curve
             } else {
                 FadeCurve::default()
             },
-            crossfade_in_from: (persisted.fade_in_frames > 0)
-                .then_some(persisted.crossfade_in_from)
-                .flatten(),
-            crossfade_out_to: (persisted.fade_out_frames > 0)
-                .then_some(persisted.crossfade_out_to)
-                .flatten(),
+            crossfade_in_peer: if crossfade_in_active {
+                persisted.crossfade_in_from
+            } else if has_fade_in {
+                persisted.previous_crossfade_in.map(|memory| memory.peer)
+            } else {
+                None
+            },
+            crossfade_out_peer: if crossfade_out_active {
+                persisted.crossfade_out_to
+            } else if has_fade_out {
+                persisted.previous_crossfade_out.map(|memory| memory.peer)
+            } else {
+                None
+            },
+            crossfade_in_active,
+            crossfade_out_active,
+            previous_crossfade_in_curve: persisted
+                .previous_crossfade_in
+                .map_or(FadeCurve::default(), |memory| memory.curve),
+            previous_crossfade_out_curve: persisted
+                .previous_crossfade_out
+                .map_or(FadeCurve::default(), |memory| memory.curve),
         })
     }
 }
@@ -148,8 +243,12 @@ impl ClipFades {
             fade_out_frames,
             fade_in_curve: FadeCurve::new(0),
             fade_out_curve: FadeCurve::new(0),
-            crossfade_in_from: None,
-            crossfade_out_to: None,
+            crossfade_in_peer: None,
+            crossfade_out_peer: None,
+            crossfade_in_active: false,
+            crossfade_out_active: false,
+            previous_crossfade_in_curve: FadeCurve::new(0),
+            previous_crossfade_out_curve: FadeCurve::new(0),
         }
     }
 
@@ -172,7 +271,11 @@ impl ClipFades {
     pub const fn with_fade_in(self, frames: u64, duration: u64) -> Self {
         let mut fades = Self::new(frames, self.fade_out_frames, duration);
         fades.fade_in_curve = if fades.fade_in_frames > 0 {
-            self.fade_in_curve
+            if self.crossfade_in_active {
+                FadeCurve::new(0)
+            } else {
+                self.fade_in_curve
+            }
         } else {
             FadeCurve::new(0)
         };
@@ -181,7 +284,23 @@ impl ClipFades {
         } else {
             FadeCurve::new(0)
         };
-        fades.crossfade_out_to = self.crossfade_out_to;
+        fades.crossfade_in_peer = if fades.fade_in_frames > 0 {
+            self.crossfade_in_peer
+        } else {
+            None
+        };
+        fades.crossfade_out_peer = if fades.fade_out_frames > 0 {
+            self.crossfade_out_peer
+        } else {
+            None
+        };
+        fades.crossfade_out_active = fades.fade_out_frames > 0 && self.crossfade_out_active;
+        fades.previous_crossfade_in_curve = if self.crossfade_in_active {
+            self.fade_in_curve
+        } else {
+            self.previous_crossfade_in_curve
+        };
+        fades.previous_crossfade_out_curve = self.previous_crossfade_out_curve;
         fades
     }
 
@@ -202,12 +321,32 @@ impl ClipFades {
                 FadeCurve::new(0)
             },
             fade_out_curve: if fade_out_frames > 0 {
-                self.fade_out_curve
+                if self.crossfade_out_active {
+                    FadeCurve::new(0)
+                } else {
+                    self.fade_out_curve
+                }
             } else {
                 FadeCurve::new(0)
             },
-            crossfade_in_from: self.crossfade_in_from,
-            crossfade_out_to: None,
+            crossfade_in_peer: if fade_in_frames > 0 {
+                self.crossfade_in_peer
+            } else {
+                None
+            },
+            crossfade_out_peer: if fade_out_frames > 0 {
+                self.crossfade_out_peer
+            } else {
+                None
+            },
+            crossfade_in_active: fade_in_frames > 0 && self.crossfade_in_active,
+            crossfade_out_active: false,
+            previous_crossfade_in_curve: self.previous_crossfade_in_curve,
+            previous_crossfade_out_curve: if self.crossfade_out_active {
+                self.fade_out_curve
+            } else {
+                self.previous_crossfade_out_curve
+            },
         }
     }
 
@@ -223,16 +362,20 @@ impl ClipFades {
         } else {
             FadeCurve::new(0)
         };
-        fades.crossfade_in_from = if fades.fade_in_frames > 0 {
-            self.crossfade_in_from
+        fades.crossfade_in_peer = if fades.fade_in_frames > 0 {
+            self.crossfade_in_peer
         } else {
             None
         };
-        fades.crossfade_out_to = if fades.fade_out_frames > 0 {
-            self.crossfade_out_to
+        fades.crossfade_out_peer = if fades.fade_out_frames > 0 {
+            self.crossfade_out_peer
         } else {
             None
         };
+        fades.crossfade_in_active = fades.fade_in_frames > 0 && self.crossfade_in_active;
+        fades.crossfade_out_active = fades.fade_out_frames > 0 && self.crossfade_out_active;
+        fades.previous_crossfade_in_curve = self.previous_crossfade_in_curve;
+        fades.previous_crossfade_out_curve = self.previous_crossfade_out_curve;
         fades
     }
 
@@ -246,10 +389,30 @@ impl ClipFades {
             (self.fade_out_frames as f64 * ratio).round() as u64,
             new_duration,
         );
-        fades.crossfade_in_from = self.crossfade_in_from;
-        fades.crossfade_out_to = self.crossfade_out_to;
-        fades.fade_in_curve = self.fade_in_curve;
-        fades.fade_out_curve = self.fade_out_curve;
+        fades.crossfade_in_peer = if fades.fade_in_frames > 0 {
+            self.crossfade_in_peer
+        } else {
+            None
+        };
+        fades.crossfade_out_peer = if fades.fade_out_frames > 0 {
+            self.crossfade_out_peer
+        } else {
+            None
+        };
+        fades.crossfade_in_active = fades.fade_in_frames > 0 && self.crossfade_in_active;
+        fades.crossfade_out_active = fades.fade_out_frames > 0 && self.crossfade_out_active;
+        fades.fade_in_curve = if fades.fade_in_frames > 0 {
+            self.fade_in_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades.fade_out_curve = if fades.fade_out_frames > 0 {
+            self.fade_out_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades.previous_crossfade_in_curve = self.previous_crossfade_in_curve;
+        fades.previous_crossfade_out_curve = self.previous_crossfade_out_curve;
         fades
     }
 
@@ -268,15 +431,35 @@ impl ClipFades {
             if keeps_end { self.fade_out_frames } else { 0 },
             fragment_duration,
         );
-        fades.fade_in_curve = if keeps_start {
+        fades.fade_in_curve = if keeps_start && !self.crossfade_in_active {
             self.fade_in_curve
         } else {
             FadeCurve::new(0)
         };
-        fades.fade_out_curve = if keeps_end {
+        fades.fade_out_curve = if keeps_end && !self.crossfade_out_active {
             self.fade_out_curve
         } else {
             FadeCurve::new(0)
+        };
+        fades.crossfade_in_peer = if keeps_start {
+            self.crossfade_in_peer
+        } else {
+            None
+        };
+        fades.crossfade_out_peer = if keeps_end {
+            self.crossfade_out_peer
+        } else {
+            None
+        };
+        fades.previous_crossfade_in_curve = if self.crossfade_in_active {
+            self.fade_in_curve
+        } else {
+            self.previous_crossfade_in_curve
+        };
+        fades.previous_crossfade_out_curve = if self.crossfade_out_active {
+            self.fade_out_curve
+        } else {
+            self.previous_crossfade_out_curve
         };
         fades
     }
@@ -284,59 +467,79 @@ impl ClipFades {
     pub const fn is_neutral(value: &Self) -> bool {
         value.fade_in_frames == 0
             && value.fade_out_frames == 0
-            && value.crossfade_in_from.is_none()
-            && value.crossfade_out_to.is_none()
+            && !value.crossfade_in_active
+            && !value.crossfade_out_active
     }
 
     pub const fn crossfade_in_from(self) -> Option<ClipId> {
-        self.crossfade_in_from
+        if self.crossfade_in_active {
+            self.crossfade_in_peer
+        } else {
+            None
+        }
     }
 
     pub const fn crossfade_out_to(self) -> Option<ClipId> {
-        self.crossfade_out_to
-    }
-
-    pub const fn linked_fade_in(self, frames: u64, from: ClipId, duration: u64) -> Self {
-        let mut fades = self.with_fade_in(frames, duration);
-        fades.fade_in_curve = FadeCurve::new(0);
-        fades.crossfade_in_from = if fades.fade_in_frames > 0 {
-            Some(from)
+        if self.crossfade_out_active {
+            self.crossfade_out_peer
         } else {
             None
+        }
+    }
+
+    pub fn linked_fade_in(self, frames: u64, from: ClipId, duration: u64) -> Self {
+        let mut fades = self.with_fade_in(frames, duration);
+        fades.fade_in_curve = if self.crossfade_in_peer == Some(from) {
+            self.previous_crossfade_in_curve
+        } else {
+            FadeCurve::new(0)
         };
+        fades.crossfade_in_peer = (fades.fade_in_frames > 0).then_some(from);
+        fades.crossfade_in_active = fades.fade_in_frames > 0;
+        fades.previous_crossfade_in_curve = FadeCurve::new(0);
         fades
     }
 
-    pub const fn linked_fade_out(self, frames: u64, to: ClipId, duration: u64) -> Self {
+    pub fn linked_fade_out(self, frames: u64, to: ClipId, duration: u64) -> Self {
         let mut fades = self.with_fade_out(frames, duration);
-        fades.fade_out_curve = FadeCurve::new(0);
-        fades.crossfade_out_to = if fades.fade_out_frames > 0 {
-            Some(to)
+        fades.fade_out_curve = if self.crossfade_out_peer == Some(to) {
+            self.previous_crossfade_out_curve
         } else {
-            None
+            FadeCurve::new(0)
         };
+        fades.crossfade_out_peer = (fades.fade_out_frames > 0).then_some(to);
+        fades.crossfade_out_active = fades.fade_out_frames > 0;
+        fades.previous_crossfade_out_curve = FadeCurve::new(0);
         fades
     }
 
     pub const fn unlinked(self) -> Self {
-        Self {
-            crossfade_in_from: None,
-            crossfade_out_to: None,
-            ..self
-        }
+        self.unlink_fade_in().unlink_fade_out()
     }
 
     pub const fn unlink_fade_in(self) -> Self {
-        Self {
-            crossfade_in_from: None,
-            ..self
+        if self.crossfade_in_active {
+            Self {
+                fade_in_curve: FadeCurve::new(0),
+                crossfade_in_active: false,
+                previous_crossfade_in_curve: self.fade_in_curve,
+                ..self
+            }
+        } else {
+            self
         }
     }
 
     pub const fn unlink_fade_out(self) -> Self {
-        Self {
-            crossfade_out_to: None,
-            ..self
+        if self.crossfade_out_active {
+            Self {
+                fade_out_curve: FadeCurve::new(0),
+                crossfade_out_active: false,
+                previous_crossfade_out_curve: self.fade_out_curve,
+                ..self
+            }
+        } else {
+            self
         }
     }
 
@@ -362,6 +565,28 @@ impl ClipFades {
         }
     }
 
+    pub const fn with_linked_fade_in_curve(self, curve: FadeCurve) -> Self {
+        Self {
+            fade_in_curve: if self.crossfade_in_active {
+                curve
+            } else {
+                self.fade_in_curve
+            },
+            ..self
+        }
+    }
+
+    pub const fn with_linked_fade_out_curve(self, curve: FadeCurve) -> Self {
+        Self {
+            fade_out_curve: if self.crossfade_out_active {
+                curve
+            } else {
+                self.fade_out_curve
+            },
+            ..self
+        }
+    }
+
     /// Per-frame amplitude. This is safe to call on the audio thread.
     #[inline]
     pub fn gain_at(self, clip_frame: u64, duration: u64) -> f32 {
@@ -371,19 +596,19 @@ impl ClipFades {
         let fade_in = if self.fade_in_frames > 0 && clip_frame < self.fade_in_frames {
             let progress = clip_frame as f32 / self.fade_in_frames as f32;
             self.fade_in_curve
-                .gain_for(progress, self.crossfade_in_from.is_some())
+                .gain_for(progress, self.crossfade_in_active)
         } else {
             1.0
         };
         let frames_after = duration - 1 - clip_frame;
         let fade_out = if self.fade_out_frames > 0 && frames_after < self.fade_out_frames {
-            let progress = if self.crossfade_out_to.is_some() {
+            let progress = if self.crossfade_out_active {
                 (frames_after + 1) as f32 / self.fade_out_frames as f32
             } else {
                 frames_after as f32 / self.fade_out_frames as f32
             };
             self.fade_out_curve
-                .gain_for(progress, self.crossfade_out_to.is_some())
+                .fade_out_gain(1.0 - progress, self.crossfade_out_active)
         } else {
             1.0
         };
