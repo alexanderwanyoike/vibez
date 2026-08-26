@@ -394,6 +394,45 @@ impl TimelineEditorState {
                     action.mark_dirty = true;
                 }
             }
+            ArrangementMsg::SetAudioClipFadeCurve {
+                track_id,
+                clip_id,
+                edge,
+                curve,
+            } => {
+                let changes_curve = self
+                    .find_content(track_id)
+                    .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                    .is_some_and(|clip| match edge {
+                        crate::state::AudioClipFadeEdge::In => {
+                            clip.fades.fade_in_frames() > 0 && clip.fades.fade_in_curve() != curve
+                        }
+                        crate::state::AudioClipFadeEdge::Out => {
+                            clip.fades.fade_out_frames() > 0 && clip.fades.fade_out_curve() != curve
+                        }
+                    });
+                if !changes_curve {
+                    return ArrangementAction::default();
+                }
+                self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
+                if let Some(clip) = self
+                    .find_content_mut(track_id)
+                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+                {
+                    clip.fades = match edge {
+                        crate::state::AudioClipFadeEdge::In => clip.fades.with_fade_in_curve(curve),
+                        crate::state::AudioClipFadeEdge::Out => {
+                            clip.fades.with_fade_out_curve(curve)
+                        }
+                    };
+                    engine.send(EngineCommand::SetClipFades {
+                        track_id,
+                        clip_id,
+                        fades: clip.fades,
+                    });
+                    action.mark_dirty = true;
+                }
+            }
             ArrangementMsg::MoveClipToTrack {
                 source_track,
                 target_track,

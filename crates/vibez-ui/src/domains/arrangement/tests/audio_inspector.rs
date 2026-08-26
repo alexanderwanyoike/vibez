@@ -340,6 +340,40 @@ fn unchanged_timeline_fade_is_not_an_edit() {
 }
 
 #[test]
+fn fade_curve_edit_updates_the_resident_clip_and_engine() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    a.tracks[0].clips[0].fades = vibez_core::track::ClipFades::new(400, 0, 1_000);
+    let curve = vibez_core::track::FadeCurve::new(75);
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::SetAudioClipFadeCurve {
+            track_id,
+            clip_id,
+            edge: crate::state::AudioClipFadeEdge::In,
+            curve,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].fades.fade_in_curve(), curve);
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipFades { fades, .. }) if fades.fade_in_curve() == curve
+    ));
+    assert!(ArrangementMsg::SetAudioClipFadeCurve {
+        track_id,
+        clip_id,
+        edge: crate::state::AudioClipFadeEdge::In,
+        curve,
+    }
+    .defers_project_edit());
+}
+
+#[test]
 fn inspector_knobs_commit_gain_and_rounded_transpose_values() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);

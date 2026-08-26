@@ -170,6 +170,8 @@ impl TrackClipCanvas {
                 loop_end: c.loop_end,
                 fade_in_frames: c.fades.fade_in_frames(),
                 fade_out_frames: c.fades.fade_out_frames(),
+                fade_in_curve: c.fades.fade_in_curve(),
+                fade_out_curve: c.fades.fade_out_curve(),
                 crossfade_in: c.fades.crossfade_in_from().is_some(),
                 crossfade_out: c.fades.crossfade_out_to().is_some(),
                 warp_stale: c.warped
@@ -445,6 +447,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::FadeClip(_) => mouse::Interaction::ResizingHorizontally,
+                ClipDragAction::FadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
@@ -452,6 +455,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
+            if self.fade_curve_hit(pos, bounds.height).is_some() {
+                return mouse::Interaction::ResizingVertically;
+            }
             if self.fade_handle_hit(pos).is_some() {
                 return mouse::Interaction::ResizingHorizontally;
             }
@@ -501,6 +507,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
             //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
+                    if let Some(drag) = self.fade_curve_hit(pos, bounds.height) {
+                        state.drag = Some(ClipDragAction::FadeCurve(drag));
+                        return (canvas::event::Status::Captured, None);
+                    }
                     if let Some(drag) = self.fade_handle_hit(pos) {
                         state.drag = Some(ClipDragAction::FadeClip(drag));
                         return (canvas::event::Status::Captured, None);
@@ -818,6 +828,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     frames: drag.frames_at_x(local_x),
                                 })
                                 .in_undo_gesture(drag.undo_gesture);
+                                return (canvas::event::Status::Captured, Some(edit));
+                            }
+                            ClipDragAction::FadeCurve(drag) => {
+                                let edit =
+                                    Message::Arrangement(ArrangementMsg::SetAudioClipFadeCurve {
+                                        track_id,
+                                        clip_id: drag.clip_id,
+                                        edge: drag.edge,
+                                        curve: drag.curve_at_y(local.y),
+                                    })
+                                    .in_undo_gesture(drag.undo_gesture);
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::PanViewport {

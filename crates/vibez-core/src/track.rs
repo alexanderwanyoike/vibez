@@ -142,12 +142,61 @@ impl<'de> Deserialize<'de> for ClipTranspose {
 /// Values are expressed in timeline frames. They are deliberately independent
 /// of source and loop positions, so a looped Clip fades only where the Clip
 /// begins and ends instead of on every loop pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct FadeCurve(i8);
+
+impl<'de> Deserialize<'de> for FadeCurve {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(i16::from(i8::deserialize(deserializer)?)))
+    }
+}
+
+impl FadeCurve {
+    pub const MIN: i8 = -100;
+    pub const MAX: i8 = 100;
+
+    pub const fn new(percent: i16) -> Self {
+        let percent = if percent < Self::MIN as i16 {
+            Self::MIN
+        } else if percent > Self::MAX as i16 {
+            Self::MAX
+        } else {
+            percent as i8
+        };
+        Self(percent)
+    }
+
+    pub const fn percent(self) -> i8 {
+        self.0
+    }
+
+    pub const fn is_linear(value: &Self) -> bool {
+        value.0 == 0
+    }
+
+    /// Map normalized time to gain. Positive values rise early, negative
+    /// values rise late, and zero is exactly linear.
+    #[inline]
+    pub fn gain(self, progress: f32) -> f32 {
+        let exponent = 2.0_f32.powf(-2.0 * f32::from(self.0) / 100.0);
+        progress.clamp(0.0, 1.0).powf(exponent)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct ClipFades {
     #[serde(default)]
     fade_in_frames: u64,
     #[serde(default)]
     fade_out_frames: u64,
+    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
+    fade_in_curve: FadeCurve,
+    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
+    fade_out_curve: FadeCurve,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     crossfade_in_from: Option<ClipId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -166,6 +215,10 @@ impl<'de> Deserialize<'de> for ClipFades {
             #[serde(default)]
             fade_out_frames: u64,
             #[serde(default)]
+            fade_in_curve: FadeCurve,
+            #[serde(default)]
+            fade_out_curve: FadeCurve,
+            #[serde(default)]
             crossfade_in_from: Option<ClipId>,
             #[serde(default)]
             crossfade_out_to: Option<ClipId>,
@@ -175,6 +228,8 @@ impl<'de> Deserialize<'de> for ClipFades {
         Ok(Self {
             fade_in_frames: persisted.fade_in_frames,
             fade_out_frames: persisted.fade_out_frames,
+            fade_in_curve: persisted.fade_in_curve,
+            fade_out_curve: persisted.fade_out_curve,
             crossfade_in_from: persisted.crossfade_in_from,
             crossfade_out_to: persisted.crossfade_out_to,
         })
@@ -197,6 +252,8 @@ impl ClipFades {
         Self {
             fade_in_frames,
             fade_out_frames,
+            fade_in_curve: FadeCurve::new(0),
+            fade_out_curve: FadeCurve::new(0),
             crossfade_in_from: None,
             crossfade_out_to: None,
         }
@@ -210,8 +267,26 @@ impl ClipFades {
         self.fade_out_frames
     }
 
+    pub const fn fade_in_curve(self) -> FadeCurve {
+        self.fade_in_curve
+    }
+
+    pub const fn fade_out_curve(self) -> FadeCurve {
+        self.fade_out_curve
+    }
+
     pub const fn with_fade_in(self, frames: u64, duration: u64) -> Self {
         let mut fades = Self::new(frames, self.fade_out_frames, duration);
+        fades.fade_in_curve = if fades.fade_in_frames > 0 {
+            self.fade_in_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades.fade_out_curve = if fades.fade_out_frames > 0 {
+            self.fade_out_curve
+        } else {
+            FadeCurve::new(0)
+        };
         fades.crossfade_out_to = self.crossfade_out_to;
         fades
     }
@@ -227,6 +302,16 @@ impl ClipFades {
         Self {
             fade_in_frames,
             fade_out_frames,
+            fade_in_curve: if fade_in_frames > 0 {
+                self.fade_in_curve
+            } else {
+                FadeCurve::new(0)
+            },
+            fade_out_curve: if fade_out_frames > 0 {
+                self.fade_out_curve
+            } else {
+                FadeCurve::new(0)
+            },
             crossfade_in_from: self.crossfade_in_from,
             crossfade_out_to: None,
         }
@@ -234,6 +319,16 @@ impl ClipFades {
 
     pub const fn clamped_to(self, duration: u64) -> Self {
         let mut fades = Self::new(self.fade_in_frames, self.fade_out_frames, duration);
+        fades.fade_in_curve = if fades.fade_in_frames > 0 {
+            self.fade_in_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades.fade_out_curve = if fades.fade_out_frames > 0 {
+            self.fade_out_curve
+        } else {
+            FadeCurve::new(0)
+        };
         fades.crossfade_in_from = if fades.fade_in_frames > 0 {
             self.crossfade_in_from
         } else {
@@ -259,6 +354,8 @@ impl ClipFades {
         );
         fades.crossfade_in_from = self.crossfade_in_from;
         fades.crossfade_out_to = self.crossfade_out_to;
+        fades.fade_in_curve = self.fade_in_curve;
+        fades.fade_out_curve = self.fade_out_curve;
         fades
     }
 
@@ -272,16 +369,29 @@ impl ClipFades {
     ) -> Self {
         let keeps_start = local_start == 0;
         let keeps_end = local_start.saturating_add(fragment_duration) >= original_duration;
-        Self::new(
+        let mut fades = Self::new(
             if keeps_start { self.fade_in_frames } else { 0 },
             if keeps_end { self.fade_out_frames } else { 0 },
             fragment_duration,
-        )
+        );
+        fades.fade_in_curve = if keeps_start {
+            self.fade_in_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades.fade_out_curve = if keeps_end {
+            self.fade_out_curve
+        } else {
+            FadeCurve::new(0)
+        };
+        fades
     }
 
     pub const fn is_neutral(value: &Self) -> bool {
         value.fade_in_frames == 0
             && value.fade_out_frames == 0
+            && FadeCurve::is_linear(&value.fade_in_curve)
+            && FadeCurve::is_linear(&value.fade_out_curve)
             && value.crossfade_in_from.is_none()
             && value.crossfade_out_to.is_none()
     }
@@ -296,6 +406,7 @@ impl ClipFades {
 
     pub const fn linked_fade_in(self, frames: u64, from: ClipId, duration: u64) -> Self {
         let mut fades = self.with_fade_in(frames, duration);
+        fades.fade_in_curve = FadeCurve::new(0);
         fades.crossfade_in_from = if fades.fade_in_frames > 0 {
             Some(from)
         } else {
@@ -306,6 +417,7 @@ impl ClipFades {
 
     pub const fn linked_fade_out(self, frames: u64, to: ClipId, duration: u64) -> Self {
         let mut fades = self.with_fade_out(frames, duration);
+        fades.fade_out_curve = FadeCurve::new(0);
         fades.crossfade_out_to = if fades.fade_out_frames > 0 {
             Some(to)
         } else {
@@ -336,6 +448,28 @@ impl ClipFades {
         }
     }
 
+    pub const fn with_fade_in_curve(self, curve: FadeCurve) -> Self {
+        Self {
+            fade_in_curve: if self.fade_in_frames > 0 {
+                curve
+            } else {
+                FadeCurve::new(0)
+            },
+            ..self
+        }
+    }
+
+    pub const fn with_fade_out_curve(self, curve: FadeCurve) -> Self {
+        Self {
+            fade_out_curve: if self.fade_out_frames > 0 {
+                curve
+            } else {
+                FadeCurve::new(0)
+            },
+            ..self
+        }
+    }
+
     /// Per-frame amplitude. This is safe to call on the audio thread.
     #[inline]
     pub fn gain_at(self, clip_frame: u64, duration: u64) -> f32 {
@@ -347,7 +481,7 @@ impl ClipFades {
             if self.crossfade_in_from.is_some() {
                 (progress * std::f32::consts::FRAC_PI_2).sin()
             } else {
-                progress
+                self.fade_in_curve.gain(progress)
             }
         } else {
             1.0
@@ -358,7 +492,8 @@ impl ClipFades {
                 let progress = (frames_after + 1) as f32 / self.fade_out_frames as f32;
                 (progress * std::f32::consts::FRAC_PI_2).sin()
             } else {
-                frames_after as f32 / self.fade_out_frames as f32
+                self.fade_out_curve
+                    .gain(frames_after as f32 / self.fade_out_frames as f32)
             }
         } else {
             1.0
@@ -938,6 +1073,44 @@ mod tests {
         let clamped = ClipFades::new(7, 7, 10);
         assert_eq!(clamped.fade_in_frames(), 7);
         assert_eq!(clamped.fade_out_frames(), 3);
+    }
+
+    #[test]
+    fn fade_curves_are_bounded_reciprocal_shapes_with_linear_legacy_defaults() {
+        let late = FadeCurve::new(-100);
+        let linear = FadeCurve::new(0);
+        let early = FadeCurve::new(100);
+
+        assert_eq!(late.percent(), -100);
+        assert_eq!(FadeCurve::new(-500).percent(), -100);
+        assert_eq!(FadeCurve::new(500).percent(), 100);
+        assert!((late.gain(0.5) - 0.0625).abs() < 1e-6);
+        assert!((linear.gain(0.5) - 0.5).abs() < 1e-6);
+        assert!((early.gain(0.5) - 0.840_896_4).abs() < 1e-6);
+
+        let legacy: ClipFades =
+            serde_json::from_str(r#"{"fade_in_frames":4,"fade_out_frames":2}"#).unwrap();
+        assert_eq!(legacy.fade_in_curve(), FadeCurve::default());
+        assert_eq!(legacy.fade_out_curve(), FadeCurve::default());
+
+        let shaped = ClipFades::new(4, 2, 8)
+            .with_fade_in_curve(early)
+            .with_fade_out_curve(late);
+        let reopened: ClipFades =
+            serde_json::from_str(&serde_json::to_string(&shaped).unwrap()).unwrap();
+        assert_eq!(reopened, shaped);
+    }
+
+    #[test]
+    fn independent_fade_curves_change_audio_and_survive_length_edits() {
+        let fades = ClipFades::new(4, 4, 8)
+            .with_fade_in_curve(FadeCurve::new(100))
+            .with_fade_out_curve(FadeCurve::new(-100));
+
+        assert!((fades.gain_at(2, 8) - 0.840_896_4).abs() < 1e-6);
+        assert!((fades.gain_at(5, 8) - 0.0625).abs() < 1e-6);
+        assert_eq!(fades.with_fade_in(3, 8).fade_in_curve().percent(), 100);
+        assert_eq!(fades.with_fade_out(0, 8).fade_out_curve().percent(), 0);
     }
 
     #[test]
