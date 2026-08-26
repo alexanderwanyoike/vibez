@@ -795,4 +795,50 @@ mod tests {
             assert!((power - 1.0).abs() < 1e-5, "frame {frame}: {power}");
         }
     }
+
+    #[test]
+    fn shaped_crossfade_edges_remain_a_complementary_power_pair() {
+        for curve in [FadeCurve::new(-100), FadeCurve::new(0), FadeCurve::new(100)] {
+            for step in 0..=20 {
+                let progress = step as f32 / 20.0;
+                let (outgoing, incoming) = curve.crossfade_gains(progress);
+                assert!((outgoing * outgoing + incoming * incoming - 1.0).abs() < 1e-5);
+            }
+        }
+
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let curve = FadeCurve::new(65);
+        let outgoing = ClipFades::default()
+            .linked_fade_out(100, incoming_id, 100)
+            .with_linked_fade_out_curve(curve);
+        let incoming = ClipFades::default()
+            .linked_fade_in(100, outgoing_id, 100)
+            .with_linked_fade_in_curve(curve);
+        assert_eq!(outgoing.fade_out_curve(), curve);
+        assert_eq!(incoming.fade_in_curve(), curve);
+        for frame in 0..100 {
+            let power = outgoing.gain_at(frame, 100).powi(2) + incoming.gain_at(frame, 100).powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "frame {frame}: {power}");
+        }
+    }
+
+    #[test]
+    fn unlinking_a_shaped_crossfade_keeps_its_length_but_returns_to_linear() {
+        let peer = ClipId::new();
+        let linked = ClipFades::default()
+            .linked_fade_out(50, peer, 100)
+            .with_linked_fade_out_curve(FadeCurve::new(80));
+        let unlinked = linked.unlink_fade_out();
+
+        assert_eq!(unlinked.fade_out_frames(), 50);
+        assert_eq!(unlinked.fade_out_curve(), FadeCurve::default());
+        assert!(unlinked.crossfade_out_to().is_none());
+
+        let reopened: ClipFades =
+            serde_json::from_str(&serde_json::to_string(&unlinked).unwrap()).unwrap();
+        let relinked = reopened.linked_fade_out(50, peer, 100);
+        assert_eq!(relinked.fade_out_curve(), FadeCurve::new(80));
+        assert_eq!(relinked.crossfade_out_to(), Some(peer));
+    }
 }

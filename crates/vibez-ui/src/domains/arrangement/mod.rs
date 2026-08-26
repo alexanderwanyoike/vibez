@@ -360,6 +360,16 @@ impl TimelineEditorState {
                 edge,
                 curve,
             } => return self.set_audio_clip_fade_curve(engine, track_id, clip_id, edge, curve),
+            ArrangementMsg::SetAudioClipCrossfadeCurve {
+                track_id,
+                outgoing_id,
+                incoming_id,
+                curve,
+            } => {
+                if self.set_crossfade_curve(engine, track_id, outgoing_id, incoming_id, curve) {
+                    action.mark_dirty = true;
+                }
+            }
             ArrangementMsg::MoveClipToTrack {
                 source_track,
                 target_track,

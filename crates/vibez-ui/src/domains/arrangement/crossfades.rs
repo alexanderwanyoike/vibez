@@ -227,6 +227,13 @@ impl TimelineEditorState {
         incoming_id: ClipId,
         overlap: u64,
     ) -> bool {
+        let preserved_curve = self.find_content(track_id).and_then(|content| {
+            let outgoing = content.clips.iter().find(|clip| clip.id == outgoing_id)?;
+            let incoming = content.clips.iter().find(|clip| clip.id == incoming_id)?;
+            (outgoing.fades.crossfade_out_to() == Some(incoming_id)
+                && incoming.fades.crossfade_in_from() == Some(outgoing_id))
+            .then_some(outgoing.fades.fade_out_curve())
+        });
         self.unlink_crossfade_edge_for_clip(engine, track_id, outgoing_id, AudioClipFadeEdge::Out);
         self.unlink_crossfade_edge_for_clip(engine, track_id, incoming_id, AudioClipFadeEdge::In);
         let Some(content) = self.find_content_mut(track_id) else {
@@ -253,6 +260,10 @@ impl TimelineEditorState {
         incoming.fades = incoming
             .fades
             .linked_fade_in(overlap, outgoing_id, incoming.duration);
+        if let Some(curve) = preserved_curve {
+            outgoing.fades = outgoing.fades.with_linked_fade_out_curve(curve);
+            incoming.fades = incoming.fades.with_linked_fade_in_curve(curve);
+        }
         let outgoing_fades = outgoing.fades;
         let incoming_fades = incoming.fades;
         engine.send(EngineCommand::SetClipFades {

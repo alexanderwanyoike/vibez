@@ -202,6 +202,16 @@ fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
         &mut engine,
         ArrangementCtx::default(),
     );
+    a.update(
+        ArrangementMsg::SetAudioClipCrossfadeCurve {
+            track_id,
+            outgoing_id,
+            incoming_id,
+            curve: vibez_core::track::FadeCurve::new(70),
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
     engine.0.clear();
 
     a.update(
@@ -228,10 +238,41 @@ fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
     assert_eq!(incoming.fades.fade_in_frames(), 250);
     assert!(outgoing.fades.crossfade_out_to().is_none());
     assert!(incoming.fades.crossfade_in_from().is_none());
+    assert_eq!(
+        outgoing.fades.fade_out_curve(),
+        vibez_core::track::FadeCurve::default()
+    );
+    assert_eq!(
+        incoming.fades.fade_in_curve(),
+        vibez_core::track::FadeCurve::default()
+    );
     assert!(matches!(
         engine.0.last(),
         Some(EngineCommand::MoveClip { .. })
     ));
+
+    a.update(
+        ArrangementMsg::MoveAudioClip {
+            track_id,
+            clip_id: incoming_id,
+            new_position: 750,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert_eq!(
+        a.tracks[0].clips[0].fades.fade_out_curve(),
+        vibez_core::track::FadeCurve::new(70)
+    );
+    assert_eq!(
+        a.tracks[0].clips[1].fades.fade_in_curve(),
+        vibez_core::track::FadeCurve::new(70)
+    );
 }
 
 #[test]
@@ -297,6 +338,17 @@ fn unchanged_fade_drag_keeps_its_crossfade_link() {
         &mut engine,
         ArrangementCtx::default(),
     );
+    let curve = vibez_core::track::FadeCurve::new(55);
+    a.update(
+        ArrangementMsg::SetAudioClipCrossfadeCurve {
+            track_id,
+            outgoing_id,
+            incoming_id,
+            curve,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
     engine.0.clear();
 
     let action = a.update(
@@ -320,4 +372,6 @@ fn unchanged_fade_drag_keeps_its_crossfade_link() {
         a.tracks[0].clips[1].fades.crossfade_in_from(),
         Some(outgoing_id)
     );
+    assert_eq!(a.tracks[0].clips[0].fades.fade_out_curve(), curve);
+    assert_eq!(a.tracks[0].clips[1].fades.fade_in_curve(), curve);
 }

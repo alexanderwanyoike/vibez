@@ -36,6 +36,15 @@ pub struct TimelineClip {
     pub warp_stale: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TimelineCrossfade {
+    pub outgoing_id: ClipId,
+    pub incoming_id: ClipId,
+    pub overlap_start: u64,
+    pub overlap_end: u64,
+    pub curve: FadeCurve,
+}
+
 /// Lightweight copy of a note clip for timeline rendering.
 pub struct TimelineNoteClip {
     pub clip_id: ClipId,
