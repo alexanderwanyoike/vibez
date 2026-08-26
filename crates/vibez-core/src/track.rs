@@ -146,6 +146,10 @@ pub struct ClipFades {
     fade_in_frames: u64,
     #[serde(default)]
     fade_out_frames: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crossfade_in_from: Option<ClipId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    crossfade_out_to: Option<ClipId>,
 }
 
 impl<'de> Deserialize<'de> for ClipFades {
@@ -159,12 +163,18 @@ impl<'de> Deserialize<'de> for ClipFades {
             fade_in_frames: u64,
             #[serde(default)]
             fade_out_frames: u64,
+            #[serde(default)]
+            crossfade_in_from: Option<ClipId>,
+            #[serde(default)]
+            crossfade_out_to: Option<ClipId>,
         }
 
         let persisted = PersistedFades::deserialize(deserializer)?;
         Ok(Self {
             fade_in_frames: persisted.fade_in_frames,
             fade_out_frames: persisted.fade_out_frames,
+            crossfade_in_from: persisted.crossfade_in_from,
+            crossfade_out_to: persisted.crossfade_out_to,
         })
     }
 }
@@ -185,6 +195,8 @@ impl ClipFades {
         Self {
             fade_in_frames,
             fade_out_frames,
+            crossfade_in_from: None,
+            crossfade_out_to: None,
         }
     }
 
@@ -197,7 +209,9 @@ impl ClipFades {
     }
 
     pub const fn with_fade_in(self, frames: u64, duration: u64) -> Self {
-        Self::new(frames, self.fade_out_frames, duration)
+        let mut fades = Self::new(frames, self.fade_out_frames, duration);
+        fades.crossfade_out_to = self.crossfade_out_to;
+        fades
     }
 
     pub const fn with_fade_out(self, frames: u64, duration: u64) -> Self {
@@ -211,11 +225,24 @@ impl ClipFades {
         Self {
             fade_in_frames,
             fade_out_frames,
+            crossfade_in_from: self.crossfade_in_from,
+            crossfade_out_to: None,
         }
     }
 
     pub const fn clamped_to(self, duration: u64) -> Self {
-        Self::new(self.fade_in_frames, self.fade_out_frames, duration)
+        let mut fades = Self::new(self.fade_in_frames, self.fade_out_frames, duration);
+        fades.crossfade_in_from = if fades.fade_in_frames > 0 {
+            self.crossfade_in_from
+        } else {
+            None
+        };
+        fades.crossfade_out_to = if fades.fade_out_frames > 0 {
+            self.crossfade_out_to
+        } else {
+            None
+        };
+        fades
     }
 
     pub fn scaled(self, old_duration: u64, new_duration: u64) -> Self {
@@ -223,11 +250,14 @@ impl ClipFades {
             return Self::default();
         }
         let ratio = new_duration as f64 / old_duration as f64;
-        Self::new(
+        let mut fades = Self::new(
             (self.fade_in_frames as f64 * ratio).round() as u64,
             (self.fade_out_frames as f64 * ratio).round() as u64,
             new_duration,
-        )
+        );
+        fades.crossfade_in_from = self.crossfade_in_from;
+        fades.crossfade_out_to = self.crossfade_out_to;
+        fades
     }
 
     /// Preserve only fades belonging to an original edge when a Clip is
@@ -248,23 +278,86 @@ impl ClipFades {
     }
 
     pub const fn is_neutral(value: &Self) -> bool {
-        value.fade_in_frames == 0 && value.fade_out_frames == 0
+        value.fade_in_frames == 0
+            && value.fade_out_frames == 0
+            && value.crossfade_in_from.is_none()
+            && value.crossfade_out_to.is_none()
     }
 
-    /// Per-frame linear amplitude. This is safe to call on the audio thread.
+    pub const fn crossfade_in_from(self) -> Option<ClipId> {
+        self.crossfade_in_from
+    }
+
+    pub const fn crossfade_out_to(self) -> Option<ClipId> {
+        self.crossfade_out_to
+    }
+
+    pub const fn linked_fade_in(self, frames: u64, from: ClipId, duration: u64) -> Self {
+        let mut fades = self.with_fade_in(frames, duration);
+        fades.crossfade_in_from = if fades.fade_in_frames > 0 {
+            Some(from)
+        } else {
+            None
+        };
+        fades
+    }
+
+    pub const fn linked_fade_out(self, frames: u64, to: ClipId, duration: u64) -> Self {
+        let mut fades = self.with_fade_out(frames, duration);
+        fades.crossfade_out_to = if fades.fade_out_frames > 0 {
+            Some(to)
+        } else {
+            None
+        };
+        fades
+    }
+
+    pub const fn unlinked(self) -> Self {
+        Self {
+            crossfade_in_from: None,
+            crossfade_out_to: None,
+            ..self
+        }
+    }
+
+    pub const fn unlink_fade_in(self) -> Self {
+        Self {
+            crossfade_in_from: None,
+            ..self
+        }
+    }
+
+    pub const fn unlink_fade_out(self) -> Self {
+        Self {
+            crossfade_out_to: None,
+            ..self
+        }
+    }
+
+    /// Per-frame amplitude. This is safe to call on the audio thread.
     #[inline]
     pub fn gain_at(self, clip_frame: u64, duration: u64) -> f32 {
         if clip_frame >= duration {
             return 0.0;
         }
         let fade_in = if self.fade_in_frames > 0 && clip_frame < self.fade_in_frames {
-            clip_frame as f32 / self.fade_in_frames as f32
+            let progress = clip_frame as f32 / self.fade_in_frames as f32;
+            if self.crossfade_in_from.is_some() {
+                (progress * std::f32::consts::FRAC_PI_2).sin()
+            } else {
+                progress
+            }
         } else {
             1.0
         };
         let frames_after = duration - 1 - clip_frame;
         let fade_out = if self.fade_out_frames > 0 && frames_after < self.fade_out_frames {
-            frames_after as f32 / self.fade_out_frames as f32
+            if self.crossfade_out_to.is_some() {
+                let progress = (frames_after + 1) as f32 / self.fade_out_frames as f32;
+                (progress * std::f32::consts::FRAC_PI_2).sin()
+            } else {
+                frames_after as f32 / self.fade_out_frames as f32
+            }
         } else {
             1.0
         };
@@ -701,7 +794,11 @@ mod tests {
         clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
         clip.original_bpm = Some(174.0);
         clip.gain_db = ClipGainDb::new(-3.5).unwrap();
-        clip.fades = ClipFades::new(4_410, 8_820, clip.duration);
+        clip.fades = ClipFades::new(4_410, 8_820, clip.duration).linked_fade_out(
+            8_820,
+            ClipId::new(),
+            clip.duration,
+        );
         clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
@@ -782,5 +879,20 @@ mod tests {
         assert_eq!(fades.for_fragment(100, 0, 40), ClipFades::new(10, 0, 40));
         assert_eq!(fades.for_fragment(100, 40, 60), ClipFades::new(0, 20, 60));
         assert_eq!(fades.for_fragment(100, 20, 40), ClipFades::default());
+    }
+
+    #[test]
+    fn linked_crossfade_edges_form_an_equal_power_pair() {
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let frames = 16;
+        let outgoing = ClipFades::default().linked_fade_out(frames, incoming_id, frames);
+        let incoming = ClipFades::default().linked_fade_in(frames, outgoing_id, frames);
+
+        for frame in 0..frames {
+            let power =
+                outgoing.gain_at(frame, frames).powi(2) + incoming.gain_at(frame, frames).powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "frame {frame}: {power}");
+        }
     }
 }

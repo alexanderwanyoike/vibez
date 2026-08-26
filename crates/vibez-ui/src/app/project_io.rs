@@ -486,7 +486,8 @@ impl App {
         }
     }
 
-    pub(super) fn rebuild_from_loaded_project(&mut self, loaded: ProjectLoadResult) {
+    pub(super) fn rebuild_from_loaded_project(&mut self, mut loaded: ProjectLoadResult) {
+        super::project_sections::sanitize_loaded_crossfades(&mut loaded.clips);
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;

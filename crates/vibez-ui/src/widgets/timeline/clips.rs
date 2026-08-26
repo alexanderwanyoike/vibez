@@ -170,6 +170,8 @@ impl TrackClipCanvas {
                 loop_end: c.loop_end,
                 fade_in_frames: c.fades.fade_in_frames(),
                 fade_out_frames: c.fades.fade_out_frames(),
+                crossfade_in: c.fades.crossfade_in_from().is_some(),
+                crossfade_out: c.fades.crossfade_out_to().is_some(),
                 warp_stale: c.warped
                     && c.warped_to_bpm
                         .map(|b| (b - bpm).abs() > 0.01)

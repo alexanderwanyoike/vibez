@@ -364,7 +364,8 @@ fn split_audio_clip_replaces_clip_with_two_halves() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
     let mut engine = RecordingEngine::default();
-    a.tracks[0].clips[0].fades = vibez_core::track::ClipFades::new(100, 200, 1000);
+    a.tracks[0].clips[0].fades =
+        vibez_core::track::ClipFades::new(100, 200, 1000).linked_fade_out(200, ClipId::new(), 1000);
     a.update(
         ArrangementMsg::SplitAudioClip {
             track_id: tid,
@@ -383,7 +384,12 @@ fn split_audio_clip_replaces_clip_with_two_halves() {
     assert_eq!(a.tracks[0].clips[0].fades.fade_out_frames(), 0);
     assert_eq!(a.tracks[0].clips[1].fades.fade_in_frames(), 0);
     assert_eq!(a.tracks[0].clips[1].fades.fade_out_frames(), 200);
-    assert!(matches!(engine.0[0], EngineCommand::RemoveClip(..)));
+    assert!(a.tracks[0].clips[0].fades.crossfade_out_to().is_none());
+    assert!(a.tracks[0].clips[1].fades.crossfade_out_to().is_none());
+    assert!(engine
+        .0
+        .iter()
+        .any(|command| matches!(command, EngineCommand::RemoveClip(..))));
 }
 
 #[test]
@@ -451,6 +457,198 @@ fn join_rejects_mixed_selection_types() {
     assert_eq!(
         action.status.as_deref(),
         Some("Join requires same type and track")
+    );
+}
+
+#[test]
+fn two_selected_edge_overlaps_create_one_equal_power_crossfade() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, outgoing_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, incoming_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    a.selected_clips = HashSet::from([
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: outgoing_id,
+        },
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: incoming_id,
+        },
+    ]);
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let outgoing = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == outgoing_id)
+        .unwrap();
+    let incoming = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == incoming_id)
+        .unwrap();
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Created equal-power crossfade")
+    );
+    assert_eq!(outgoing.fades.fade_out_frames(), 250);
+    assert_eq!(outgoing.fades.crossfade_out_to(), Some(incoming_id));
+    assert_eq!(incoming.fades.fade_in_frames(), 250);
+    assert_eq!(incoming.fades.crossfade_in_from(), Some(outgoing_id));
+    assert_eq!(
+        engine
+            .0
+            .iter()
+            .filter(|command| matches!(command, EngineCommand::SetClipFades { .. }))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn moving_one_crossfaded_clip_unlinks_both_edges_without_losing_fade_lengths() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, outgoing_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, incoming_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    a.selected_clips = HashSet::from([
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: outgoing_id,
+        },
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: incoming_id,
+        },
+    ]);
+    let mut engine = RecordingEngine::default();
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    engine.0.clear();
+
+    a.update(
+        ArrangementMsg::MoveAudioClip {
+            track_id,
+            clip_id: incoming_id,
+            new_position: 1_100,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let outgoing = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == outgoing_id)
+        .unwrap();
+    let incoming = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == incoming_id)
+        .unwrap();
+    assert_eq!(outgoing.fades.fade_out_frames(), 250);
+    assert_eq!(incoming.fades.fade_in_frames(), 250);
+    assert!(outgoing.fades.crossfade_out_to().is_none());
+    assert!(incoming.fades.crossfade_in_from().is_none());
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::MoveClip { .. })
+    ));
+}
+
+#[test]
+fn one_clip_can_keep_independent_crossfades_on_both_edges() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, first_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, middle_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    let (_, last_id) = add_audio_clip(&mut a, 0, 1_500, 1_000);
+    let mut engine = RecordingEngine::default();
+    let selection = |left, right| {
+        HashSet::from([
+            ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: left,
+            },
+            ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: right,
+            },
+        ])
+    };
+
+    a.selected_clips = selection(first_id, middle_id);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    a.selected_clips = selection(middle_id, last_id);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    let middle = a.tracks[0]
+        .clips
+        .iter()
+        .find(|clip| clip.id == middle_id)
+        .unwrap();
+    assert_eq!(middle.fades.crossfade_in_from(), Some(first_id));
+    assert_eq!(middle.fades.crossfade_out_to(), Some(last_id));
+}
+
+#[test]
+fn unchanged_fade_drag_keeps_its_crossfade_link() {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, outgoing_id) = add_audio_clip(&mut a, 0, 0, 1_000);
+    let (_, incoming_id) = add_audio_clip(&mut a, 0, 750, 1_000);
+    let mut engine = RecordingEngine::default();
+    a.selected_clips = HashSet::from([
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: outgoing_id,
+        },
+        ArrangementSelection::AudioClip {
+            track_id,
+            clip_id: incoming_id,
+        },
+    ]);
+    a.update(
+        ArrangementMsg::CrossfadeSelectedAudioClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    engine.0.clear();
+
+    let action = a.update(
+        ArrangementMsg::SetAudioClipFade {
+            track_id,
+            clip_id: outgoing_id,
+            edge: crate::state::AudioClipFadeEdge::Out,
+            frames: 250,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert!(engine.0.is_empty());
+    assert_eq!(
+        a.tracks[0].clips[0].fades.crossfade_out_to(),
+        Some(incoming_id)
+    );
+    assert_eq!(
+        a.tracks[0].clips[1].fades.crossfade_in_from(),
+        Some(outgoing_id)
     );
 }
 

@@ -81,8 +81,8 @@ impl TimelineEditorState {
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
         let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+            .find_content(track_id)
+            .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
         else {
             return action;
         };
@@ -102,6 +102,15 @@ impl TimelineEditorState {
             action.status = Some("Refreshing Clip render after a newer edit...".into());
             return action;
         }
+        if success.geometry.is_some() {
+            self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+        }
+        let Some(clip) = self
+            .find_content_mut(track_id)
+            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+        else {
+            return action;
+        };
         clip.audio = Arc::clone(&success.audio);
         let replaces_geometry = success.geometry.is_some();
         if let Some(geometry) = success.geometry {
@@ -165,6 +174,24 @@ impl TimelineEditorState {
         else {
             return action;
         };
+        match field {
+            AudioClipInspectorField::FadeIn => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::In,
+            ),
+            AudioClipInspectorField::FadeOut => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::Out,
+            ),
+            AudioClipInspectorField::SourceStart | AudioClipInspectorField::SourceEnd => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+            }
+            _ => {}
+        }
         let Some(clip) = self
             .find_content_mut(track_id)
             .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))

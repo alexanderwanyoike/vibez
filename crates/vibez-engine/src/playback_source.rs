@@ -579,6 +579,57 @@ mod tests {
     }
 
     #[test]
+    fn linked_overlap_renders_as_a_complementary_equal_power_pair() {
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let source = PreparedPlaybackSource::new(
+            vec![
+                EngineClip {
+                    id: outgoing_id,
+                    audio: Arc::new(DecodedAudio {
+                        channels: vec![vec![1.0; 8], vec![0.0; 8]],
+                        sample_rate: 48_000,
+                    }),
+                    position: 0,
+                    source_offset: 0,
+                    start_marker: 0,
+                    duration: 8,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 8,
+                    linear_gain: 1.0,
+                    fades: ClipFades::default().linked_fade_out(4, incoming_id, 8),
+                },
+                EngineClip {
+                    id: incoming_id,
+                    audio: Arc::new(DecodedAudio {
+                        channels: vec![vec![0.0; 8], vec![1.0; 8]],
+                        sample_rate: 48_000,
+                    }),
+                    position: 4,
+                    source_offset: 0,
+                    start_marker: 0,
+                    duration: 8,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 8,
+                    linear_gain: 1.0,
+                    fades: ClipFades::default().linked_fade_in(4, outgoing_id, 8),
+                },
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 4, 4, 2, None));
+        for frame in output.chunks_exact(2) {
+            let power = frame[0].powi(2) + frame[1].powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "{frame:?}: {power}");
+        }
+    }
+
+    #[test]
     fn total_length_combines_resident_audio_and_note_sources() {
         let audio = Arc::new(DecodedAudio {
             channels: vec![vec![0.5; 100]],

@@ -27,6 +27,7 @@ pub use messages::{
     ClipTransposeRenderRequest,
 };
 mod clipboard;
+mod crossfades;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -363,6 +364,7 @@ impl TimelineEditorState {
                 }
             }
             ArrangementMsg::RemoveClip(track_id, clip_id) => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
                 engine.send(EngineCommand::RemoveClip(track_id, clip_id));
                 if let Some(track) = self.find_content_mut(track_id) {
                     track.clips.retain(|c| c.id != clip_id);
@@ -474,6 +476,7 @@ impl TimelineEditorState {
                 clip_id,
                 new_position,
             } => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position = new_position;
@@ -517,6 +520,25 @@ impl TimelineEditorState {
                 edge,
                 frames,
             } => {
+                let changes_audible_fades = self
+                    .find_content(track_id)
+                    .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                    .is_some_and(|clip| {
+                        let next = match edge {
+                            crate::state::AudioClipFadeEdge::In => {
+                                clip.fades.with_fade_in(frames, clip.duration)
+                            }
+                            crate::state::AudioClipFadeEdge::Out => {
+                                clip.fades.with_fade_out(frames, clip.duration)
+                            }
+                        };
+                        next.fade_in_frames() != clip.fades.fade_in_frames()
+                            || next.fade_out_frames() != clip.fades.fade_out_frames()
+                    });
+                if !changes_audible_fades {
+                    return ArrangementAction::default();
+                }
+                self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
                 if let Some(clip) = self
                     .find_content_mut(track_id)
                     .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
@@ -529,9 +551,6 @@ impl TimelineEditorState {
                             clip.fades.with_fade_out(frames, clip.duration)
                         }
                     };
-                    if fades == clip.fades {
-                        return ArrangementAction::default();
-                    }
                     clip.fades = fades;
                     engine.send(EngineCommand::SetClipFades {
                         track_id,
@@ -548,6 +567,9 @@ impl TimelineEditorState {
                 clip_id,
                 is_note_clip,
             } => {
+                if !is_note_clip {
+                    self.unlink_crossfades_for_clip(engine, source_track, clip_id);
+                }
                 if is_note_clip {
                     // Move note clip between instrument tracks
                     let mut clip_data = None;
@@ -644,6 +666,7 @@ impl TimelineEditorState {
                     for selection in &selections {
                         match selection {
                             ArrangementSelection::AudioClip { track_id, clip_id } => {
+                                self.unlink_crossfades_for_clip(engine, *track_id, *clip_id);
                                 engine.send(EngineCommand::RemoveClip(*track_id, *clip_id));
                                 if let Some(track) = self.find_content_mut(*track_id) {
                                     track.clips.retain(|c| c.id != *clip_id);
@@ -685,6 +708,7 @@ impl TimelineEditorState {
                                         duplicate.name = clip.name.clone();
                                         duplicate.position =
                                             clip.position.saturating_add(clip.duration);
+                                        duplicate.fades = duplicate.fades.unlinked();
                                         duplicate
                                     })
                                 });
@@ -1000,6 +1024,9 @@ impl TimelineEditorState {
             }
             ArrangementMsg::JoinSelectedClips => {
                 return self.op_join_selected_clips(engine, ctx);
+            }
+            ArrangementMsg::CrossfadeSelectedAudioClips => {
+                return self.crossfade_selected_audio_clips(engine);
             }
             ArrangementMsg::TrimSelectedByTrackMutes => {
                 return self.op_trim_selected_by_track_mutes(engine, ctx);

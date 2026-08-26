@@ -283,6 +283,7 @@ impl TimelineEditorState {
         new_duration: u64,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
+        self.unlink_crossfades_for_clip(engine, track_id, clip_id);
         let mut sync_data = None;
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
@@ -352,6 +353,7 @@ impl TimelineEditorState {
         success: ClipWarpSuccess,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
+        self.unlink_crossfades_for_clip(engine, track_id, clip_id);
         engine.send(EngineCommand::ReplaceClipAudio {
             track_id,
             clip_id,
@@ -471,6 +473,7 @@ impl TimelineEditorState {
             .and_then(|track| track.clips.iter().find(|clip| clip.id == old_clip_id))
             .map(|clip| clip.gain_db)
             .unwrap_or_default();
+        self.unlink_crossfades_for_clip(engine, track_id, old_clip_id);
         engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.retain(|c| c.id != old_clip_id);
@@ -635,7 +638,9 @@ impl TimelineEditorState {
                     }
                     let source_frame = audio_source_frame(clip, local as u64);
                     if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] = *sample * clip.gain_db.linear();
+                        dst[dst_frame] += *sample
+                            * clip.gain_db.linear()
+                            * clip.fades.gain_at(local as u64, clip.duration);
                     }
                 }
             }
@@ -649,6 +654,7 @@ impl TimelineEditorState {
 
         // Remove all originals
         for cid in &clip_ids {
+            self.unlink_crossfades_for_clip(engine, track_id, *cid);
             engine.send(EngineCommand::RemoveClip(track_id, *cid));
             if let Some(track) = self.find_content_mut(track_id) {
                 track.clips.retain(|c| c.id != *cid);
@@ -820,6 +826,7 @@ impl TimelineEditorState {
         original_id: ClipId,
         fragments: Vec<UiClip>,
     ) {
+        self.unlink_crossfades_for_clip(engine, track_id, original_id);
         engine.send(EngineCommand::RemoveClip(track_id, original_id));
         if let Some(content) = self.find_content_mut(track_id) {
             content.clips.retain(|clip| clip.id != original_id);

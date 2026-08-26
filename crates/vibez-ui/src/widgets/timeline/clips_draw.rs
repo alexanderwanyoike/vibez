@@ -268,11 +268,30 @@ impl TrackClipCanvas {
                     let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
                     let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
                     let bottom = clip_y + clip_h - 2.0;
+                    let curve_gain = |progress: f32, equal_power: bool| {
+                        if equal_power {
+                            (progress * std::f32::consts::FRAC_PI_2).sin()
+                        } else {
+                            progress
+                        }
+                    };
                     let envelope = canvas::Path::new(|builder| {
                         builder.move_to(iced::Point::new(clip_x, bottom));
-                        builder.line_to(iced::Point::new(fade_in_x, top));
+                        for step in 1..=12 {
+                            let progress = step as f32 / 12.0;
+                            let x = clip_x + (fade_in_x - clip_x) * progress;
+                            let y =
+                                bottom - (bottom - top) * curve_gain(progress, clip.crossfade_in);
+                            builder.line_to(iced::Point::new(x, y));
+                        }
                         builder.line_to(iced::Point::new(fade_out_x, top));
-                        builder.line_to(iced::Point::new(clip_x + clip_w, bottom));
+                        for step in 1..=12 {
+                            let progress = step as f32 / 12.0;
+                            let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
+                            let gain = curve_gain(1.0 - progress, clip.crossfade_out);
+                            let y = bottom - (bottom - top) * gain;
+                            builder.line_to(iced::Point::new(x, y));
+                        }
                     });
                     frame.stroke(
                         &envelope,
@@ -288,6 +307,27 @@ impl TrackClipCanvas {
                                 theme::accent(),
                             );
                         }
+                    }
+                    for x in [
+                        clip.crossfade_in.then_some((clip_x + fade_in_x) / 2.0),
+                        clip.crossfade_out
+                            .then_some((fade_out_x + clip_x + clip_w) / 2.0),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        let cross = canvas::Path::new(|builder| {
+                            builder.move_to(iced::Point::new(x - 3.0, top + 2.0));
+                            builder.line_to(iced::Point::new(x + 3.0, top + 8.0));
+                            builder.move_to(iced::Point::new(x + 3.0, top + 2.0));
+                            builder.line_to(iced::Point::new(x - 3.0, top + 8.0));
+                        });
+                        frame.stroke(
+                            &cross,
+                            canvas::Stroke::default()
+                                .with_color(theme::accent())
+                                .with_width(1.4),
+                        );
                     }
                 }
                 let border_color = if is_selected {
