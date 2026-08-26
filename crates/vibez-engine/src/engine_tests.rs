@@ -1543,6 +1543,62 @@ fn note_clip_loop_renders() {
     );
 }
 
+#[test]
+fn note_clip_reports_triggered_pitches_for_device_feedback() {
+    use vibez_core::midi::{InstrumentKind, MidiNote};
+
+    let (mut engine, mut cmd_tx, mut event_rx) = AudioEngine::new();
+    let track_id = TrackId::new();
+    let clip_id = ClipId::new();
+
+    cmd_tx
+        .push(EngineCommand::AddInstrumentTrack(
+            track_id,
+            "Drums".into(),
+            InstrumentKind::DrumRack,
+        ))
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddNoteClip {
+            track_id,
+            clip_id,
+            position_beats: 0.0,
+            duration_beats: 1.0,
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: 0.0,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
+        })
+        .unwrap();
+    cmd_tx
+        .push(EngineCommand::AddNote {
+            track_id,
+            clip_id,
+            note: MidiNote {
+                pitch: 36,
+                velocity: 100,
+                start_beat: 0.0,
+                duration_beats: 0.25,
+            },
+        })
+        .unwrap();
+    cmd_tx.push(EngineCommand::Play).unwrap();
+
+    let mut output = vec![0.0; 512 * 2];
+    engine.process(&mut output, 2);
+
+    assert!(std::iter::from_fn(|| event_rx.pop().ok()).any(|event| {
+        matches!(
+            event,
+            EngineEvent::TrackNoteActivity {
+                track_id: event_track_id,
+                triggered_notes,
+            } if event_track_id == track_id && triggered_notes == 1u128 << 36
+        )
+    }));
+}
+
 // ---- Automation ----
 
 fn rms(buf: &[f32]) -> f32 {

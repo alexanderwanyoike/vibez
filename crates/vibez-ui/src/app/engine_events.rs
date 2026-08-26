@@ -114,6 +114,17 @@ impl App {
                             track.peak_r = peak_r.max(track.peak_r * 0.85);
                         }
                     }
+                    EngineEvent::TrackNoteActivity {
+                        track_id,
+                        mut triggered_notes,
+                    } => {
+                        let now = std::time::Instant::now();
+                        while triggered_notes != 0 {
+                            let pitch = triggered_notes.trailing_zeros() as u8;
+                            self.state.view.trigger_drum_pad(track_id, pitch, now);
+                            triggered_notes &= triggered_notes - 1;
+                        }
+                    }
                     EngineEvent::TrackMuteChanged {
                         track_id,
                         muted,
@@ -182,6 +193,11 @@ impl App {
                         canonical_section_position_samples,
                         ..
                     } => {
+                        self.state.view.trigger_drum_pad(
+                            track_id,
+                            pitch,
+                            std::time::Instant::now(),
+                        );
                         self.state.perform.capture.repeated_note(
                             track_id,
                             pitch,
@@ -209,6 +225,13 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
+                        if on {
+                            self.state.view.trigger_drum_pad(
+                                track_id,
+                                pitch,
+                                std::time::Instant::now(),
+                            );
+                        }
                         self.state.perform.capture.input_note(
                             track_id,
                             pitch,

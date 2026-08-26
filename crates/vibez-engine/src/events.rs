@@ -84,6 +84,14 @@ pub enum EngineEvent {
         peak_r: f32,
     },
 
+    /// Pitches triggered by resident MIDI clips during the latest audio
+    /// block. One bit per MIDI pitch keeps device feedback bounded to one
+    /// event per track and block, even when several notes land together.
+    TrackNoteActivity {
+        track_id: TrackId,
+        triggered_notes: u128,
+    },
+
     /// A track mute command became effective in the audio engine at this
     /// active engine-clock sample. This is the authoritative event Capture
     /// consumes.
@@ -277,6 +285,16 @@ impl PartialEq for EngineEvent {
                     && left_peak_l == right_peak_l
                     && left_peak_r == right_peak_r
             }
+            (
+                Self::TrackNoteActivity {
+                    track_id: left_track,
+                    triggered_notes: left_notes,
+                },
+                Self::TrackNoteActivity {
+                    track_id: right_track,
+                    triggered_notes: right_notes,
+                },
+            ) => left_track == right_track && left_notes == right_notes,
             (
                 Self::TrackMuteChanged {
                     track_id: left_track,

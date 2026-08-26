@@ -121,6 +121,9 @@ pub struct ViewState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+    /// Short-lived, engine-authored note flashes for device feedback.
+    /// This is view state only and is never persisted with the project.
+    pub(crate) drum_pad_activity: HashMap<(TrackId, u8), std::time::Instant>,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -148,11 +151,35 @@ impl Default for ViewState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            drum_pad_activity: HashMap::new(),
         }
     }
 }
 
 impl ViewState {
+    const DRUM_PAD_ACTIVITY_HOLD: std::time::Duration = std::time::Duration::from_millis(140);
+
+    pub fn trigger_drum_pad(&mut self, track_id: TrackId, pitch: u8, now: std::time::Instant) {
+        self.drum_pad_activity
+            .insert((track_id, pitch), now + Self::DRUM_PAD_ACTIVITY_HOLD);
+    }
+
+    pub fn drum_pad_is_active(
+        &self,
+        track_id: TrackId,
+        pitch: u8,
+        now: std::time::Instant,
+    ) -> bool {
+        self.drum_pad_activity
+            .get(&(track_id, pitch))
+            .is_some_and(|expires_at| *expires_at > now)
+    }
+
+    pub fn prune_drum_pad_activity(&mut self, now: std::time::Instant) {
+        self.drum_pad_activity
+            .retain(|_, expires_at| *expires_at > now);
+    }
+
     pub fn grid_config(&self) -> GridConfig {
         GridConfig::new(
             self.snap_grid,
@@ -1287,6 +1314,25 @@ mod tests {
 
         assert!(view.drum_rack_slice_dialog.is_none());
         assert!(view.transient_analysis_dialog.is_none());
+    }
+
+    #[test]
+    fn drum_pad_activity_is_track_and_pitch_specific_and_expires() {
+        let mut view = ViewState::default();
+        let track_id = TrackId::new();
+        let other_track_id = TrackId::new();
+        let now = std::time::Instant::now();
+
+        view.trigger_drum_pad(track_id, 52, now);
+
+        assert!(view.drum_pad_is_active(track_id, 52, now));
+        assert!(!view.drum_pad_is_active(track_id, 51, now));
+        assert!(!view.drum_pad_is_active(other_track_id, 52, now));
+
+        let after_hold = now + ViewState::DRUM_PAD_ACTIVITY_HOLD;
+        assert!(!view.drum_pad_is_active(track_id, 52, after_hold));
+        view.prune_drum_pad_activity(after_hold);
+        assert!(view.drum_pad_activity.is_empty());
     }
 
     #[test]

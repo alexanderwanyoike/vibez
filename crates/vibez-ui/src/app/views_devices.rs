@@ -723,13 +723,20 @@ impl App {
             Some(Message::remove_track_instrument(track_id)),
         ));
 
+        let activity_now = std::time::Instant::now();
         let mut grid = column![].spacing(4);
         for row_index in 0..4 {
             let mut pad_row = row![].spacing(4);
             for col_index in 0..4 {
                 let pad_index = bank_start + row_index * 4 + col_index;
                 let pad = &track.drum_rack_pads[pad_index];
-                let active = selected_pad == pad_index;
+                let pad_pitch = vibez_core::track::drum_rack_pad_pitch(pad_index)
+                    .expect("Drum Rack UI renders only valid pad slots");
+                let active = selected_pad == pad_index
+                    || self
+                        .state
+                        .view
+                        .drum_pad_is_active(track_id, pad_pitch, activity_now);
                 let drop_target = matches!(
                     self.state.browser.drag_target,
                     Some(crate::state::BrowserDropTarget::DrumRackPad {
@@ -755,10 +762,7 @@ impl App {
                 // Use container + mouse_area so press events reach us and
                 // drag-drop works. iced Button would capture ButtonPressed
                 // and hide it from mouse_area.
-                let pad_note = crate::widgets::piano_roll::pitch_name(
-                    vibez_core::track::drum_rack_pad_pitch(pad_index)
-                        .expect("Drum Rack UI renders only valid pad slots"),
-                );
+                let pad_note = crate::widgets::piano_roll::pitch_name(pad_pitch);
                 let pad_body = container(
                     column![
                         text(format!("{:02}  {pad_note}", pad_index + 1))

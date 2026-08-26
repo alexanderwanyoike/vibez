@@ -307,6 +307,19 @@ impl AudioEngine {
                 track.render(pos, frames, channels, loop_region)
             };
 
+            let triggered_notes = track.pending_note_activity();
+            if triggered_notes != 0
+                && self
+                    .event_tx
+                    .push(EngineEvent::TrackNoteActivity {
+                        track_id: track.id,
+                        triggered_notes,
+                    })
+                    .is_ok()
+            {
+                track.clear_note_activity(triggered_notes);
+            }
+
             if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
                 let input = live_input.expect("checked live input");
                 if !rendered && track.instrument.is_none() {

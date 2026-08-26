@@ -141,6 +141,9 @@ pub struct EngineTrack {
     /// adjacent sample positions, so a jump would otherwise strand
     /// every sounding note in the "held down" state forever.
     active_notes: u128,
+    /// MIDI pitches triggered by resident clips since the UI activity event
+    /// was last delivered. Retained if the event ring is temporarily full.
+    pending_note_activity: u128,
     pub(crate) suppress_source_notes: bool,
 }
 
@@ -253,6 +256,7 @@ impl EngineTrack {
         }
         for &(frame, pitch, vel) in &self.timed_note_ons {
             instrument.note_on_at(pitch, vel, frame);
+            self.pending_note_activity |= 1u128 << pitch;
             rendered = true;
         }
         // Update the sounding-note mask in event order: within one
@@ -339,6 +343,7 @@ impl EngineTrack {
                 let (_, pitch, velocity) = self.timed_note_ons[note_on_index];
                 instrument.note_on(pitch, velocity);
                 self.active_notes |= 1u128 << pitch;
+                self.pending_note_activity |= 1u128 << pitch;
                 rendered = true;
                 note_on_index += 1;
             }
@@ -362,6 +367,14 @@ impl EngineTrack {
         }
 
         rendered
+    }
+
+    pub(crate) fn pending_note_activity(&self) -> u128 {
+        self.pending_note_activity
+    }
+
+    pub(crate) fn clear_note_activity(&mut self, delivered: u128) {
+        self.pending_note_activity &= !delivered;
     }
 }
 

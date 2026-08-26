@@ -33,6 +33,7 @@ impl EngineTrack {
             timed_note_offs: Vec::new(),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
+            pending_note_activity: 0,
             suppress_source_notes: false,
         }
     }
