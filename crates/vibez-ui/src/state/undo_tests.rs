@@ -514,6 +514,133 @@ fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
 }
 
 #[test]
+fn reverse_fades_and_crossfade_curve_restore_as_individual_undo_steps() {
+    let mut state = AppState::default();
+    let track_id = TrackId::new();
+    let outgoing_id = ClipId::new();
+    let incoming_id = ClipId::new();
+    Arc::make_mut(&mut state.project_tracks)
+        .tracks
+        .push(ProjectTrack::new(track_id, "Audio".into(), 0));
+    let audio = Arc::new(DecodedAudio {
+        channels: vec![vec![0.25; 2_000]],
+        sample_rate: 48_000,
+    });
+    let make_clip = |id, position| UiClip {
+        id,
+        name: "Loop".into(),
+        audio: Arc::clone(&audio),
+        source: None,
+        position,
+        source_offset: 0,
+        start_marker: 0,
+        duration: 1_000,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 1_000,
+        gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
+        transpose: Default::default(),
+        original_bpm: None,
+        warped: false,
+        warped_to_bpm: None,
+        original_audio: None,
+    };
+    Arc::make_mut(&mut state.arrangement.timeline)
+        .ensure(track_id)
+        .clips
+        .extend([make_clip(outgoing_id, 0), make_clip(incoming_id, 750)]);
+    let mut engine = RecordingEngine::default();
+    let mut edit = |state: &mut AppState, message| {
+        let before = snapshot(state);
+        state.arrangement.update(
+            Arc::make_mut(&mut state.project_tracks),
+            message,
+            &mut engine,
+            ArrangementCtx::default(),
+        );
+        state.project.history.push_edit(before, None);
+    };
+
+    edit(
+        &mut state,
+        ArrangementMsg::ToggleClipReverse(track_id, outgoing_id),
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::SetAudioClipFade {
+            track_id,
+            clip_id: outgoing_id,
+            edge: super::AudioClipFadeEdge::In,
+            frames: 100,
+        },
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::SetAudioClipFadeCurve {
+            track_id,
+            clip_id: outgoing_id,
+            edge: super::AudioClipFadeEdge::In,
+            curve: vibez_core::track::FadeCurve::new(70),
+        },
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::SetAudioClipFade {
+            track_id,
+            clip_id: outgoing_id,
+            edge: super::AudioClipFadeEdge::Out,
+            frames: 250,
+        },
+    );
+    edit(
+        &mut state,
+        ArrangementMsg::SetAudioClipCrossfadeCurve {
+            track_id,
+            outgoing_id,
+            incoming_id,
+            curve: vibez_core::track::FadeCurve::new(-55),
+        },
+    );
+    assert_eq!(state.project.history.undo.len(), 5);
+
+    undo_once(&mut state);
+    let clips = &state.arrangement.timeline.get(track_id).unwrap().clips;
+    assert_eq!(clips[0].fades.fade_out_curve(), Default::default());
+    assert_eq!(clips[1].fades.fade_in_curve(), Default::default());
+    assert_eq!(clips[0].fades.crossfade_out_to(), Some(incoming_id));
+
+    undo_once(&mut state);
+    let clips = &state.arrangement.timeline.get(track_id).unwrap().clips;
+    assert_eq!(clips[0].fades.fade_out_frames(), 0);
+    assert_eq!(clips[1].fades.fade_in_frames(), 0);
+    assert!(clips[0].fades.crossfade_out_to().is_none());
+
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0]
+            .fades
+            .fade_in_curve(),
+        Default::default()
+    );
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0]
+            .fades
+            .fade_in_frames(),
+        0
+    );
+    undo_once(&mut state);
+    assert_eq!(
+        state.arrangement.timeline.get(track_id).unwrap().clips[0].playback_direction,
+        vibez_core::track::ClipPlaybackDirection::Forward
+    );
+}
+
+#[test]
 fn add_move_and_delete_transient_markers_each_restore_through_undo() {
     let mut state = AppState::default();
     let track_id = TrackId::new();
