@@ -697,12 +697,18 @@ mod tests {
 
     #[test]
     fn sensitivity_affects_yield() {
-        // Low-amplitude impulses: high sensitivity should retain at least as
-        // many as low sensitivity.
+        // A clip with attacks at different levels must produce fewer markers
+        // at the strong-attacks end and progressively retain quieter attacks
+        // as sensitivity increases. Equal result sets would make the producer
+        // control a no-op even though they technically remain nested.
         let sr = 44_100u32;
         let mut buf = vec![0.0f32; 44_100];
-        for i in (2_000..40_000).step_by(5_000) {
-            buf[i] = 0.05;
+        for (index, amplitude) in [1.0f32, 0.5, 0.2, 0.08, 0.02].into_iter().enumerate() {
+            let start = 2_000 + index * 8_000;
+            for offset in 0..1_024 {
+                let phase = std::f32::consts::TAU * 120.0 * offset as f32 / sr as f32;
+                buf[start + offset] += phase.sin() * (-(offset as f32) / 300.0).exp() * amplitude;
+            }
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
         let results = [0, 25, 50, 75, 100]
@@ -715,6 +721,14 @@ mod tests {
                 pair[0],
             );
         }
+        assert!(
+            results[0].len() < results[4].len(),
+            "sensitivity endpoints must differ: {results:?}"
+        );
+        assert!(
+            results.windows(2).filter(|pair| pair[0] != pair[1]).count() >= 2,
+            "sensitivity must provide more than one useful step: {results:?}"
+        );
     }
 
     #[test]

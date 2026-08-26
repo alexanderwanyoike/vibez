@@ -36,9 +36,9 @@ impl App {
         let detected_count = marker_count(vibez_core::transient::TransientMarkerKind::Suggested);
         let manual_count = marker_count(vibez_core::transient::TransientMarkerKind::Authored);
         let marker_summary = if manual_count == 0 {
-            format!("{detected_count} detected")
+            format!("{detected_count} currently detected")
         } else {
-            format!("{detected_count} detected · {manual_count} manual")
+            format!("{detected_count} currently detected · {manual_count} manual")
         };
 
         let sensitivity_knob: Element<'_, Message> =
