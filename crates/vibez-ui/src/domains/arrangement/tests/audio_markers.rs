@@ -472,6 +472,33 @@ fn detection_replaces_suggestions_but_preserves_authored_transient_markers() {
 }
 
 #[test]
+fn repeated_detection_reports_completion_without_dirtying_the_project() {
+    let mut arrangement = arrangement_with_tracks(1);
+    let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
+    arrangement.tracks[0].clips[0]
+        .transient_markers
+        .replace_suggestions([300, 700]);
+    let mut engine = RecordingEngine::default();
+
+    let action = arrangement.update(
+        ArrangementMsg::ReplaceDetectedTransientMarkers {
+            track_id,
+            clip_id,
+            source_frames: vec![300, 700],
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Detected 2 Transient Markers (no change)")
+    );
+    assert!(engine.0.is_empty());
+}
+
+#[test]
 fn warp_marker_edits_keep_fixed_boundaries_and_sync_the_engine() {
     let mut arrangement = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);

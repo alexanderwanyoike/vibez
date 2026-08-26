@@ -29,7 +29,11 @@ impl App {
         let expected_audio = Arc::clone(&clip.audio);
         let detection_audio = Arc::clone(&expected_audio);
         if record_undo {
-            self.state.status_text = format!("Detecting transients in {}...", clip.name);
+            self.state.status_text = format!(
+                "Analysing transients in {} at {}%...",
+                clip.name,
+                sensitivity.percent()
+            );
         }
         Task::perform(
             detect_clip_transients_async(detection_audio, sensitivity),

@@ -94,7 +94,7 @@ impl TimelineEditorState {
                 let result = self
                     .find_content_mut(track_id)
                     .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
-                    .and_then(|clip| {
+                    .map(|clip| {
                         let (source_start, source_end) = source_bounds(clip);
                         let before = clip.transient_markers.clone();
                         clip.transient_markers.replace_suggestions(
@@ -102,18 +102,23 @@ impl TimelineEditorState {
                                 .into_iter()
                                 .filter(|frame| *frame >= source_start && *frame <= source_end),
                         );
-                        (clip.transient_markers != before).then(|| {
-                            clip.transient_markers
-                                .as_slice()
-                                .iter()
-                                .filter(|marker| marker.kind() == TransientMarkerKind::Suggested)
-                                .count()
-                        })
+                        let changed = clip.transient_markers != before;
+                        let count = clip
+                            .transient_markers
+                            .as_slice()
+                            .iter()
+                            .filter(|marker| marker.kind() == TransientMarkerKind::Suggested)
+                            .count();
+                        (changed, count)
                     });
-                if let Some(count) = result {
+                if let Some((changed, count)) = result {
                     self.selected_transient_marker = None;
-                    action.status = Some(format!("Detected {count} Transient Markers"));
-                    action.mark_dirty = true;
+                    action.status = Some(if changed {
+                        format!("Detected {count} Transient Markers")
+                    } else {
+                        format!("Detected {count} Transient Markers (no change)")
+                    });
+                    action.mark_dirty = changed;
                 }
             }
             _ => unreachable!("non-Transient Marker message reached its editor"),
