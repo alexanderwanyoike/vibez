@@ -38,6 +38,7 @@ rubato = "0.16"
 rtrb = "0.3"
 audio_thread_priority = "0.32"
 midir = "0.10"
+rustfft = "6.4"
 
 # GUI
 iced = { version = "0.13", features = ["advanced", "canvas", "tokio"] }
