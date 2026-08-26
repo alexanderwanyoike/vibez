@@ -790,7 +790,7 @@ impl App {
         self.poll_engine_events();
         self.state
             .view
-            .prune_drum_pad_activity(std::time::Instant::now());
+            .prune_drum_pad_flashes(std::time::Instant::now());
         self.poll_spectrum();
         self.poll_plugin_loads();
         self.poll_plugin_windows();

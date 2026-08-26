@@ -1,4 +1,5 @@
 use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::time::TempoMap;
 use vibez_instruments::Instrument;
@@ -141,8 +142,8 @@ pub struct EngineTrack {
     /// adjacent sample positions, so a jump would otherwise strand
     /// every sounding note in the "held down" state forever.
     active_notes: u128,
-    /// MIDI pitches triggered by resident clips since the UI activity event
-    /// was last delivered. Retained if the event ring is temporarily full.
+    /// Drum Rack pitches triggered by resident clips during this render block.
+    /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
     pub(crate) suppress_source_notes: bool,
 }
@@ -217,6 +218,10 @@ impl EngineTrack {
         } = block;
         let buf_size = frames * channels;
         let mut rendered = false;
+        let reports_drum_pad_activity = self
+            .instrument
+            .as_ref()
+            .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
 
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
@@ -256,7 +261,9 @@ impl EngineTrack {
         }
         for &(frame, pitch, vel) in &self.timed_note_ons {
             instrument.note_on_at(pitch, vel, frame);
-            self.pending_note_activity |= 1u128 << pitch;
+            if reports_drum_pad_activity {
+                self.pending_note_activity |= 1u128 << pitch;
+            }
             rendered = true;
         }
         // Update the sounding-note mask in event order: within one
@@ -307,6 +314,10 @@ impl EngineTrack {
         } = block;
         let buf_size = frames * channels;
         let mut rendered = false;
+        let reports_drum_pad_activity = self
+            .instrument
+            .as_ref()
+            .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
         if !self.suppress_source_notes {
@@ -343,7 +354,9 @@ impl EngineTrack {
                 let (_, pitch, velocity) = self.timed_note_ons[note_on_index];
                 instrument.note_on(pitch, velocity);
                 self.active_notes |= 1u128 << pitch;
-                self.pending_note_activity |= 1u128 << pitch;
+                if reports_drum_pad_activity {
+                    self.pending_note_activity |= 1u128 << pitch;
+                }
                 rendered = true;
                 note_on_index += 1;
             }
@@ -369,12 +382,8 @@ impl EngineTrack {
         rendered
     }
 
-    pub(crate) fn pending_note_activity(&self) -> u128 {
-        self.pending_note_activity
-    }
-
-    pub(crate) fn clear_note_activity(&mut self, delivered: u128) {
-        self.pending_note_activity &= !delivered;
+    pub(crate) fn take_note_activity(&mut self) -> u128 {
+        std::mem::take(&mut self.pending_note_activity)
     }
 }
 

@@ -84,9 +84,9 @@ pub enum EngineEvent {
         peak_r: f32,
     },
 
-    /// Pitches triggered by resident MIDI clips during the latest audio
-    /// block. One bit per MIDI pitch keeps device feedback bounded to one
-    /// event per track and block, even when several notes land together.
+    /// Drum Rack pitches triggered by resident MIDI clips during the latest
+    /// audio block. One bit per MIDI pitch keeps device feedback bounded to
+    /// one event per track and block, even when several notes land together.
     TrackNoteActivity {
         track_id: TrackId,
         triggered_notes: u128,

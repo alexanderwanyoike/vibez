@@ -123,7 +123,7 @@ pub struct ViewState {
     pub edit_name_text: String,
     /// Short-lived, engine-authored note flashes for device feedback.
     /// This is view state only and is never persisted with the project.
-    pub(crate) drum_pad_activity: HashMap<(TrackId, u8), std::time::Instant>,
+    pub(crate) drum_pad_flash_until: HashMap<(TrackId, u8), std::time::Instant>,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -151,32 +151,53 @@ impl Default for ViewState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
-            drum_pad_activity: HashMap::new(),
+            drum_pad_flash_until: HashMap::new(),
         }
     }
 }
 
 impl ViewState {
-    const DRUM_PAD_ACTIVITY_HOLD: std::time::Duration = std::time::Duration::from_millis(140);
+    const DRUM_PAD_FLASH_HOLD: std::time::Duration = std::time::Duration::from_millis(140);
 
-    pub fn trigger_drum_pad(&mut self, track_id: TrackId, pitch: u8, now: std::time::Instant) {
-        self.drum_pad_activity
-            .insert((track_id, pitch), now + Self::DRUM_PAD_ACTIVITY_HOLD);
+    pub fn trigger_drum_pad_flash(
+        &mut self,
+        track_id: TrackId,
+        pitch: u8,
+        now: std::time::Instant,
+    ) {
+        self.drum_pad_flash_until
+            .insert((track_id, pitch), now + Self::DRUM_PAD_FLASH_HOLD);
     }
 
-    pub fn drum_pad_is_active(
+    pub fn drum_pad_is_flashing(
         &self,
         track_id: TrackId,
         pitch: u8,
         now: std::time::Instant,
     ) -> bool {
-        self.drum_pad_activity
+        self.drum_pad_flash_until
             .get(&(track_id, pitch))
             .is_some_and(|expires_at| *expires_at > now)
     }
 
-    pub fn prune_drum_pad_activity(&mut self, now: std::time::Instant) {
-        self.drum_pad_activity
+    pub fn drum_pad_bank_is_flashing(
+        &self,
+        track_id: TrackId,
+        bank: usize,
+        now: std::time::Instant,
+    ) -> bool {
+        let first_pad = bank.saturating_mul(vibez_core::track::DRUM_RACK_BANK_SIZE);
+        let end_pad = first_pad
+            .saturating_add(vibez_core::track::DRUM_RACK_BANK_SIZE)
+            .min(vibez_core::track::DRUM_RACK_PAD_COUNT);
+        (first_pad..end_pad).any(|pad| {
+            vibez_core::track::drum_rack_pad_pitch(pad)
+                .is_some_and(|pitch| self.drum_pad_is_flashing(track_id, pitch, now))
+        })
+    }
+
+    pub fn prune_drum_pad_flashes(&mut self, now: std::time::Instant) {
+        self.drum_pad_flash_until
             .retain(|_, expires_at| *expires_at > now);
     }
 
@@ -1323,16 +1344,30 @@ mod tests {
         let other_track_id = TrackId::new();
         let now = std::time::Instant::now();
 
-        view.trigger_drum_pad(track_id, 52, now);
+        view.trigger_drum_pad_flash(track_id, 52, now);
 
-        assert!(view.drum_pad_is_active(track_id, 52, now));
-        assert!(!view.drum_pad_is_active(track_id, 51, now));
-        assert!(!view.drum_pad_is_active(other_track_id, 52, now));
+        assert!(view.drum_pad_is_flashing(track_id, 52, now));
+        assert!(!view.drum_pad_is_flashing(track_id, 51, now));
+        assert!(!view.drum_pad_is_flashing(other_track_id, 52, now));
 
-        let after_hold = now + ViewState::DRUM_PAD_ACTIVITY_HOLD;
-        assert!(!view.drum_pad_is_active(track_id, 52, after_hold));
-        view.prune_drum_pad_activity(after_hold);
-        assert!(view.drum_pad_activity.is_empty());
+        let after_hold = now + ViewState::DRUM_PAD_FLASH_HOLD;
+        assert!(!view.drum_pad_is_flashing(track_id, 52, after_hold));
+        view.prune_drum_pad_flashes(after_hold);
+        assert!(view.drum_pad_flash_until.is_empty());
+    }
+
+    #[test]
+    fn drum_pad_bank_activity_finds_flashes_outside_the_selected_bank() {
+        let mut view = ViewState::default();
+        let track_id = TrackId::new();
+        let now = std::time::Instant::now();
+        let second_bank_pitch =
+            vibez_core::track::drum_rack_pad_pitch(vibez_core::track::DRUM_RACK_BANK_SIZE).unwrap();
+
+        view.trigger_drum_pad_flash(track_id, second_bank_pitch, now);
+
+        assert!(!view.drum_pad_bank_is_flashing(track_id, 0, now));
+        assert!(view.drum_pad_bank_is_flashing(track_id, 1, now));
     }
 
     #[test]

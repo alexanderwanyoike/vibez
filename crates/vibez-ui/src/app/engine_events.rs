@@ -34,12 +34,43 @@ fn active_audition_status(status: &str) -> bool {
     )
 }
 
+fn apply_drum_pad_flash(
+    view: &mut crate::state::ViewState,
+    event: &EngineEvent,
+    now: std::time::Instant,
+) {
+    match event {
+        EngineEvent::TrackNoteActivity {
+            track_id,
+            triggered_notes,
+        } => {
+            let mut notes = *triggered_notes;
+            while notes != 0 {
+                let pitch = notes.trailing_zeros() as u8;
+                view.trigger_drum_pad_flash(*track_id, pitch, now);
+                notes &= notes - 1;
+            }
+        }
+        EngineEvent::NoteRepeated {
+            track_id, pitch, ..
+        }
+        | EngineEvent::InstrumentNoteInput {
+            track_id,
+            pitch,
+            on: true,
+            ..
+        } => view.trigger_drum_pad_flash(*track_id, *pitch, now),
+        _ => {}
+    }
+}
+
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
         let mut completed_section_recordings = Vec::new();
         let mut completed_captures = Vec::new();
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
+                apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
                     EngineEvent::DisposeEffect(cell) => {
                         // Plugin teardown remains on the UI thread.
@@ -114,17 +145,7 @@ impl App {
                             track.peak_r = peak_r.max(track.peak_r * 0.85);
                         }
                     }
-                    EngineEvent::TrackNoteActivity {
-                        track_id,
-                        mut triggered_notes,
-                    } => {
-                        let now = std::time::Instant::now();
-                        while triggered_notes != 0 {
-                            let pitch = triggered_notes.trailing_zeros() as u8;
-                            self.state.view.trigger_drum_pad(track_id, pitch, now);
-                            triggered_notes &= triggered_notes - 1;
-                        }
-                    }
+                    EngineEvent::TrackNoteActivity { .. } => {}
                     EngineEvent::TrackMuteChanged {
                         track_id,
                         muted,
@@ -193,11 +214,6 @@ impl App {
                         canonical_section_position_samples,
                         ..
                     } => {
-                        self.state.view.trigger_drum_pad(
-                            track_id,
-                            pitch,
-                            std::time::Instant::now(),
-                        );
                         self.state.perform.capture.repeated_note(
                             track_id,
                             pitch,
@@ -225,13 +241,6 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
-                        if on {
-                            self.state.view.trigger_drum_pad(
-                                track_id,
-                                pitch,
-                                std::time::Instant::now(),
-                            );
-                        }
                         self.state.perform.capture.input_note(
                             track_id,
                             pitch,
@@ -452,5 +461,58 @@ mod tests {
             state.perform.pending_track_mute(track_id),
             None::<PendingTrackMute>
         );
+    }
+
+    #[test]
+    fn every_drum_pad_feedback_event_path_drives_the_same_flash_state() {
+        use vibez_core::perform::NoteRepeatRate;
+
+        let track_id = TrackId::new();
+        let now = std::time::Instant::now();
+        let mut view = crate::state::ViewState::default();
+        let clip_activity = EngineEvent::TrackNoteActivity {
+            track_id,
+            triggered_notes: (1u128 << 41) | (1u128 << 44),
+        };
+        let repeated = EngineEvent::NoteRepeated {
+            track_id,
+            pitch: 42,
+            velocity: 100,
+            rate: NoteRepeatRate::Eighth,
+            effective_at_samples: 0,
+            canonical_at_samples: 0,
+            section_id: None,
+            section_position_samples: None,
+            canonical_section_position_samples: None,
+        };
+        let input = EngineEvent::InstrumentNoteInput {
+            track_id,
+            pitch: 43,
+            velocity: 100,
+            on: true,
+            effective_at_samples: 0,
+            section_id: None,
+            section_position_samples: None,
+        };
+        let input_note_off = EngineEvent::InstrumentNoteInput {
+            track_id,
+            pitch: 45,
+            velocity: 0,
+            on: false,
+            effective_at_samples: 0,
+            section_id: None,
+            section_position_samples: None,
+        };
+
+        apply_drum_pad_flash(&mut view, &clip_activity, now);
+        apply_drum_pad_flash(&mut view, &repeated, now);
+        apply_drum_pad_flash(&mut view, &input, now);
+        apply_drum_pad_flash(&mut view, &input_note_off, now);
+
+        assert!(view.drum_pad_is_flashing(track_id, 41, now));
+        assert!(view.drum_pad_is_flashing(track_id, 42, now));
+        assert!(view.drum_pad_is_flashing(track_id, 43, now));
+        assert!(view.drum_pad_is_flashing(track_id, 44, now));
+        assert!(!view.drum_pad_is_flashing(track_id, 45, now));
     }
 }
