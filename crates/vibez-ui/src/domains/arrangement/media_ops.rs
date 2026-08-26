@@ -11,7 +11,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::fragment_geometry::{audio_fragment_geometry, unmuted_beat_ranges, visible_notes};
+use super::fragment_geometry::{audio_fragment, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
@@ -87,29 +87,12 @@ impl TimelineEditorState {
                                 .clamp(start_sample, clip_end_sample);
                             (end_sample > start_sample).then(|| {
                                 let local_start = start_sample - clip.position;
-                                let mut fragment = clip.clone();
-                                fragment.id = ClipId::new();
-                                fragment.position = start_sample;
-                                (
-                                    fragment.source_offset,
-                                    fragment.start_marker,
-                                    fragment.warp_markers,
-                                ) = audio_fragment_geometry(
+                                audio_fragment(
                                     clip,
+                                    clip.name.clone(),
                                     local_start,
                                     end_sample - start_sample,
-                                );
-                                fragment.duration = end_sample - start_sample;
-                                fragment.fades = clip.fades.for_fragment(
-                                    clip.duration,
-                                    local_start,
-                                    fragment.duration,
-                                );
-                                fragment.transient_markers.retain_source_range(
-                                    fragment.source_offset,
-                                    fragment.source_end(),
-                                );
-                                fragment
+                                )
                             })
                         })
                         .collect();
@@ -682,14 +665,20 @@ impl TimelineEditorState {
     /// engine and UI state. Every op that fragments a clip (split, trim) must
     /// route through here so the engine command list stays in one place;
     /// selection bookkeeping stays with the caller.
-    fn replace_audio_clip(
+    pub(super) fn replace_audio_clip(
         &mut self,
         engine: &mut impl EngineHandle,
         track_id: TrackId,
         original_id: ClipId,
-        fragments: Vec<UiClip>,
+        mut fragments: Vec<UiClip>,
     ) {
         self.unlink_crossfades_for_clip(engine, track_id, original_id);
+        // Fragment constructors already unlink both edges. Keep the
+        // replacement boundary defensive so a future caller cannot persist a
+        // link to a removed Clip.
+        for fragment in &mut fragments {
+            fragment.fades = fragment.fades.unlinked();
+        }
         engine.send(EngineCommand::RemoveClip(track_id, original_id));
         if let Some(content) = self.find_content_mut(track_id) {
             content.clips.retain(|clip| clip.id != original_id);
@@ -772,29 +761,13 @@ impl TimelineEditorState {
             })
             .map(|clip| {
                 let left_duration = split_position - clip.position;
-                let mut left = clip.clone();
-                left.id = ClipId::new();
-                left.name = format!("{} L", clip.name);
-                (left.source_offset, left.start_marker, left.warp_markers) =
-                    audio_fragment_geometry(clip, 0, left_duration);
-                left.duration = left_duration;
-                left.fades = clip.fades.for_fragment(clip.duration, 0, left.duration);
-                left.transient_markers
-                    .retain_source_range(left.source_offset, left.source_end());
-
-                let mut right = clip.clone();
-                right.id = ClipId::new();
-                right.name = format!("{} R", clip.name);
-                right.position = split_position;
-                right.duration = clip.duration - left_duration;
-                right.fades = clip
-                    .fades
-                    .for_fragment(clip.duration, left_duration, right.duration);
-                (right.source_offset, right.start_marker, right.warp_markers) =
-                    audio_fragment_geometry(clip, left_duration, right.duration);
-                right
-                    .transient_markers
-                    .retain_source_range(right.source_offset, right.source_end());
+                let left = audio_fragment(clip, format!("{} L", clip.name), 0, left_duration);
+                let right = audio_fragment(
+                    clip,
+                    format!("{} R", clip.name),
+                    left_duration,
+                    clip.duration - left_duration,
+                );
                 (left, right)
             });
         if let Some((left, right)) = split {

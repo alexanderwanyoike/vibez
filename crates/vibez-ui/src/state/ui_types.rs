@@ -166,6 +166,12 @@ impl UiClip {
             .round() as u64
     }
 
+    pub(crate) fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
+        self.warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64
+    }
+
     pub(crate) fn warp_geometry_for_fragment(
         &self,
         local_start: u64,
