@@ -27,8 +27,8 @@ pub struct TimelineClip {
     pub fade_out_frames: u64,
     pub fade_in_curve: FadeCurve,
     pub fade_out_curve: FadeCurve,
-    pub crossfade_in: bool,
-    pub crossfade_out: bool,
+    pub crossfade_in_from: Option<ClipId>,
+    pub crossfade_out_to: Option<ClipId>,
     /// True when this clip is warped but its `warped_to_bpm` no longer
     /// matches the current project BPM. The canvas draws a diagonal
     /// stripe overlay so the user can see at a glance that a re-warp
