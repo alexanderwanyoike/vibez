@@ -573,6 +573,35 @@ impl TrackInfo {
     }
 }
 
+/// Direction in which an Audio Clip traverses its resolved visible playback.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipPlaybackDirection {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+impl ClipPlaybackDirection {
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Forward => Self::Reverse,
+            Self::Reverse => Self::Forward,
+        }
+    }
+
+    pub const fn map_clip_frame(self, clip_frame: u64, duration: u64) -> u64 {
+        match self {
+            Self::Forward => clip_frame,
+            Self::Reverse => duration.saturating_sub(1).saturating_sub(clip_frame),
+        }
+    }
+
+    pub const fn is_forward(value: &Self) -> bool {
+        matches!(value, Self::Forward)
+    }
+}
+
 /// Serializable clip metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipInfo {
@@ -607,6 +636,9 @@ pub struct ClipInfo {
     /// Fade lengths at the visible Clip edges.
     #[serde(default, skip_serializing_if = "ClipFades::is_neutral")]
     pub fades: ClipFades,
+    /// Nondestructive traversal direction over the resolved Clip playback.
+    #[serde(default, skip_serializing_if = "ClipPlaybackDirection::is_forward")]
+    pub playback_direction: ClipPlaybackDirection,
     /// Duration-preserving pitch offset in semitones.
     #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
     pub transpose: ClipTranspose,
@@ -746,6 +778,7 @@ mod tests {
             loop_end: 0,
             gain_db: Default::default(),
             fades: Default::default(),
+            playback_direction: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -799,6 +832,7 @@ mod tests {
             ClipId::new(),
             clip.duration,
         );
+        clip.playback_direction = ClipPlaybackDirection::Reverse;
         clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
@@ -814,6 +848,7 @@ mod tests {
         assert_eq!(clip.original_bpm, deserialized.original_bpm);
         assert_eq!(clip.gain_db, deserialized.gain_db);
         assert_eq!(clip.fades, deserialized.fades);
+        assert_eq!(clip.playback_direction, deserialized.playback_direction);
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
@@ -847,6 +882,7 @@ mod tests {
         assert!(clip.source.is_none());
         assert_eq!(clip.gain_db, ClipGainDb::default());
         assert_eq!(clip.fades, ClipFades::default());
+        assert_eq!(clip.playback_direction, ClipPlaybackDirection::Forward);
         assert_eq!(clip.transpose, ClipTranspose::default());
         assert_eq!(clip.start_marker, None);
     }

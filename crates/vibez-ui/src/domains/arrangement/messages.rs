@@ -118,6 +118,7 @@ pub enum ArrangementMsg {
         is_note_clip: bool,
     },
     ToggleClipLoop(TrackId, ClipId),
+    ToggleClipReverse(TrackId, ClipId),
     SetClipLoopRegion {
         track_id: TrackId,
         clip_id: ClipId,
@@ -243,6 +244,7 @@ impl ArrangementMsg {
                 | Self::SetAudioClipFade { .. }
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
+                | Self::ToggleClipReverse(..)
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }

@@ -394,6 +394,27 @@ impl TimelineEditorState {
                     });
                 }
             }
+            ArrangementMsg::ToggleClipReverse(track_id, clip_id) => {
+                if let Some(clip) = self
+                    .find_content_mut(track_id)
+                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+                {
+                    clip.playback_direction = clip.playback_direction.toggled();
+                    engine.send(EngineCommand::SetClipPlaybackDirection {
+                        track_id,
+                        clip_id,
+                        direction: clip.playback_direction,
+                    });
+                    action.status = Some(match clip.playback_direction {
+                        vibez_core::track::ClipPlaybackDirection::Forward => {
+                            "Audio Clip plays forward".into()
+                        }
+                        vibez_core::track::ClipPlaybackDirection::Reverse => {
+                            "Audio Clip plays in reverse".into()
+                        }
+                    });
+                }
+            }
             ArrangementMsg::SetClipLoopRegion {
                 track_id,
                 clip_id,
@@ -641,6 +662,7 @@ impl TimelineEditorState {
                             loop_end: clip.loop_end,
                             linear_gain: clip.gain_db.linear(),
                             fades: clip.fades,
+                            playback_direction: clip.playback_direction,
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -726,6 +748,7 @@ impl TimelineEditorState {
                                         loop_end: duplicate.loop_end,
                                         linear_gain: duplicate.gain_db.linear(),
                                         fades: duplicate.fades,
+                                        playback_direction: duplicate.playback_direction,
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -1124,6 +1147,7 @@ impl TimelineEditorState {
 }
 
 mod audio_clip_inspector;
+mod fragment_geometry;
 mod media_ops;
 mod ops;
 

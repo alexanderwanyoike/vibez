@@ -794,6 +794,7 @@ impl App {
                     loop_end: clip.info.loop_end,
                     linear_gain: clip.info.gain_db.linear(),
                     fades: clip.info.fades,
+                    playback_direction: clip.info.playback_direction,
                 });
             }
             if self.state.find_track(clip.info.track_id).is_some() {

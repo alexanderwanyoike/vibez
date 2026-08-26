@@ -349,6 +349,7 @@ impl App {
                     loop_end: duration,
                     linear_gain: 1.0,
                     fades: Default::default(),
+                    playback_direction: Default::default(),
                 });
                 self.state
                     .arrange_content_mut(outcome.track_id)
@@ -367,6 +368,7 @@ impl App {
                         loop_end: duration,
                         gain_db: Default::default(),
                         fades: Default::default(),
+                        playback_direction: Default::default(),
                         transpose: Default::default(),
                         original_bpm: None,
                         warped: false,

@@ -6,12 +6,13 @@ use std::collections::HashSet;
 use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
 use std::sync::Arc;
 
-use vibez_core::automation::{AutomationLane, AutomationTarget};
+use vibez_core::automation::AutomationTarget;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
 use super::audio_clip_inspector::clear_warp_request;
+use super::fragment_geometry::{audio_fragment_source_start, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
@@ -20,67 +21,7 @@ use crate::state::{
 use super::*;
 
 fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    clip.timeline().source_at(local_frame) as usize
-}
-
-fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
-    let mut visible = Vec::new();
-    for note in &clip.notes {
-        for occurrence in clip.note_occurrences(note.start_beat) {
-            let note_end = occurrence + note.duration_beats;
-            let kept_start = occurrence.max(local_start);
-            let kept_end = note_end.min(local_end);
-            if kept_end > kept_start {
-                visible.push(MidiNote {
-                    start_beat: kept_start - local_start,
-                    duration_beats: kept_end - kept_start,
-                    ..*note
-                });
-            }
-        }
-    }
-    visible.sort_by(|a, b| {
-        a.start_beat
-            .partial_cmp(&b.start_beat)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    visible
-}
-
-/// Unmuted portions of `[start, end)` in project beats. Track Mute is a
-/// stepped lane and deliberately imposes no state before its first point, so
-/// uncaptured material before the first event is retained.
-fn unmuted_beat_ranges(lane: &AutomationLane, start: f64, end: f64) -> Vec<(f64, f64)> {
-    if end <= start {
-        return Vec::new();
-    }
-
-    let mut boundaries = vec![start];
-    boundaries.extend(
-        lane.points
-            .iter()
-            .map(|point| point.beat)
-            .filter(|beat| *beat > start && *beat < end),
-    );
-    boundaries.push(end);
-
-    let mut ranges: Vec<(f64, f64)> = Vec::new();
-    for window in boundaries.windows(2) {
-        let range_start = window[0];
-        let range_end = window[1];
-        let muted = lane.value_at(range_start).is_some_and(|value| value >= 0.5);
-        if muted || range_end <= range_start {
-            continue;
-        }
-        if let Some((_, previous_end)) = ranges.last_mut() {
-            if *previous_end == range_start {
-                *previous_end = range_end;
-                continue;
-            }
-        }
-        ranges.push((range_start, range_end));
-    }
-    ranges
+    clip.source_frame_at(local_frame) as usize
 }
 
 impl TimelineEditorState {
@@ -150,8 +91,11 @@ impl TimelineEditorState {
                                 let mut fragment = clip.clone();
                                 fragment.id = ClipId::new();
                                 fragment.position = start_sample;
-                                fragment.source_offset =
-                                    audio_source_frame(clip, local_start) as u64;
+                                fragment.source_offset = audio_fragment_source_start(
+                                    clip,
+                                    local_start,
+                                    end_sample - start_sample,
+                                );
                                 fragment.start_marker = fragment.source_offset;
                                 fragment.duration = end_sample - start_sample;
                                 fragment.fades = clip.fades.for_fragment(
@@ -306,6 +250,7 @@ impl TimelineEditorState {
                     clip.loop_end,
                     clip.gain_db.linear(),
                     clip.fades,
+                    clip.playback_direction,
                 ));
             }
         }
@@ -320,6 +265,7 @@ impl TimelineEditorState {
             loop_end,
             linear_gain,
             fades,
+            playback_direction,
         )) = sync_data
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
@@ -336,6 +282,7 @@ impl TimelineEditorState {
                 loop_end,
                 linear_gain,
                 fades,
+                playback_direction,
             });
         }
         action.scroll_to_beat = clip_end_beat;
@@ -500,6 +447,7 @@ impl TimelineEditorState {
             loop_end: 0,
             linear_gain: gain_db.linear(),
             fades: Default::default(),
+            playback_direction: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -516,6 +464,7 @@ impl TimelineEditorState {
                 loop_end: 0,
                 gain_db,
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -676,6 +625,7 @@ impl TimelineEditorState {
             loop_end: total_duration,
             linear_gain: 1.0,
             fades: Default::default(),
+            playback_direction: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -692,6 +642,7 @@ impl TimelineEditorState {
                 loop_end: total_duration,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -845,6 +796,7 @@ impl TimelineEditorState {
                 loop_end: clip.loop_end,
                 linear_gain: clip.gain_db.linear(),
                 fades: clip.fades,
+                playback_direction: clip.playback_direction,
             });
         }
         if let Some(content) = self.find_content_mut(track_id) {
@@ -910,6 +862,8 @@ impl TimelineEditorState {
                 let mut left = clip.clone();
                 left.id = ClipId::new();
                 left.name = format!("{} L", clip.name);
+                left.source_offset = audio_fragment_source_start(clip, 0, left_duration);
+                left.start_marker = left.source_offset;
                 left.duration = left_duration;
                 left.fades = clip.fades.for_fragment(clip.duration, 0, left.duration);
 
@@ -921,7 +875,8 @@ impl TimelineEditorState {
                 right.fades = clip
                     .fades
                     .for_fragment(clip.duration, left_duration, right.duration);
-                right.source_offset = audio_source_frame(clip, left_duration) as u64;
+                right.source_offset =
+                    audio_fragment_source_start(clip, left_duration, right.duration);
                 right.start_marker = right.source_offset;
                 (left, right)
             });

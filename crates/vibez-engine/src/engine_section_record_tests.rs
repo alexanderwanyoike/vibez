@@ -71,6 +71,7 @@ fn source(
                     loop_end: 0,
                     linear_gain: 1.0,
                     fades: Default::default(),
+                    playback_direction: Default::default(),
                 }],
                 Vec::new(),
                 Vec::new(),
@@ -209,6 +210,7 @@ fn stopped_count_in_does_not_play_arrangement_content() {
             loop_end: 0,
             linear_gain: 1.0,
             fades: Default::default(),
+            playback_direction: Default::default(),
         })
         .unwrap();
     commands

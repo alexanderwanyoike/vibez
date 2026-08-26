@@ -56,6 +56,7 @@ fn audio_clip(position: u64) -> UiClip {
         loop_end: 0,
         gain_db: Default::default(),
         fades: Default::default(),
+        playback_direction: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,

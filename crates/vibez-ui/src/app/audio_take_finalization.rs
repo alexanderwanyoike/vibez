@@ -227,6 +227,7 @@ mod tests {
                     loop_end: outcome.audio.num_frames() as u64,
                     gain_db: Default::default(),
                     fades: Default::default(),
+                    playback_direction: Default::default(),
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,

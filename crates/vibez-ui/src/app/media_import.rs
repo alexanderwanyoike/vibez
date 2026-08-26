@@ -717,6 +717,7 @@ impl App {
             loop_end: 0,
             linear_gain: 1.0,
             fades: Default::default(),
+            playback_direction: Default::default(),
         });
 
         if self.state.find_track(track_id).is_some() {
@@ -734,6 +735,7 @@ impl App {
                 loop_end: 0,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

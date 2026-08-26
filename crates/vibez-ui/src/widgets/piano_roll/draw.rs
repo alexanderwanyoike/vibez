@@ -507,6 +507,7 @@ impl PianoRollWidget {
                 h,
                 theme::text_dim(),
                 theme::bg_surface(),
+                true,
             );
         }
 

@@ -79,6 +79,7 @@ impl App {
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
+            playback_direction: clip.playback_direction,
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -285,7 +286,62 @@ impl App {
         .spacing(7)
         .align_y(iced::Alignment::Center);
         let source_bounds = column![
-            text("SOURCE").size(8).color(th::text_muted()),
+            row![
+                text("SOURCE").size(8).color(th::text_muted()),
+                horizontal_space(),
+                {
+                    let reversed = clip.playback_direction
+                        == vibez_core::track::ClipPlaybackDirection::Reverse;
+                    button(
+                        text(if reversed {
+                            "REVERSE ON"
+                        } else {
+                            "REVERSE OFF"
+                        })
+                        .size(8)
+                        .color(if reversed {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        }),
+                    )
+                    .on_press(Message::Arrangement(ArrangementMsg::ToggleClipReverse(
+                        track_id, clip.id,
+                    )))
+                    .padding([3, 6])
+                    .style(move |_theme: &Theme, status| button::Style {
+                        background: Some(
+                            if reversed {
+                                th::accent_dim()
+                            } else if matches!(
+                                status,
+                                button::Status::Hovered | button::Status::Pressed
+                            ) {
+                                th::bg_hover()
+                            } else {
+                                th::bg_surface()
+                            }
+                            .into(),
+                        ),
+                        text_color: if reversed {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        },
+                        border: iced::Border {
+                            color: if reversed {
+                                th::accent()
+                            } else {
+                                th::divider()
+                            },
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                },
+            ]
+            .align_y(iced::Alignment::Center),
             range_row(
                 "IN",
                 AudioClipInspectorField::SourceStart,

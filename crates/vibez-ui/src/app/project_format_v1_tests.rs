@@ -4,7 +4,7 @@ use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
-use vibez_core::track::{InstrumentStateInfo, TrackInfo};
+use vibez_core::track::{ClipPlaybackDirection, InstrumentStateInfo, TrackInfo};
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 use vibez_engine::engine::AudioProcessBlock;
 
@@ -116,6 +116,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
                     loop_end: 0,
                     gain_db: Default::default(),
                     fades: Default::default(),
+                    playback_direction: ClipPlaybackDirection::Reverse,
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,
@@ -141,6 +142,11 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             reopened.project.arrange.clips[0].source,
             Some(MediaSourceRef::ProjectMedia { .. })
         ));
+        assert_eq!(
+            reopened.project.arrange.clips[0].playback_direction,
+            ClipPlaybackDirection::Reverse,
+            "{file_name}"
+        );
         assert_audible(reopened_audio, file_name);
     }
 }
@@ -207,6 +213,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
                 loop_end: 0,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: Some(120.0),
                 warped: true,
@@ -311,6 +318,7 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
                 loop_end: audio.num_frames() as u64,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -363,6 +371,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
         loop_end: audio.num_frames() as u64,
         gain_db: Default::default(),
         fades: Default::default(),
+        playback_direction: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -488,6 +497,7 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
                 loop_end: 128,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -685,6 +695,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
                 loop_end: 0,
                 gain_db: Default::default(),
                 fades: Default::default(),
+                playback_direction: Default::default(),
                 transpose: Default::default(),
                 original_bpm: Some(120.0),
                 warped: true,
