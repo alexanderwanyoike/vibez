@@ -815,8 +815,8 @@ impl App {
             grid = grid.push(pad_row);
         }
 
-        let bank_button = |label: &'static str, bank: Option<usize>| {
-            button(text(label).size(9).color(th::text_dim()))
+        let bank_button = |icon: char, bank: Option<usize>| {
+            button(icons::icon(icon).size(9).color(th::text_dim()))
                 .on_press_maybe(bank.map(|bank| {
                     Message::Devices(crate::domains::devices::DevicesMsg::SelectDrumRackBank(
                         track_id, bank,
@@ -846,9 +846,9 @@ impl App {
                 .size(9)
                 .color(th::text_muted()),
             horizontal_space(),
-            bank_button("‹", selected_bank.checked_sub(1)),
+            bank_button(icons::CHEVRON_LEFT, selected_bank.checked_sub(1)),
             bank_button(
-                "›",
+                icons::CHEVRON_RIGHT,
                 (selected_bank + 1 < bank_count).then_some(selected_bank + 1)
             ),
         ]

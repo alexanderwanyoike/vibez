@@ -130,9 +130,7 @@ impl App {
             )
         } else {
             let used_banks = selected_count.div_ceil(bank_size);
-            format!(
-                "{selected_count} slices will use {used_banks} of {bank_count} pad banks. Switch banks with [ and ]."
-            )
+            format!("{selected_count} slices will use {used_banks} of {bank_count} pad banks.")
         };
         let cancel = button(text("Cancel").size(12).color(th::text()))
             .on_press(Message::CancelDrumRackSlice)
