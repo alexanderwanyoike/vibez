@@ -4,6 +4,7 @@ use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
+use vibez_core::track::ClipInfo;
 use vibez_core::track::{
     ClipFades, ClipPlaybackDirection, FadeCurve, InstrumentStateInfo, TrackInfo,
 };
@@ -11,6 +12,7 @@ use vibez_core::transient::{TransientMarker, TransientMarkerKind, TransientMarke
 use vibez_core::warp_marker::{WarpMarker, WarpMarkers};
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 use vibez_engine::engine::AudioProcessBlock;
+use vibez_project::Project;
 
 fn one_second_audio() -> Arc<DecodedAudio> {
     Arc::new(DecodedAudio {

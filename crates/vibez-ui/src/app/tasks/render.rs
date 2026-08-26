@@ -1,6 +1,9 @@
 //! Offline export and bounce render tasks.
 
-use super::super::*;
+use std::path::PathBuf;
+use std::sync::Arc;
+use vibez_core::track::MediaSourceRef;
+
 pub(in crate::app) async fn export_async(
     request: vibez_engine::render::BounceRequest,
     mut plugins: vibez_engine::render::OfflinePlugins,

@@ -1,7 +1,9 @@
 //! Offline clip DSP tasks: quantize, BPM and transient detection, transpose, auto-warp.
 
-use super::super::*;
-use super::*;
+use super::super::audio_tasks::{compute_audio_quantize, AutoWarpInput, QuantizeInput};
+use super::run_off_ui_thread;
+use std::sync::Arc;
+
 pub(in crate::app) async fn quantize_audio_clip_async(
     input: QuantizeInput,
 ) -> Result<crate::message::AudioQuantizeSuccess, String> {

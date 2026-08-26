@@ -1,7 +1,12 @@
 //! Browser media decode, loop analysis, staging, audition, and library scanning tasks.
 
-use super::super::*;
-use super::*;
+use super::super::audio_tasks::scan_sample_root;
+use crate::message::SampleLibraryScanResult;
+use std::path::PathBuf;
+use std::sync::Arc;
+use vibez_audio_io::file_io;
+use vibez_core::track::MediaSourceRef;
+
 pub(in crate::app) async fn decode_local_for_preview_async(
     path: PathBuf,
 ) -> Result<crate::message::AnalysedBrowserAudio, String> {
