@@ -282,6 +282,12 @@ impl App {
         let target_overlay = self.state.perform.instrument_target_overlay;
         let range_or_bank = if target_overlay {
             format!("TARGET BANK {bank}")
+        } else if self.state.perform.instrument_target_is_drum_rack() {
+            format!(
+                "BANK {} / {}",
+                self.state.perform.drum_rack_bank() + 1,
+                vibez_core::track::DRUM_RACK_BANK_COUNT
+            )
         } else {
             format!("OCTAVE {:+}", self.state.perform.instrument_octave())
         };

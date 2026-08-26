@@ -339,4 +339,16 @@ mod tests {
 
         assert!(buffer.iter().all(|sample| sample.abs() < 1e-6));
     }
+
+    #[test]
+    fn rack_renders_a_pad_from_a_later_bank() {
+        let mut rack = DrumRack::new(44_100.0);
+        rack.load_drum_pad_sample(20, make_test_audio(64, 0.5), "bank-two.wav".into());
+        rack.note_on(56, 127);
+
+        let mut buffer = vec![0.0; 128];
+        rack.render(&mut buffer, 2);
+
+        assert!(buffer.iter().any(|sample| sample.abs() > 0.0));
+    }
 }

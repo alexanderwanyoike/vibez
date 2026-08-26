@@ -3,6 +3,7 @@
 use std::fmt;
 
 use vibez_core::id::TrackId;
+use vibez_core::midi::InstrumentKind;
 
 use crate::state::ProjectTrack;
 
@@ -166,6 +167,8 @@ impl SixteenLevelsAssignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) struct InstrumentPerformanceState {
     octave: i8,
+    drum_rack_bank: u8,
+    drum_rack_target: bool,
     computer_key_velocity: ComputerKeyVelocity,
     full_level: bool,
     sixteen_levels_enabled: bool,
@@ -186,19 +189,35 @@ impl PerformState {
         selected: Option<TrackId>,
         project_tracks: &[ProjectTrack],
     ) {
-        let playable_target = selected.filter(|track_id| {
+        let playable_target = selected.and_then(|track_id| {
             project_tracks
                 .iter()
-                .any(|track| track.id == *track_id && track.is_playable_midi_target())
+                .find(|track| track.id == track_id && track.is_playable_midi_target())
         });
-        if playable_target.is_some() {
-            self.sync_instrument_target(playable_target);
+        if let Some(track) = playable_target {
+            self.sync_instrument_target_kind(
+                track.id,
+                track.instrument_kind == Some(InstrumentKind::DrumRack),
+            );
         }
     }
 
     pub(crate) fn sync_instrument_target(&mut self, target: Option<TrackId>) {
         if self.instrument.target != target {
             self.instrument.target = target;
+            self.instrument.drum_rack_target = false;
+            self.instrument.drum_rack_bank = 0;
+            self.clear_instrument_source();
+        }
+    }
+
+    fn sync_instrument_target_kind(&mut self, target: TrackId, drum_rack: bool) {
+        let target_changed = self.instrument.target != Some(target);
+        let kind_changed = self.instrument.drum_rack_target != drum_rack;
+        if target_changed || kind_changed {
+            self.instrument.target = Some(target);
+            self.instrument.drum_rack_target = drum_rack;
+            self.instrument.drum_rack_bank = 0;
             self.clear_instrument_source();
         }
     }
@@ -215,6 +234,12 @@ impl PerformState {
             .octave
             .saturating_add(amount)
             .clamp(MIN_INSTRUMENT_OCTAVE, MAX_INSTRUMENT_OCTAVE);
+    }
+
+    pub(super) fn shift_drum_rack_bank(&mut self, amount: i8) {
+        let maximum = vibez_core::track::DRUM_RACK_BANK_COUNT.saturating_sub(1) as i16;
+        self.instrument.drum_rack_bank =
+            (i16::from(self.instrument.drum_rack_bank) + i16::from(amount)).clamp(0, maximum) as u8;
     }
 
     pub(super) fn toggle_full_level(&mut self) {
@@ -331,7 +356,22 @@ impl PerformState {
         self.instrument.octave
     }
 
+    pub const fn drum_rack_bank(&self) -> u8 {
+        self.instrument.drum_rack_bank
+    }
+
+    pub const fn instrument_target_is_drum_rack(&self) -> bool {
+        self.instrument.drum_rack_target
+    }
+
     pub fn instrument_pitch(&self, position: PadPosition) -> u8 {
+        if self.instrument.drum_rack_target {
+            let pad_index = usize::from(self.instrument.drum_rack_bank)
+                * vibez_core::track::DRUM_RACK_BANK_SIZE
+                + usize::from(position.ordinal(PerformMode::Instrument) - 1);
+            return vibez_core::track::drum_rack_pad_pitch(pad_index)
+                .expect("every configured Drum Rack bank is complete");
+        }
         let base = i16::from(INSTRUMENT_BASE_PITCH + position.ordinal(PerformMode::Instrument));
         (base + i16::from(self.instrument.octave) * 12).clamp(0, 127) as u8
     }

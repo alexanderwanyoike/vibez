@@ -603,6 +603,8 @@ impl PerformState {
                         PerformMode::Instrument => {
                             if self.instrument_target_overlay {
                                 self.banks.instrument = self.banks.instrument.saturating_sub(1);
+                            } else if self.instrument_target_is_drum_rack() {
+                                self.shift_drum_rack_bank(-1);
                             } else {
                                 self.shift_instrument_octave(-1);
                             }
@@ -646,6 +648,8 @@ impl PerformState {
                                 let last_bank = playable.saturating_sub(1) / 16;
                                 self.banks.instrument =
                                     self.banks.instrument.saturating_add(1).min(last_bank as u8);
+                            } else if self.instrument_target_is_drum_rack() {
+                                self.shift_drum_rack_bank(1);
                             } else {
                                 self.shift_instrument_octave(1);
                             }
@@ -680,9 +684,7 @@ impl PerformState {
                         .iter()
                         .any(|track| track.id == track_id && track.is_playable_midi_target())
                 {
-                    if ctx.selected_project_track != Some(track_id) {
-                        self.sync_instrument_target(Some(track_id));
-                    }
+                    self.sync_instrument_target_from_selection(Some(track_id), ctx.project_tracks);
                     return PerformAction {
                         select_project_track: Some(track_id),
                         ..PerformAction::default()
@@ -783,7 +785,7 @@ impl PerformState {
                     })
                     .flatten();
                 if let Some(track_id) = selected_instrument_target {
-                    self.sync_instrument_target(Some(track_id));
+                    self.sync_instrument_target_from_selection(Some(track_id), ctx.project_tracks);
                 }
                 let instrument_note =
                     if self.mode == PerformMode::Instrument && !self.instrument_target_overlay {

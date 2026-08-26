@@ -61,7 +61,7 @@ impl TimelineEditorState {
         let total_regions = boundaries.len() - 1;
         if total_regions > DRUM_RACK_PAD_COUNT {
             return failure(&format!(
-                "{total_regions} slices will not fit the {DRUM_RACK_PAD_COUNT}-pad Drum Rack; reduce the markers first"
+                "{total_regions} slices exceed the {DRUM_RACK_PAD_COUNT}-pad Drum Rack; reduce the markers first"
             ));
         }
         let source_frames = audio.num_frames() as f32;

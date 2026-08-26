@@ -41,6 +41,7 @@ pub enum DevicesMsg {
     RemoveTrackInstrument(TrackId),
     SetInstrumentParam(TrackId, usize, f32),
     SelectDrumRackPad(TrackId, usize),
+    SelectDrumRackBank(TrackId, usize),
     ClearDrumRackPad(TrackId, usize),
     SetDrumPadParam {
         track_id: TrackId,
@@ -81,6 +82,7 @@ impl DevicesMsg {
             self,
             DevicesMsg::AuditionNote { .. }
                 | DevicesMsg::SelectDrumRackPad(..)
+                | DevicesMsg::SelectDrumRackBank(..)
                 | DevicesMsg::ShowContextMenu { .. }
                 | DevicesMsg::DismissContextMenu
                 | DevicesMsg::SetMenuCategory(_)
@@ -373,6 +375,18 @@ impl DevicesState {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     let max_index = track.drum_rack_pads.len().saturating_sub(1);
                     track.selected_drum_pad = pad_index.min(max_index);
+                }
+                action.select_track = Some(track_id);
+            }
+            DevicesMsg::SelectDrumRackBank(track_id, bank_index) => {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    let bank_index =
+                        bank_index.min(vibez_core::track::DRUM_RACK_BANK_COUNT.saturating_sub(1));
+                    let slot = track.selected_drum_pad % vibez_core::track::DRUM_RACK_BANK_SIZE;
+                    track.selected_drum_pad = bank_index
+                        .saturating_mul(vibez_core::track::DRUM_RACK_BANK_SIZE)
+                        .saturating_add(slot)
+                        .min(track.drum_rack_pads.len().saturating_sub(1));
                 }
                 action.select_track = Some(track_id);
             }
@@ -677,6 +691,28 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn rack_bank_navigation_preserves_the_selected_slot_without_auditioning() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = crate::state::default_drum_rack_pads();
+        tracks[0].selected_drum_pad = 3;
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+
+        devices.update(
+            DevicesMsg::SelectDrumRackBank(track_id, 1),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+
+        assert_eq!(tracks[0].selected_drum_pad, 19);
+        assert!(engine.0.is_empty());
+        assert!(!DevicesMsg::SelectDrumRackBank(track_id, 2).marks_dirty());
     }
 
     #[test]
