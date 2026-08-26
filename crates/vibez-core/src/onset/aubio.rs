@@ -8,15 +8,15 @@
 //! aubio is licensed under GPL-3.0-or-later. Vibez carries the same compatible
 //! licence. Upstream source: <https://github.com/aubio/aubio/tree/0.4.9>.
 
-#[cfg(test)]
 use super::TransientSensitivity;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
 
 const DEFAULT_WINDOW_SIZE: usize = 1_024;
 const DEFAULT_HOP_SIZE: usize = 256;
-const DEFAULT_THRESHOLD: f32 = 0.058;
-const COMPLEX_CANDIDATE_THRESHOLD: f32 = 0.001;
+// aubio's documented complex-domain default. Sensitivity interpolates through
+// this value at 50%, from the documented 0.900..=0.001 useful range.
+const COMPLEX_DEFAULT_THRESHOLD: f32 = 0.15;
 const DEFAULT_MIN_IOI_MS: f32 = 50.0;
 const DEFAULT_SILENCE_DB: f32 = -70.0;
 const DEFAULT_DELAY_HOPS: f32 = 4.3;
@@ -33,19 +33,10 @@ pub(super) struct Config {
 }
 
 impl Config {
-    #[cfg(test)]
-    pub(super) fn for_sensitivity(sensitivity: TransientSensitivity) -> Self {
-        // aubio documents 0.001..=0.900 as the useful peak-threshold range.
-        // Interpolate logarithmically through its HFC default at 50%, giving
-        // useful travel at both ends instead of bunching every result near the
-        // middle of the knob.
-        Self {
-            threshold: sensitivity.threshold_through(DEFAULT_THRESHOLD),
-            ..Self::default()
-        }
-    }
-
-    pub(super) fn for_complex_candidates(sample_rate: u32) -> Self {
+    pub(super) fn for_complex_candidates(
+        sample_rate: u32,
+        sensitivity: TransientSensitivity,
+    ) -> Self {
         let window_size = match sample_rate {
             0..=33_074 => DEFAULT_WINDOW_SIZE / 2,
             33_075..=66_149 => DEFAULT_WINDOW_SIZE,
@@ -53,19 +44,12 @@ impl Config {
             _ => DEFAULT_WINDOW_SIZE * 4,
         };
         Self {
-            // Candidate generation is intentionally fixed and permissive.
-            // Producer sensitivity filters one stable set later in the
-            // pipeline, so retained markers never move between settings.
-            threshold: COMPLEX_CANDIDATE_THRESHOLD,
+            threshold: sensitivity.threshold_through(COMPLEX_DEFAULT_THRESHOLD),
             delay_hops: COMPLEX_DELAY_HOPS,
             window_size,
             hop_size: window_size / 4,
             ..Self::default()
         }
-    }
-
-    pub(super) fn analysis_delay_frames(self) -> u64 {
-        (self.delay_hops * self.hop_size as f32) as u64
     }
 
     pub(super) fn minimum_inter_onset_frames(self, sample_rate: u32) -> u64 {
@@ -94,7 +78,7 @@ impl Default for Config {
         Self {
             window_size: DEFAULT_WINDOW_SIZE,
             hop_size: DEFAULT_HOP_SIZE,
-            threshold: DEFAULT_THRESHOLD,
+            threshold: COMPLEX_DEFAULT_THRESHOLD,
             min_ioi_ms: DEFAULT_MIN_IOI_MS,
             silence_db: DEFAULT_SILENCE_DB,
             delay_hops: DEFAULT_DELAY_HOPS,
@@ -110,21 +94,21 @@ enum ConfigError {
     ZeroSampleRate,
 }
 
-#[cfg(test)]
-pub(super) fn detect_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, DescriptorKind::Hfc)
-}
-
-pub(super) fn detect_complex_onsets(mono: &[f32], sample_rate: u32, config: Config) -> Vec<u64> {
-    detect_onsets_with_descriptor(mono, sample_rate, config, DescriptorKind::Complex)
-}
-
-fn detect_onsets_with_descriptor(
+pub(super) fn detect_complex_onsets_where(
     mono: &[f32],
     sample_rate: u32,
     config: Config,
-    descriptor: DescriptorKind,
-) -> Vec<u64> {
+    accepts: impl FnMut(u64) -> bool,
+) -> Vec<(u64, u64)> {
+    detect_onsets_where(mono, sample_rate, config, accepts)
+}
+
+fn detect_onsets_where(
+    mono: &[f32],
+    sample_rate: u32,
+    config: Config,
+    accepts: impl FnMut(u64) -> bool,
+) -> Vec<(u64, u64)> {
     let Ok(config) = config.validate(sample_rate) else {
         return Vec::new();
     };
@@ -132,40 +116,7 @@ fn detect_onsets_with_descriptor(
         return Vec::new();
     }
 
-    Detector::new(sample_rate, config, descriptor).process(mono)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DescriptorKind {
-    #[cfg(test)]
-    Hfc,
-    Complex,
-}
-
-enum Descriptor {
-    #[cfg(test)]
-    Hfc,
-    Complex(ComplexDomain),
-}
-
-impl Descriptor {
-    fn new(kind: DescriptorKind, bins: usize, sample_rate: u32, hop_size: usize) -> Self {
-        match kind {
-            #[cfg(test)]
-            DescriptorKind::Hfc => Self::Hfc,
-            DescriptorKind::Complex => {
-                Self::Complex(ComplexDomain::new(bins, sample_rate, hop_size))
-            }
-        }
-    }
-
-    fn process(&mut self, spectrum: &Spectrum) -> f32 {
-        match self {
-            #[cfg(test)]
-            Self::Hfc => high_frequency_content(&spectrum.magnitudes),
-            Self::Complex(complex) => complex.process(spectrum),
-        }
-    }
+    Detector::new(sample_rate, config).process(mono, accepts)
 }
 
 struct Detector {
@@ -177,11 +128,11 @@ struct Detector {
     last_onset: usize,
     phase_vocoder: PhaseVocoder,
     peak_picker: PeakPicker,
-    descriptor: Descriptor,
+    descriptor: ComplexDomain,
 }
 
 impl Detector {
-    fn new(sample_rate: u32, config: Config, descriptor: DescriptorKind) -> Self {
+    fn new(sample_rate: u32, config: Config) -> Self {
         let bins = config.window_size / 2 + 1;
         Self {
             hop_size: config.hop_size,
@@ -192,49 +143,60 @@ impl Detector {
             last_onset: 0,
             phase_vocoder: PhaseVocoder::new(config.window_size, config.hop_size),
             peak_picker: PeakPicker::new(config.threshold),
-            descriptor: Descriptor::new(descriptor, bins, sample_rate, config.hop_size),
+            descriptor: ComplexDomain::new(bins, sample_rate, config.hop_size),
         }
     }
 
-    fn process(mut self, mono: &[f32]) -> Vec<u64> {
+    fn process(mut self, mono: &[f32], mut accepts: impl FnMut(u64) -> bool) -> Vec<(u64, u64)> {
         let mut onsets = Vec::new();
         let mut hop = vec![0.0; self.hop_size];
 
         for chunk in mono.chunks(self.hop_size) {
             hop.fill(0.0);
             hop[..chunk.len()].copy_from_slice(chunk);
-            if let Some(frame) = self.process_hop(&hop) {
-                onsets.push(frame as u64);
+            if let Some(event) = self.process_hop(&hop, &mut accepts) {
+                onsets.push(event);
             }
         }
         onsets
     }
 
-    fn process_hop(&mut self, input: &[f32]) -> Option<usize> {
+    fn process_hop(
+        &mut self,
+        input: &[f32],
+        accepts: &mut impl FnMut(u64) -> bool,
+    ) -> Option<(u64, u64)> {
         let spectrum = self.phase_vocoder.spectrum(input);
         let descriptor = self.descriptor.process(&spectrum);
         let peak = self.peak_picker.process(descriptor);
         let silent = db_spl(input) < self.silence_db;
-        let mut accepted = false;
+        let mut accepted = None;
 
         if peak > 0.0 && !silent {
             let new_onset = self.total_frames + (peak * self.hop_size as f32).round() as usize;
             if self.last_onset + self.min_ioi < new_onset
                 && !(self.last_onset > 0 && self.delay > new_onset)
             {
-                self.last_onset = self.delay.max(new_onset);
-                accepted = true;
+                let delayed_onset = self.delay.max(new_onset);
+                let estimated = delayed_onset.saturating_sub(self.delay) as u64;
+                if accepts(estimated) {
+                    self.last_onset = delayed_onset;
+                    accepted = Some((estimated, new_onset as u64));
+                }
             }
         } else if peak <= 0.0 && self.total_frames <= self.delay && !silent {
             let new_onset = self.total_frames;
             if self.total_frames == 0 || self.last_onset + self.min_ioi < new_onset {
-                self.last_onset = self.total_frames + self.delay;
-                accepted = true;
+                let estimated = new_onset as u64;
+                if accepts(estimated) {
+                    self.last_onset = self.total_frames + self.delay;
+                    accepted = Some((estimated, new_onset as u64));
+                }
             }
         }
 
         self.total_frames += self.hop_size;
-        accepted.then(|| self.last_onset.saturating_sub(self.delay))
+        accepted
     }
 }
 
@@ -371,15 +333,6 @@ impl ComplexDomain {
     }
 }
 
-#[cfg(test)]
-fn high_frequency_content(magnitudes: &[f32]) -> f32 {
-    magnitudes
-        .iter()
-        .enumerate()
-        .map(|(index, magnitude)| (index + 1) as f32 * magnitude.ln_1p())
-        .sum()
-}
-
 struct PeakPicker {
     threshold: f32,
     novelty: [f32; 7],
@@ -506,12 +459,6 @@ mod tests {
         }
     }
 
-    // Port of the zero-spectrum cases in tests/src/spectral/test-specdesc.c.
-    #[test]
-    fn ported_upstream_hfc_zero_spectrum_is_zero() {
-        assert_eq!(high_frequency_content(&vec![0.0; 513]), 0.0);
-    }
-
     // Port of the complex-domain zero-spectrum case in aubio 0.4.9's
     // tests/src/spectral/test-specdesc.c, strengthened to check repeated
     // frames because the descriptor retains two frames of phase history.
@@ -529,61 +476,35 @@ mod tests {
 
     #[test]
     fn sensitivity_never_changes_the_minimum_hit_spacing() {
-        let fewer = Config::for_sensitivity(TransientSensitivity::new(0));
-        let balanced = Config::for_sensitivity(TransientSensitivity::new(50));
-        let more = Config::for_sensitivity(TransientSensitivity::new(100));
+        let fewer = Config::for_complex_candidates(44_100, TransientSensitivity::new(0));
+        let balanced = Config::for_complex_candidates(44_100, TransientSensitivity::new(50));
+        let more = Config::for_complex_candidates(44_100, TransientSensitivity::new(100));
         assert_eq!(more.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert_eq!(balanced.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert_eq!(fewer.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert!(more.threshold < balanced.threshold);
         assert!(balanced.threshold < fewer.threshold);
 
-        let candidates = Config::for_complex_candidates(44_100);
-        assert_eq!(candidates.threshold, COMPLEX_CANDIDATE_THRESHOLD);
+        let candidates = Config::for_complex_candidates(44_100, TransientSensitivity::DEFAULT);
+        assert_eq!(candidates.threshold, COMPLEX_DEFAULT_THRESHOLD);
         assert_eq!(candidates.min_ioi_ms, DEFAULT_MIN_IOI_MS);
         assert_eq!(candidates.delay_hops, COMPLEX_DELAY_HOPS);
-        assert_eq!(Config::for_complex_candidates(48_000).window_size, 1_024);
-        assert_eq!(Config::for_complex_candidates(96_000).window_size, 2_048);
-    }
-
-    #[test]
-    fn silence_has_no_onsets() {
-        assert!(detect_onsets(&vec![0.0; 22_050], 44_100, Config::default()).is_empty());
-    }
-
-    #[test]
-    fn constant_signal_matches_aubio_start_marker() {
         assert_eq!(
-            detect_onsets(&vec![0.25; 44_100], 44_100, Config::default()),
-            vec![0]
+            Config::for_complex_candidates(48_000, TransientSensitivity::DEFAULT).window_size,
+            1_024
+        );
+        assert_eq!(
+            Config::for_complex_candidates(96_000, TransientSensitivity::DEFAULT).window_size,
+            2_048
         );
     }
 
     #[test]
-    fn decaying_bursts_match_aubio_0_4_9_golden_frames() {
-        let mut audio = vec![0.0f32; 44_100];
-        for start in [2_048usize, 8_192, 16_384, 28_672] {
-            for offset in 0..4_096 {
-                if start + offset >= audio.len() {
-                    break;
-                }
-                let phase = std::f32::consts::TAU * 120.0 * offset as f32 / 44_100.0;
-                audio[start + offset] += phase.sin() * (-(offset as f32) / 300.0).exp() * 0.8;
-            }
-        }
-
-        // Generated by aubio 0.4.9 with method=default, win=1024,
-        // hop=256, sample_rate=44100. A two-sample allowance covers the
-        // expected FFT/backend floating-point difference.
-        let upstream = [1_943i64, 8_087, 16_279, 28_567];
-        let actual = detect_onsets(&audio, 44_100, Config::default());
-        assert_eq!(actual.len(), upstream.len(), "actual={actual:?}");
-        for (actual, expected) in actual.iter().zip(upstream) {
-            assert!(
-                (*actual as i64 - expected).abs() <= 2,
-                "expected {expected}, got {actual}; all={actual:?}"
-            );
-        }
+    fn silence_has_no_onsets() {
+        assert!(
+            detect_complex_onsets_where(&vec![0.0; 22_050], 44_100, Config::default(), |_| true)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -609,7 +530,7 @@ mod tests {
         // a beating decay, which the producer-facing attack validator rejects,
         // but each upstream primary event must retain its timestamp.
         let upstream = [1_459i64, 12_710, 23_714, 34_717];
-        let actual = detect_complex_onsets(
+        let actual = detect_complex_onsets_where(
             &audio,
             sample_rate,
             Config {
@@ -617,12 +538,13 @@ mod tests {
                 delay_hops: COMPLEX_DELAY_HOPS,
                 ..Config::default()
             },
+            |_| true,
         );
         for expected in upstream {
             assert!(
                 actual
                     .iter()
-                    .any(|actual| (*actual as i64 - expected).abs() <= 3),
+                    .any(|(actual, _)| (*actual as i64 - expected).abs() <= 3),
                 "expected {expected}; all={actual:?}"
             );
         }

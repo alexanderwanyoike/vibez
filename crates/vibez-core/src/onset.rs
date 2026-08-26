@@ -18,8 +18,13 @@
 use crate::audio_buffer::DecodedAudio;
 
 mod aubio;
+mod localize;
+#[doc(hidden)]
+pub mod metrics;
 #[cfg(test)]
 mod transient_analysis_tests;
+
+use localize::{backtrack_to_energy_minima, canonicalize_onsets};
 
 /// Producer-facing transient sensitivity. Higher percentages retain quieter
 /// attacks; lower percentages keep only the most prominent attacks.
@@ -47,14 +52,8 @@ impl TransientSensitivity {
         self.0 as f32 / Self::MAX_PERCENT as f32
     }
 
-    #[cfg(test)]
     fn threshold_through(self, midpoint: f32) -> f32 {
-        let normalized = self.normalized();
-        if normalized <= 0.5 {
-            0.9 * (midpoint / 0.9).powf(normalized / 0.5)
-        } else {
-            midpoint * (0.001 / midpoint).powf((normalized - 0.5) / 0.5)
-        }
+        three_point_log_interpolation(self.normalized(), 0.9, midpoint, 0.001)
     }
 }
 
@@ -76,75 +75,40 @@ const PREEMPHASIS: f32 = 0.97;
 
 /// Detect onsets in `audio` and return sample indices.
 ///
-/// Candidate generation is fixed so sensitivity can only add or remove stable
-/// source-frame positions. Higher percentages retain quieter attacks.
+/// Higher sensitivity accepts quieter spectral and time-domain attacks.
 pub fn detect_onsets(audio: &DecodedAudio, sensitivity: TransientSensitivity) -> Vec<u64> {
     let frames = audio.num_frames();
     if frames < 1_024 || audio.sample_rate == 0 {
         return Vec::new();
     }
-    let config = aubio::Config::for_complex_candidates(audio.sample_rate);
-    // Analyse channels independently. Averaging stereo before analysis can
-    // erase an attack when channels carry opposite-polarity content.
-    let mut candidates = audio
-        .channels
-        .iter()
-        .flat_map(|channel| {
-            let analysis_delay = config.analysis_delay_frames();
-            aubio::detect_complex_onsets(channel, audio.sample_rate, config)
-                .into_iter()
-                .map(move |estimated_onset| {
-                    (
-                        estimated_onset,
-                        estimated_onset.saturating_add(analysis_delay),
-                    )
-                })
-        })
-        .collect::<Vec<_>>();
-
-    // Aubio's spectral descriptors can report a pitched decay cycle as a new
-    // onset. Transient markers are editing boundaries, so require each
-    // spectral candidate to coincide with a meaningful time-domain attack.
+    let config = aubio::Config::for_complex_candidates(audio.sample_rate, sensitivity);
     let global_peak = audio
         .channels
         .iter()
         .flat_map(|channel| channel.iter())
         .map(|sample| sample.abs())
         .fold(0.0f32, f32::max);
-    candidates.retain(|&(estimated_onset, _)| {
-        estimated_onset > 0 && genuine_attack(audio, estimated_onset, sensitivity, global_peak)
-    });
+    // Analyse channels independently. Averaging stereo before analysis can
+    // erase an attack when channels carry opposite-polarity content.
+    let candidates = audio
+        .channels
+        .iter()
+        .flat_map(|channel| {
+            aubio::detect_complex_onsets_where(channel, audio.sample_rate, config, |onset| {
+                onset > 0 && genuine_attack(audio, onset, sensitivity, global_peak)
+            })
+        })
+        .collect::<Vec<_>>();
     // Aubio subtracts its analysis delay to estimate the musical onset. For
     // slice localisation we instead begin at the later detected peak, then
     // backtrack through source energy to the actual boundary. Starting from
     // the compensated estimate can put an impulse before its own attack.
-    let peaks = candidates
-        .into_iter()
-        .map(|(_, detected_peak)| detected_peak)
-        .collect::<Vec<_>>();
-    let mut onsets = backtrack_to_energy_minima(audio, &peaks);
+    let mut onsets = backtrack_to_energy_minima(audio, &candidates);
     // Clip start is already an explicit boundary in Vibez. Aubio reports a
     // non-silent file start as an onset, but showing that as a suggested
     // transient marker adds no editable information.
     onsets.retain(|&frame| frame > 0 && frame < frames as u64);
-    canonicalize_onsets(
-        &mut onsets,
-        config.minimum_inter_onset_frames(audio.sample_rate),
-    )
-}
-
-fn canonicalize_onsets(onsets: &mut [u64], minimum_interval_frames: u64) -> Vec<u64> {
-    onsets.sort_unstable();
-    let mut canonical = Vec::with_capacity(onsets.len());
-    for &onset in onsets.iter() {
-        if canonical
-            .last()
-            .is_none_or(|previous: &u64| onset.abs_diff(*previous) > minimum_interval_frames)
-        {
-            canonical.push(onset);
-        }
-    }
-    canonical
+    canonicalize_onsets(onsets, config.minimum_inter_onset_frames(audio.sample_rate))
 }
 
 fn frames_for_ms(sample_rate: u32, milliseconds: f32) -> usize {
@@ -192,110 +156,15 @@ fn peak_and_rms(audio: &DecodedAudio, start: usize, end: usize) -> (f32, f32) {
     (peak, rms)
 }
 
-const BACKTRACK_WINDOW_MS: f32 = 23.22;
-const BACKTRACK_HOP_MS: f32 = 2.9;
-const BACKTRACK_MAX_MS: f32 = 50.0;
-
-fn backtrack_to_energy_minima(audio: &DecodedAudio, onsets: &[u64]) -> Vec<u64> {
-    if onsets.is_empty() || audio.num_frames() < 3 {
-        return onsets.to_vec();
-    }
-
-    let hop = frames_for_ms(audio.sample_rate, BACKTRACK_HOP_MS).max(1);
-    let window = frames_for_ms(audio.sample_rate, BACKTRACK_WINDOW_MS).max(1);
-    let energy = rms_energy_envelope(audio, window, hop);
-    backtrack_events_to_minima(
-        onsets,
-        &energy,
-        hop,
-        frames_for_ms(audio.sample_rate, BACKTRACK_MAX_MS),
-    )
-}
-
-fn rms_energy_envelope(audio: &DecodedAudio, window: usize, hop: usize) -> Vec<f32> {
-    let frames = audio.num_frames();
-    if frames == 0 || window == 0 || hop == 0 {
-        return Vec::new();
-    }
-
-    let channel_count = audio.channels.len().max(1) as f64;
-    let mut prefix_energy = vec![0.0f64; frames + 1];
-    for frame in 0..frames {
-        let square_sum = audio
-            .channels
-            .iter()
-            .map(|channel| f64::from(channel.get(frame).copied().unwrap_or(0.0)).powi(2))
-            .sum::<f64>();
-        prefix_energy[frame + 1] = prefix_energy[frame] + square_sum / channel_count;
-    }
-
-    (0..frames)
-        .step_by(hop)
-        .map(|end| {
-            // A trailing RMS window keeps the final silence minimum aligned
-            // with the source attack. A centred window would smear future
-            // attack energy earlier by half a window and make slices early.
-            let start = end.saturating_sub(window);
-            let frame_count = (end - start).max(1) as f64;
-            ((prefix_energy[end] - prefix_energy[start]) / frame_count).sqrt() as f32
-        })
-        .collect()
-}
-
-// The local-minimum matching rule is derived from librosa 0.11.0's
-// `onset_backtrack`, copyright (c) 2013-2023 the librosa development team,
-// distributed under the ISC licence:
-//
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
-//
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-//
-// Vibez adds a bounded look-back expressed in source frames because a DAW
-// marker must not jump into an earlier event.
-fn backtrack_events_to_minima(
-    events: &[u64],
-    energy: &[f32],
-    hop: usize,
-    max_lookback: usize,
-) -> Vec<u64> {
-    if energy.len() < 3 || hop == 0 {
-        return events.to_vec();
-    }
-
-    let mut minima = vec![0usize];
-    minima.extend(energy.windows(3).enumerate().filter_map(|(index, values)| {
-        (values[1] <= values[0] && values[1] < values[2]).then_some(index + 1)
-    }));
-
-    events
-        .iter()
-        .map(|&event| {
-            let event = usize::try_from(event).unwrap_or(usize::MAX);
-            let first_allowed = event.saturating_sub(max_lookback);
-            minima
-                .iter()
-                .rev()
-                .map(|minimum| minimum.saturating_mul(hop))
-                .find(|minimum| *minimum <= event && *minimum >= first_allowed)
-                .map_or(event as u64, |minimum| minimum as u64)
-        })
-        .collect()
-}
-
 fn attack_prominence_floor(sensitivity: TransientSensitivity) -> f32 {
-    let normalized = sensitivity.normalized();
+    three_point_log_interpolation(sensitivity.normalized(), 0.6, 0.1, 0.005)
+}
+
+fn three_point_log_interpolation(normalized: f32, low: f32, midpoint: f32, high: f32) -> f32 {
     if normalized <= 0.5 {
-        0.6 * (0.1f32 / 0.6).powf(normalized / 0.5)
+        low * (midpoint / low).powf(normalized / 0.5)
     } else {
-        0.1 * (0.005f32 / 0.1).powf((normalized - 0.5) / 0.5)
+        midpoint * (high / midpoint).powf((normalized - 0.5) / 0.5)
     }
 }
 
@@ -464,8 +333,10 @@ pub fn detect_bpm(audio: &DecodedAudio, sample_rate: u32) -> Option<BpmEstimate>
     // Gate: sparse clips with weak ACF are rejected rather than
     // guessed. This is the difference between "we detected nothing"
     // and "we detected garbage".
-    let onsets_count = detect_onsets(audio, TransientSensitivity::DEFAULT).len();
-    if onsets_count < 8 && confidence_ratio < 1.5 {
+    // The ODF has already been computed for tempo analysis. Count its strong
+    // local peaks here instead of running the FFT transient detector again.
+    // The old gate doubled transient-analysis work during sample import.
+    if strong_flux_peak_count(&ds) < 8 && confidence_ratio < 1.5 {
         return None;
     }
 
@@ -494,6 +365,22 @@ pub fn detect_bpm(audio: &DecodedAudio, sample_rate: u32) -> Option<BpmEstimate>
         bpm: best_bpm,
         confidence,
     })
+}
+
+fn strong_flux_peak_count(flux: &[f32]) -> usize {
+    if flux.len() < 3 {
+        return 0;
+    }
+    let mean = flux.iter().copied().sum::<f32>() / flux.len() as f32;
+    let variance = flux
+        .iter()
+        .map(|value| (*value - mean).powi(2))
+        .sum::<f32>()
+        / flux.len() as f32;
+    let threshold = mean + variance.sqrt() * 0.5;
+    flux.windows(3)
+        .filter(|values| values[1] > threshold && values[1] >= values[0] && values[1] > values[2])
+        .count()
 }
 
 fn parncutt_weight(bpm: f64) -> f64 {
@@ -743,14 +630,12 @@ mod tests {
     fn canonical_onsets_merge_cross_channel_candidates_within_aubio_minimum_interval() {
         let sample_rate = 44_100u32;
         let first = 10_000u64;
-        let mut onsets = vec![first, first + frames_for_ms(sample_rate, 7.0) as u64];
-        let minimum_interval = aubio::Config::for_complex_candidates(sample_rate)
-            .minimum_inter_onset_frames(sample_rate);
+        let onsets = vec![first, first + frames_for_ms(sample_rate, 7.0) as u64];
+        let minimum_interval =
+            aubio::Config::for_complex_candidates(sample_rate, TransientSensitivity::DEFAULT)
+                .minimum_inter_onset_frames(sample_rate);
 
-        assert_eq!(
-            canonicalize_onsets(&mut onsets, minimum_interval),
-            vec![first]
-        );
+        assert_eq!(canonicalize_onsets(onsets, minimum_interval), vec![first]);
     }
 
     #[test]

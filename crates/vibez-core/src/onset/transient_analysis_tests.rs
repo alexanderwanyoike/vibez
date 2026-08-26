@@ -1,3 +1,4 @@
+use super::metrics::evaluate;
 use super::*;
 
 fn make_audio(channels: Vec<Vec<f32>>, sample_rate: u32) -> DecodedAudio {
@@ -33,80 +34,16 @@ fn ringing_attack_train(sample_rate: u32) -> (DecodedAudio, Vec<u64>) {
     )
 }
 
-#[derive(Debug)]
-struct OnsetScore {
-    correct: usize,
-    false_positives: usize,
-    false_negatives: usize,
-    doubled: usize,
-    signed_errors: Vec<i64>,
-}
-
-impl OnsetScore {
-    fn precision(&self) -> f32 {
-        self.correct as f32 / (self.correct + self.false_positives).max(1) as f32
-    }
-
-    fn recall(&self) -> f32 {
-        self.correct as f32 / (self.correct + self.false_negatives).max(1) as f32
-    }
-
-    fn f1(&self) -> f32 {
-        let precision = self.precision();
-        let recall = self.recall();
-        if precision + recall == 0.0 {
-            0.0
-        } else {
-            2.0 * precision * recall / (precision + recall)
-        }
-    }
-}
-
-fn score_onsets(detected: &[u64], expected: &[u64], tolerance: u64) -> OnsetScore {
-    let mut matched = vec![false; expected.len()];
-    let mut signed_errors = Vec::new();
-    let mut false_positives = 0;
-    let mut doubled = 0;
-
-    for &candidate in detected {
-        let best = expected
-            .iter()
-            .enumerate()
-            .filter(|(index, onset)| !matched[*index] && candidate.abs_diff(**onset) <= tolerance)
-            .min_by_key(|(_, onset)| candidate.abs_diff(**onset));
-        if let Some((index, onset)) = best {
-            matched[index] = true;
-            signed_errors.push(candidate as i64 - *onset as i64);
-        } else {
-            false_positives += 1;
-            if expected
-                .iter()
-                .any(|onset| candidate.abs_diff(*onset) <= tolerance)
-            {
-                doubled += 1;
-            }
-        }
-    }
-
-    let correct = matched.iter().filter(|matched| **matched).count();
-    OnsetScore {
-        correct,
-        false_positives,
-        false_negatives: expected.len() - correct,
-        doubled,
-        signed_errors,
-    }
-}
-
 #[test]
 fn beating_decay_tails_are_not_detected_as_new_attacks() {
     let sample_rate = 44_100u32;
     let (audio, expected) = ringing_attack_train(sample_rate);
     let detected = detect_onsets(&audio, TransientSensitivity::DEFAULT);
-    let score = score_onsets(
+    let score = evaluate(
         &detected,
         &expected,
         frames_for_ms(sample_rate, 25.0) as u64,
+        sample_rate,
     );
 
     assert_eq!(
@@ -119,14 +56,44 @@ fn beating_decay_tails_are_not_detected_as_new_attacks() {
     );
     assert_eq!(score.doubled, 0, "score={score:?}, onsets={detected:?}");
     assert_eq!(score.f1(), 1.0, "score={score:?}, onsets={detected:?}");
-    assert_eq!(score.signed_errors.len(), expected.len());
-    let five_ms = frames_for_ms(sample_rate, 5.0) as i64;
+    assert_eq!(score.signed_errors_ms.len(), expected.len());
     assert!(
         score
-            .signed_errors
+            .signed_errors_ms
             .iter()
-            .all(|error| error.abs() <= five_ms),
-        "slice boundaries exceed 5 ms: {score:?}"
+            .all(|error| error.abs() <= 7.0),
+        "ringing-tail boundaries exceed aubio's 7 ms tolerance: {score:?}"
+    );
+}
+
+#[test]
+fn sharp_click_boundaries_land_within_one_localisation_hop() {
+    let sample_rate = 44_100u32;
+    let expected = [4_000u64, 14_000, 24_000, 34_000];
+    let mut channel = vec![0.0f32; sample_rate as usize];
+    for start in expected {
+        let start = start as usize;
+        for offset in 0..1_024 {
+            let phase = std::f32::consts::TAU * 1_800.0 * offset as f32 / sample_rate as f32;
+            channel[start + offset] = phase.cos() * (-(offset as f32) / 100.0).exp();
+        }
+    }
+    let audio = make_audio(vec![channel.clone(), channel], sample_rate);
+    let detected = detect_onsets(&audio, TransientSensitivity::DEFAULT);
+    let score = evaluate(
+        &detected,
+        &expected,
+        frames_for_ms(sample_rate, 10.0) as u64,
+        sample_rate,
+    );
+
+    assert_eq!(score.f1(), 1.0, "score={score:?}, onsets={detected:?}");
+    assert!(
+        score
+            .signed_errors_ms
+            .iter()
+            .all(|error| error.abs() <= 2.90),
+        "sharp-click boundary exceeds one localisation hop: {score:?}"
     );
 }
 
@@ -141,10 +108,11 @@ fn transient_detection_is_sample_rate_and_gain_robust() {
                 }
             }
             let detected = detect_onsets(&audio, TransientSensitivity::DEFAULT);
-            let score = score_onsets(
+            let score = evaluate(
                 &detected,
                 &expected,
                 frames_for_ms(sample_rate, 25.0) as u64,
+                sample_rate,
             );
             assert_eq!(
                 score.f1(),
@@ -170,10 +138,11 @@ fn opposite_polarity_stereo_does_not_cancel_transient_analysis() {
         .for_each(|sample| *sample = -*sample);
 
     let detected = detect_onsets(&audio, TransientSensitivity::DEFAULT);
-    let score = score_onsets(
+    let score = evaluate(
         &detected,
         &expected,
         frames_for_ms(sample_rate, 25.0) as u64,
+        sample_rate,
     );
     assert_eq!(score.f1(), 1.0, "score={score:?}, onsets={detected:?}");
 }
@@ -185,10 +154,11 @@ fn ported_librosa_backtracking_lands_on_a_preceding_energy_minimum() {
     let energy = [3.0, 2.0, 2.0, 4.0, 3.0, 1.0, 2.0];
     let hop = 128usize;
     let events = [hop as u64, (3 * hop) as u64, (6 * hop) as u64];
-    let backtracked = backtrack_events_to_minima(&events, &energy, hop, usize::MAX);
+    let events = events.map(|event| (event, event));
+    let backtracked = localize::backtrack_events_to_minima(&events, &energy, hop, usize::MAX);
 
     assert_eq!(backtracked, [0, (2 * hop) as u64, (5 * hop) as u64]);
-    for (event, boundary) in events.iter().zip(&backtracked) {
+    for ((event, _), boundary) in events.iter().zip(&backtracked) {
         assert!(*boundary <= *event, "backtracking moved an event later");
         let frame = *boundary as usize / hop;
         assert!(
@@ -204,7 +174,7 @@ fn backtracking_respects_the_daw_lookback_bound() {
     let hop = 128usize;
     let event = (6 * hop) as u64;
     assert_eq!(
-        backtrack_events_to_minima(&[event], &energy, hop, hop),
+        localize::backtrack_events_to_minima(&[(event, event)], &energy, hop, hop),
         [event]
     );
 }
