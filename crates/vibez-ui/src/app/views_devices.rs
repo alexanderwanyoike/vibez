@@ -18,6 +18,23 @@ use crate::widgets::effect_slot::view_effect_slot;
 
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrumPadVisualState {
+    Idle,
+    Selected,
+    Firing,
+}
+
+fn drum_pad_visual_state(selected: bool, firing: bool) -> DrumPadVisualState {
+    if firing {
+        DrumPadVisualState::Firing
+    } else if selected {
+        DrumPadVisualState::Selected
+    } else {
+        DrumPadVisualState::Idle
+    }
+}
+
 impl App {
     /// Build the device chain for the detail panel.
     pub(super) fn view_device_chain<'a>(
@@ -723,13 +740,33 @@ impl App {
             Some(Message::remove_track_instrument(track_id)),
         ));
 
+        let activity_now = std::time::Instant::now();
+        let earlier_bank_firing = (0..selected_bank).any(|bank| {
+            self.state
+                .view
+                .drum_pad_bank_is_flashing(track_id, bank, activity_now)
+        });
+        let later_bank_firing = ((selected_bank + 1)..bank_count).any(|bank| {
+            self.state
+                .view
+                .drum_pad_bank_is_flashing(track_id, bank, activity_now)
+        });
         let mut grid = column![].spacing(4);
         for row_index in 0..4 {
             let mut pad_row = row![].spacing(4);
             for col_index in 0..4 {
                 let pad_index = bank_start + row_index * 4 + col_index;
                 let pad = &track.drum_rack_pads[pad_index];
-                let active = selected_pad == pad_index;
+                let pad_pitch = vibez_core::track::drum_rack_pad_pitch(pad_index)
+                    .expect("Drum Rack UI renders only valid pad slots");
+                let visual_state = drum_pad_visual_state(
+                    selected_pad == pad_index,
+                    self.state
+                        .view
+                        .drum_pad_is_flashing(track_id, pad_pitch, activity_now),
+                );
+                let firing = visual_state == DrumPadVisualState::Firing;
+                let selected = visual_state == DrumPadVisualState::Selected;
                 let drop_target = matches!(
                     self.state.browser.drag_target,
                     Some(crate::state::BrowserDropTarget::DrumRackPad {
@@ -755,18 +792,25 @@ impl App {
                 // Use container + mouse_area so press events reach us and
                 // drag-drop works. iced Button would capture ButtonPressed
                 // and hide it from mouse_area.
-                let pad_note = crate::widgets::piano_roll::pitch_name(
-                    vibez_core::track::drum_rack_pad_pitch(pad_index)
-                        .expect("Drum Rack UI renders only valid pad slots"),
-                );
+                let pad_note = crate::widgets::piano_roll::pitch_name(pad_pitch);
                 let pad_body = container(
                     column![
                         text(format!("{:02}  {pad_note}", pad_index + 1))
                             .size(9)
-                            .color(if active { th::accent() } else { th::text_dim() }),
-                        text(label)
-                            .size(8)
-                            .color(if active { th::accent() } else { th::text() })
+                            .color(if firing {
+                                th::bg_dark()
+                            } else if selected {
+                                th::accent()
+                            } else {
+                                th::text_dim()
+                            }),
+                        text(label).size(8).color(if firing {
+                            th::bg_dark()
+                        } else if selected {
+                            th::accent()
+                        } else {
+                            th::text()
+                        })
                     ]
                     .spacing(2)
                     .align_x(iced::Alignment::Center),
@@ -776,23 +820,25 @@ impl App {
                 .height(Length::Fixed(30.0))
                 .style(move |_theme: &Theme| container::Style {
                     background: Some(
-                        if drop_target || active {
+                        if firing {
+                            th::accent()
+                        } else if drop_target || selected {
                             th::accent_dim()
                         } else {
                             th::bg_dark()
                         }
                         .into(),
                     ),
-                    text_color: Some(if active { th::accent() } else { th::text() }),
+                    text_color: Some(if firing { th::bg_dark() } else { th::text() }),
                     border: iced::Border {
-                        color: if drop_target {
+                        color: if firing || drop_target {
                             th::accent()
-                        } else if active {
+                        } else if selected {
                             th::accent_dim()
                         } else {
                             th::border()
                         },
-                        width: if drop_target { 2.0 } else { 1.0 },
+                        width: if firing || drop_target { 2.0 } else { 1.0 },
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -815,41 +861,52 @@ impl App {
             grid = grid.push(pad_row);
         }
 
-        let bank_button = |icon: char, bank: Option<usize>| {
-            button(icons::icon(icon).size(9).color(th::text_dim()))
-                .on_press_maybe(bank.map(|bank| {
-                    Message::Devices(crate::domains::devices::DevicesMsg::SelectDrumRackBank(
-                        track_id, bank,
-                    ))
-                }))
-                .padding([1, 7])
-                .style(move |_theme: &Theme, status| button::Style {
-                    background: Some(
-                        if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                            th::bg_hover()
-                        } else {
-                            th::bg_dark()
-                        }
-                        .into(),
-                    ),
-                    text_color: th::text_dim(),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                })
+        let bank_button = |icon: char, bank: Option<usize>, firing: bool| {
+            button(icons::icon(icon).size(9).color(if firing {
+                th::accent()
+            } else {
+                th::text_dim()
+            }))
+            .on_press_maybe(bank.map(|bank| {
+                Message::Devices(crate::domains::devices::DevicesMsg::SelectDrumRackBank(
+                    track_id, bank,
+                ))
+            }))
+            .padding([1, 7])
+            .style(move |_theme: &Theme, status| button::Style {
+                background: Some(
+                    if firing {
+                        th::accent_dim()
+                    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                        th::bg_hover()
+                    } else {
+                        th::bg_dark()
+                    }
+                    .into(),
+                ),
+                text_color: if firing { th::accent() } else { th::text_dim() },
+                border: iced::Border {
+                    color: if firing { th::accent() } else { th::border() },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            })
         };
         let bank_navigation = row![
             text(format!("BANK {} / {bank_count}", selected_bank + 1))
                 .size(9)
                 .color(th::text_muted()),
             horizontal_space(),
-            bank_button(icons::CHEVRON_LEFT, selected_bank.checked_sub(1)),
+            bank_button(
+                icons::CHEVRON_LEFT,
+                selected_bank.checked_sub(1),
+                earlier_bank_firing
+            ),
             bank_button(
                 icons::CHEVRON_RIGHT,
-                (selected_bank + 1 < bank_count).then_some(selected_bank + 1)
+                (selected_bank + 1 < bank_count).then_some(selected_bank + 1),
+                later_bank_firing
             ),
         ]
         .spacing(4)
@@ -1157,5 +1214,26 @@ impl App {
                 .width(Length::Fixed(120.0))
                 .align_x(iced::Alignment::Center),
         )
+    }
+}
+
+#[cfg(test)]
+mod drum_pad_visual_tests {
+    use super::*;
+
+    #[test]
+    fn firing_has_precedence_over_selection() {
+        assert_eq!(
+            drum_pad_visual_state(true, true),
+            DrumPadVisualState::Firing
+        );
+        assert_eq!(
+            drum_pad_visual_state(true, false),
+            DrumPadVisualState::Selected
+        );
+        assert_eq!(
+            drum_pad_visual_state(false, false),
+            DrumPadVisualState::Idle
+        );
     }
 }

@@ -307,6 +307,17 @@ impl AudioEngine {
                 track.render(pos, frames, channels, loop_region)
             };
 
+            let triggered_notes = track.take_note_activity();
+            if triggered_notes != 0 {
+                // Pad flashes are cosmetic. Never retain them or let them
+                // compete with authoritative input and Capture events after a
+                // UI stall fills the shared ring.
+                let _ = self.event_tx.push(EngineEvent::TrackNoteActivity {
+                    track_id: track.id,
+                    triggered_notes,
+                });
+            }
+
             if live_input.is_some_and(|input| input.target_track_raw == track.id.raw()) {
                 let input = live_input.expect("checked live input");
                 if !rendered && track.instrument.is_none() {
