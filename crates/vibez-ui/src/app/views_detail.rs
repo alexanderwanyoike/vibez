@@ -24,7 +24,10 @@ const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
 // the default density. Reserve another 440 px for the actual workspace so a
 // dragged detail panel can never crush Perform or Arrange into a letterbox.
 const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = 580.0;
-const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.44;
+// The dogfood reference at a 1,920 x 1,040 work area leaves about 364 px for
+// the detail panel. Preserve that 35% composition when a saved drag height is
+// larger than the current window can comfortably show.
+const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.35;
 const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 pub(super) fn resolved_detail_playhead_samples(
@@ -601,27 +604,28 @@ mod tests {
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
         assert_eq!(effective_detail_panel_height(80.0, 900.0, 180.0), 180.0);
         assert_eq!(effective_detail_panel_height(280.0, 900.0, 180.0), 280.0);
-        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 320.0);
-        assert_eq!(effective_detail_panel_height(800.0, 1_000.0, 180.0), 420.0);
+        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 315.0);
+        assert_eq!(effective_detail_panel_height(800.0, 1_000.0, 180.0), 350.0);
         assert_eq!(effective_detail_panel_height(320.0, 520.0, 180.0), 180.0);
     }
 
     #[test]
     fn detail_panel_cannot_recreate_the_crushed_perform_layout() {
-        assert_eq!(effective_detail_panel_height(900.0, 1_032.0, 180.0), 452.0);
+        let height = effective_detail_panel_height(900.0, 1_032.0, 180.0);
+        assert!((height - 361.2).abs() < 0.001);
     }
 
     #[test]
     fn midi_editor_preference_yields_to_the_workspace_safety_bound() {
-        assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 320.0);
-        assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 320.0);
+        assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 315.0);
+        assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 315.0);
         assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
     }
 
     #[test]
     fn audio_inspector_gets_enough_height_for_its_compact_controls() {
         assert_eq!(effective_detail_panel_height(180.0, 900.0, 260.0), 260.0);
-        assert_eq!(effective_detail_panel_height(320.0, 900.0, 260.0), 320.0);
+        assert_eq!(effective_detail_panel_height(320.0, 900.0, 260.0), 315.0);
     }
 
     #[test]
