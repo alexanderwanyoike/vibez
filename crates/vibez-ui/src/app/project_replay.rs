@@ -328,6 +328,9 @@ impl App {
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
                 linear_gain: clip.gain_db.linear(),
+                fades: clip.fades,
+                playback_direction: clip.playback_direction,
+                warp_markers: clip.warp_markers.clone(),
             });
         }
 

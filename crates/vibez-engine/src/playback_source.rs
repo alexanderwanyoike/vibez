@@ -13,6 +13,8 @@ use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
+use vibez_core::track::{ClipFades, ClipPlaybackDirection};
+use vibez_core::warp_marker::WarpMarkers;
 
 #[cfg(test)]
 thread_local! {
@@ -42,6 +44,9 @@ pub struct EngineClip {
     pub loop_end: u64,
     /// Pre-channel scalar resolved on the UI thread from the persisted dB value.
     pub linear_gain: f32,
+    pub fades: ClipFades,
+    pub playback_direction: ClipPlaybackDirection,
+    pub warp_markers: WarpMarkers,
 }
 
 impl EngineClip {
@@ -62,6 +67,26 @@ impl EngineClip {
     pub fn is_active(&self, pos: u64, frames: u64) -> bool {
         let end = pos.saturating_add(frames);
         self.position < end && self.end_position() > pos
+    }
+
+    fn source_frame_at(
+        &self,
+        clip_frame: u64,
+        timeline: FrameClipTimeline,
+        warp_timeline_end: u64,
+    ) -> f64 {
+        let timeline_frame = timeline.source_at(
+            self.playback_direction
+                .map_clip_frame(clip_frame, self.duration),
+        );
+        if self.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        self.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(self.source_offset) as f64,
+            self.source_offset,
+            warp_timeline_end,
+        )
     }
 }
 
@@ -327,6 +352,22 @@ impl PreparedPlaybackSource {
         }
     }
 
+    pub fn set_clip_playback_direction(
+        &mut self,
+        clip_id: ClipId,
+        direction: ClipPlaybackDirection,
+    ) {
+        if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
+            clip.playback_direction = direction;
+        }
+    }
+
+    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, warp_markers: WarpMarkers) {
+        if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
+            clip.warp_markers = warp_markers;
+        }
+    }
+
     /// Render this resident source into a caller-owned channel buffer.
     /// Channel processing remains outside this type.
     pub fn render_audio(
@@ -351,29 +392,36 @@ impl PreparedPlaybackSource {
                 continue;
             }
             let audio_channels = clip.audio.num_channels();
-            let source_end = clip
+            let identity_source_end = clip
                 .source_offset
                 .saturating_add(clip.duration)
-                .min(clip.audio.num_frames() as u64) as usize;
+                .min(clip.audio.num_frames() as u64);
+            let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
+            let timeline = clip.timeline();
+            let identity_timeline_end = clip
+                .duration
+                .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
+            let warp_timeline_end = clip.warp_markers.timeline_end(identity_timeline_end);
             let mut clip_rendered = false;
             for frame in 0..frames {
                 let global_frame = apply_loop_wrap(pos + frame as u64, loop_region);
                 if global_frame < clip.position || global_frame >= clip.end_position() {
                     continue;
                 }
-                let clip_frame = (global_frame - clip.position) as usize;
-                let source_frame = clip.timeline().source_at(clip_frame as u64) as usize;
+                let clip_frame = global_frame - clip.position;
+                let source_frame = clip.source_frame_at(clip_frame, timeline, warp_timeline_end);
+                let fade_gain = clip.fades.gain_at(clip_frame, clip.duration);
                 for ch in 0..channels {
-                    let sample = if source_frame >= source_end {
+                    let sample = if source_frame >= source_end as f64 {
                         0.0
                     } else if ch < audio_channels {
-                        clip.audio.sample(ch, source_frame)
+                        clip.audio.sample_linear(ch, source_frame)
                     } else if audio_channels > 0 {
-                        clip.audio.sample(audio_channels - 1, source_frame)
+                        clip.audio.sample_linear(audio_channels - 1, source_frame)
                     } else {
                         0.0
                     };
-                    output[frame * channels + ch] += sample * clip.linear_gain;
+                    output[frame * channels + ch] += sample * clip.linear_gain * fade_gain;
                 }
                 clip_rendered = true;
             }
@@ -427,6 +475,7 @@ mod tests {
 
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::track::ClipFades;
 
     use super::*;
     use crate::mixer::EngineTrack;
@@ -501,6 +550,9 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
@@ -513,6 +565,226 @@ mod tests {
         assert!(existing_path.render(0, 4, 1, None));
         assert!(prepared_path.render(0, 4, 1, None));
         assert_eq!(existing_path.mix_buffer, prepared_path.mix_buffer);
+    }
+
+    #[test]
+    fn audio_clip_fades_are_applied_at_timeline_edges() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![1.0; 8]],
+            sample_rate: 48_000,
+        });
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 8,
+                linear_gain: 1.0,
+                fades: ClipFades::new(4, 4, 8),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.25, 0.5, 0.75, 0.75, 0.5, 0.25, 0.0]);
+    }
+
+    #[test]
+    fn piecewise_warp_composes_with_reverse_loops_gain_and_edge_fades() {
+        let mut warp_markers = WarpMarkers::default();
+        assert!(warp_markers.add(1, 2, 0, 4, 4));
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio: Arc::new(DecodedAudio {
+                    channels: vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 48_000,
+                }),
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 0.5,
+                fades: ClipFades::new(2, 2, 8),
+                playback_direction: ClipPlaybackDirection::Reverse,
+                warp_markers,
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.25, 0.25, 0.0, 1.25, 0.5, 0.125, 0.0]);
+    }
+
+    #[test]
+    fn loop_wraps_do_not_restart_the_clip_fade() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![1.0; 4]],
+            sample_rate: 48_000,
+        });
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 1.0,
+                fades: ClipFades::new(2, 0, 8),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn reverse_traverses_the_resolved_clip_without_mutating_its_audio() {
+        let clip_id = ClipId::new();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![(0..8).map(|frame| frame as f32).collect()],
+            sample_rate: 48_000,
+        });
+        let original = Arc::clone(&audio);
+        let mut source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 8,
+                linear_gain: 1.0,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        source.set_clip_playback_direction(clip_id, ClipPlaybackDirection::Reverse);
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0]);
+        assert_eq!(
+            original.channels[0],
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        );
+    }
+
+    #[test]
+    fn reverse_traverses_the_complete_visible_loop_and_keeps_fades_on_timeline_edges() {
+        let clip_id = ClipId::new();
+        let mut source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio: Arc::new(DecodedAudio {
+                    channels: vec![vec![1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 48_000,
+                }),
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 1.0,
+                fades: ClipFades::new(2, 2, 8),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        source.set_clip_playback_direction(clip_id, ClipPlaybackDirection::Reverse);
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 1.5, 2.0, 1.0, 4.0, 3.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn linked_overlap_renders_as_a_complementary_equal_power_pair() {
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let source = PreparedPlaybackSource::new(
+            vec![
+                EngineClip {
+                    id: outgoing_id,
+                    audio: Arc::new(DecodedAudio {
+                        channels: vec![vec![1.0; 8], vec![0.0; 8]],
+                        sample_rate: 48_000,
+                    }),
+                    position: 0,
+                    source_offset: 0,
+                    start_marker: 0,
+                    duration: 8,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 8,
+                    linear_gain: 1.0,
+                    fades: ClipFades::default().linked_fade_out(4, incoming_id, 8),
+                    playback_direction: Default::default(),
+                    warp_markers: Default::default(),
+                },
+                EngineClip {
+                    id: incoming_id,
+                    audio: Arc::new(DecodedAudio {
+                        channels: vec![vec![0.0; 8], vec![1.0; 8]],
+                        sample_rate: 48_000,
+                    }),
+                    position: 4,
+                    source_offset: 0,
+                    start_marker: 0,
+                    duration: 8,
+                    loop_enabled: false,
+                    loop_start: 0,
+                    loop_end: 8,
+                    linear_gain: 1.0,
+                    fades: ClipFades::default().linked_fade_in(4, outgoing_id, 8),
+                    playback_direction: Default::default(),
+                    warp_markers: Default::default(),
+                },
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 4, 4, 2, None));
+        let (frames, _) = output.as_chunks::<2>();
+        for frame in frames {
+            let power = frame[0].powi(2) + frame[1].powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "{frame:?}: {power}");
+        }
     }
 
     #[test]
@@ -533,6 +805,9 @@ mod tests {
                 loop_start: 0,
                 loop_end: 0,
                 linear_gain: 1.0,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),

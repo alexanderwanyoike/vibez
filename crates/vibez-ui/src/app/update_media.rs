@@ -46,7 +46,30 @@ impl App {
                 crate::domains::automation::AutomationMsg::DeleteSelectedPoint,
             ));
         }
-        // Priority 2: selected notes in the open piano roll.
+        // Priority 2: the selected Audio Clip marker.
+        if let Some((track_id, clip_id, source_frame)) =
+            self.state.active_timeline_editor().selected_warp_marker
+        {
+            return self.update(Message::Arrangement(ArrangementMsg::RemoveWarpMarker {
+                track_id,
+                clip_id,
+                source_frame,
+            }));
+        }
+        if let Some((track_id, clip_id, source_frame)) = self
+            .state
+            .active_timeline_editor()
+            .selected_transient_marker
+        {
+            return self.update(Message::Arrangement(
+                ArrangementMsg::RemoveTransientMarker {
+                    track_id,
+                    clip_id,
+                    source_frame,
+                },
+            ));
+        }
+        // Priority 3: selected notes in the open piano roll.
         if let Some((track_id, clip_id)) = self.state.active_timeline_editor().selected_note_clip {
             let has_selection = self
                 .state
@@ -59,7 +82,7 @@ impl App {
                 )));
             }
         }
-        // Priority 3: selected arrangement clips.
+        // Priority 4: selected arrangement clips.
         if !self
             .state
             .active_timeline_editor()
@@ -391,6 +414,12 @@ impl App {
     }
 
     pub(super) fn on_escape_pressed(&mut self) -> Task<Message> {
+        if self.state.view.transient_analysis_dialog.take().is_some() {
+            return Task::none();
+        }
+        if self.state.view.drum_rack_slice_dialog.take().is_some() {
+            return Task::none();
+        }
         if !self
             .state
             .active_timeline_editor()

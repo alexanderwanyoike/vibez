@@ -364,6 +364,7 @@ mod tests {
     fn project_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.vibez");
+        let crossfade_peer = ClipId::new();
 
         let project = Project {
             master: None,
@@ -391,6 +392,14 @@ mod tests {
                     loop_start: 0,
                     loop_end: 0,
                     gain_db: Default::default(),
+                    fades: vibez_core::track::ClipFades::default().linked_fade_out(
+                        4_410,
+                        crossfade_peer,
+                        44_100,
+                    ),
+                    playback_direction: Default::default(),
+                    transient_markers: Default::default(),
+                    warp_markers: Default::default(),
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,
@@ -411,6 +420,10 @@ mod tests {
         assert_eq!(loaded.tracks[0].name, "Synth");
         assert_eq!(loaded.arrange.clips.len(), 1);
         assert_eq!(loaded.arrange.clips[0].name, "loop.wav");
+        assert_eq!(
+            loaded.arrange.clips[0].fades.crossfade_out_to(),
+            Some(crossfade_peer)
+        );
     }
 
     #[test]
@@ -454,6 +467,10 @@ mod tests {
                     loop_start: 32,
                     loop_end: 2_080,
                     gain_db: Default::default(),
+                    fades: Default::default(),
+                    playback_direction: Default::default(),
+                    transient_markers: Default::default(),
+                    warp_markers: Default::default(),
                     transpose: Default::default(),
                     original_bpm: Some(123.0),
                     warped: false,

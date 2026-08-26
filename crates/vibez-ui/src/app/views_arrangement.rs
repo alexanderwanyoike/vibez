@@ -342,6 +342,12 @@ impl App {
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: 0,
+                        fade_in_frames: 0,
+                        fade_out_frames: 0,
+                        fade_in_curve: Default::default(),
+                        fade_out_curve: Default::default(),
+                        crossfade_in_from: None,
+                        crossfade_out_to: None,
                         warp_stale: false,
                     });
             }

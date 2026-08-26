@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -7,16 +8,22 @@ use iced::{Color, Point, Rectangle, Renderer, Theme};
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::FrameClipTimeline;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::ClipPlaybackDirection;
+use vibez_core::transient::{TransientMarkerKind, TransientMarkers};
+use vibez_core::warp_marker::WarpMarkers;
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{GridConfig, UndoGestureId};
+use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::theme;
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
+use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 
 /// Canvas widget for showing a detailed waveform of an audio clip in the detail panel.
 pub struct AudioClipDetailWidget {
+    pub location: vibez_project::TimelineLocation,
     pub track_id: TrackId,
     pub clip_id: ClipId,
     pub audio: Arc<DecodedAudio>,
@@ -32,11 +39,17 @@ pub struct AudioClipDetailWidget {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub playback_direction: ClipPlaybackDirection,
+    pub transient_markers: TransientMarkers,
+    pub selected_transient_marker: Option<u64>,
+    pub warp_markers: WarpMarkers,
+    pub selected_warp_marker: Option<u64>,
 }
 
 #[derive(Debug, Default)]
 pub struct AudioClipDetailState {
     drag: Option<AudioMarkerDrag>,
+    double_click: DoubleClick,
 }
 
 const AUDIO_RULER_HEIGHT: f32 = 30.0;
@@ -46,7 +59,27 @@ const LOOP_HANDLE_ROW_HEIGHT: f32 = 10.0;
 enum AudioMarkerDrag {
     Start(UndoGestureId),
     Loop(LoopDrag),
+    Transient {
+        current_source_frame: u64,
+        undo_gesture: UndoGestureId,
+    },
+    TransientWarp {
+        source_frame: u64,
+        current_timeline_frame: u64,
+        undo_gesture: UndoGestureId,
+    },
+    Warp {
+        source_frame: u64,
+        current_timeline_frame: u64,
+        undo_gesture: UndoGestureId,
+    },
 }
+
+const TRANSIENT_HIT_RADIUS: f32 = 6.0;
+const TRANSIENT_HANDLE_BOTTOM: f32 = AUDIO_RULER_HEIGHT + 8.0;
+const WARP_MARKER_TOP: f32 = 20.0;
+const WARP_HIT_RADIUS: f32 = 7.0;
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 impl AudioClipDetailWidget {
     fn loop_range_frames(&self) -> u64 {
@@ -87,16 +120,56 @@ impl AudioClipDetailWidget {
         (beats * self.samples_per_beat()).round().max(1.0) as u64
     }
 
-    fn source_to_x(&self, source_frame: u64, bounds: &Rectangle) -> f32 {
+    fn timeline_to_x(&self, timeline_frame: u64, bounds: &Rectangle) -> f32 {
         let visible_frames = self.duration_samples.max(1);
-        let local = source_frame
+        let local = timeline_frame
             .saturating_sub(self.source_offset)
             .min(visible_frames);
-        (local as f64 / visible_frames as f64 * f64::from(bounds.width)) as f32
+        let fraction = local as f64 / visible_frames as f64;
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
+        (fraction * f64::from(bounds.width)) as f32
+    }
+
+    fn source_end(&self) -> u64 {
+        self.warp_markers.source_end(
+            self.source_offset
+                .saturating_add(self.duration_samples)
+                .min(self.audio.num_frames() as u64),
+        )
+    }
+
+    fn warp_timeline_end(&self) -> u64 {
+        self.warp_markers.timeline_end(self.loop_range_frames())
+    }
+
+    fn source_to_x(&self, source_frame: u64, bounds: &Rectangle) -> f32 {
+        let local = self
+            .warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64;
+        self.timeline_to_x(self.source_offset.saturating_add(local), bounds)
+    }
+
+    fn mapped_source_frame(&self, timeline_frame: u64) -> f64 {
+        if self.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        self.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(self.source_offset) as f64,
+            self.source_offset,
+            self.warp_timeline_end(),
+        )
     }
 
     fn x_to_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
         let fraction = f64::from(x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
         let local = fraction * self.duration_samples as f64;
         let local = if self.grid.snap_enabled {
             let beat = local / self.samples_per_beat();
@@ -107,20 +180,29 @@ impl AudioClipDetailWidget {
         (local.round() as u64).min(self.loop_range_frames())
     }
 
+    fn x_to_unsnapped_local_frame(&self, x: f32, bounds: &Rectangle) -> u64 {
+        let fraction = f64::from(x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        let fraction = match self.playback_direction {
+            ClipPlaybackDirection::Forward => fraction,
+            ClipPlaybackDirection::Reverse => 1.0 - fraction,
+        };
+        ((fraction * self.duration_samples as f64).round() as u64).min(self.loop_range_frames())
+    }
+
     fn hit_test_loop_marker(&self, position: Point, bounds: &Rectangle) -> Option<LoopMarker> {
         if !self.loop_enabled || self.loop_end <= self.loop_start {
             return None;
         }
         clip_loop_markers::hit_test(
-            self.source_to_x(self.loop_start, bounds),
-            self.source_to_x(self.loop_end, bounds),
+            self.timeline_to_x(self.loop_start, bounds),
+            self.timeline_to_x(self.loop_end, bounds),
             position,
             LOOP_HANDLE_ROW_HEIGHT,
         )
     }
 
     fn hit_test_start_marker(&self, position: Point, bounds: &Rectangle) -> bool {
-        clip_loop_markers::hit_test_start(self.source_to_x(self.start_marker, bounds), position)
+        clip_loop_markers::hit_test_start(self.timeline_to_x(self.start_marker, bounds), position)
     }
 
     fn start_marker_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
@@ -136,6 +218,75 @@ impl AudioClipDetailWidget {
             self.loop_enabled,
         )
         .clamp_start(candidate, self.source_offset, source_end)
+    }
+
+    fn transient_source_from_x(&self, x: f32, bounds: &Rectangle) -> u64 {
+        self.warp_markers
+            .source_at_timeline(
+                self.x_to_unsnapped_local_frame(x, bounds) as f64,
+                self.source_offset,
+                self.warp_timeline_end(),
+            )
+            .round() as u64
+    }
+
+    fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
+        self.warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64
+    }
+
+    fn is_transient_handle(position: Point) -> bool {
+        (AUDIO_RULER_HEIGHT..=TRANSIENT_HANDLE_BOTTOM).contains(&position.y)
+    }
+
+    fn hit_test_transient_marker(&self, position: Point, bounds: &Rectangle) -> Option<u64> {
+        (position.y >= AUDIO_RULER_HEIGHT).then(|| {
+            self.transient_markers
+                .as_slice()
+                .iter()
+                .min_by(|left, right| {
+                    let left_distance =
+                        (position.x - self.source_to_x(left.source_frame(), bounds)).abs();
+                    let right_distance =
+                        (position.x - self.source_to_x(right.source_frame(), bounds)).abs();
+                    left_distance.total_cmp(&right_distance)
+                })
+                .filter(|marker| {
+                    (position.x - self.source_to_x(marker.source_frame(), bounds)).abs()
+                        <= TRANSIENT_HIT_RADIUS
+                })
+                .map(|marker| marker.source_frame())
+        })?
+    }
+
+    fn hit_test_warp_marker(&self, position: Point, bounds: &Rectangle) -> Option<u64> {
+        ((WARP_MARKER_TOP..=AUDIO_RULER_HEIGHT).contains(&position.y)).then(|| {
+            self.warp_markers
+                .interior()
+                .iter()
+                .min_by(|left, right| {
+                    let left_x = self.timeline_to_x(
+                        self.source_offset.saturating_add(left.timeline_frame()),
+                        bounds,
+                    );
+                    let right_x = self.timeline_to_x(
+                        self.source_offset.saturating_add(right.timeline_frame()),
+                        bounds,
+                    );
+                    (position.x - left_x)
+                        .abs()
+                        .total_cmp(&(position.x - right_x).abs())
+                })
+                .filter(|marker| {
+                    let x = self.timeline_to_x(
+                        self.source_offset.saturating_add(marker.timeline_frame()),
+                        bounds,
+                    );
+                    (position.x - x).abs() <= WARP_HIT_RADIUS
+                })
+                .map(|marker| marker.source_frame())
+        })?
     }
 }
 
@@ -210,6 +361,15 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         let loop_start = self.loop_start as usize;
         let loop_end = self.loop_end as usize;
         let loop_len = if looping { loop_end - loop_start } else { 0 };
+        let mapped_loop_start = self.mapped_source_frame(self.loop_start).floor() as usize;
+        let mapped_loop_end = self.mapped_source_frame(self.loop_end).ceil() as usize;
+        let timeline = FrameClipTimeline::new(
+            self.start_marker,
+            self.loop_start,
+            self.loop_end,
+            self.duration_samples,
+            self.loop_enabled,
+        );
 
         if num_frames > 0 {
             let pixels = w as usize;
@@ -229,7 +389,11 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     .saturating_sub(source_offset)
                     .saturating_add(loop_len);
                 while boundary < num_frames {
-                    let bx = boundary as f32 / num_frames as f32 * w;
+                    let forward_x = boundary as f32 / num_frames as f32 * w;
+                    let bx = match self.playback_direction {
+                        ClipPlaybackDirection::Forward => forward_x,
+                        ClipPlaybackDirection::Reverse => w - forward_x,
+                    };
                     let line = canvas::Path::line(
                         iced::Point::new(bx, AUDIO_RULER_HEIGHT),
                         iced::Point::new(bx, h),
@@ -261,46 +425,51 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             // if N >= loop_len we know the peak is just the peak of the whole loop region.
             // Otherwise we break into at most 2 contiguous segments.
             let full_loop_peak = if looping {
-                Some(peak_for_range(loop_start, loop_end))
+                Some(peak_for_range(mapped_loop_start, mapped_loop_end))
             } else {
                 None
             };
 
             for px in 0..pixels {
-                let clip_frame_start = px * num_frames / pixels.max(1);
-                let clip_frame_end = (px + 1) * num_frames / pixels.max(1);
+                let visible_start = px * num_frames / pixels.max(1);
+                let visible_end = (px + 1) * num_frames / pixels.max(1);
+                let (clip_frame_start, clip_frame_end) = match self.playback_direction {
+                    ClipPlaybackDirection::Forward => (visible_start, visible_end),
+                    ClipPlaybackDirection::Reverse => {
+                        (num_frames - visible_end, num_frames - visible_start)
+                    }
+                };
                 let span = clip_frame_end.saturating_sub(clip_frame_start).max(1);
 
                 let (min_val, max_val) = if !looping {
                     // Non-looped: direct contiguous range
-                    let src_start = self.source_offset as usize + clip_frame_start;
-                    let src_end = self.source_offset as usize + clip_frame_end;
+                    let src_start = self
+                        .mapped_source_frame(timeline.source_at(clip_frame_start as u64))
+                        .floor() as usize;
+                    let src_end = self
+                        .mapped_source_frame(timeline.source_at(clip_frame_end as u64))
+                        .ceil() as usize;
                     peak_for_range(src_start, src_end)
                 } else if span >= loop_len {
                     // Pixel covers at least one full loop cycle — use cached full peak
                     full_loop_peak.unwrap()
                 } else {
                     // Map start/end into source positions within the loop
-                    let raw_start = self.source_offset as usize + clip_frame_start;
-                    let raw_end = self.source_offset as usize + clip_frame_end;
-                    let src_start = if raw_start >= loop_end {
-                        loop_start + (raw_start - loop_start) % loop_len
-                    } else {
-                        raw_start
-                    };
-                    let src_end = if raw_end >= loop_end {
-                        loop_start + (raw_end - loop_start) % loop_len
-                    } else {
-                        raw_end
-                    };
+                    let src_start = self
+                        .mapped_source_frame(timeline.source_at(clip_frame_start as u64))
+                        .floor() as usize;
+                    let src_end = self
+                        .mapped_source_frame(timeline.source_at(clip_frame_end as u64))
+                        .ceil() as usize;
 
                     if src_start <= src_end {
                         // Contiguous segment
                         peak_for_range(src_start, src_end.max(src_start + 1))
                     } else {
                         // Wraps around loop boundary: two segments
-                        let (mn1, mx1) = peak_for_range(src_start, loop_end);
-                        let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
+                        let (mn1, mx1) = peak_for_range(src_start, mapped_loop_end);
+                        let (mn2, mx2) =
+                            peak_for_range(mapped_loop_start, src_end.max(mapped_loop_start + 1));
                         (mn1.min(mn2), mx1.max(mx2))
                     }
                 };
@@ -327,19 +496,20 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         if looping {
             clip_loop_markers::draw_brace(
                 &mut frame,
-                self.source_to_x(self.loop_start, &bounds),
-                self.source_to_x(self.loop_end, &bounds),
+                self.timeline_to_x(self.loop_start, &bounds),
+                self.timeline_to_x(self.loop_end, &bounds),
                 theme::accent(),
             );
         }
 
-        let start_x = self.source_to_x(self.start_marker, &bounds);
+        let start_x = self.timeline_to_x(self.start_marker, &bounds);
         clip_loop_markers::draw_start(
             &mut frame,
             start_x,
             h,
             theme::text_dim(),
             theme::bg_surface(),
+            self.playback_direction == ClipPlaybackDirection::Forward,
         );
 
         let ruler_border = canvas::Path::line(
@@ -393,6 +563,67 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             }
         }
 
+        // Warp Markers own the audible timing map. Their ruler handles are
+        // intentionally distinct from the quieter Transient suggestions.
+        for marker in self.warp_markers.interior() {
+            let x = self
+                .timeline_to_x(
+                    self.source_offset.saturating_add(marker.timeline_frame()),
+                    &bounds,
+                )
+                .floor()
+                + 0.5;
+            let selected = self.selected_warp_marker == Some(marker.source_frame());
+            let color = if selected {
+                theme::meter_yellow()
+            } else {
+                theme::accent()
+            };
+            let line = canvas::Path::line(Point::new(x, WARP_MARKER_TOP), Point::new(x, h));
+            frame.stroke(
+                &line,
+                canvas::Stroke::default()
+                    .with_color(theme::with_alpha(color, if selected { 0.9 } else { 0.65 }))
+                    .with_width(if selected { 2.0 } else { 1.0 }),
+            );
+            let handle = canvas::Path::new(|path| {
+                path.move_to(Point::new(x - 4.0, WARP_MARKER_TOP));
+                path.line_to(Point::new(x + 4.0, WARP_MARKER_TOP));
+                path.line_to(Point::new(x, AUDIO_RULER_HEIGHT));
+                path.close();
+            });
+            frame.fill(&handle, color);
+        }
+
+        // Transient Markers sit over the waveform but under the playhead.
+        // Suggested detections are quieter than markers the producer authored
+        // or moved by hand.
+        for marker in self.transient_markers.as_slice() {
+            let x = self.source_to_x(marker.source_frame(), &bounds).floor() + 0.5;
+            let selected = self.selected_transient_marker == Some(marker.source_frame());
+            let color = if selected {
+                theme::meter_yellow()
+            } else if marker.kind() == TransientMarkerKind::Authored {
+                theme::accent()
+            } else {
+                theme::with_alpha(theme::accent(), 0.48)
+            };
+            let line = canvas::Path::line(Point::new(x, AUDIO_RULER_HEIGHT), Point::new(x, h));
+            frame.stroke(
+                &line,
+                canvas::Stroke::default()
+                    .with_color(color)
+                    .with_width(if selected { 2.0 } else { 1.0 }),
+            );
+            let handle = canvas::Path::new(|path| {
+                path.move_to(Point::new(x - 4.0, AUDIO_RULER_HEIGHT));
+                path.line_to(Point::new(x + 4.0, AUDIO_RULER_HEIGHT));
+                path.line_to(Point::new(x, AUDIO_RULER_HEIGHT + 6.0));
+                path.close();
+            });
+            frame.fill(&handle, color);
+        }
+
         // Playhead
         if self.playhead_normalized >= 0.0 && self.playhead_normalized <= 1.0 {
             let px = (self.playhead_normalized as f32) * w;
@@ -419,6 +650,8 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
             || cursor.position_in(bounds).is_some_and(|position| {
                 self.hit_test_start_marker(position, &bounds)
                     || self.hit_test_loop_marker(position, &bounds).is_some()
+                    || self.hit_test_warp_marker(position, &bounds).is_some()
+                    || self.hit_test_transient_marker(position, &bounds).is_some()
             })
         {
             mouse::Interaction::ResizingHorizontally
@@ -437,10 +670,130 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                let Some(position) = cursor.position_in(bounds) else {
+                    return (canvas::event::Status::Ignored, None);
+                };
+                let source_frame = self.transient_source_from_x(position.x, &bounds);
+                let transient_marker = self.hit_test_transient_marker(position, &bounds);
+                let warp_marker = self.hit_test_warp_marker(position, &bounds);
+                (
+                    canvas::event::Status::Captured,
+                    Some(Message::View(ViewMsg::ShowContextMenu {
+                        x: bounds.x + position.x,
+                        y: bounds.y + position.y,
+                        target: ContextMenuTarget::AudioClipDetail {
+                            location: self.location,
+                            track_id: self.track_id,
+                            clip_id: self.clip_id,
+                            source_frame,
+                            timeline_frame: self.timeline_frame_at_source(source_frame),
+                            transient_marker,
+                            warp_marker,
+                        },
+                    })),
+                )
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let Some(position) = cursor.position_in(bounds) else {
                     return (canvas::event::Status::Ignored, None);
                 };
+                if let Some(source_frame) = self.hit_test_warp_marker(position, &bounds) {
+                    let current_timeline_frame = self
+                        .warp_markers
+                        .interior()
+                        .iter()
+                        .find(|marker| marker.source_frame() == source_frame)
+                        .map(|marker| marker.timeline_frame())
+                        .unwrap_or_default();
+                    state.double_click.clear();
+                    state.drag = Some(AudioMarkerDrag::Warp {
+                        source_frame,
+                        current_timeline_frame,
+                        undo_gesture: UndoGestureId::new(),
+                    });
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Arrangement(ArrangementMsg::SelectWarpMarker {
+                            track_id: self.track_id,
+                            clip_id: self.clip_id,
+                            source_frame: Some(source_frame),
+                        })),
+                    );
+                }
+                if let Some(source_frame) = self.hit_test_transient_marker(position, &bounds) {
+                    let double = state.double_click.press(
+                        Instant::now(),
+                        position,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(8.0),
+                    );
+                    if double {
+                        state.double_click.clear();
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Arrangement(ArrangementMsg::AddWarpMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame,
+                                timeline_frame: self.timeline_frame_at_source(source_frame),
+                            })),
+                        );
+                    }
+                    let undo_gesture = UndoGestureId::new();
+                    state.drag = Some(if Self::is_transient_handle(position) {
+                        AudioMarkerDrag::TransientWarp {
+                            source_frame,
+                            current_timeline_frame: self.timeline_frame_at_source(source_frame),
+                            undo_gesture,
+                        }
+                    } else {
+                        AudioMarkerDrag::Transient {
+                            current_source_frame: source_frame,
+                            undo_gesture,
+                        }
+                    });
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Arrangement(
+                            ArrangementMsg::SelectTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: Some(source_frame),
+                            },
+                        )),
+                    );
+                }
+                if position.y >= AUDIO_RULER_HEIGHT {
+                    let double = state.double_click.press(
+                        Instant::now(),
+                        position,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(8.0),
+                    );
+                    if double {
+                        state.double_click.clear();
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::Arrangement(ArrangementMsg::AddTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: self.transient_source_from_x(position.x, &bounds),
+                            })),
+                        );
+                    }
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::Arrangement(
+                            ArrangementMsg::SelectTransientMarker {
+                                track_id: self.track_id,
+                                clip_id: self.clip_id,
+                                source_frame: None,
+                            },
+                        )),
+                    );
+                }
                 state.drag = if self.hit_test_start_marker(position, &bounds) {
                     Some(AudioMarkerDrag::Start(UndoGestureId::new()))
                 } else if let Some(marker) = self.hit_test_loop_marker(position, &bounds) {
@@ -492,6 +845,81 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                             .in_undo_gesture(drag.undo_gesture())
                         })
                     }
+                    AudioMarkerDrag::Transient {
+                        current_source_frame,
+                        undo_gesture,
+                    } => {
+                        state.double_click.clear();
+                        let to = self.transient_source_from_x(position.x, &bounds);
+                        if to == current_source_frame {
+                            None
+                        } else {
+                            state.drag = Some(AudioMarkerDrag::Transient {
+                                current_source_frame: to,
+                                undo_gesture,
+                            });
+                            Some(
+                                Message::Arrangement(ArrangementMsg::MoveTransientMarker {
+                                    track_id: self.track_id,
+                                    clip_id: self.clip_id,
+                                    from: current_source_frame,
+                                    to,
+                                })
+                                .in_undo_gesture(undo_gesture),
+                            )
+                        }
+                    }
+                    AudioMarkerDrag::TransientWarp {
+                        source_frame,
+                        current_timeline_frame,
+                        undo_gesture,
+                    } => {
+                        state.double_click.clear();
+                        let timeline_frame = self.x_to_local_frame(position.x, &bounds);
+                        if timeline_frame == current_timeline_frame {
+                            None
+                        } else {
+                            state.drag = Some(AudioMarkerDrag::Warp {
+                                source_frame,
+                                current_timeline_frame: timeline_frame,
+                                undo_gesture,
+                            });
+                            Some(
+                                Message::Arrangement(ArrangementMsg::AddWarpMarker {
+                                    track_id: self.track_id,
+                                    clip_id: self.clip_id,
+                                    source_frame,
+                                    timeline_frame,
+                                })
+                                .in_undo_gesture(undo_gesture),
+                            )
+                        }
+                    }
+                    AudioMarkerDrag::Warp {
+                        source_frame,
+                        current_timeline_frame,
+                        undo_gesture,
+                    } => {
+                        let timeline_frame = self.x_to_local_frame(position.x, &bounds);
+                        if timeline_frame == current_timeline_frame {
+                            None
+                        } else {
+                            state.drag = Some(AudioMarkerDrag::Warp {
+                                source_frame,
+                                current_timeline_frame: timeline_frame,
+                                undo_gesture,
+                            });
+                            Some(
+                                Message::Arrangement(ArrangementMsg::MoveWarpMarker {
+                                    track_id: self.track_id,
+                                    clip_id: self.clip_id,
+                                    source_frame,
+                                    timeline_frame,
+                                })
+                                .in_undo_gesture(undo_gesture),
+                            )
+                        }
+                    }
                 };
                 (canvas::event::Status::Captured, message)
             }
@@ -506,213 +934,5 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use iced::widget::canvas::Program;
-
-    fn widget() -> AudioClipDetailWidget {
-        AudioClipDetailWidget {
-            track_id: TrackId::new(),
-            clip_id: ClipId::new(),
-            audio: Arc::new(DecodedAudio {
-                channels: vec![vec![0.0; 1_000]],
-                sample_rate: 1_000,
-            }),
-            duration_samples: 800,
-            source_offset: 100,
-            start_marker: 100,
-            sample_rate: 1_000,
-            bpm: 120.0,
-            grid: GridConfig::new(crate::state::SnapGrid::QUARTER, true, false, 0),
-            track_color: Color::WHITE,
-            playhead_normalized: -1.0,
-            loop_enabled: true,
-            loop_start: 100,
-            loop_end: 500,
-        }
-    }
-
-    fn arrangement_message(message: Option<Message>) -> Option<ArrangementMsg> {
-        match message {
-            Some(Message::UndoGesture { edit, .. }) => arrangement_message(Some(*edit)),
-            Some(Message::Arrangement(message)) => Some(message),
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn audio_loop_end_marker_drag_edits_source_frames() {
-        let widget = widget();
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-        let end = Point::new(widget.source_to_x(widget.loop_end, &bounds), 5.0);
-        let target = Point::new(600.0, 5.0);
-        let mut state = AudioClipDetailState::default();
-
-        let pressed = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-                bounds,
-                mouse::Cursor::Available(end),
-            )
-            .0;
-        assert_eq!(pressed, canvas::event::Status::Captured);
-
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
-                bounds,
-                mouse::Cursor::Available(target),
-            )
-            .1;
-        assert!(matches!(
-            arrangement_message(message),
-            Some(ArrangementMsg::SetClipLoopRegion {
-                track_id,
-                clip_id,
-                loop_start: 100,
-                loop_end: 600,
-            }) if track_id == widget.track_id && clip_id == widget.clip_id
-        ));
-    }
-
-    #[test]
-    fn overlapping_start_and_loop_start_have_separate_hit_rows() {
-        let mut widget = widget();
-        widget.grid.snap_enabled = false;
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-        let overlap_x = widget.source_to_x(widget.start_marker, &bounds);
-        let target = Point::new(300.0, 15.0);
-        let mut state = AudioClipDetailState::default();
-
-        let pressed = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-                bounds,
-                mouse::Cursor::Available(Point::new(overlap_x, 15.0)),
-            )
-            .0;
-        assert_eq!(pressed, canvas::event::Status::Captured);
-
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
-                bounds,
-                mouse::Cursor::Available(target),
-            )
-            .1;
-        assert!(matches!(
-            arrangement_message(message),
-            Some(ArrangementMsg::SetClipStartMarker {
-                track_id,
-                clip_id,
-                start_marker: 400,
-            }) if track_id == widget.track_id && clip_id == widget.clip_id
-        ));
-    }
-
-    #[test]
-    fn audio_ruler_maps_measures_from_project_tempo() {
-        let mut widget = widget();
-        widget.duration_samples = 4_000;
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-
-        assert_eq!(widget.total_beats(), 8.0);
-        assert_eq!(widget.beat_to_x(4.0, &bounds), 400.0);
-        assert_eq!(widget.beat_to_x(8.0, &bounds), 800.0);
-    }
-
-    #[test]
-    fn audio_loop_drag_skips_an_unchanged_snapped_region() {
-        let mut widget = widget();
-        widget.loop_end = 600;
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-        let end = Point::new(widget.source_to_x(widget.loop_end, &bounds), 5.0);
-        let mut state = AudioClipDetailState::default();
-
-        widget.update(
-            &mut state,
-            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-            bounds,
-            mouse::Cursor::Available(end),
-        );
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: end }),
-                bounds,
-                mouse::Cursor::Available(end),
-            )
-            .1;
-
-        assert!(message.is_none());
-    }
-
-    #[test]
-    fn audio_loop_overshoot_keeps_one_grid_cell_between_the_handles() {
-        let mut widget = widget();
-        widget.loop_end = 900;
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-        let start = Point::new(widget.source_to_x(widget.loop_start, &bounds), 5.0);
-        let past_end = Point::new(1_000.0, 5.0);
-        let mut state = AudioClipDetailState::default();
-
-        widget.update(
-            &mut state,
-            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-            bounds,
-            mouse::Cursor::Available(start),
-        );
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: past_end }),
-                bounds,
-                mouse::Cursor::Available(past_end),
-            )
-            .1;
-
-        assert!(matches!(
-            arrangement_message(message),
-            Some(ArrangementMsg::SetClipLoopRegion {
-                loop_start: 400,
-                loop_end: 900,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn dragging_repairs_a_legacy_region_past_the_visible_clip() {
-        let mut widget = widget();
-        widget.duration_samples = 400;
-        widget.loop_end = 900;
-        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
-        let end = Point::new(bounds.width - 1.0, 5.0);
-        let target = Point::new(600.0, 5.0);
-        let mut state = AudioClipDetailState::default();
-
-        widget.update(
-            &mut state,
-            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-            bounds,
-            mouse::Cursor::Available(end),
-        );
-        let message = widget
-            .update(
-                &mut state,
-                canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
-                bounds,
-                mouse::Cursor::Available(target),
-            )
-            .1;
-
-        assert!(matches!(
-            arrangement_message(message),
-            Some(ArrangementMsg::SetClipLoopRegion { loop_end: 500, .. })
-        ));
-    }
-}
+#[path = "audio_clip_detail_tests.rs"]
+mod tests;

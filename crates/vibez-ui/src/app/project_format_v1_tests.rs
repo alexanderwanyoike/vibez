@@ -4,7 +4,11 @@ use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
-use vibez_core::track::{InstrumentStateInfo, TrackInfo};
+use vibez_core::track::{
+    ClipFades, ClipPlaybackDirection, FadeCurve, InstrumentStateInfo, TrackInfo,
+};
+use vibez_core::transient::{TransientMarker, TransientMarkerKind, TransientMarkers};
+use vibez_core::warp_marker::{WarpMarker, WarpMarkers};
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 use vibez_engine::engine::AudioProcessBlock;
 
@@ -97,6 +101,21 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             "{file_name}"
         );
         let track = TrackInfo::new("Audio");
+        let mut transient_markers = TransientMarkers::default();
+        transient_markers.add_authored(imported.num_frames() as u64 / 3);
+        transient_markers.replace_suggestions([imported.num_frames() as u64 / 2]);
+        let mut warp_markers = WarpMarkers::default();
+        warp_markers.add(
+            imported.num_frames() as u64 / 3,
+            imported.num_frames() as u64 / 2,
+            0,
+            imported.num_frames() as u64,
+            imported.num_frames() as u64,
+        );
+        let duration = imported.num_frames() as u64;
+        let fades = ClipFades::new(duration / 10, duration / 8, duration)
+            .with_fade_in_curve(FadeCurve::new(65))
+            .with_fade_out_curve(FadeCurve::new(-45));
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
             tracks: vec![track.clone()],
@@ -108,13 +127,17 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
                     position: 0,
                     source_offset: 0,
                     start_marker: None,
-                    duration: imported.num_frames() as u64,
+                    duration,
                     source: Some(staged),
                     file_path: None,
                     loop_enabled: false,
                     loop_start: 0,
                     loop_end: 0,
                     gain_db: Default::default(),
+                    fades,
+                    playback_direction: ClipPlaybackDirection::Reverse,
+                    transient_markers,
+                    warp_markers,
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,
@@ -136,10 +159,47 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             imported.num_frames(),
             "{file_name}"
         );
+        assert_eq!(
+            reopened.project.arrange.clips[0].warp_markers.as_slice(),
+            &[
+                WarpMarker::new(0, 0),
+                WarpMarker::new(
+                    imported.num_frames() as u64 / 3,
+                    imported.num_frames() as u64 / 2,
+                ),
+                WarpMarker::new(imported.num_frames() as u64, imported.num_frames() as u64,),
+            ],
+            "{file_name}"
+        );
         assert!(matches!(
             reopened.project.arrange.clips[0].source,
             Some(MediaSourceRef::ProjectMedia { .. })
         ));
+        assert_eq!(
+            reopened.project.arrange.clips[0].playback_direction,
+            ClipPlaybackDirection::Reverse,
+            "{file_name}"
+        );
+        assert_eq!(
+            reopened.project.arrange.clips[0].fades, fades,
+            "{file_name}"
+        );
+        assert_eq!(
+            reopened.project.arrange.clips[0]
+                .transient_markers
+                .as_slice(),
+            &[
+                TransientMarker::new(
+                    imported.num_frames() as u64 / 3,
+                    TransientMarkerKind::Authored,
+                ),
+                TransientMarker::new(
+                    imported.num_frames() as u64 / 2,
+                    TransientMarkerKind::Suggested,
+                ),
+            ],
+            "{file_name}"
+        );
         assert_audible(reopened_audio, file_name);
     }
 }
@@ -205,6 +265,10 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: Some(120.0),
                 warped: true,
@@ -308,6 +372,10 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
                 loop_start: 0,
                 loop_end: audio.num_frames() as u64,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -359,6 +427,10 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
         loop_start: 0,
         loop_end: audio.num_frames() as u64,
         gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -483,6 +555,10 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
                 loop_start: 0,
                 loop_end: 128,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -679,6 +755,10 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: Some(120.0),
                 warped: true,

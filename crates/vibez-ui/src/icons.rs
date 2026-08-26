@@ -23,6 +23,7 @@ pub const TRASH_2: char = '\u{E18E}';
 pub const X: char = '\u{E1B2}';
 pub const CHEVRON_UP: char = '\u{E070}';
 pub const CHEVRON_DOWN: char = '\u{E06D}';
+pub const CHEVRON_LEFT: char = '\u{E06E}';
 pub const CHEVRON_RIGHT: char = '\u{E06F}';
 pub const SLIDERS_VERTICAL: char = '\u{E162}';
 pub const LAYOUT_LIST: char = '\u{E1D9}';
@@ -37,6 +38,7 @@ pub const SCISSORS: char = '\u{E152}';
 pub const REPEAT: char = '\u{E146}';
 pub const PENCIL: char = '\u{E131}';
 pub const MOUSE_POINTER: char = '\u{E0F3}';
+pub const FLIP_HORIZONTAL_2: char = '\u{E35D}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {

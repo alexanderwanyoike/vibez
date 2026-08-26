@@ -10,7 +10,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::TrackKind;
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
-use vibez_engine::commands::{AuditionStart, EngineCommand};
+use vibez_engine::commands::EngineCommand;
 
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::UiClip;
@@ -26,61 +26,9 @@ impl App {
         success: crate::message::AudioQuantizeSuccess,
         sample_rate: u32,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => {
-                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                self.state.arrangement.apply_audio_quantize_success(
-                    &mut engine,
-                    track_id,
-                    old_clip_id,
-                    success,
-                    sample_rate,
-                )
-            }
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = {
-                    let mut engine = crate::domains::DiscardingEngine;
-                    self.state
-                        .perform
-                        .section_editor
-                        .editor_mut()
-                        .apply_audio_quantize_success(
-                            &mut engine,
-                            track_id,
-                            old_clip_id,
-                            success,
-                            sample_rate,
-                        )
-                };
-                self.state.perform.commit_selected_section_timeline();
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let mut engine = crate::domains::DiscardingEngine;
-                let action = editor.apply_audio_quantize_success(
-                    &mut engine,
-                    track_id,
-                    old_clip_id,
-                    success,
-                    sample_rate,
-                );
-                section.timeline = editor.timeline;
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, engine| {
+            editor.apply_audio_quantize_success(engine, track_id, old_clip_id, success, sample_rate)
+        })
     }
 
     pub(super) fn apply_clip_bpm_detected_at(
@@ -91,44 +39,9 @@ impl App {
         bpm: Option<f64>,
         confidence: f32,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => self
-                .state
-                .arrangement
-                .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence),
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = self
-                    .state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
-                self.state.perform.commit_selected_section_timeline();
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let action = editor.apply_clip_bpm_detected(track_id, clip_id, bpm, confidence);
-                section.timeline = editor.timeline;
-                if action.mark_dirty {
-                    self.refresh_playing_section_after_edit(section_id);
-                }
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, _engine| {
+            editor.apply_clip_bpm_detected(track_id, clip_id, bpm, confidence)
+        })
     }
 
     pub(super) fn apply_clip_warp_success_at(
@@ -138,49 +51,9 @@ impl App {
         clip_id: ClipId,
         success: crate::message::ClipWarpSuccess,
     ) -> crate::domains::arrangement::ArrangementAction {
-        match location {
-            vibez_project::TimelineLocation::Arrange => {
-                let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                self.state.arrangement.apply_clip_warp_success(
-                    &mut engine,
-                    track_id,
-                    clip_id,
-                    success,
-                )
-            }
-            vibez_project::TimelineLocation::Section(section_id)
-                if self.state.perform.selected_section == Some(section_id) =>
-            {
-                let action = {
-                    let mut engine = crate::domains::DiscardingEngine;
-                    self.state
-                        .perform
-                        .section_editor
-                        .editor_mut()
-                        .apply_clip_warp_success(&mut engine, track_id, clip_id, success)
-                };
-                self.state.perform.commit_selected_section_timeline();
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-            vibez_project::TimelineLocation::Section(section_id) => {
-                let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                else {
-                    return crate::domains::arrangement::ArrangementAction::default();
-                };
-                let mut editor = crate::state::TimelineEditorState {
-                    timeline: Arc::clone(&section.timeline),
-                    ..crate::state::TimelineEditorState::default()
-                };
-                let mut engine = crate::domains::DiscardingEngine;
-                let action =
-                    editor.apply_clip_warp_success(&mut engine, track_id, clip_id, success);
-                section.timeline = editor.timeline;
-                self.refresh_playing_section_after_edit(section_id);
-                action
-            }
-        }
+        self.with_timeline_editor_at(location, move |editor, _project_tracks, engine| {
+            editor.apply_clip_warp_success(engine, track_id, clip_id, success)
+        })
     }
 
     pub(super) fn dispatch_drop_on_arrangement(
@@ -716,6 +589,9 @@ impl App {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
 
         if self.state.find_track(track_id).is_some() {
@@ -732,6 +608,10 @@ impl App {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -741,7 +621,14 @@ impl App {
         }
 
         self.state.status_text = format!("Added clip: {name}");
-        self.schedule_auto_warp_if_enabled(track_id, clip_id, audio)
+        Task::batch([
+            self.schedule_auto_warp_if_enabled(track_id, clip_id, audio),
+            self.schedule_auto_detect_clip_transients(
+                vibez_project::TimelineLocation::Arrange,
+                track_id,
+                clip_id,
+            ),
+        ])
     }
 
     pub(super) fn handle_drum_rack_pad_file_selected(
@@ -844,32 +731,9 @@ impl App {
                 )
             }
             None => {
-                // No active drag: treat release as a click.
-                // Select the pad AND audition its loaded sample
-                // via the engine's Audition Bus (bypasses
-                // transport + mute + solo; one-shot). This is
-                // the fastest way to hear what's on a pad
-                // without drawing notes into the piano roll.
-                let audition = self
-                    .state
-                    .find_track(track_id)
-                    .and_then(|track| track.drum_rack_pads.get(pad_index))
-                    .and_then(|pad| {
-                        pad.audio.as_ref().map(|audio| {
-                            (
-                                Arc::clone(audio),
-                                pad.name.clone().unwrap_or_else(|| "sample".into()),
-                            )
-                        })
-                    });
-                if let Some((audio, name)) = audition {
-                    self.send_command(EngineCommand::StartAudition {
-                        audio,
-                        start: AuditionStart::Immediate,
-                        looped: false,
-                    });
-                    self.state.status_text = format!("Pad {}: {}", pad_index + 1, name);
-                }
+                // A click is a note sent through the Drum Rack's own track.
+                // Browser audition is reserved for Browser previews, otherwise
+                // one pad press reaches two independent playback paths.
                 self.update(Message::select_drum_rack_pad(track_id, pad_index))
             }
         }

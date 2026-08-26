@@ -86,6 +86,7 @@ impl TimelineEditorState {
         for selection in &selections {
             match selection {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
+                    self.unlink_crossfades_for_clip(engine, *track_id, *clip_id);
                     engine.send(EngineCommand::RemoveClip(*track_id, *clip_id));
                     if let Some(track) = self.find_content_mut(*track_id) {
                         track.clips.retain(|clip| clip.id != *clip_id);
@@ -138,10 +139,17 @@ impl TimelineEditorState {
                     let delta = ((overlap_start - clip_start) * spb).round() as u64;
                     let duration = ((overlap_end - overlap_start) * spb).round() as u64;
                     let mut fragment = clip.clone();
+                    fragment.fades = fragment.fades.unlinked();
                     fragment.position = 0;
                     fragment.duration = duration.max(1);
-                    fragment.source_offset = clip.timeline().source_at(delta);
-                    fragment.start_marker = fragment.source_offset;
+                    fragment.fades =
+                        clip.fades
+                            .for_fragment(clip.duration, delta, fragment.duration);
+                    (
+                        fragment.source_offset,
+                        fragment.start_marker,
+                        fragment.warp_markers,
+                    ) = clip.warp_geometry_for_fragment(delta, fragment.duration);
                     copied.push(ClipboardClip::Audio {
                         track_id: *track_id,
                         track_offset: 0,
@@ -197,11 +205,13 @@ impl TimelineEditorState {
                         if let Some(clip) = self.find_content(*track_id).and_then(|content| {
                             content.clips.iter().find(|clip| clip.id == *clip_id)
                         }) {
+                            let mut copied_clip = clip.clone();
+                            copied_clip.fades = copied_clip.fades.unlinked();
                             copied.push(ClipboardClip::Audio {
                                 track_id: *track_id,
                                 track_offset: 0,
                                 position_beats: clip.position as f64 / spb,
-                                clip: clip.clone(),
+                                clip: copied_clip,
                             });
                         }
                     }
@@ -324,6 +334,7 @@ impl TimelineEditorState {
                 paste_anchor_beats + (entry.position_beats() - earliest_position_beats);
             match entry {
                 ClipboardClip::Audio { mut clip, .. } => {
+                    clip.fades = clip.fades.unlinked();
                     clip.id = ClipId::new();
                     clip.position = (position_beats * ctx.samples_per_beat).round().max(0.0) as u64;
                     engine.send(EngineCommand::AddClip {
@@ -338,6 +349,9 @@ impl TimelineEditorState {
                         loop_start: clip.loop_start,
                         loop_end: clip.loop_end,
                         linear_gain: clip.gain_db.linear(),
+                        fades: clip.fades,
+                        playback_direction: clip.playback_direction,
+                        warp_markers: clip.warp_markers.clone(),
                     });
                     selected.insert(ArrangementSelection::AudioClip {
                         track_id,

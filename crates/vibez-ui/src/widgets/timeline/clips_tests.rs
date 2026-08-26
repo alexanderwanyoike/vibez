@@ -10,6 +10,7 @@ use iced::keyboard::{Event, Key, Location, Modifiers};
 use iced::widget::canvas;
 use iced::{mouse, Color, Point, Rectangle, Size};
 
+use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent};
@@ -18,6 +19,7 @@ use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
 
 use super::*;
+use crate::widgets::timeline::fade_drag;
 
 fn track_canvas(content: &TrackTimelineContent, zoom_level: f32) -> TrackClipCanvas {
     track_canvas_at(content, zoom_level, 0.0, 800.0, 16.0)
@@ -352,6 +354,12 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
         warp_stale: false,
     });
     let (status, message) = right_click(&canvas, Point::new(10.0, 10.0));
@@ -433,6 +441,12 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
         warp_stale: false,
     });
 
@@ -441,4 +455,314 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         preview_id
     );
     assert!(canvas.hit_test(10.0).is_none());
+}
+
+#[test]
+fn selected_audio_fade_handle_drag_emits_realtime_edits_in_one_undo_gesture() {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 44_100,
+        name: "Clip".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 11_025,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let mut state = ClipInteractionState::default();
+    let handle = Point::new(10.0, FADE_HANDLE_Y);
+
+    let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(handle),
+    );
+    assert_eq!(status, canvas::event::Status::Captured);
+    assert!(message.is_none());
+
+    let drag = |state: &mut ClipInteractionState, x: f32| {
+        <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            state,
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: Point::new(x, FADE_HANDLE_Y),
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(x, FADE_HANDLE_Y)),
+        )
+        .1
+    };
+    let first = drag(&mut state, 20.0);
+    let second = drag(&mut state, 30.0);
+
+    let extract = |message: Option<Message>| match message {
+        Some(Message::UndoGesture { id, edit }) => match *edit {
+            Message::Arrangement(ArrangementMsg::SetAudioClipFade {
+                clip_id: edited,
+                edge: crate::state::AudioClipFadeEdge::In,
+                frames,
+                ..
+            }) => Some((id, edited, frames)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (first_gesture, first_clip, first_frames) = extract(first).expect("first fade edit");
+    let (second_gesture, second_clip, second_frames) = extract(second).expect("second fade edit");
+    assert_eq!(first_gesture, second_gesture);
+    assert_eq!((first_clip, second_clip), (clip_id, clip_id));
+    assert_eq!((first_frames, second_frames), (22_050, 33_075));
+}
+
+#[test]
+fn fade_drag_snaps_to_an_overlapping_neighbour_across_pointer_moves() {
+    let mut canvas = empty_track_canvas();
+    let outgoing_id = ClipId::new();
+    let incoming_id = ClipId::new();
+    let timeline_clip = |clip_id, position, name: &str| TimelineClip {
+        clip_id,
+        position,
+        duration: 44_100,
+        name: name.into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
+        warp_stale: false,
+    };
+    canvas.clips.push(timeline_clip(outgoing_id, 0, "Outgoing"));
+    canvas
+        .clips
+        .push(timeline_clip(incoming_id, 33_075, "Incoming"));
+    canvas.selected_clips.insert(outgoing_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let outgoing_end_x = canvas.beat_to_x(2.0);
+    let neighbour_x = canvas.beat_to_x(1.5);
+    let mut state = ClipInteractionState::default();
+
+    let pressed = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(Point::new(outgoing_end_x, FADE_HANDLE_Y)),
+    )
+    .0;
+    assert_eq!(pressed, canvas::event::Status::Captured);
+
+    for x in [
+        neighbour_x - FADE_HANDLE_HIT_RADIUS,
+        neighbour_x + FADE_HANDLE_HIT_RADIUS,
+    ] {
+        let message = <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            &mut state,
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: Point::new(x, FADE_HANDLE_Y),
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(x, FADE_HANDLE_Y)),
+        )
+        .1;
+        assert!(matches!(
+            message,
+            Some(Message::UndoGesture { edit, .. }) if matches!(
+                *edit,
+                Message::Arrangement(ArrangementMsg::SetAudioClipFade {
+                    clip_id,
+                    edge: crate::state::AudioClipFadeEdge::Out,
+                    frames: 11_025,
+                    ..
+                }) if clip_id == outgoing_id
+            )
+        ));
+    }
+}
+
+#[test]
+fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 44_100,
+        name: "Clip".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 22_050,
+        fade_out_frames: 0,
+        fade_in_curve: Default::default(),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let clip_width = canvas.geometry().width_for_beats(2.0);
+    let handle = fade_drag::fade_curve_handle(
+        0.0,
+        clip_width,
+        bounds.height,
+        &canvas.clips[0],
+        crate::state::AudioClipFadeEdge::In,
+    )
+    .unwrap();
+    let mut state = ClipInteractionState::default();
+
+    let pressed = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(handle),
+    )
+    .0;
+    assert_eq!(pressed, canvas::event::Status::Captured);
+
+    let target = Point::new(handle.x, CLIP_Y + CLIP_TITLE_HEIGHT + 2.0);
+    let message = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::CursorMoved { position: target }),
+        bounds,
+        mouse::Cursor::Available(target),
+    )
+    .1;
+
+    assert!(matches!(
+        message,
+        Some(Message::UndoGesture { edit, .. }) if matches!(
+            *edit,
+            Message::Arrangement(ArrangementMsg::SetAudioClipFadeCurve {
+                clip_id: edited,
+                edge: crate::state::AudioClipFadeEdge::In,
+                curve,
+                ..
+            }) if edited == clip_id && curve.percent() == 100
+        )
+    ));
+}
+
+#[test]
+fn linked_crossfade_has_one_shared_curve_handle_and_edit() {
+    let mut canvas = empty_track_canvas();
+    let outgoing_id = ClipId::new();
+    let incoming_id = ClipId::new();
+    canvas.crossfades.push(TimelineCrossfade {
+        outgoing_id,
+        incoming_id,
+        overlap_start: 33_075,
+        overlap_end: 44_100,
+        curve: Default::default(),
+    });
+    canvas.selected_clips.insert(outgoing_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let handles: Vec<_> = canvas.crossfade_curve_handles(bounds.height).collect();
+    assert_eq!(handles.len(), 1);
+    let handle = handles[0].2;
+    let mut state = ClipInteractionState::default();
+
+    let pressed = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(handle),
+    )
+    .0;
+    assert_eq!(pressed, canvas::event::Status::Captured);
+
+    let target = Point::new(handle.x, CLIP_Y + CLIP_TITLE_HEIGHT + 2.0);
+    let message = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::CursorMoved { position: target }),
+        bounds,
+        mouse::Cursor::Available(target),
+    )
+    .1;
+    assert!(matches!(
+        message,
+        Some(Message::UndoGesture { edit, .. }) if matches!(
+            *edit,
+            Message::Arrangement(ArrangementMsg::SetAudioClipCrossfadeCurve {
+                outgoing_id: outgoing,
+                incoming_id: incoming,
+                curve,
+                ..
+            }) if outgoing == outgoing_id && incoming == incoming_id && curve.percent() == 100
+        )
+    ));
+}
+
+#[test]
+fn overlapping_fade_controls_choose_the_handle_nearest_the_pointer() {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 44_100,
+        name: "Short steep fade".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 11_025,
+        fade_out_frames: 0,
+        fade_in_curve: vibez_core::track::FadeCurve::new(100),
+        fade_out_curve: Default::default(),
+        crossfade_in_from: None,
+        crossfade_out_to: None,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let clip_width = canvas.geometry().width_for_beats(2.0);
+    let (length_x, _) = fade_drag::fade_handle_xs(0.0, clip_width, &canvas.clips[0]);
+    let curve = fade_drag::fade_curve_handle(
+        0.0,
+        clip_width,
+        bounds.height,
+        &canvas.clips[0],
+        crate::state::AudioClipFadeEdge::In,
+    )
+    .unwrap();
+    let length = Point::new(length_x, FADE_HANDLE_Y);
+
+    assert!(matches!(
+        canvas.fade_control_hit(length, bounds.height),
+        Some(fade_drag::FadeControlDrag::Length(_))
+    ));
+    assert!(matches!(
+        canvas.fade_control_hit(curve, bounds.height),
+        Some(fade_drag::FadeControlDrag::Curve(_))
+    ));
 }

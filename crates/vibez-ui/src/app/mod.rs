@@ -160,6 +160,7 @@ mod audio_take_finalization;
 mod audio_tasks;
 mod bounce;
 mod capture;
+mod drum_rack_preparation;
 mod engine_events;
 mod keyboard;
 mod local_watcher;
@@ -168,6 +169,7 @@ mod tracked_request;
 
 use async_helpers::*;
 pub(crate) use audio_tasks::*;
+use drum_rack_preparation::*;
 pub(crate) use keyboard::*;
 mod dropbox_io;
 mod media;
@@ -178,6 +180,8 @@ mod project_replay;
 mod project_sections;
 mod save_runtime;
 mod section_record;
+mod timeline_results;
+mod transient_markers;
 mod update;
 mod update_media;
 mod update_policy;
@@ -215,6 +219,7 @@ mod views_settings_perform;
 mod views_settings_project;
 mod views_settings_updates;
 mod views_shell;
+mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
 
@@ -585,27 +590,6 @@ impl App {
             self.state.view.scroll_offset_beats,
         )
         .pixels_per_beat()
-    }
-
-    /// Walk `next_track_number` forward past any names already in use so
-    /// that `format!("{prefix} {n}")` is unique. Prevents e.g. two lanes
-    /// both named "Track 2" when numbering gets out of sync after loads,
-    /// deletes, or undo chains.
-    fn next_unique_track_number(&mut self, prefix: &str) -> u32 {
-        loop {
-            let candidate = self.state.project_tracks.next_track_number;
-            let name = format!("{prefix} {candidate}");
-            let clash = self
-                .state
-                .project_tracks
-                .tracks
-                .iter()
-                .any(|t| t.name == name);
-            if !clash {
-                return candidate;
-            }
-            Arc::make_mut(&mut self.state.project_tracks).next_track_number += 1;
-        }
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.

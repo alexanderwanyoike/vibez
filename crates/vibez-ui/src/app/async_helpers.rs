@@ -172,6 +172,15 @@ pub(super) async fn detect_clip_bpm_async(
         .unwrap_or(None)
 }
 
+pub(super) async fn detect_clip_transients_async(
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    sensitivity: vibez_core::onset::TransientSensitivity,
+) -> Vec<u64> {
+    tokio::task::spawn_blocking(move || vibez_core::onset::detect_onsets(&audio, sensitivity))
+        .await
+        .unwrap_or_default()
+}
+
 pub(super) async fn transpose_clip_async(
     request: crate::domains::arrangement::ClipTransposeRenderRequest,
 ) -> Result<crate::message::ClipTransposeSuccess, String> {
@@ -852,7 +861,7 @@ pub(super) async fn load_project_async(
                                 pad_index,
                                 source: source.clone(),
                                 audio: Arc::new(audio),
-                                name: source.display_name(),
+                                name: pad.name.clone().unwrap_or_else(|| source.display_name()),
                                 state: pad.clone(),
                             }),
                             Err(err) => warnings.push(format!("Skipped {label} ({err})")),

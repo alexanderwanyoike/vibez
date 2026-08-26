@@ -12,7 +12,8 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use crate::message::Message;
-use crate::state::{ArrangementSelection, ProjectTrack, UiClip};
+use crate::state::{ArrangementSelection, UiClip};
+use vibez_core::midi::TrackKind;
 
 use super::*;
 
@@ -120,16 +121,14 @@ impl App {
     }
 
     pub(super) fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
-        let track_num = self.next_unique_track_number("Bounce");
-        Arc::make_mut(&mut self.state.project_tracks).next_track_number = track_num + 1;
-        let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-        let track_id = TrackId::new();
-        let track_name = format!("Bounce {track_num}");
-
-        self.send_command(EngineCommand::AddTrack(track_id, track_name.clone()));
-        Arc::make_mut(&mut self.state.project_tracks)
-            .tracks
-            .push(ProjectTrack::new(track_id, track_name, color_index));
+        let track_id = {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            Arc::make_mut(&mut self.state.project_tracks).add_numbered_track(
+                "Bounce",
+                TrackKind::Audio,
+                &mut engine,
+            )
+        };
 
         let clip_id = ClipId::new();
         let duration = outcome.audio.num_frames() as u64;
@@ -145,6 +144,9 @@ impl App {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
 
         if self.state.find_track(track_id).is_some() {
@@ -161,6 +163,10 @@ impl App {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

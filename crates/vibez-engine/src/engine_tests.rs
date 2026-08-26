@@ -469,6 +469,9 @@ fn add_clip_and_play() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -517,6 +520,9 @@ fn clip_gain_is_applied_before_the_track_channel_strip() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -559,6 +565,9 @@ fn mute_silences_track() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackMute(tid, true)).unwrap();
@@ -600,6 +609,9 @@ fn solo_isolates_track() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -615,6 +627,9 @@ fn solo_isolates_track() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     // Solo track 1 only
@@ -662,6 +677,9 @@ fn gain_scaling() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackGain(tid, 0.5)).unwrap();
@@ -697,6 +715,9 @@ fn pan_hard_left() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::SetTrackPan(tid, 0.0)).unwrap();
@@ -740,6 +761,9 @@ fn multi_track_summing() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -755,6 +779,9 @@ fn multi_track_summing() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -815,6 +842,9 @@ fn per_track_metering_events() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -863,6 +893,9 @@ fn transport_auto_stop_multitrack() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -898,6 +931,9 @@ fn move_clip_changes_position() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -938,6 +974,9 @@ fn add_clip_with_loop_plays_looped_audio() {
             loop_start: 0,
             loop_end: 100,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Play).unwrap();
@@ -980,6 +1019,9 @@ fn resize_clip_preserves_loop_state() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     // Enable loop via SetClipLoop
@@ -1011,6 +1053,9 @@ fn resize_clip_preserves_loop_state() {
             loop_start: 0,
             loop_end: 100,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::Seek(0)).unwrap();
@@ -1526,6 +1571,9 @@ fn constant_clip_track(
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     (tid, cid)
@@ -1583,6 +1631,9 @@ fn track_output_capture_stays_aligned_across_arrangement_loop_wrap() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -1652,6 +1703,9 @@ fn track_output_capture_excludes_sends_returns_master_and_inaudible_sources() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -1925,6 +1979,9 @@ fn master_gain_scales_the_summed_mix() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -1965,6 +2022,9 @@ fn master_effect_chain_processes_the_summed_mix() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     // A master EQ with the LF shelf slammed down should attenuate a
@@ -2048,6 +2108,9 @@ fn spectrum_tap_streams_track_samples() {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx
@@ -2105,6 +2168,9 @@ fn engine_with_send(send: f32) -> (AudioEngine, rtrb::Producer<EngineCommand>, T
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         })
         .unwrap();
     cmd_tx.push(EngineCommand::AddBus(bus, "A".into())).unwrap();

@@ -49,7 +49,7 @@ pub(super) fn clear_warp_request(
     let ratio = original_frames as f64 / current_frames;
     let scale = |frames: u64| (frames as f64 * ratio).round() as u64;
     let source_offset = scale(clip.source_offset).min(original_frames);
-    let source_end = scale(clip.source_offset.saturating_add(clip.duration))
+    let source_end = scale(clip.source_end())
         .min(original_frames)
         .max(source_offset);
     Some(ClipTransposeRenderRequest {
@@ -81,8 +81,8 @@ impl TimelineEditorState {
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
         let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+            .find_content(track_id)
+            .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
         else {
             return action;
         };
@@ -102,9 +102,23 @@ impl TimelineEditorState {
             action.status = Some("Refreshing Clip render after a newer edit...".into());
             return action;
         }
+        if success.geometry.is_some() {
+            self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+        }
+        let Some(clip) = self
+            .find_content_mut(track_id)
+            .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+        else {
+            return action;
+        };
+        let previous_audio_frames = clip.audio.num_frames().max(1);
         clip.audio = Arc::clone(&success.audio);
         let replaces_geometry = success.geometry.is_some();
         if let Some(geometry) = success.geometry {
+            let marker_ratio = success.audio.num_frames() as f64 / previous_audio_frames as f64;
+            clip.transient_markers
+                .scale_source_frames(marker_ratio, success.audio.num_frames() as u64);
+            clip.fades = clip.fades.scaled(clip.duration, geometry.duration);
             clip.source_offset = geometry.source_offset;
             clip.start_marker = geometry.start_marker;
             clip.duration = geometry.duration;
@@ -119,6 +133,11 @@ impl TimelineEditorState {
                 start_marker: geometry.start_marker,
                 loop_start: geometry.loop_start,
                 loop_end: geometry.loop_end,
+            });
+            engine.send(EngineCommand::SetClipFades {
+                track_id,
+                clip_id,
+                fades: clip.fades,
             });
         } else {
             engine.send(EngineCommand::ReplaceClipBuffer {
@@ -159,6 +178,24 @@ impl TimelineEditorState {
         else {
             return action;
         };
+        match field {
+            AudioClipInspectorField::FadeIn => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::In,
+            ),
+            AudioClipInspectorField::FadeOut => self.unlink_crossfade_edge_for_clip(
+                engine,
+                track_id,
+                clip_id,
+                crate::state::AudioClipFadeEdge::Out,
+            ),
+            AudioClipInspectorField::SourceStart | AudioClipInspectorField::SourceEnd => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
+            }
+            _ => {}
+        }
         let Some(clip) = self
             .find_content_mut(track_id)
             .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
@@ -194,6 +231,32 @@ impl TimelineEditorState {
                 });
                 action.status = Some(format!("Clip Gain {:+.1} dB", gain.db()));
             }
+            AudioClipInspectorField::FadeIn | AudioClipInspectorField::FadeOut => {
+                let Some(frames) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {
+                    action.status = Some("Fade length must be a positive time in seconds".into());
+                    return action;
+                };
+                let fades = match field {
+                    AudioClipInspectorField::FadeIn => {
+                        clip.fades.with_fade_in(frames, clip.duration)
+                    }
+                    AudioClipInspectorField::FadeOut => {
+                        clip.fades.with_fade_out(frames, clip.duration)
+                    }
+                    _ => unreachable!(),
+                };
+                clip.fades = fades;
+                engine.send(EngineCommand::SetClipFades {
+                    track_id,
+                    clip_id,
+                    fades,
+                });
+                action.status = Some(format!(
+                    "Clip fades {:.3} s in, {:.3} s out",
+                    format_seconds(fades.fade_in_frames()),
+                    format_seconds(fades.fade_out_frames())
+                ));
+            }
             AudioClipInspectorField::SourceBpm => {
                 let Some(bpm) = text
                     .parse::<f64>()
@@ -215,10 +278,7 @@ impl TimelineEditorState {
                         Some("Source boundary must be a positive time in seconds".into());
                     return action;
                 };
-                let current_end = clip
-                    .source_offset
-                    .saturating_add(clip.duration)
-                    .min(source_frames);
+                let current_end = clip.source_end().min(source_frames);
                 let (new_start, new_end) = match field {
                     AudioClipInspectorField::SourceStart => (value, current_end),
                     AudioClipInspectorField::SourceEnd => (clip.source_offset, value),
@@ -233,6 +293,10 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
+                let cleared_warp_markers = clip.warp_markers.clear();
+                clip.transient_markers
+                    .retain_source_range(new_start, new_end);
+                clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 clip.loop_start = clip.loop_start.clamp(new_start, new_end);
                 clip.loop_end = clip.loop_end.clamp(clip.loop_start, new_end);
@@ -250,6 +314,18 @@ impl TimelineEditorState {
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
                 });
+                engine.send(EngineCommand::SetClipFades {
+                    track_id,
+                    clip_id,
+                    fades: clip.fades,
+                });
+                if cleared_warp_markers {
+                    engine.send(EngineCommand::SetClipWarpMarkers {
+                        track_id,
+                        clip_id,
+                        warp_markers: Default::default(),
+                    });
+                }
                 engine.send(EngineCommand::SetClipLoop {
                     track_id,
                     clip_id,
@@ -257,11 +333,22 @@ impl TimelineEditorState {
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
                 });
-                action.status = Some(format!(
-                    "Source {:.3} to {:.3} s",
-                    format_seconds(new_start),
-                    format_seconds(new_end)
-                ));
+                action.status = Some(if cleared_warp_markers {
+                    format!(
+                        "Source {:.3} to {:.3} s · Warp Markers cleared",
+                        format_seconds(new_start),
+                        format_seconds(new_end)
+                    )
+                } else {
+                    format!(
+                        "Source {:.3} to {:.3} s",
+                        format_seconds(new_start),
+                        format_seconds(new_end)
+                    )
+                });
+                if cleared_warp_markers {
+                    self.selected_warp_marker = None;
+                }
             }
             AudioClipInspectorField::Start => {
                 let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {

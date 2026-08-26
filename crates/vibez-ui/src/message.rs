@@ -56,6 +56,8 @@ pub enum DrumPadParam {
     Pan,
     Start,
     End,
+    FadeIn,
+    FadeOut,
     CoarseTune,
     FineTune,
 }
@@ -81,6 +83,16 @@ pub struct LoadedClipData {
     /// Raw un-warped audio, retained when `info.warped` so later
     /// re-warps stretch from the original.
     pub original_audio: Option<Arc<DecodedAudio>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClipTransientDetection {
+    pub location: TimelineLocation,
+    pub track_id: TrackId,
+    pub clip_id: ClipId,
+    pub expected_audio: Arc<DecodedAudio>,
+    pub source_frames: Vec<u64>,
+    pub record_undo: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +151,12 @@ pub struct LoadedDrumRackPadData {
     pub audio: Arc<DecodedAudio>,
     pub name: String,
     pub state: DrumPadState,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedDrumRackAudio {
+    pub source: MediaSourceRef,
+    pub audio: Arc<DecodedAudio>,
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +461,27 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
+    SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
+    ConfirmDrumRackSlice,
+    CancelDrumRackSlice,
+    OpenTransientAnalysisDialog {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SetTransientAnalysisSensitivity(u8),
+    TransientAnalysisSensitivityInputChanged(String),
+    SubmitTransientAnalysisSensitivity,
+    ConfirmTransientAnalysis,
+    CancelTransientAnalysis,
+    AudioClipDrumRackPrepared {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: crate::domains::arrangement::AudioSliceMarkers,
+        expected_clip: Box<crate::state::UiClip>,
+        result: Result<PreparedDrumRackAudio, String>,
+    },
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
@@ -723,6 +762,13 @@ pub enum Message {
         track_id: TrackId,
         clip_id: ClipId,
     },
+    DetectClipTransients {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        sensitivity: vibez_core::onset::TransientSensitivity,
+    },
+    ClipTransientsDetected(ClipTransientDetection),
     /// Background BPM detection result. `bpm` is `None` when the
     /// detector refused to commit (silence, sparse pad, too short).
     ClipBpmDetected {

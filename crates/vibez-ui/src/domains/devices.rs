@@ -41,6 +41,7 @@ pub enum DevicesMsg {
     RemoveTrackInstrument(TrackId),
     SetInstrumentParam(TrackId, usize, f32),
     SelectDrumRackPad(TrackId, usize),
+    SelectDrumRackBank(TrackId, usize),
     ClearDrumRackPad(TrackId, usize),
     SetDrumPadParam {
         track_id: TrackId,
@@ -81,6 +82,7 @@ impl DevicesMsg {
             self,
             DevicesMsg::AuditionNote { .. }
                 | DevicesMsg::SelectDrumRackPad(..)
+                | DevicesMsg::SelectDrumRackBank(..)
                 | DevicesMsg::ShowContextMenu { .. }
                 | DevicesMsg::DismissContextMenu
                 | DevicesMsg::SetMenuCategory(_)
@@ -300,7 +302,7 @@ impl DevicesState {
                     track.sample_source = None;
                     track.sample_audio = None;
                     track.instrument_params = instrument_params.clone();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.drum_rack_pads = crate::state::default_drum_rack_pads();
                     track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
                     track.plugin_instrument_ref = None;
@@ -329,7 +331,7 @@ impl DevicesState {
                     track.sample_source = None;
                     track.sample_audio = None;
                     track.instrument_params.clear();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.drum_rack_pads = crate::state::default_drum_rack_pads();
                     track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
                     track.plugin_instrument_ref = None;
@@ -355,7 +357,9 @@ impl DevicesState {
             }
             DevicesMsg::SelectDrumRackPad(track_id, pad_index) => {
                 // Audition the pad like Ableton: hear it on click.
-                let pitch = 36 + pad_index.min(127) as u8;
+                let Some(pitch) = vibez_core::track::drum_rack_pad_pitch(pad_index) else {
+                    return action;
+                };
                 engine.send(EngineCommand::AuditionNote {
                     track_id,
                     pitch,
@@ -371,6 +375,18 @@ impl DevicesState {
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     let max_index = track.drum_rack_pads.len().saturating_sub(1);
                     track.selected_drum_pad = pad_index.min(max_index);
+                }
+                action.select_track = Some(track_id);
+            }
+            DevicesMsg::SelectDrumRackBank(track_id, bank_index) => {
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    let bank_index =
+                        bank_index.min(vibez_core::track::DRUM_RACK_BANK_COUNT.saturating_sub(1));
+                    let slot = track.selected_drum_pad % vibez_core::track::DRUM_RACK_BANK_SIZE;
+                    track.selected_drum_pad = bank_index
+                        .saturating_mul(vibez_core::track::DRUM_RACK_BANK_SIZE)
+                        .saturating_add(slot)
+                        .min(track.drum_rack_pads.len().saturating_sub(1));
                 }
                 action.select_track = Some(track_id);
             }
@@ -401,6 +417,14 @@ impl DevicesState {
                             DrumPadParam::Pan => pad.pan = value.clamp(-1.0, 1.0),
                             DrumPadParam::Start => pad.start = value.clamp(0.0, 1.0),
                             DrumPadParam::End => pad.end = value.clamp(0.0, 1.0),
+                            DrumPadParam::FadeIn => {
+                                pad.fade_in_ms =
+                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
+                            }
+                            DrumPadParam::FadeOut => {
+                                pad.fade_out_ms =
+                                    value.clamp(0.0, vibez_core::track::DRUM_PAD_MAX_FADE_MS);
+                            }
                             DrumPadParam::CoarseTune => {
                                 pad.coarse_tune = value.clamp(-24.0, 24.0).round() as i8;
                             }
@@ -678,6 +702,28 @@ mod tests {
     }
 
     #[test]
+    fn rack_bank_navigation_preserves_the_selected_slot_without_auditioning() {
+        let (mut tracks, track_id, _) = midi_track_with_effect();
+        tracks[0].drum_rack_pads = crate::state::default_drum_rack_pads();
+        tracks[0].selected_drum_pad = 3;
+        let mut devices = DevicesState::default();
+        let mut engine = RecordingEngine::default();
+
+        devices.update(
+            DevicesMsg::SelectDrumRackBank(track_id, 1),
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+
+        assert_eq!(tracks[0].selected_drum_pad, 19);
+        assert!(engine.0.is_empty());
+        assert!(!DevicesMsg::SelectDrumRackBank(track_id, 2).marks_dirty());
+    }
+
+    #[test]
     fn pad_param_edit_syncs_full_pad_state() {
         let (mut tracks, track_id, _) = midi_track_with_effect();
         tracks[0].drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
@@ -700,6 +746,31 @@ mod tests {
         assert!(matches!(
             engine.0[0],
             EngineCommand::SetDrumRackPadState { .. }
+        ));
+
+        devices.update(
+            DevicesMsg::SetDrumPadParam {
+                track_id,
+                pad_index: 0,
+                param: DrumPadParam::FadeOut,
+                value: 500.0,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut crate::state::new_master_track(),
+            &mut [],
+            44_100,
+        );
+        assert_eq!(
+            tracks[0].drum_rack_pads[0].fade_out_ms,
+            vibez_core::track::DRUM_PAD_MAX_FADE_MS
+        );
+        assert!(matches!(
+            engine.0[1],
+            EngineCommand::SetDrumRackPadState {
+                ref state,
+                ..
+            } if state.fade_out_ms == vibez_core::track::DRUM_PAD_MAX_FADE_MS
         ));
     }
 

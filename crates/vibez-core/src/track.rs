@@ -7,6 +7,11 @@ use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 use crate::perform::SwingOffset;
+use crate::transient::TransientMarkers;
+use crate::warp_marker::WarpMarkers;
+
+mod fades;
+pub use fades::{ClipFades, FadeCurve};
 
 /// Persisted hardware-input channel selection for an Audio Project Track.
 /// Channel indexes are zero-based internally and presented as one-based labels.
@@ -249,18 +254,72 @@ impl MediaSourceRef {
     }
 }
 
-/// Persisted state for a future native drum rack.
+/// The rack stores four banks while the UI exposes one 4x4 bank at a time.
+pub const DRUM_RACK_BANK_SIZE: usize = 16;
+pub const DRUM_RACK_BANK_COUNT: usize = 4;
+pub const DRUM_RACK_PAD_COUNT: usize = DRUM_RACK_BANK_SIZE * DRUM_RACK_BANK_COUNT;
+pub const DRUM_RACK_BASE_NOTE: u8 = 36;
+pub const DRUM_PAD_DEFAULT_FADE_MS: f32 = 3.0;
+pub const DRUM_PAD_MAX_FADE_MS: f32 = 250.0;
+
+fn default_drum_pad_fade_ms() -> f32 {
+    DRUM_PAD_DEFAULT_FADE_MS
+}
+
+pub const fn drum_rack_pad_pitch(pad_index: usize) -> Option<u8> {
+    if pad_index < DRUM_RACK_PAD_COUNT {
+        Some(DRUM_RACK_BASE_NOTE + pad_index as u8)
+    } else {
+        None
+    }
+}
+
+pub const fn drum_rack_pad_index(pitch: u8) -> Option<usize> {
+    if pitch >= DRUM_RACK_BASE_NOTE && pitch < DRUM_RACK_BASE_NOTE + DRUM_RACK_PAD_COUNT as u8 {
+        Some((pitch - DRUM_RACK_BASE_NOTE) as usize)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DrumPadState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub source: Option<MediaSourceRef>,
     pub gain: f32,
     pub pan: f32,
     pub start: f32,
     pub end: f32,
+    /// Linear attack fade at the playable pad boundary, in milliseconds.
+    #[serde(default = "default_drum_pad_fade_ms")]
+    pub fade_in_ms: f32,
+    /// Linear release fade used at the pad end, note-off and choke, in milliseconds.
+    #[serde(default = "default_drum_pad_fade_ms")]
+    pub fade_out_ms: f32,
     pub coarse_tune: i8,
     pub fine_tune: f32,
     pub one_shot: bool,
     pub choke_group: Option<u8>,
+}
+
+impl Default for DrumPadState {
+    fn default() -> Self {
+        Self {
+            name: None,
+            source: None,
+            gain: 1.0,
+            pan: 0.0,
+            start: 0.0,
+            end: 1.0,
+            fade_in_ms: DRUM_PAD_DEFAULT_FADE_MS,
+            fade_out_ms: DRUM_PAD_DEFAULT_FADE_MS,
+            coarse_tune: 0,
+            fine_tune: 0.0,
+            one_shot: true,
+            choke_group: None,
+        }
+    }
 }
 
 /// Persisted state for native instruments.
@@ -343,6 +402,35 @@ impl TrackInfo {
     }
 }
 
+/// Direction in which an Audio Clip traverses its resolved visible playback.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipPlaybackDirection {
+    #[default]
+    Forward,
+    Reverse,
+}
+
+impl ClipPlaybackDirection {
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Forward => Self::Reverse,
+            Self::Reverse => Self::Forward,
+        }
+    }
+
+    pub const fn map_clip_frame(self, clip_frame: u64, duration: u64) -> u64 {
+        match self {
+            Self::Forward => clip_frame,
+            Self::Reverse => duration.saturating_sub(1).saturating_sub(clip_frame),
+        }
+    }
+
+    pub const fn is_forward(value: &Self) -> bool {
+        matches!(value, Self::Forward)
+    }
+}
+
 /// Serializable clip metadata shared between engine and UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipInfo {
@@ -374,6 +462,18 @@ pub struct ClipInfo {
     /// Nondestructive per-Clip gain before the Project Track channel strip.
     #[serde(default, skip_serializing_if = "ClipGainDb::is_neutral")]
     pub gain_db: ClipGainDb,
+    /// Fade lengths at the visible Clip edges.
+    #[serde(default, skip_serializing_if = "ClipFades::is_neutral")]
+    pub fades: ClipFades,
+    /// Nondestructive traversal direction over the resolved Clip playback.
+    #[serde(default, skip_serializing_if = "ClipPlaybackDirection::is_forward")]
+    pub playback_direction: ClipPlaybackDirection,
+    /// Source-frame Transient Markers used by later Warp and Slice operations.
+    #[serde(default, skip_serializing_if = "TransientMarkers::is_neutral")]
+    pub transient_markers: TransientMarkers,
+    /// Piecewise source-to-Clip timing map. Empty means identity timing.
+    #[serde(default, skip_serializing_if = "WarpMarkers::is_neutral")]
+    pub warp_markers: WarpMarkers,
     /// Duration-preserving pitch offset in semitones.
     #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
     pub transpose: ClipTranspose,
@@ -512,6 +612,10 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -560,6 +664,16 @@ mod tests {
         clip.file_path = Some(PathBuf::from("/audio/vocal.wav"));
         clip.original_bpm = Some(174.0);
         clip.gain_db = ClipGainDb::new(-3.5).unwrap();
+        clip.fades = ClipFades::new(4_410, 8_820, clip.duration).linked_fade_out(
+            8_820,
+            ClipId::new(),
+            clip.duration,
+        );
+        clip.playback_direction = ClipPlaybackDirection::Reverse;
+        clip.transient_markers.add_authored(12_345);
+        clip.transient_markers.replace_suggestions([4_410, 22_050]);
+        clip.warp_markers
+            .add(22_050, 30_000, clip.source_offset, 89_200, clip.duration);
         clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
@@ -574,6 +688,10 @@ mod tests {
         assert_eq!(clip.source, deserialized.source);
         assert_eq!(clip.original_bpm, deserialized.original_bpm);
         assert_eq!(clip.gain_db, deserialized.gain_db);
+        assert_eq!(clip.fades, deserialized.fades);
+        assert_eq!(clip.playback_direction, deserialized.playback_direction);
+        assert_eq!(clip.transient_markers, deserialized.transient_markers);
+        assert_eq!(clip.warp_markers, deserialized.warp_markers);
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
@@ -606,7 +724,186 @@ mod tests {
         assert_eq!(clip.file_path, Some(PathBuf::from("legacy.wav")));
         assert!(clip.source.is_none());
         assert_eq!(clip.gain_db, ClipGainDb::default());
+        assert_eq!(clip.fades, ClipFades::default());
+        assert_eq!(clip.playback_direction, ClipPlaybackDirection::Forward);
+        assert!(clip.transient_markers.is_empty());
+        assert!(clip.warp_markers.is_empty());
         assert_eq!(clip.transpose, ClipTranspose::default());
         assert_eq!(clip.start_marker, None);
+    }
+
+    #[test]
+    fn clip_fades_enforce_duration_and_render_the_visible_edges() {
+        let fades = ClipFades::new(4, 4, 8);
+        assert_eq!(fades.gain_at(0, 8), 0.0);
+        assert_eq!(fades.gain_at(2, 8), 0.5);
+        assert_eq!(fades.gain_at(3, 8), 0.75);
+        assert_eq!(fades.gain_at(4, 8), 0.75);
+        assert_eq!(fades.gain_at(7, 8), 0.0);
+
+        let clamped = ClipFades::new(7, 7, 10);
+        assert_eq!(clamped.fade_in_frames(), 7);
+        assert_eq!(clamped.fade_out_frames(), 3);
+    }
+
+    #[test]
+    fn fade_curves_are_bounded_reciprocal_shapes_with_linear_legacy_defaults() {
+        let late = FadeCurve::new(-100);
+        let linear = FadeCurve::new(0);
+        let early = FadeCurve::new(100);
+
+        assert_eq!(late.percent(), -100);
+        assert_eq!(FadeCurve::new(-500).percent(), -100);
+        assert_eq!(FadeCurve::new(500).percent(), 100);
+        assert!((late.gain(0.5) - 0.0625).abs() < 1e-6);
+        assert!((linear.gain(0.5) - 0.5).abs() < 1e-6);
+        assert!((early.gain(0.5) - 0.840_896_4).abs() < 1e-6);
+
+        let legacy: ClipFades =
+            serde_json::from_str(r#"{"fade_in_frames":4,"fade_out_frames":2}"#).unwrap();
+        assert_eq!(legacy.fade_in_curve(), FadeCurve::default());
+        assert_eq!(legacy.fade_out_curve(), FadeCurve::default());
+
+        let shaped = ClipFades::new(4, 2, 8)
+            .with_fade_in_curve(early)
+            .with_fade_out_curve(late);
+        let reopened: ClipFades =
+            serde_json::from_str(&serde_json::to_string(&shaped).unwrap()).unwrap();
+        assert_eq!(reopened, shaped);
+    }
+
+    #[test]
+    fn persisted_fades_clamp_wide_curve_values_and_normalize_empty_edges() {
+        let curve: FadeCurve = serde_json::from_str("500").unwrap();
+        assert_eq!(curve.percent(), FadeCurve::MAX);
+
+        let fades: ClipFades = serde_json::from_str(
+            r#"{"fade_in_frames":0,"fade_out_frames":0,"fade_in_curve":50,"fade_out_curve":-50}"#,
+        )
+        .unwrap();
+        assert_eq!(fades.fade_in_curve(), FadeCurve::default());
+        assert_eq!(fades.fade_out_curve(), FadeCurve::default());
+        assert!(ClipFades::is_neutral(&fades));
+    }
+
+    #[test]
+    fn independent_fade_curves_change_audio_and_survive_length_edits() {
+        let fades = ClipFades::new(4, 4, 8)
+            .with_fade_in_curve(FadeCurve::new(100))
+            .with_fade_out_curve(FadeCurve::new(-100));
+
+        assert!((fades.gain_at(2, 8) - 0.840_896_4).abs() < 1e-6);
+        assert!((fades.gain_at(5, 8) - 0.0625).abs() < 1e-6);
+        assert_eq!(fades.with_fade_in(3, 8).fade_in_curve().percent(), 100);
+        assert_eq!(fades.with_fade_out(0, 8).fade_out_curve().percent(), 0);
+    }
+
+    #[test]
+    fn neutral_clip_fades_do_not_change_audio_gain() {
+        let fades = ClipFades::default();
+        for frame in 0..8 {
+            assert_eq!(fades.gain_at(frame, 8), 1.0);
+        }
+    }
+
+    #[test]
+    fn clip_fragments_keep_only_the_fades_at_edges_they_contain() {
+        let fades = ClipFades::new(10, 20, 100);
+        assert_eq!(fades.for_fragment(100, 0, 40), ClipFades::new(10, 0, 40));
+        assert_eq!(fades.for_fragment(100, 40, 60), ClipFades::new(0, 20, 60));
+        assert_eq!(fades.for_fragment(100, 20, 40), ClipFades::default());
+    }
+
+    #[test]
+    fn linked_crossfade_edges_form_an_equal_power_pair() {
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let frames = 16;
+        let outgoing = ClipFades::default().linked_fade_out(frames, incoming_id, frames);
+        let incoming = ClipFades::default().linked_fade_in(frames, outgoing_id, frames);
+
+        for frame in 0..frames {
+            let power =
+                outgoing.gain_at(frame, frames).powi(2) + incoming.gain_at(frame, frames).powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "frame {frame}: {power}");
+        }
+    }
+
+    #[test]
+    fn shaped_crossfade_edges_remain_a_complementary_power_pair() {
+        for curve in [FadeCurve::new(-100), FadeCurve::new(0), FadeCurve::new(100)] {
+            for step in 0..=20 {
+                let progress = step as f32 / 20.0;
+                let (outgoing, incoming) = curve.crossfade_gains(progress);
+                assert!((outgoing * outgoing + incoming * incoming - 1.0).abs() < 1e-5);
+            }
+        }
+
+        let outgoing_id = ClipId::new();
+        let incoming_id = ClipId::new();
+        let curve = FadeCurve::new(65);
+        let outgoing = ClipFades::default()
+            .linked_fade_out(100, incoming_id, 100)
+            .with_linked_fade_out_curve(curve);
+        let incoming = ClipFades::default()
+            .linked_fade_in(100, outgoing_id, 100)
+            .with_linked_fade_in_curve(curve);
+        assert_eq!(outgoing.fade_out_curve(), curve);
+        assert_eq!(incoming.fade_in_curve(), curve);
+        for frame in 0..100 {
+            let power = outgoing.gain_at(frame, 100).powi(2) + incoming.gain_at(frame, 100).powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "frame {frame}: {power}");
+        }
+    }
+
+    #[test]
+    fn unlinking_a_shaped_crossfade_keeps_its_length_but_returns_to_linear() {
+        let peer = ClipId::new();
+        let linked = ClipFades::default()
+            .linked_fade_out(50, peer, 100)
+            .with_linked_fade_out_curve(FadeCurve::new(80));
+        let unlinked = linked.unlink_fade_out();
+
+        assert_eq!(unlinked.fade_out_frames(), 50);
+        assert_eq!(unlinked.fade_out_curve(), FadeCurve::default());
+        assert!(unlinked.crossfade_out_to().is_none());
+
+        let reopened: ClipFades =
+            serde_json::from_str(&serde_json::to_string(&unlinked).unwrap()).unwrap();
+        let relinked = reopened.linked_fade_out(50, peer, 100);
+        assert_eq!(relinked.fade_out_curve(), FadeCurve::new(80));
+        assert_eq!(relinked.crossfade_out_to(), Some(peer));
+    }
+
+    #[test]
+    fn drum_rack_maps_four_complete_pad_banks_above_c1() {
+        assert_eq!(DRUM_RACK_PAD_COUNT, 64);
+        assert_eq!(DRUM_RACK_BANK_COUNT, 4);
+        assert_eq!(drum_rack_pad_pitch(0), Some(36));
+        assert_eq!(drum_rack_pad_pitch(16), Some(52));
+        assert_eq!(drum_rack_pad_pitch(63), Some(99));
+        assert_eq!(drum_rack_pad_pitch(64), None);
+        assert_eq!(drum_rack_pad_index(99), Some(63));
+    }
+
+    #[test]
+    fn legacy_drum_pad_state_gets_click_safe_fades() {
+        let json = r#"{
+            "name": "Kick",
+            "source": null,
+            "gain": 1.0,
+            "pan": 0.0,
+            "start": 0.0,
+            "end": 1.0,
+            "coarse_tune": 0,
+            "fine_tune": 0.0,
+            "one_shot": true,
+            "choke_group": null
+        }"#;
+
+        let pad: DrumPadState = serde_json::from_str(json).unwrap();
+
+        assert_eq!(pad.fade_in_ms, DRUM_PAD_DEFAULT_FADE_MS);
+        assert_eq!(pad.fade_out_ms, DRUM_PAD_DEFAULT_FADE_MS);
     }
 }

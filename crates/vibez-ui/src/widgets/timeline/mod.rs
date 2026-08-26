@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
 use vibez_core::clip_timeline::BeatClipTimeline;
 use vibez_core::id::ClipId;
+use vibez_core::track::FadeCurve;
 
 // ── Lightweight data types for rendering ──
 
@@ -21,11 +23,26 @@ pub struct TimelineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    pub fade_in_frames: u64,
+    pub fade_out_frames: u64,
+    pub fade_in_curve: FadeCurve,
+    pub fade_out_curve: FadeCurve,
+    pub crossfade_in_from: Option<ClipId>,
+    pub crossfade_out_to: Option<ClipId>,
     /// True when this clip is warped but its `warped_to_bpm` no longer
     /// matches the current project BPM. The canvas draws a diagonal
     /// stripe overlay so the user can see at a glance that a re-warp
     /// is needed.
     pub warp_stale: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TimelineCrossfade {
+    pub outgoing_id: ClipId,
+    pub incoming_id: ClipId,
+    pub overlap_start: u64,
+    pub overlap_end: u64,
+    pub curve: FadeCurve,
 }
 
 /// Lightweight copy of a note clip for timeline rendering.
@@ -64,6 +81,8 @@ struct PeakCacheKey {
     loop_enabled: bool,
     loop_start: u64,
     loop_end: u64,
+    playback_direction: vibez_core::track::ClipPlaybackDirection,
+    warp_map: u64,
 }
 
 struct PeakCacheEntry {
@@ -76,6 +95,8 @@ thread_local! {
 }
 
 pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
+    let mut warp_hasher = DefaultHasher::new();
+    clip.warp_markers.hash(&mut warp_hasher);
     let key = PeakCacheKey {
         audio: Arc::as_ptr(&clip.audio) as usize,
         source_offset: clip.source_offset,
@@ -84,6 +105,8 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         loop_enabled: clip.loop_enabled,
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
+        playback_direction: clip.playback_direction,
+        warp_map: warp_hasher.finish(),
     };
     if let Some(peaks) = PEAK_CACHE.with(|cache| {
         cache.borrow().get(&key).and_then(|entry| {
@@ -101,6 +124,18 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
     let loop_start = timeline.loop_start as usize;
     let loop_end = timeline.loop_end as usize;
     let loop_len = if looping { loop_end - loop_start } else { 0 };
+    let map_source = |timeline_frame: u64| {
+        if clip.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        clip.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(clip.source_offset) as f64,
+            clip.source_offset,
+            clip.warp_timeline_end(),
+        )
+    };
+    let mapped_loop_start = map_source(timeline.loop_start).floor() as usize;
+    let mapped_loop_end = map_source(timeline.loop_end).ceil() as usize;
     let channels = clip.audio.num_channels();
     if channels == 0 {
         return Arc::new(vec![(0.0, 0.0); num_peaks]);
@@ -119,48 +154,49 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
 
     // Cache full loop region peak for spans >= loop_len
     let full_loop_peak = if looping {
-        Some(peak_for_range(loop_start, loop_end))
+        Some(peak_for_range(mapped_loop_start, mapped_loop_end))
     } else {
         None
     };
 
-    let peaks = Arc::new(
-        (0..num_peaks)
-            .map(|i| {
-                let cf_start = i * clip.duration as usize / num_peaks;
-                let cf_end = (i + 1) * clip.duration as usize / num_peaks;
-                let span = cf_end.saturating_sub(cf_start).max(1);
+    let mut peaks: Vec<_> = (0..num_peaks)
+        .map(|i| {
+            let cf_start = i * clip.duration as usize / num_peaks;
+            let cf_end = (i + 1) * clip.duration as usize / num_peaks;
+            let span = cf_end.saturating_sub(cf_start).max(1);
 
-                if !looping {
-                    let src_start = timeline.source_at(cf_start as u64) as usize;
-                    let source_end =
-                        clip.source_offset
-                            .saturating_add(clip.duration)
-                            .min(clip.audio.num_frames() as u64) as usize;
-                    if src_start >= source_end {
-                        (0.0, 0.0)
-                    } else {
-                        let src_end = (timeline.source_at(cf_end as u64) as usize).min(source_end);
-                        peak_for_range(src_start, src_end)
-                    }
-                } else if span >= loop_len {
-                    full_loop_peak.unwrap()
+            if !looping {
+                let src_start = map_source(timeline.source_at(cf_start as u64)).floor() as usize;
+                let source_end = clip.source_end() as usize;
+                if src_start >= source_end {
+                    (0.0, 0.0)
                 } else {
-                    let src_start = timeline.source_at(cf_start as u64) as usize;
-                    let src_end = timeline.source_at(cf_end as u64) as usize;
-
-                    if src_start <= src_end {
-                        peak_for_range(src_start, src_end.max(src_start + 1))
-                    } else {
-                        // Wraps around loop boundary
-                        let (mn1, mx1) = peak_for_range(src_start, loop_end);
-                        let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
-                        (mn1.min(mn2), mx1.max(mx2))
-                    }
+                    let src_end = (map_source(timeline.source_at(cf_end as u64)).ceil() as usize)
+                        .min(source_end);
+                    peak_for_range(src_start, src_end)
                 }
-            })
-            .collect(),
-    );
+            } else if span >= loop_len {
+                full_loop_peak.unwrap()
+            } else {
+                let src_start = map_source(timeline.source_at(cf_start as u64)).floor() as usize;
+                let src_end = map_source(timeline.source_at(cf_end as u64)).ceil() as usize;
+
+                if src_start <= src_end {
+                    peak_for_range(src_start, src_end.max(src_start + 1))
+                } else {
+                    // Wraps around loop boundary
+                    let (mn1, mx1) = peak_for_range(src_start, mapped_loop_end);
+                    let (mn2, mx2) =
+                        peak_for_range(mapped_loop_start, src_end.max(mapped_loop_start + 1));
+                    (mn1.min(mn2), mx1.max(mx2))
+                }
+            }
+        })
+        .collect();
+    if clip.playback_direction == vibez_core::track::ClipPlaybackDirection::Reverse {
+        peaks.reverse();
+    }
+    let peaks = Arc::new(peaks);
     PEAK_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.len() >= 256 {
@@ -189,15 +225,20 @@ pub(super) const RESIZE_EDGE_PX: f32 = 8.0;
 pub(super) const CLIP_TITLE_HEIGHT: f32 = 18.0;
 /// Top padding of clips within the track canvas.
 pub(super) const CLIP_Y: f32 = 4.0;
+pub(super) const FADE_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 6.0;
+pub(super) const FADE_HANDLE_HIT_RADIUS: f32 = 7.0;
 
+mod clip_drag;
 mod clips;
 mod clips_draw;
 #[cfg(test)]
 mod clips_tests;
+mod fade_drag;
 pub mod marquee;
 mod minimap;
 mod ruler;
 
+pub use clip_drag::ClipDragAction;
 pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan, TRACK_ROW_HEIGHT};
 pub use minimap::*;
@@ -210,6 +251,7 @@ mod performance_tests {
     use std::sync::Arc;
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::id::ClipId;
+    use vibez_core::track::ClipPlaybackDirection;
 
     #[test]
     fn duplicated_long_clips_reuse_cached_waveform_peaks() {
@@ -231,6 +273,10 @@ mod performance_tests {
             loop_start: 0,
             loop_end: 0,
             gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -244,5 +290,49 @@ mod performance_tests {
             assert_eq!(duplicate_peaks.len(), 1000);
             assert!(Arc::ptr_eq(&first, &duplicate_peaks));
         }
+    }
+
+    #[test]
+    fn reverse_uses_a_distinct_cache_entry_and_mirrors_waveform_peaks() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![[vec![0.25; 100], vec![0.75; 100]].concat()],
+            sample_rate: 100,
+        });
+        let mut clip = UiClip {
+            id: ClipId::new(),
+            name: "Two halves.wav".into(),
+            audio,
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 200,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 200,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: ClipPlaybackDirection::Forward,
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        };
+
+        let forward = compute_clip_peaks(&clip);
+        clip.playback_direction = ClipPlaybackDirection::Reverse;
+        let reverse = compute_clip_peaks(&clip);
+
+        assert_eq!(forward.as_slice(), &[(0.0, 0.25), (0.0, 0.75)]);
+        assert_eq!(reverse.as_slice(), &[(0.0, 0.75), (0.0, 0.25)]);
+        assert!(!Arc::ptr_eq(&forward, &reverse));
+
+        clip.playback_direction = ClipPlaybackDirection::Forward;
+        assert!(clip.warp_markers.add(50, 100, 0, 200, 200));
+        let warped = compute_clip_peaks(&clip);
+        assert!(!Arc::ptr_eq(&forward, &warped));
     }
 }

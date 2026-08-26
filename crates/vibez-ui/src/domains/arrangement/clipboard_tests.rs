@@ -55,6 +55,10 @@ fn audio_clip(position: u64) -> UiClip {
         loop_start: 0,
         loop_end: 0,
         gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -121,8 +125,10 @@ fn audio_cross_timeline_paste_remints_identity_and_anchors_at_playhead() {
     let project = project_tracks(&[TrackKind::Audio, TrackKind::Audio]);
     let source_track = project.tracks[0].id;
     let destination_track = project.tracks[1].id;
-    let source = audio_clip(600);
+    let mut source = audio_clip(600);
     let source_id = source.id;
+    source.fades =
+        vibez_core::track::ClipFades::default().linked_fade_out(50, ClipId::new(), source.duration);
     let media = Arc::clone(&source.audio);
     let mut source_editor = TimelineEditorState::default();
     Arc::make_mut(&mut source_editor.timeline)
@@ -158,6 +164,8 @@ fn audio_cross_timeline_paste_remints_identity_and_anchors_at_playhead() {
     assert_ne!(pasted.id, source_id);
     assert_eq!(pasted.position, 9_000);
     assert!(Arc::ptr_eq(&pasted.audio, &media));
+    assert_eq!(pasted.fades.fade_out_frames(), 50);
+    assert!(pasted.fades.crossfade_out_to().is_none());
     assert_eq!(
         source_editor.timeline.get(source_track).unwrap().clips[0].id,
         source_id

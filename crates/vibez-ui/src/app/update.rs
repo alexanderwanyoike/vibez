@@ -91,9 +91,7 @@ impl App {
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         let deferred_arrangement_project_edit = matches!(
             &message,
-            Message::Arrangement(msg)
-                if msg.is_clipboard_project_edit()
-                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. })
+            Message::Arrangement(msg) if msg.defers_project_edit()
         );
         let should_mark_dirty = matches!(
             &message,
@@ -209,10 +207,176 @@ impl App {
                 };
                 self.apply_devices_action(action);
             }
+            Message::SetDrumRackSliceMarkers(markers) => {
+                if let Some(dialog) = self.state.view.drum_rack_slice_dialog.as_mut() {
+                    dialog.markers = markers;
+                }
+            }
+            Message::CancelDrumRackSlice => {
+                self.state.view.drum_rack_slice_dialog = None;
+            }
+            Message::OpenTransientAnalysisDialog {
+                location,
+                track_id,
+                clip_id,
+            } => {
+                let clip_exists = self
+                    .timeline_content_at(location, track_id)
+                    .is_some_and(|content| content.clips.iter().any(|clip| clip.id == clip_id));
+                if clip_exists {
+                    self.state.view.transient_analysis_dialog =
+                        Some(crate::state::TransientAnalysisDialog {
+                            location,
+                            track_id,
+                            clip_id,
+                            sensitivity: vibez_core::onset::TransientSensitivity::DEFAULT,
+                            sensitivity_input: vibez_core::onset::TransientSensitivity::DEFAULT
+                                .percent()
+                                .to_string(),
+                        });
+                } else {
+                    self.state.status_text = "The Audio Clip is no longer available".into();
+                }
+            }
+            Message::SetTransientAnalysisSensitivity(percent) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.set_sensitivity(percent);
+                }
+            }
+            Message::TransientAnalysisSensitivityInputChanged(input) => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.edit_sensitivity_input(input);
+                }
+            }
+            Message::SubmitTransientAnalysisSensitivity => {
+                if let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() {
+                    dialog.normalize_sensitivity_input();
+                }
+            }
+            Message::CancelTransientAnalysis => {
+                self.state.view.transient_analysis_dialog = None;
+            }
+            Message::ConfirmTransientAnalysis => {
+                let Some(dialog) = self.state.view.transient_analysis_dialog.as_mut() else {
+                    return Task::none();
+                };
+                if !dialog.commit_sensitivity_input() {
+                    self.state.status_text = "Enter a sensitivity from 0 to 100%".into();
+                    return Task::none();
+                }
+                let dialog = self
+                    .state
+                    .view
+                    .transient_analysis_dialog
+                    .take()
+                    .expect("validated dialog remains open");
+                return self.dispatch_detect_clip_transients(
+                    dialog.location,
+                    dialog.track_id,
+                    dialog.clip_id,
+                    dialog.sensitivity,
+                    true,
+                );
+            }
+            Message::ConfirmDrumRackSlice => {
+                let Some(dialog) = self.state.view.drum_rack_slice_dialog.take() else {
+                    return Task::none();
+                };
+                let Some(clip) = self
+                    .timeline_content_at(dialog.location, dialog.track_id)
+                    .and_then(|content| content.clips.iter().find(|clip| clip.id == dialog.clip_id))
+                    .cloned()
+                else {
+                    self.state.status_text = "The Audio Clip is no longer available".into();
+                    return Task::none();
+                };
+                let slice_count =
+                    crate::domains::arrangement::slice_region_count(&clip, dialog.markers);
+                if slice_count == 0 || slice_count > vibez_core::track::DRUM_RACK_PAD_COUNT {
+                    self.state.view.drum_rack_slice_dialog = Some(dialog);
+                    self.state.status_text = if slice_count == 0 {
+                        "The selected marker type has no interior slices".into()
+                    } else {
+                        format!(
+                            "{slice_count} slices exceed the {}-pad Drum Rack",
+                            vibez_core::track::DRUM_RACK_PAD_COUNT,
+                        )
+                    };
+                    return Task::none();
+                }
+                self.state.status_text = "Preparing Drum Rack slices…".into();
+                let expected_clip = Box::new(clip.clone());
+                return Task::perform(prepare_drum_rack_audio_async(clip), move |result| {
+                    Message::AudioClipDrumRackPrepared {
+                        location: dialog.location,
+                        track_id: dialog.track_id,
+                        clip_id: dialog.clip_id,
+                        markers: dialog.markers,
+                        expected_clip: expected_clip.clone(),
+                        result,
+                    }
+                });
+            }
             Message::Arrangement(msg) => {
-                let deferred_snapshot = (msg.is_clipboard_project_edit()
-                    || matches!(msg, ArrangementMsg::SubmitAudioClipInspectorField { .. }))
-                .then(|| self.take_snapshot());
+                if matches!(msg, ArrangementMsg::DeleteSelectedClip) {
+                    let location = self.active_timeline_location();
+                    let deleted: std::collections::HashSet<_> = self
+                        .state
+                        .active_timeline_editor()
+                        .selected_clips
+                        .iter()
+                        .filter_map(|selection| match selection {
+                            crate::state::ArrangementSelection::AudioClip { track_id, clip_id } => {
+                                Some((*track_id, *clip_id))
+                            }
+                            crate::state::ArrangementSelection::NoteClip { .. } => None,
+                        })
+                        .collect();
+                    self.state.view.dismiss_clip_dialogs_for(location, &deleted);
+                }
+                if let ArrangementMsg::RequestSliceAudioClipToDrumRack { track_id, clip_id } = &msg
+                {
+                    let (track_id, clip_id) = (*track_id, *clip_id);
+                    let location = self.active_timeline_location();
+                    let Some(clip) = self
+                        .timeline_content_at(location, track_id)
+                        .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                        .cloned()
+                    else {
+                        return Task::none();
+                    };
+                    if clip.source.is_none() {
+                        self.state.status_text =
+                            "Slice to Drum Rack needs available Source Media".into();
+                        return Task::none();
+                    }
+                    let transient_count = crate::domains::arrangement::slice_region_count(
+                        &clip,
+                        crate::domains::arrangement::AudioSliceMarkers::Transients,
+                    );
+                    let warp_count = crate::domains::arrangement::slice_region_count(
+                        &clip,
+                        crate::domains::arrangement::AudioSliceMarkers::Warp,
+                    );
+                    if transient_count == 0 && warp_count == 0 {
+                        self.state.status_text =
+                            "Add an interior Transient or Warp marker before slicing".into();
+                        return Task::none();
+                    }
+                    self.state.view.drum_rack_slice_dialog =
+                        Some(crate::state::DrumRackSliceDialog {
+                            location,
+                            track_id,
+                            clip_id,
+                            markers: if transient_count > 0 {
+                                crate::domains::arrangement::AudioSliceMarkers::Transients
+                            } else {
+                                crate::domains::arrangement::AudioSliceMarkers::Warp
+                            },
+                        });
+                    return Task::none();
+                }
+                let deferred_snapshot = msg.defers_project_edit().then(|| self.take_snapshot());
                 let playhead_beats = self.focused_editor_playhead_beats();
                 let samples_per_beat = if self.state.transport.bpm > 0.0 {
                     60.0 * self.state.transport.sample_rate as f64 / self.state.transport.bpm
@@ -243,6 +407,40 @@ impl App {
                 return self
                     .apply_arrangement_action_in_transaction(action, owns_project_transaction);
             }
+            Message::AudioClipDrumRackPrepared {
+                location,
+                track_id,
+                clip_id,
+                markers,
+                expected_clip,
+                result,
+            } => match result {
+                Ok(prepared) => {
+                    let current = self
+                        .timeline_content_at(location, track_id)
+                        .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id));
+                    if self.active_timeline_location() != location
+                        || !current
+                            .is_some_and(|clip| clip.has_same_audible_geometry(&expected_clip))
+                    {
+                        self.state.status_text =
+                            "Drum Rack slices cancelled because the Audio Clip changed".into();
+                        return Task::none();
+                    }
+                    return self.update(Message::Arrangement(
+                        ArrangementMsg::SliceAudioClipToDrumRack {
+                            track_id,
+                            clip_id,
+                            markers,
+                            source: prepared.source,
+                            audio: prepared.audio,
+                        },
+                    ));
+                }
+                Err(error) => {
+                    self.state.status_text = format!("Slice to Drum Rack failed: {error}");
+                }
+            },
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
                     snap_grid: self
@@ -630,6 +828,23 @@ impl App {
                 clip_id,
             } => {
                 return self.dispatch_detect_clip_bpm(location, track_id, clip_id);
+            }
+            Message::DetectClipTransients {
+                location,
+                track_id,
+                clip_id,
+                sensitivity,
+            } => {
+                return self.dispatch_detect_clip_transients(
+                    location,
+                    track_id,
+                    clip_id,
+                    sensitivity,
+                    true,
+                );
+            }
+            Message::ClipTransientsDetected(completion) => {
+                return self.finish_detect_clip_transients(completion, undo_gesture);
             }
             Message::ClipBpmDetected {
                 location,

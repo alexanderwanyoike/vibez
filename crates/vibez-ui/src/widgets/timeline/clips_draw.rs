@@ -7,6 +7,7 @@ use iced::{Color, Rectangle, Renderer};
 use crate::theme;
 use crate::timeline_geometry::TimelineGeometry;
 
+use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::*;
 
 fn fit_clip_title(name: &str, clip_width: f32, loop_icon_visible: bool) -> Option<String> {
@@ -261,6 +262,59 @@ impl TrackClipCanvas {
                 // Selection highlight
                 let is_selected =
                     !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
+                if !is_recording_preview
+                    && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
+                {
+                    let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
+                    let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
+                    let bottom = clip_y + clip_h - 2.0;
+                    let envelope = canvas::Path::new(|builder| {
+                        builder.move_to(iced::Point::new(clip_x, bottom));
+                        for step in 1..=12 {
+                            let progress = step as f32 / 12.0;
+                            let x = clip_x + (fade_in_x - clip_x) * progress;
+                            let y = bottom
+                                - (bottom - top)
+                                    * clip
+                                        .fade_in_curve
+                                        .gain_for(progress, clip.crossfade_in_from.is_some());
+                            builder.line_to(iced::Point::new(x, y));
+                        }
+                        builder.line_to(iced::Point::new(fade_out_x, top));
+                        for step in 1..=12 {
+                            let progress = step as f32 / 12.0;
+                            let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
+                            let gain = clip
+                                .fade_out_curve
+                                .fade_out_gain(progress, clip.crossfade_out_to.is_some());
+                            let y = bottom - (bottom - top) * gain;
+                            builder.line_to(iced::Point::new(x, y));
+                        }
+                    });
+                    frame.stroke(
+                        &envelope,
+                        canvas::Stroke::default()
+                            .with_color(theme::with_alpha(theme::text(), 0.72))
+                            .with_width(1.25),
+                    );
+                    if is_selected {
+                        for x in [fade_in_x, fade_out_x] {
+                            frame.fill_rectangle(
+                                iced::Point::new(x - 2.5, FADE_HANDLE_Y - 2.5),
+                                iced::Size::new(5.0, 5.0),
+                                theme::accent(),
+                            );
+                        }
+                        for edge in [
+                            crate::state::AudioClipFadeEdge::In,
+                            crate::state::AudioClipFadeEdge::Out,
+                        ] {
+                            if let Some(handle) = fade_curve_handle(clip_x, clip_w, h, clip, edge) {
+                                frame.fill(&canvas::Path::circle(handle, 3.25), theme::accent());
+                            }
+                        }
+                    }
+                }
                 let border_color = if is_selected {
                     theme::accent()
                 } else {
@@ -362,6 +416,34 @@ impl TrackClipCanvas {
                         offset += stripe_spacing;
                     }
                 }
+            }
+        }
+
+        // Keep one visible marker for every linked relationship. Selecting
+        // either Clip reveals the shared curve handle at its actual height.
+        for (outgoing_id, incoming_id, handle) in self.crossfade_curve_handles(h) {
+            let marker = canvas::Path::new(|builder| {
+                builder.move_to(iced::Point::new(handle.x - 3.0, CLIP_Y + 4.0));
+                builder.line_to(iced::Point::new(handle.x + 3.0, CLIP_Y + 10.0));
+                builder.move_to(iced::Point::new(handle.x + 3.0, CLIP_Y + 4.0));
+                builder.line_to(iced::Point::new(handle.x - 3.0, CLIP_Y + 10.0));
+            });
+            frame.stroke(
+                &marker,
+                canvas::Stroke::default()
+                    .with_color(theme::accent())
+                    .with_width(1.4),
+            );
+            if self.selected_clips.contains(&outgoing_id)
+                || self.selected_clips.contains(&incoming_id)
+            {
+                frame.fill(&canvas::Path::circle(handle, 4.0), theme::accent());
+                frame.stroke(
+                    &canvas::Path::circle(handle, 4.0),
+                    canvas::Stroke::default()
+                        .with_color(theme::text())
+                        .with_width(1.0),
+                );
             }
         }
 

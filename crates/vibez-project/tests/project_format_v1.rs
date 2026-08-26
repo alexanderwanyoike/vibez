@@ -4,7 +4,11 @@ use std::process::Command;
 use std::time::Duration;
 
 use vibez_core::id::{ClipId, SectionId};
-use vibez_core::track::{ClipGainDb, ClipInfo, ClipTranspose, MediaSourceRef, TrackInfo};
+use vibez_core::midi::{InstrumentKind, MidiNote, NoteClipInfo, TrackKind};
+use vibez_core::track::{
+    ClipFades, ClipGainDb, ClipInfo, ClipTranspose, DrumPadState, InstrumentStateInfo,
+    MediaSourceRef, TrackInfo,
+};
 use vibez_project::project_format_v1::{
     detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
     stage_remote_file, strip_staged_sources, sweep_staging_root, ProjectContainer,
@@ -172,6 +176,10 @@ fn project_with_source(source: MediaSourceRef) -> Project {
                 loop_start: 0,
                 loop_end: 128,
                 gain_db: ClipGainDb::new(-3.0).unwrap(),
+                fades: ClipFades::new(16, 24, 128),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: ClipTranspose::new(7),
                 original_bpm: Some(120.0),
                 warped: false,
@@ -208,6 +216,10 @@ fn arrange_and_section_share_one_embedded_media_row() {
         loop_start: 0,
         loop_end: 128,
         gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -266,6 +278,99 @@ fn arrange_and_section_share_one_embedded_media_row() {
 }
 
 #[test]
+fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("sliced-loop.wav");
+    let destination = directory.path().join("sliced-rack.vzp");
+    fs::write(&source_path, vec![23_u8; 4_096]).unwrap();
+    let source = || MediaSourceRef::LocalFile {
+        path: source_path.clone(),
+    };
+    let pad = |name: &str, start, end| DrumPadState {
+        name: Some(name.into()),
+        source: Some(source()),
+        gain: 1.0,
+        pan: 0.0,
+        start,
+        end,
+        fade_in_ms: 4.0,
+        fade_out_ms: 7.0,
+        coarse_tune: 0,
+        fine_tune: 0.0,
+        one_shot: true,
+        choke_group: None,
+    };
+    let mut track = TrackInfo::new("Slices 1");
+    track.kind = TrackKind::Midi;
+    track.instrument = Some(InstrumentKind::DrumRack);
+    track.native_instrument = Some(InstrumentStateInfo::DrumRack {
+        pads: vec![pad("Loop Slice 1", 0.0, 0.4), pad("Loop Slice 2", 0.4, 1.0)],
+    });
+    let note_clip = NoteClipInfo {
+        id: ClipId::new(),
+        track_id: track.id,
+        name: "Loop Slices".into(),
+        position_beats: 4.0,
+        duration_beats: 8.0,
+        notes: vec![
+            MidiNote {
+                pitch: 36,
+                velocity: 127,
+                start_beat: 0.0,
+                duration_beats: 3.2,
+            },
+            MidiNote {
+                pitch: 37,
+                velocity: 127,
+                start_beat: 3.2,
+                duration_beats: 4.8,
+            },
+        ],
+        start_marker_beats: Some(0.0),
+        loop_enabled: false,
+        loop_start_beats: 0.0,
+        loop_end_beats: 8.0,
+        groove_grid: Default::default(),
+    };
+    let project = Project {
+        tracks: vec![track],
+        arrange: TimelineInfo {
+            note_clips: vec![note_clip],
+            ..TimelineInfo::default()
+        },
+        ..Project::default()
+    };
+
+    save_project_v1(&destination, None, project).unwrap();
+    let loaded = ProjectContainer::open(&destination)
+        .unwrap()
+        .load_document()
+        .unwrap();
+
+    assert_eq!(loaded.project_media.len(), 1);
+    assert_eq!(loaded.project.arrange.note_clips[0].notes.len(), 2);
+    let InstrumentStateInfo::DrumRack { pads } =
+        loaded.project.tracks[0].native_instrument.as_ref().unwrap()
+    else {
+        panic!("Drum Rack state");
+    };
+    assert_eq!((pads[0].start, pads[0].end), (0.0, 0.4));
+    assert_eq!((pads[1].start, pads[1].end), (0.4, 1.0));
+    assert_eq!((pads[0].fade_in_ms, pads[0].fade_out_ms), (4.0, 7.0));
+    assert_eq!(pads[0].name.as_deref(), Some("Loop Slice 1"));
+    assert_eq!(pads[1].name.as_deref(), Some("Loop Slice 2"));
+    let ids: Vec<_> = pads
+        .iter()
+        .filter_map(|pad| match pad.source.as_ref()? {
+            MediaSourceRef::ProjectMedia { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0], ids[1]);
+}
+
+#[test]
 fn production_save_is_self_contained_incremental_and_save_as_reuses_media() {
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("source.wav");
@@ -290,6 +395,10 @@ fn production_save_is_self_contained_incremental_and_save_as_reuses_media() {
         panic!("committed project must reference Project Media");
     };
     assert_eq!(document.project.arrange.clips[0].gain_db.db(), -3.0);
+    assert_eq!(
+        document.project.arrange.clips[0].fades,
+        ClipFades::new(16, 24, 128)
+    );
     assert_eq!(document.project.arrange.clips[0].transpose.semitones(), 7);
     assert_eq!(container.read_media(id).unwrap(), bytes);
     let fingerprint = container.media_fingerprint(id).unwrap();

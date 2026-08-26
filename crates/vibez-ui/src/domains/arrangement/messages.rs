@@ -4,9 +4,15 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::track::ClipTranspose;
+use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
 use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSliceMarkers {
+    Transients,
+    Warp,
+}
 
 #[derive(Debug, Clone)]
 pub struct ClipTransposeRenderRequest {
@@ -105,6 +111,24 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         new_duration: u64,
     },
+    SetAudioClipFade {
+        track_id: TrackId,
+        clip_id: ClipId,
+        edge: crate::state::AudioClipFadeEdge,
+        frames: u64,
+    },
+    SetAudioClipFadeCurve {
+        track_id: TrackId,
+        clip_id: ClipId,
+        edge: crate::state::AudioClipFadeEdge,
+        curve: vibez_core::track::FadeCurve,
+    },
+    SetAudioClipCrossfadeCurve {
+        track_id: TrackId,
+        outgoing_id: ClipId,
+        incoming_id: ClipId,
+        curve: vibez_core::track::FadeCurve,
+    },
     MoveClipToTrack {
         source_track: TrackId,
         target_track: TrackId,
@@ -112,6 +136,55 @@ pub enum ArrangementMsg {
         is_note_clip: bool,
     },
     ToggleClipLoop(TrackId, ClipId),
+    ToggleClipReverse(TrackId, ClipId),
+    SelectTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: Option<u64>,
+    },
+    AddTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
+    MoveTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        from: u64,
+        to: u64,
+    },
+    RemoveTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
+    ReplaceDetectedTransientMarkers {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frames: Vec<u64>,
+    },
+    SelectWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: Option<u64>,
+    },
+    AddWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        timeline_frame: u64,
+    },
+    MoveWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        timeline_frame: u64,
+    },
+    RemoveWarpMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
     SetClipLoopRegion {
         track_id: TrackId,
         clip_id: ClipId,
@@ -162,6 +235,22 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         split_position: u64,
     },
+    SliceAudioClipAtMarkers {
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: AudioSliceMarkers,
+    },
+    RequestSliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: AudioSliceMarkers,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
+    },
     SplitNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -169,6 +258,7 @@ pub enum ArrangementMsg {
     },
     SplitSelectedAtPlayhead,
     JoinSelectedClips,
+    CrossfadeSelectedAudioClips,
     /// Replace selected clips with the portions where their track's captured
     /// Track Mute automation is off.
     TrimSelectedByTrackMutes,
@@ -233,8 +323,21 @@ impl ArrangementMsg {
                 | Self::MoveAudioClip { .. }
                 | Self::MoveNoteClipPosition { .. }
                 | Self::ResizeAudioClip { .. }
+                | Self::SetAudioClipFade { .. }
+                | Self::SetAudioClipFadeCurve { .. }
+                | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
+                | Self::ToggleClipReverse(..)
+                | Self::SelectTransientMarker { .. }
+                | Self::AddTransientMarker { .. }
+                | Self::MoveTransientMarker { .. }
+                | Self::RemoveTransientMarker { .. }
+                | Self::ReplaceDetectedTransientMarkers { .. }
+                | Self::SelectWarpMarker { .. }
+                | Self::AddWarpMarker { .. }
+                | Self::MoveWarpMarker { .. }
+                | Self::RemoveWarpMarker { .. }
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }
@@ -252,9 +355,13 @@ impl ArrangementMsg {
                 | Self::ResizeSelectedClips { .. }
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
+                | Self::SliceAudioClipAtMarkers { .. }
+                | Self::RequestSliceAudioClipToDrumRack { .. }
+                | Self::SliceAudioClipToDrumRack { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
+                | Self::CrossfadeSelectedAudioClips
                 | Self::TrimSelectedByTrackMutes
                 | Self::DeleteClipsInRegion { .. }
                 | Self::SplitClipsAtRegion { .. }
@@ -289,6 +396,9 @@ impl ArrangementMsg {
                 | ArrangementMsg::AudioClipInspectorInputChanged { .. }
                 | ArrangementMsg::DiscardAudioClipInspectorEdit { .. }
                 | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
+                | ArrangementMsg::SelectTransientMarker { .. }
+                | ArrangementMsg::SelectWarpMarker { .. }
+                | ArrangementMsg::RequestSliceAudioClipToDrumRack { .. }
         )
     }
 
@@ -302,6 +412,28 @@ impl ArrangementMsg {
     pub(crate) const fn is_clipboard_project_edit(&self) -> bool {
         matches!(self, Self::CutSelectedClips | Self::PasteClips)
     }
+
+    /// Edits whose domain result decides whether canonical state changed.
+    /// The app must defer its snapshot and dirty flag until after `update`.
+    pub(crate) const fn defers_project_edit(&self) -> bool {
+        self.is_clipboard_project_edit()
+            || matches!(
+                self,
+                Self::SubmitAudioClipInspectorField { .. }
+                    | Self::SetAudioClipFade { .. }
+                    | Self::SetAudioClipFadeCurve { .. }
+                    | Self::SetAudioClipCrossfadeCurve { .. }
+                    | Self::AddTransientMarker { .. }
+                    | Self::MoveTransientMarker { .. }
+                    | Self::RemoveTransientMarker { .. }
+                    | Self::ReplaceDetectedTransientMarkers { .. }
+                    | Self::AddWarpMarker { .. }
+                    | Self::MoveWarpMarker { .. }
+                    | Self::RemoveWarpMarker { .. }
+                    | Self::SliceAudioClipAtMarkers { .. }
+                    | Self::SliceAudioClipToDrumRack { .. }
+            )
+    }
 }
 
 /// Cross-domain effects requested by an arrangement update.
@@ -312,6 +444,9 @@ pub struct ArrangementAction {
     pub close_track_guis: Option<TrackId>,
     /// Remove this shared identity from every Section timeline too.
     pub remove_track_from_sections: Option<TrackId>,
+    /// Seed one newly-created Project Track and its Arrange content through
+    /// the canonical replay path after all project stores have been updated.
+    pub replay_project_track: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
     /// Selecting a clip focuses the detail panel's Clip tab.

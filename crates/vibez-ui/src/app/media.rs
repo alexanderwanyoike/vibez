@@ -12,7 +12,7 @@ use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
-use crate::state::{AuditionMode, ProjectTrack, SampleBrowserEntry, UiClip, UiDrumPad};
+use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad};
 
 use super::*;
 
@@ -416,16 +416,14 @@ impl App {
             }
         }
 
-        let track_num = self.next_unique_track_number("Audio");
-        Arc::make_mut(&mut self.state.project_tracks).next_track_number = track_num + 1;
-        let id = TrackId::new();
-        let color_index = ((track_num - 1) % 8) as u8;
-        let name = format!("Audio {track_num}");
-
-        self.send_command(EngineCommand::AddTrack(id, name.clone()));
-        Arc::make_mut(&mut self.state.project_tracks)
-            .tracks
-            .push(ProjectTrack::new(id, name, color_index));
+        let id = {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            Arc::make_mut(&mut self.state.project_tracks).add_numbered_track(
+                "Audio",
+                TrackKind::Audio,
+                &mut engine,
+            )
+        };
         self.state.arrange_content_mut(id);
         self.state.arrangement.selected_track = Some(id);
         id
@@ -594,6 +592,9 @@ impl App {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if self.state.find_track(track_id).is_some() {
             self.state.arrange_content_mut(track_id).clips.push(UiClip {
@@ -609,6 +610,10 @@ impl App {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm,
                 warped,
@@ -630,7 +635,11 @@ impl App {
                 .map(|value| format!(" · source {value}"))
                 .unwrap_or_default()
         );
-        Task::none()
+        self.schedule_auto_detect_clip_transients(
+            vibez_project::TimelineLocation::Arrange,
+            track_id,
+            clip_id,
+        )
     }
 
     pub(super) fn add_audio_clip_to_section_at(
@@ -667,8 +676,9 @@ impl App {
             AuditionMode::Raw => (None, false, None),
             AuditionMode::Warp => (treatment.source_bpm, true, Some(self.state.transport.bpm)),
         };
+        let clip_id = ClipId::new();
         let clip = UiClip {
-            id: ClipId::new(),
+            id: clip_id,
             name: name.clone(),
             audio,
             source: Some(source),
@@ -680,6 +690,10 @@ impl App {
             loop_start: 0,
             loop_end: 0,
             gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm,
             warped,
@@ -734,7 +748,11 @@ impl App {
                 .map(|value| format!(" · source {value}"))
                 .unwrap_or_default()
         );
-        Task::none()
+        self.schedule_auto_detect_clip_transients(
+            vibez_project::TimelineLocation::Section(section_id),
+            track_id,
+            clip_id,
+        )
     }
 }
 

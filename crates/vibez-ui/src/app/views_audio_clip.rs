@@ -1,6 +1,8 @@
 //! Audio Clip Inspector panel and waveform controls.
 
-use iced::widget::{button, canvas, column, container, horizontal_space, row, text, text_input};
+use iced::widget::{
+    button, canvas, column, container, horizontal_space, row, text, text_input, tooltip,
+};
 use iced::{Color, Element, Length, Theme};
 
 use crate::domains::arrangement::ArrangementMsg;
@@ -65,6 +67,7 @@ impl App {
             .unwrap_or(-1.0);
 
         let waveform_widget = AudioClipDetailWidget {
+            location: self.active_timeline_location(),
             track_id,
             clip_id: clip.id,
             audio: Arc::clone(&clip.audio),
@@ -79,6 +82,25 @@ impl App {
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
+            playback_direction: clip.playback_direction,
+            transient_markers: clip.transient_markers.clone(),
+            selected_transient_marker: self
+                .state
+                .active_timeline_editor()
+                .selected_transient_marker
+                .filter(|(selected_track, selected_clip, _)| {
+                    *selected_track == track_id && *selected_clip == clip.id
+                })
+                .map(|(_, _, source_frame)| source_frame),
+            warp_markers: clip.warp_markers.clone(),
+            selected_warp_marker: self
+                .state
+                .active_timeline_editor()
+                .selected_warp_marker
+                .filter(|(selected_track, selected_clip, _)| {
+                    *selected_track == track_id && *selected_clip == clip.id
+                })
+                .map(|(_, _, source_frame)| source_frame),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -95,20 +117,26 @@ impl App {
         .size(10)
         .color(th::text_muted());
 
-        let header_row = row![label, horizontal_space(), clip_info]
+        let marker_summary = text(format!(
+            "{} TRANSIENTS · {} WARP · RIGHT-CLICK WAVEFORM",
+            clip.transient_markers.as_slice().len(),
+            clip.warp_markers.interior().len(),
+        ))
+        .size(8)
+        .color(th::text_muted());
+        let header_row = row![label, marker_summary, horizontal_space(), clip_info]
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
-        let source_end_frames = clip
-            .source_offset
-            .saturating_add(clip.duration)
-            .min(clip.audio.num_frames() as u64);
+        let source_end_frames = clip.source_end();
         let source_end = source_end_frames as f64 / sample_rate;
         let start = clip.start_marker as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;
         let loop_end = clip.loop_end as f64 / sample_rate;
+        let fade_in = clip.fades.fade_in_frames() as f64 / sample_rate;
+        let fade_out = clip.fades.fade_out_frames() as f64 / sample_rate;
 
         let parameter = |label_text: &'static str,
                          rotary_field: AudioClipRotaryField,
@@ -283,7 +311,80 @@ impl App {
         .spacing(7)
         .align_y(iced::Alignment::Center);
         let source_bounds = column![
-            text("SOURCE").size(8).color(th::text_muted()),
+            row![
+                text("SOURCE").size(8).color(th::text_muted()),
+                horizontal_space(),
+                {
+                    let reversed = clip.playback_direction
+                        == vibez_core::track::ClipPlaybackDirection::Reverse;
+                    let reverse_button = button(
+                        icons::icon(icons::FLIP_HORIZONTAL_2)
+                            .size(13)
+                            .color(if reversed {
+                                th::accent()
+                            } else {
+                                th::text_dim()
+                            }),
+                    )
+                    .on_press(Message::Arrangement(ArrangementMsg::ToggleClipReverse(
+                        track_id, clip.id,
+                    )))
+                    .padding([4, 7])
+                    .style(move |_theme: &Theme, status| button::Style {
+                        background: Some(
+                            if reversed {
+                                th::accent_dim()
+                            } else if matches!(
+                                status,
+                                button::Status::Hovered | button::Status::Pressed
+                            ) {
+                                th::bg_hover()
+                            } else {
+                                th::bg_surface()
+                            }
+                            .into(),
+                        ),
+                        text_color: if reversed {
+                            th::accent()
+                        } else {
+                            th::text_dim()
+                        },
+                        border: iced::Border {
+                            color: if reversed {
+                                th::accent()
+                            } else {
+                                th::divider()
+                            },
+                            width: 1.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    });
+                    let hint = container(
+                        text(if reversed {
+                            "Reverse playback is on. Click for forward playback."
+                        } else {
+                            "Reverse audio playback"
+                        })
+                        .size(10)
+                        .color(th::text()),
+                    )
+                    .padding([5, 7])
+                    .style(|_theme: &Theme| container::Style {
+                        background: Some(th::bg_elevated().into()),
+                        border: iced::Border {
+                            color: th::border_light(),
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    });
+                    tooltip(reverse_button, hint, tooltip::Position::Top)
+                        .gap(6)
+                        .padding(0)
+                },
+            ]
+            .align_y(iced::Alignment::Center),
             range_row(
                 "IN",
                 AudioClipInspectorField::SourceStart,
@@ -315,12 +416,25 @@ impl App {
             ),
         ]
         .spacing(3);
+        let fade_bounds = column![
+            text("FADES").size(8).color(th::text_muted()),
+            range_row(
+                "FADE IN",
+                AudioClipInspectorField::FadeIn,
+                format!("{fade_in:.3}"),
+                "FADE OUT",
+                AudioClipInspectorField::FadeOut,
+                format!("{fade_out:.3}"),
+            ),
+        ]
+        .spacing(3);
 
         let timing_controls = column![
             self.view_audio_warp_row(track_id, clip),
             divider(),
             source_bounds,
             loop_bounds,
+            fade_bounds,
         ]
         .spacing(6)
         .width(Length::Fill);

@@ -23,10 +23,15 @@ use crate::state::{
 
 mod messages;
 pub use messages::{
-    ArrangementAction, ArrangementCtx, ArrangementMsg, ClipRenderedGeometry,
+    ArrangementAction, ArrangementCtx, ArrangementMsg, AudioSliceMarkers, ClipRenderedGeometry,
     ClipTransposeRenderRequest,
 };
 mod clipboard;
+mod crossfades;
+mod fade_edits;
+mod slice_to_drum_rack;
+mod slicing;
+pub(crate) use slicing::slice_region_count;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -66,6 +71,31 @@ impl ProjectTracksState {
         }
     }
 
+    /// Create one numbered Project Track with the standard channel strip.
+    /// Callers remain responsible for adding its timeline lane and selecting it.
+    pub(crate) fn add_numbered_track(
+        &mut self,
+        prefix: &str,
+        kind: TrackKind,
+        engine: &mut impl EngineHandle,
+    ) -> TrackId {
+        let track_number = self.next_unique_track_number(prefix);
+        self.next_track_number = track_number + 1;
+        let id = TrackId::new();
+        let name = format!("{prefix} {track_number}");
+        let color_index = (track_number.wrapping_sub(1) % 8) as u8;
+        let mut track = if kind.is_midi() {
+            engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
+            ProjectTrack::new_instrument(id, name, kind, color_index)
+        } else {
+            engine.send(EngineCommand::AddTrack(id, name.clone()));
+            ProjectTrack::new(id, name, color_index)
+        };
+        attach_channel_eq(engine, &mut track);
+        self.tracks.push(track);
+        id
+    }
+
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
         if let Some(idx) = self.tracks.iter().position(|t| t.id == track_id) {
             let target = if up {
@@ -100,244 +130,7 @@ impl TimelineEditorState {
     }
 }
 
-impl ArrangementState {
-    fn remove_project_track(
-        &mut self,
-        project_tracks: &mut ProjectTracksState,
-        track_id: TrackId,
-        engine: &mut impl EngineHandle,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        if track_id.is_master()
-            || !project_tracks
-                .tracks
-                .iter()
-                .any(|track| track.id == track_id)
-        {
-            return action;
-        }
-
-        self.pending_project_track_deletion = None;
-        let removed_name = project_tracks
-            .tracks
-            .iter()
-            .find(|track| track.id == track_id)
-            .map(|track| track.name.clone())
-            .unwrap_or_else(|| format!("{track_id}"));
-        engine.send(EngineCommand::RemoveTrack(track_id));
-        project_tracks.tracks.retain(|track| track.id != track_id);
-        for track in &mut project_tracks.tracks {
-            if track.audio_input_route.resample_source() == Some(track_id) {
-                track.audio_input_route = AudioInputRoute::default();
-                track.input_monitoring = InputMonitoring::Off;
-            }
-        }
-        Arc::make_mut(&mut self.timeline).remove(track_id);
-        if self.selected_track == Some(track_id) {
-            self.selected_track = project_tracks.tracks.first().map(|track| track.id);
-        }
-        if self
-            .selected_note_clip
-            .is_some_and(|(id, _)| id == track_id)
-        {
-            self.selected_note_clip = None;
-        }
-        self.selected_clips.retain(|selection| match selection {
-            ArrangementSelection::AudioClip { track_id: id, .. }
-            | ArrangementSelection::NoteClip { track_id: id, .. } => *id != track_id,
-        });
-        action.close_track_guis = Some(track_id);
-        action.remove_track_from_sections = Some(track_id);
-        action.status = Some(format!(
-            "Removed {removed_name}. {} track(s) remain.",
-            project_tracks.tracks.len()
-        ));
-        action
-    }
-
-    /// Arrange owns Project Track controls and resolves its local timeline
-    /// before forwarding editor messages to the shared boundary.
-    pub fn update(
-        &mut self,
-        project_tracks: &mut ProjectTracksState,
-        msg: ArrangementMsg,
-        engine: &mut impl EngineHandle,
-        ctx: ArrangementCtx,
-    ) -> ArrangementAction {
-        if msg.is_timeline_editor_message() {
-            return self
-                .resolve_timeline_mut()
-                .editor
-                .update(project_tracks, msg, engine, ctx);
-        }
-
-        let mut action = ArrangementAction::default();
-        match msg {
-            ArrangementMsg::AddTrack => {
-                let track_num = project_tracks.next_unique_track_number("Track");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                project_tracks.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("Track {track_num}");
-                engine.send(EngineCommand::AddTrack(id, name.clone()));
-                let mut track = ProjectTrack::new(id, name, color_index);
-                attach_channel_eq(engine, &mut track);
-                project_tracks.tracks.push(track);
-                Arc::make_mut(&mut self.timeline).ensure(id);
-                self.selected_track = Some(id);
-                action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
-            }
-            ArrangementMsg::AddMidiTrack | ArrangementMsg::AddInstrumentTrack => {
-                let track_num = project_tracks.next_unique_track_number("MIDI");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                project_tracks.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("MIDI {track_num}");
-                engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
-                let mut track =
-                    ProjectTrack::new_instrument(id, name, TrackKind::Midi, color_index);
-                track.has_instrument = false;
-                attach_channel_eq(engine, &mut track);
-                project_tracks.tracks.push(track);
-                Arc::make_mut(&mut self.timeline).ensure(id);
-                self.selected_track = Some(id);
-                action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
-            }
-            ArrangementMsg::RequestRemoveTrack(track_id) => {
-                if !track_id.is_master()
-                    && project_tracks
-                        .tracks
-                        .iter()
-                        .any(|track| track.id == track_id)
-                {
-                    self.pending_project_track_deletion = Some(track_id);
-                }
-            }
-            ArrangementMsg::CancelRemoveTrack => {
-                self.pending_project_track_deletion = None;
-            }
-            ArrangementMsg::ConfirmRemoveTrack(track_id) => {
-                if self.pending_project_track_deletion != Some(track_id) {
-                    return action;
-                }
-                return self.remove_project_track(project_tracks, track_id, engine);
-            }
-            ArrangementMsg::RemoveTrack(track_id) => {
-                return self.remove_project_track(project_tracks, track_id, engine);
-            }
-            ArrangementMsg::SelectTrack(track_id) => self.selected_track = Some(track_id),
-            ArrangementMsg::RenameTrack(track_id, new_name) => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.name = new_name;
-                }
-            }
-            ArrangementMsg::MoveTrackUp(track_id) => {
-                project_tracks.move_track(track_id, true, engine)
-            }
-            ArrangementMsg::MoveTrackDown(track_id) => {
-                project_tracks.move_track(track_id, false, engine)
-            }
-            ArrangementMsg::MoveSelectedTrackUp => {
-                if let Some(track_id) = self.selected_track {
-                    project_tracks.move_track(track_id, true, engine);
-                }
-            }
-            ArrangementMsg::MoveSelectedTrackDown => {
-                if let Some(track_id) = self.selected_track {
-                    project_tracks.move_track(track_id, false, engine);
-                }
-            }
-            ArrangementMsg::SetTrackGain(track_id, gain) => {
-                let gain = gain.clamp(0.0, 2.0);
-                engine.send(EngineCommand::SetTrackGain(track_id, gain));
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.gain = gain;
-                }
-            }
-            ArrangementMsg::SetTrackPan(track_id, pan) => {
-                let pan = pan.clamp(0.0, 1.0);
-                engine.send(EngineCommand::SetTrackPan(track_id, pan));
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.pan = pan;
-                }
-            }
-            ArrangementMsg::SetTrackMute(track_id) => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.mute = !track.mute;
-                    engine.send(EngineCommand::SetTrackMute(track_id, track.mute));
-                }
-            }
-            ArrangementMsg::SetTrackSolo(track_id) => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.solo = !track.solo;
-                    engine.send(EngineCommand::SetTrackSolo(track_id, track.solo));
-                }
-            }
-            ArrangementMsg::AddBus => {
-                let letter = (b'A' + (project_tracks.buses.len() % 26) as u8) as char;
-                let id = TrackId::new();
-                let name = format!("{letter} Return");
-                engine.send(EngineCommand::AddBus(id, name.clone()));
-                let color_index = ((project_tracks.buses.len() + 4) % 8) as u8;
-                let mut bus = ProjectTrack::new(id, name.clone(), color_index);
-                attach_channel_eq(engine, &mut bus);
-                project_tracks.buses.push(bus);
-                Arc::make_mut(&mut self.timeline).ensure(id);
-                self.selected_track = Some(id);
-                action.status = Some(format!("Added {name}"));
-            }
-            ArrangementMsg::RemoveBus(bus_id) => {
-                engine.send(EngineCommand::RemoveBus(bus_id));
-                project_tracks.buses.retain(|bus| bus.id != bus_id);
-                Arc::make_mut(&mut self.timeline).remove(bus_id);
-                for track in &mut project_tracks.tracks {
-                    track.sends.retain(|(id, _)| *id != bus_id);
-                }
-                for content in Arc::make_mut(&mut self.timeline).by_track.values_mut() {
-                    content.automation.retain(|lane| {
-                        lane.target != vibez_core::automation::AutomationTarget::Send { bus_id }
-                    });
-                }
-                if self.selected_track == Some(bus_id) {
-                    self.selected_track = project_tracks.tracks.first().map(|track| track.id);
-                }
-                action.close_track_guis = Some(bus_id);
-                action.remove_track_from_sections = Some(bus_id);
-                action.status = Some("Removed bus".to_string());
-            }
-            ArrangementMsg::SetSend {
-                track_id,
-                bus_id,
-                amount,
-            } => {
-                let amount = amount.clamp(0.0, 1.0);
-                if let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == track_id) {
-                    match track.sends.iter_mut().find(|(id, _)| *id == bus_id) {
-                        Some(send) => send.1 = amount,
-                        None => track.sends.push((bus_id, amount)),
-                    }
-                    engine.send(EngineCommand::SetSend {
-                        track_id,
-                        bus_id,
-                        amount,
-                    });
-                }
-            }
-            ArrangementMsg::EngineTrackMeter {
-                track_id,
-                peak_l,
-                peak_r,
-            } => {
-                if let Some(track) = project_tracks.find_mut(track_id) {
-                    track.peak_l = peak_l.max(track.peak_l * 0.85);
-                    track.peak_r = peak_r.max(track.peak_r * 0.85);
-                }
-            }
-            _ => unreachable!("editor messages are delegated before Arrange track handling"),
-        }
-        action
-    }
-}
+mod project_tracks;
 
 impl TimelineEditorState {
     pub fn update(
@@ -363,6 +156,7 @@ impl TimelineEditorState {
                 }
             }
             ArrangementMsg::RemoveClip(track_id, clip_id) => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
                 engine.send(EngineCommand::RemoveClip(track_id, clip_id));
                 if let Some(track) = self.find_content_mut(track_id) {
                     track.clips.retain(|c| c.id != clip_id);
@@ -370,6 +164,13 @@ impl TimelineEditorState {
                 // Clear from multi-selection if this clip was selected
                 self.selected_clips
                     .remove(&ArrangementSelection::AudioClip { track_id, clip_id });
+                if self.selected_transient_marker.is_some_and(
+                    |(selected_track, selected_clip, _)| {
+                        selected_track == track_id && selected_clip == clip_id
+                    },
+                ) {
+                    self.selected_transient_marker = None;
+                }
             }
             ArrangementMsg::ToggleClipLoop(track_id, clip_id) => {
                 let mut cmd_data = None;
@@ -391,6 +192,40 @@ impl TimelineEditorState {
                         loop_end,
                     });
                 }
+            }
+            ArrangementMsg::ToggleClipReverse(track_id, clip_id) => {
+                if let Some(clip) = self
+                    .find_content_mut(track_id)
+                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
+                {
+                    clip.playback_direction = clip.playback_direction.toggled();
+                    engine.send(EngineCommand::SetClipPlaybackDirection {
+                        track_id,
+                        clip_id,
+                        direction: clip.playback_direction,
+                    });
+                    action.status = Some(match clip.playback_direction {
+                        vibez_core::track::ClipPlaybackDirection::Forward => {
+                            "Audio Clip plays forward".into()
+                        }
+                        vibez_core::track::ClipPlaybackDirection::Reverse => {
+                            "Audio Clip plays in reverse".into()
+                        }
+                    });
+                }
+            }
+            message @ (ArrangementMsg::SelectTransientMarker { .. }
+            | ArrangementMsg::AddTransientMarker { .. }
+            | ArrangementMsg::MoveTransientMarker { .. }
+            | ArrangementMsg::RemoveTransientMarker { .. }
+            | ArrangementMsg::ReplaceDetectedTransientMarkers { .. }) => {
+                return self.update_transient_markers(message);
+            }
+            message @ (ArrangementMsg::SelectWarpMarker { .. }
+            | ArrangementMsg::AddWarpMarker { .. }
+            | ArrangementMsg::MoveWarpMarker { .. }
+            | ArrangementMsg::RemoveWarpMarker { .. }) => {
+                return self.update_warp_markers(engine, message);
             }
             ArrangementMsg::SetClipLoopRegion {
                 track_id,
@@ -440,6 +275,7 @@ impl TimelineEditorState {
                 shift_held,
             } => {
                 self.discard_audio_clip_inspector_edits();
+                self.selected_transient_marker = None;
                 // Clicking a clip switches the editor back to clip selection.
                 // Leaving an older time range active makes split/cut commands
                 // silently operate on that range instead of the visible clip
@@ -474,6 +310,7 @@ impl TimelineEditorState {
                 clip_id,
                 new_position,
             } => {
+                self.unlink_crossfades_for_clip(engine, track_id, clip_id);
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
                         clip.position = new_position;
@@ -511,12 +348,37 @@ impl TimelineEditorState {
                 self.discard_audio_clip_inspector_edits_for(clip_id);
                 return self.op_resize_audio_clip(engine, ctx, track_id, clip_id, new_duration);
             }
+            ArrangementMsg::SetAudioClipFade {
+                track_id,
+                clip_id,
+                edge,
+                frames,
+            } => return self.set_audio_clip_fade(engine, track_id, clip_id, edge, frames),
+            ArrangementMsg::SetAudioClipFadeCurve {
+                track_id,
+                clip_id,
+                edge,
+                curve,
+            } => return self.set_audio_clip_fade_curve(engine, track_id, clip_id, edge, curve),
+            ArrangementMsg::SetAudioClipCrossfadeCurve {
+                track_id,
+                outgoing_id,
+                incoming_id,
+                curve,
+            } => {
+                if self.set_crossfade_curve(engine, track_id, outgoing_id, incoming_id, curve) {
+                    action.mark_dirty = true;
+                }
+            }
             ArrangementMsg::MoveClipToTrack {
                 source_track,
                 target_track,
                 clip_id,
                 is_note_clip,
             } => {
+                if !is_note_clip {
+                    self.unlink_crossfades_for_clip(engine, source_track, clip_id);
+                }
                 if is_note_clip {
                     // Move note clip between instrument tracks
                     let mut clip_data = None;
@@ -587,6 +449,9 @@ impl TimelineEditorState {
                             loop_start: clip.loop_start,
                             loop_end: clip.loop_end,
                             linear_gain: clip.gain_db.linear(),
+                            fades: clip.fades,
+                            playback_direction: clip.playback_direction,
+                            warp_markers: clip.warp_markers.clone(),
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -612,6 +477,7 @@ impl TimelineEditorState {
                     for selection in &selections {
                         match selection {
                             ArrangementSelection::AudioClip { track_id, clip_id } => {
+                                self.unlink_crossfades_for_clip(engine, *track_id, *clip_id);
                                 engine.send(EngineCommand::RemoveClip(*track_id, *clip_id));
                                 if let Some(track) = self.find_content_mut(*track_id) {
                                     track.clips.retain(|c| c.id != *clip_id);
@@ -653,6 +519,7 @@ impl TimelineEditorState {
                                         duplicate.name = clip.name.clone();
                                         duplicate.position =
                                             clip.position.saturating_add(clip.duration);
+                                        duplicate.fades = duplicate.fades.unlinked();
                                         duplicate
                                     })
                                 });
@@ -669,6 +536,9 @@ impl TimelineEditorState {
                                         loop_start: duplicate.loop_start,
                                         loop_end: duplicate.loop_end,
                                         linear_gain: duplicate.gain_db.linear(),
+                                        fades: duplicate.fades,
+                                        playback_direction: duplicate.playback_direction,
+                                        warp_markers: duplicate.warp_markers.clone(),
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {
@@ -912,6 +782,35 @@ impl TimelineEditorState {
             } => {
                 return self.op_split_audio_clip(engine, ctx, track_id, clip_id, split_position);
             }
+            ArrangementMsg::SliceAudioClipAtMarkers {
+                track_id,
+                clip_id,
+                markers,
+            } => {
+                return self.slice_audio_clip_at_markers(engine, track_id, clip_id, markers);
+            }
+            ArrangementMsg::RequestSliceAudioClipToDrumRack { .. } => {
+                return ArrangementAction::default();
+            }
+            ArrangementMsg::SliceAudioClipToDrumRack {
+                track_id,
+                clip_id,
+                markers,
+                source,
+                audio,
+            } => {
+                return self.slice_audio_clip_to_drum_rack(
+                    project_tracks,
+                    track_id,
+                    clip_id,
+                    slice_to_drum_rack::DrumRackSliceMaterial {
+                        markers,
+                        source,
+                        audio,
+                    },
+                    ctx,
+                );
+            }
             ArrangementMsg::SplitNoteClip {
                 track_id,
                 clip_id,
@@ -967,6 +866,9 @@ impl TimelineEditorState {
             }
             ArrangementMsg::JoinSelectedClips => {
                 return self.op_join_selected_clips(engine, ctx);
+            }
+            ArrangementMsg::CrossfadeSelectedAudioClips => {
+                return self.crossfade_selected_audio_clips(engine);
             }
             ArrangementMsg::TrimSelectedByTrackMutes => {
                 return self.op_trim_selected_by_track_mutes(engine, ctx);
@@ -1064,8 +966,12 @@ impl TimelineEditorState {
 }
 
 mod audio_clip_inspector;
+mod fragment_geometry;
 mod media_ops;
 mod ops;
+mod transient_markers;
+mod warp_markers;
+mod warp_ops;
 
 #[cfg(test)]
 mod clipboard_tests;

@@ -3,15 +3,15 @@
 
 use std::collections::HashSet;
 
-use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
+use crate::message::AudioQuantizeSuccess;
 use std::sync::Arc;
 
-use vibez_core::automation::{AutomationLane, AutomationTarget};
+use vibez_core::automation::AutomationTarget;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::audio_clip_inspector::clear_warp_request;
+use super::fragment_geometry::{audio_fragment, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
@@ -20,67 +20,7 @@ use crate::state::{
 use super::*;
 
 fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    clip.timeline().source_at(local_frame) as usize
-}
-
-fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
-    let mut visible = Vec::new();
-    for note in &clip.notes {
-        for occurrence in clip.note_occurrences(note.start_beat) {
-            let note_end = occurrence + note.duration_beats;
-            let kept_start = occurrence.max(local_start);
-            let kept_end = note_end.min(local_end);
-            if kept_end > kept_start {
-                visible.push(MidiNote {
-                    start_beat: kept_start - local_start,
-                    duration_beats: kept_end - kept_start,
-                    ..*note
-                });
-            }
-        }
-    }
-    visible.sort_by(|a, b| {
-        a.start_beat
-            .partial_cmp(&b.start_beat)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    visible
-}
-
-/// Unmuted portions of `[start, end)` in project beats. Track Mute is a
-/// stepped lane and deliberately imposes no state before its first point, so
-/// uncaptured material before the first event is retained.
-fn unmuted_beat_ranges(lane: &AutomationLane, start: f64, end: f64) -> Vec<(f64, f64)> {
-    if end <= start {
-        return Vec::new();
-    }
-
-    let mut boundaries = vec![start];
-    boundaries.extend(
-        lane.points
-            .iter()
-            .map(|point| point.beat)
-            .filter(|beat| *beat > start && *beat < end),
-    );
-    boundaries.push(end);
-
-    let mut ranges: Vec<(f64, f64)> = Vec::new();
-    for window in boundaries.windows(2) {
-        let range_start = window[0];
-        let range_end = window[1];
-        let muted = lane.value_at(range_start).is_some_and(|value| value >= 0.5);
-        if muted || range_end <= range_start {
-            continue;
-        }
-        if let Some((_, previous_end)) = ranges.last_mut() {
-            if *previous_end == range_start {
-                *previous_end = range_end;
-                continue;
-            }
-        }
-        ranges.push((range_start, range_end));
-    }
-    ranges
+    clip.source_frame_at(local_frame) as usize
 }
 
 impl TimelineEditorState {
@@ -147,14 +87,12 @@ impl TimelineEditorState {
                                 .clamp(start_sample, clip_end_sample);
                             (end_sample > start_sample).then(|| {
                                 let local_start = start_sample - clip.position;
-                                let mut fragment = clip.clone();
-                                fragment.id = ClipId::new();
-                                fragment.position = start_sample;
-                                fragment.source_offset =
-                                    audio_source_frame(clip, local_start) as u64;
-                                fragment.start_marker = fragment.source_offset;
-                                fragment.duration = end_sample - start_sample;
-                                fragment
+                                audio_fragment(
+                                    clip,
+                                    clip.name.clone(),
+                                    local_start,
+                                    end_sample - start_sample,
+                                )
                             })
                         })
                         .collect();
@@ -278,15 +216,28 @@ impl TimelineEditorState {
         new_duration: u64,
     ) -> ArrangementAction {
         let mut action = ArrangementAction::default();
+        self.unlink_crossfades_for_clip(engine, track_id, clip_id);
         let mut sync_data = None;
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                let old_mapping_end = clip.warp_timeline_end();
+                let new_mapping_end = new_duration
+                    .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
+                clip.warp_markers = clip.warp_markers.resized_timeline(
+                    old_mapping_end,
+                    new_mapping_end,
+                    clip.source_offset,
+                    clip.audio.num_frames() as u64,
+                );
                 clip.duration = new_duration;
+                clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 if clip.loop_enabled {
                     clip.clamp_loop_to_clip();
                 }
+                clip.transient_markers
+                    .retain_source_range(clip.source_offset, clip.source_end());
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 sync_data = Some((
                     Arc::clone(&clip.audio),
@@ -298,6 +249,9 @@ impl TimelineEditorState {
                     clip.loop_start,
                     clip.loop_end,
                     clip.gain_db.linear(),
+                    clip.fades,
+                    clip.playback_direction,
+                    clip.warp_markers.clone(),
                 ));
             }
         }
@@ -311,6 +265,9 @@ impl TimelineEditorState {
             loop_start,
             loop_end,
             linear_gain,
+            fades,
+            playback_direction,
+            warp_markers,
         )) = sync_data
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
@@ -326,117 +283,13 @@ impl TimelineEditorState {
                 loop_start,
                 loop_end,
                 linear_gain,
+                fades,
+                playback_direction,
+                warp_markers,
             });
         }
         action.scroll_to_beat = clip_end_beat;
         self.drag_resize_active = true;
-        action
-    }
-
-    /// A background warp finished: swap in the stretched audio and
-    /// record the warp geometry on the clip.
-    pub fn apply_clip_warp_success(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: ClipWarpSuccess,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        engine.send(EngineCommand::ReplaceClipAudio {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&success.audio),
-            duration: success.new_duration,
-            source_offset: success.new_source_offset,
-            start_marker: success.new_start_marker,
-            loop_start: success.new_loop_start,
-            loop_end: success.new_loop_end,
-        });
-        if let Some(track) = self.find_content_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                clip.audio = Arc::clone(&success.audio);
-                clip.duration = success.new_duration;
-                clip.source_offset = success.new_source_offset;
-                clip.start_marker = success.new_start_marker;
-                clip.loop_start = success.new_loop_start;
-                clip.loop_end = success.new_loop_end;
-                clip.original_bpm = Some(success.detected_bpm);
-                clip.warped = true;
-                clip.warped_to_bpm = Some(success.warped_to_bpm);
-                clip.original_audio = Some(Arc::clone(&success.original_audio));
-            }
-        }
-        self.discard_audio_clip_inspector_edits_for(clip_id);
-        action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
-        action.mark_dirty = true;
-        action
-    }
-
-    /// An auto-warp-on-import attempt finished.
-    pub fn apply_auto_warp_outcome(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        outcome: AutoWarpOutcome,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        match outcome {
-            AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Point the user at the manual
-                // workflow in the clip detail panel.
-                action.status = Some(
-                    "Auto-warp: could not detect BPM. Select the clip and type the source \
-                     BPM in the Warp row, then press Enter and click Warp."
-                        .to_string(),
-                );
-            }
-            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
-                if let Some(track) = self.find_content_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                action.status = Some(format!(
-                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
-                     Use the clip's Warp button to apply it manually.",
-                    bpm, confidence
-                ));
-                action.mark_dirty = true;
-            }
-            AutoWarpOutcome::Warped { success, .. } => {
-                return self.apply_clip_warp_success(engine, track_id, clip_id, success);
-            }
-        }
-        action
-    }
-
-    /// Restore a warped clip's original audio (or just drop the warp
-    /// flags when the original is gone).
-    pub fn apply_clear_clip_warp(
-        &mut self,
-        _engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        if let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|track| track.clips.iter_mut().find(|clip| clip.id == clip_id))
-        {
-            if clip.original_audio.is_some() {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-                action.transpose_render = clear_warp_request(track_id, clip);
-                action.status = Some("Returning Clip to raw timing...".into());
-            } else {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-                action.status = Some("Clip uses raw timing".into());
-            }
-        }
-        action.mark_dirty = true;
         action
     }
 
@@ -456,6 +309,7 @@ impl TimelineEditorState {
             .and_then(|track| track.clips.iter().find(|clip| clip.id == old_clip_id))
             .map(|clip| clip.gain_db)
             .unwrap_or_default();
+        self.unlink_crossfades_for_clip(engine, track_id, old_clip_id);
         engine.send(EngineCommand::RemoveClip(track_id, old_clip_id));
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.retain(|c| c.id != old_clip_id);
@@ -481,6 +335,9 @@ impl TimelineEditorState {
             loop_start: 0,
             loop_end: 0,
             linear_gain: gain_db.linear(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -496,6 +353,10 @@ impl TimelineEditorState {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -618,7 +479,9 @@ impl TimelineEditorState {
                     }
                     let source_frame = audio_source_frame(clip, local as u64);
                     if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] = *sample * clip.gain_db.linear();
+                        dst[dst_frame] += *sample
+                            * clip.gain_db.linear()
+                            * clip.fades.gain_at(local as u64, clip.duration);
                     }
                 }
             }
@@ -632,6 +495,7 @@ impl TimelineEditorState {
 
         // Remove all originals
         for cid in &clip_ids {
+            self.unlink_crossfades_for_clip(engine, track_id, *cid);
             engine.send(EngineCommand::RemoveClip(track_id, *cid));
             if let Some(track) = self.find_content_mut(track_id) {
                 track.clips.retain(|c| c.id != *cid);
@@ -652,6 +516,9 @@ impl TimelineEditorState {
             loop_start: 0,
             loop_end: total_duration,
             linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -667,6 +534,10 @@ impl TimelineEditorState {
                 loop_start: 0,
                 loop_end: total_duration,
                 gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -794,13 +665,20 @@ impl TimelineEditorState {
     /// engine and UI state. Every op that fragments a clip (split, trim) must
     /// route through here so the engine command list stays in one place;
     /// selection bookkeeping stays with the caller.
-    fn replace_audio_clip(
+    pub(super) fn replace_audio_clip(
         &mut self,
         engine: &mut impl EngineHandle,
         track_id: TrackId,
         original_id: ClipId,
-        fragments: Vec<UiClip>,
+        mut fragments: Vec<UiClip>,
     ) {
+        self.unlink_crossfades_for_clip(engine, track_id, original_id);
+        // Fragment constructors already unlink both edges. Keep the
+        // replacement boundary defensive so a future caller cannot persist a
+        // link to a removed Clip.
+        for fragment in &mut fragments {
+            fragment.fades = fragment.fades.unlinked();
+        }
         engine.send(EngineCommand::RemoveClip(track_id, original_id));
         if let Some(content) = self.find_content_mut(track_id) {
             content.clips.retain(|clip| clip.id != original_id);
@@ -818,6 +696,9 @@ impl TimelineEditorState {
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
                 linear_gain: clip.gain_db.linear(),
+                fades: clip.fades,
+                playback_direction: clip.playback_direction,
+                warp_markers: clip.warp_markers.clone(),
             });
         }
         if let Some(content) = self.find_content_mut(track_id) {
@@ -880,18 +761,13 @@ impl TimelineEditorState {
             })
             .map(|clip| {
                 let left_duration = split_position - clip.position;
-                let mut left = clip.clone();
-                left.id = ClipId::new();
-                left.name = format!("{} L", clip.name);
-                left.duration = left_duration;
-
-                let mut right = clip.clone();
-                right.id = ClipId::new();
-                right.name = format!("{} R", clip.name);
-                right.position = split_position;
-                right.duration = clip.duration - left_duration;
-                right.source_offset = audio_source_frame(clip, left_duration) as u64;
-                right.start_marker = right.source_offset;
+                let left = audio_fragment(clip, format!("{} L", clip.name), 0, left_duration);
+                let right = audio_fragment(
+                    clip,
+                    format!("{} R", clip.name),
+                    left_duration,
+                    clip.duration - left_duration,
+                );
                 (left, right)
             });
         if let Some((left, right)) = split {

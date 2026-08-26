@@ -12,8 +12,11 @@ use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
 use vibez_core::track::{
-    AudioInputRoute, ClipGainDb, ClipTranspose, DrumPadState, InputMonitoring, MediaSourceRef,
+    AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
+    InputMonitoring, MediaSourceRef,
 };
+use vibez_core::transient::TransientMarkers;
+use vibez_core::warp_marker::WarpMarkers;
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -36,6 +39,10 @@ pub struct UiClip {
     pub loop_start: u64,
     pub loop_end: u64,
     pub gain_db: ClipGainDb,
+    pub fades: ClipFades,
+    pub playback_direction: ClipPlaybackDirection,
+    pub transient_markers: TransientMarkers,
+    pub warp_markers: WarpMarkers,
     pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.
@@ -54,6 +61,21 @@ pub struct UiClip {
 }
 
 impl UiClip {
+    pub(crate) fn source_end(&self) -> u64 {
+        self.warp_markers.source_end(
+            self.source_offset
+                .saturating_add(self.duration)
+                .min(self.audio.num_frames() as u64),
+        )
+    }
+
+    pub(crate) fn warp_timeline_end(&self) -> u64 {
+        let identity_end = self
+            .duration
+            .min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
+        self.warp_markers.timeline_end(identity_end)
+    }
+
     pub(crate) fn timeline(&self) -> FrameClipTimeline {
         FrameClipTimeline::new(
             self.start_marker,
@@ -122,12 +144,92 @@ impl UiClip {
         self.loop_end = end;
         true
     }
+
+    pub(crate) fn clamp_fades_to_clip(&mut self) {
+        self.fades = self.fades.clamped_to(self.duration);
+    }
+
+    pub(crate) fn source_frame_at(&self, clip_frame: u64) -> u64 {
+        self.source_frame_position_at(clip_frame).round() as u64
+    }
+
+    pub(crate) fn source_frame_position_at(&self, clip_frame: u64) -> f64 {
+        let timeline_frame = self.timeline().source_at(
+            self.playback_direction
+                .map_clip_frame(clip_frame, self.duration),
+        );
+        if self.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        self.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(self.source_offset) as f64,
+            self.source_offset,
+            self.warp_timeline_end(),
+        )
+    }
+
+    pub(crate) fn has_same_audible_geometry(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.audio, &other.audio)
+            && self.duration == other.duration
+            && self.source_offset == other.source_offset
+            && self.start_marker == other.start_marker
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start == other.loop_start
+            && self.loop_end == other.loop_end
+            && self.gain_db == other.gain_db
+            && self.fades == other.fades
+            && self.playback_direction == other.playback_direction
+            && self.warp_markers == other.warp_markers
+            && self.transpose == other.transpose
+            && self.warped == other.warped
+            && self.warped_to_bpm == other.warped_to_bpm
+    }
+
+    pub(crate) fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
+        self.warp_markers
+            .timeline_at_source(source_frame as f64, self.source_offset, self.source_end())
+            .round() as u64
+    }
+
+    pub(crate) fn warp_geometry_for_fragment(
+        &self,
+        local_start: u64,
+        duration: u64,
+    ) -> (u64, u64, WarpMarkers) {
+        let phase = match self.playback_direction {
+            ClipPlaybackDirection::Forward => local_start,
+            ClipPlaybackDirection::Reverse => self
+                .duration
+                .saturating_sub(local_start)
+                .saturating_sub(duration),
+        };
+        let timeline_start = self.timeline().source_at(phase);
+        if self.warp_markers.is_empty() {
+            return (timeline_start, timeline_start, WarpMarkers::default());
+        }
+        if self.timeline().is_looping() {
+            return (
+                self.source_offset,
+                timeline_start,
+                self.warp_markers.clone(),
+            );
+        }
+        let (source_offset, markers) = self.warp_markers.for_fragment(
+            timeline_start.saturating_sub(self.source_offset),
+            duration,
+            self.source_offset,
+            self.warp_timeline_end(),
+        );
+        (source_offset, source_offset, markers)
+    }
 }
 
 /// Editable numeric fields in Audio Clip Inspector V1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AudioClipInspectorField {
     Gain,
+    FadeIn,
+    FadeOut,
     SourceBpm,
     SourceStart,
     SourceEnd,
@@ -135,6 +237,12 @@ pub enum AudioClipInspectorField {
     LoopStart,
     LoopEnd,
     Transpose,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClipFadeEdge {
+    In,
+    Out,
 }
 
 /// Inspector fields that can be controlled by a rotary widget.
@@ -167,6 +275,8 @@ pub struct UiDrumPad {
     pub pan: f32,
     pub start: f32,
     pub end: f32,
+    pub fade_in_ms: f32,
+    pub fade_out_ms: f32,
     pub coarse_tune: i8,
     pub fine_tune: f32,
     pub one_shot: bool,
@@ -183,6 +293,8 @@ impl Default for UiDrumPad {
             pan: 0.0,
             start: 0.0,
             end: 1.0,
+            fade_in_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
+            fade_out_ms: vibez_core::track::DRUM_PAD_DEFAULT_FADE_MS,
             coarse_tune: 0,
             fine_tune: 0.0,
             one_shot: true,
@@ -194,11 +306,14 @@ impl Default for UiDrumPad {
 impl UiDrumPad {
     pub fn to_state(&self) -> DrumPadState {
         DrumPadState {
+            name: self.name.clone(),
             source: self.source.clone(),
             gain: self.gain,
             pan: self.pan,
             start: self.start,
             end: self.end,
+            fade_in_ms: self.fade_in_ms,
+            fade_out_ms: self.fade_out_ms,
             coarse_tune: self.coarse_tune,
             fine_tune: self.fine_tune,
             one_shot: self.one_shot,
@@ -208,13 +323,18 @@ impl UiDrumPad {
 
     pub fn from_state(state: &DrumPadState) -> Self {
         Self {
-            name: state.source.as_ref().map(MediaSourceRef::display_name),
+            name: state
+                .name
+                .clone()
+                .or_else(|| state.source.as_ref().map(MediaSourceRef::display_name)),
             source: state.source.clone(),
             audio: None,
             gain: state.gain,
             pan: state.pan,
             start: state.start,
             end: state.end,
+            fade_in_ms: state.fade_in_ms,
+            fade_out_ms: state.fade_out_ms,
             coarse_tune: state.coarse_tune,
             fine_tune: state.fine_tune,
             one_shot: state.one_shot,

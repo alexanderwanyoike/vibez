@@ -348,6 +348,9 @@ impl App {
                     loop_start: 0,
                     loop_end: duration,
                     linear_gain: 1.0,
+                    fades: Default::default(),
+                    playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 });
                 self.state
                     .arrange_content_mut(outcome.track_id)
@@ -365,6 +368,10 @@ impl App {
                         loop_start: 0,
                         loop_end: duration,
                         gain_db: Default::default(),
+                        fades: Default::default(),
+                        playback_direction: Default::default(),
+                        transient_markers: Default::default(),
+                        warp_markers: Default::default(),
                         transpose: Default::default(),
                         original_bpm: None,
                         warped: false,
@@ -393,6 +400,11 @@ impl App {
                 self.state.status_text = quality_warning
                     .map(|warning| format!("{completed} · Warning: {warning}"))
                     .unwrap_or(completed);
+                return self.schedule_auto_detect_clip_transients(
+                    vibez_project::TimelineLocation::Arrange,
+                    outcome.track_id,
+                    clip_id,
+                );
             }
             Err(error) => {
                 self.state.audio_recording.finish();

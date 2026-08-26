@@ -44,7 +44,6 @@ pub(crate) fn auto_open_midi_input(
 pub(crate) fn compute_audio_quantize(
     input: QuantizeInput,
 ) -> Result<crate::message::AudioQuantizeSuccess, String> {
-    const DEFAULT_SENSITIVITY: f32 = 1.5;
     const MIN_SLICE_FRAMES: usize = 64;
 
     let QuantizeInput {
@@ -61,10 +60,11 @@ pub(crate) fn compute_audio_quantize(
 
     let sr = sample_rate as f64;
     let clip_end_src = clip_source_offset.saturating_add(clip_duration);
-    let onsets: Vec<u64> = vibez_core::onset::detect_onsets(&audio, DEFAULT_SENSITIVITY)
-        .into_iter()
-        .filter(|&o| o >= clip_source_offset && o < clip_end_src)
-        .collect();
+    let onsets: Vec<u64> =
+        vibez_core::onset::detect_onsets(&audio, vibez_core::onset::TransientSensitivity::DEFAULT)
+            .into_iter()
+            .filter(|&o| o >= clip_source_offset && o < clip_end_src)
+            .collect();
     if onsets.is_empty() {
         return Err("No transients detected in clip".into());
     }

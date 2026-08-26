@@ -169,6 +169,10 @@ impl App {
             .is_some()
         {
             stack![base_layout, self.view_track_deletion_overlay()].into()
+        } else if self.state.view.transient_analysis_dialog.is_some() {
+            stack![base_layout, self.view_transient_analysis_overlay()].into()
+        } else if self.state.view.drum_rack_slice_dialog.is_some() {
+            stack![base_layout, self.view_drum_rack_slice_overlay()].into()
         } else if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
         } else if self.state.about_open {

@@ -205,6 +205,9 @@ impl Section {
                         loop_start: clip.loop_start,
                         loop_end: clip.loop_end,
                         linear_gain: clip.gain_db.linear(),
+                        fades: clip.fades.clamped_to(clip.duration),
+                        playback_direction: clip.playback_direction,
+                        warp_markers: clip.warp_markers.clone(),
                     })
                     .collect();
                 let note_clips = content
@@ -337,6 +340,10 @@ mod tests {
                 loop_start: 0,
                 loop_end: 64,
                 gain_db,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -350,6 +357,49 @@ mod tests {
             (prepared.tracks()[0].source.clips[0].linear_gain - gain_db.linear()).abs()
                 < f32::EPSILON
         );
+    }
+
+    #[test]
+    fn section_playback_keeps_audio_clip_reverse_direction() {
+        let track_id = TrackId::new();
+        let clip_id = ClipId::new();
+        let mut section = Section::new(0);
+        Arc::make_mut(&mut section.timeline)
+            .ensure(track_id)
+            .clips
+            .push(UiClip {
+                id: clip_id,
+                name: "Reverse loop".into(),
+                audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                    channels: vec![vec![1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 48_000,
+                }),
+                source: None,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 4,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 4,
+                gain_db: Default::default(),
+                fades: Default::default(),
+                playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
+                transpose: Default::default(),
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+                original_audio: None,
+            });
+
+        let prepared = section.prepare_playback_source_for_tracks(&[track_id]);
+        let mut output = vec![0.0; 4];
+        assert!(prepared.tracks()[0]
+            .source
+            .render_audio(&mut output, 0, 4, 1, None));
+        assert_eq!(output, vec![4.0, 3.0, 2.0, 1.0]);
     }
 
     #[test]
