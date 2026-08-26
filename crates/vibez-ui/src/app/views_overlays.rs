@@ -37,9 +37,9 @@ const CONTEXT_MENU_CLIP_WIDTH: f32 = 220.0 + CONTEXT_MENU_CARD_PADDING;
 fn context_menu_width(target: &ContextMenuTarget) -> f32 {
     match target {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
-        ContextMenuTarget::TimeSelection { .. } | ContextMenuTarget::ArrangementEmpty => {
-            200.0 + CONTEXT_MENU_CARD_PADDING
-        }
+        ContextMenuTarget::TimeSelection { .. }
+        | ContextMenuTarget::AudioClipDetail { .. }
+        | ContextMenuTarget::ArrangementEmpty => 200.0 + CONTEXT_MENU_CARD_PADDING,
     }
 }
 
@@ -781,6 +781,81 @@ impl App {
                     Message::BounceSelectionToAudio,
                 ));
 
+                col.into()
+            }
+            ContextMenuTarget::AudioClipDetail {
+                location,
+                track_id,
+                clip_id,
+                source_frame,
+                marker,
+            } => {
+                let location = *location;
+                let track_id = *track_id;
+                let clip_id = *clip_id;
+                let source_frame = *source_frame;
+                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+
+                if let Some(marker) = *marker {
+                    col = col.push(menu_btn(
+                        icons::TRASH_2,
+                        "Delete transient".into(),
+                        Message::Arrangement(ArrangementMsg::RemoveTransientMarker {
+                            track_id,
+                            clip_id,
+                            source_frame: marker,
+                        }),
+                    ));
+                } else {
+                    col = col.push(menu_btn(
+                        icons::PLUS,
+                        "Add transient here".into(),
+                        Message::Arrangement(ArrangementMsg::AddTransientMarker {
+                            track_id,
+                            clip_id,
+                            source_frame,
+                        }),
+                    ));
+                }
+                col = col.push(menu_btn(
+                    icons::SLIDERS_VERTICAL,
+                    "Analyse · fewer markers".into(),
+                    Message::DetectClipTransients {
+                        location,
+                        track_id,
+                        clip_id,
+                        detail: vibez_core::onset::TransientDetectionDetail::Fewer,
+                    },
+                ));
+                col = col.push(menu_btn(
+                    icons::SLIDERS_VERTICAL,
+                    "Analyse · balanced".into(),
+                    Message::DetectClipTransients {
+                        location,
+                        track_id,
+                        clip_id,
+                        detail: vibez_core::onset::TransientDetectionDetail::Balanced,
+                    },
+                ));
+                col = col.push(menu_btn(
+                    icons::SLIDERS_VERTICAL,
+                    "Analyse · more markers".into(),
+                    Message::DetectClipTransients {
+                        location,
+                        track_id,
+                        clip_id,
+                        detail: vibez_core::onset::TransientDetectionDetail::More,
+                    },
+                ));
+                col = col.push(menu_btn(
+                    icons::X,
+                    "Clear detected markers".into(),
+                    Message::Arrangement(ArrangementMsg::ReplaceDetectedTransientMarkers {
+                        track_id,
+                        clip_id,
+                        source_frames: Vec::new(),
+                    }),
+                ));
                 col.into()
             }
             ContextMenuTarget::ArrangementEmpty => column![

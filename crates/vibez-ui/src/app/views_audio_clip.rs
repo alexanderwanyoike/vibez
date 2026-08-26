@@ -65,6 +65,7 @@ impl App {
             .unwrap_or(-1.0);
 
         let waveform_widget = AudioClipDetailWidget {
+            location: self.active_timeline_location(),
             track_id,
             clip_id: clip.id,
             audio: Arc::clone(&clip.audio),
@@ -80,6 +81,15 @@ impl App {
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
             playback_direction: clip.playback_direction,
+            transient_markers: clip.transient_markers.clone(),
+            selected_transient_marker: self
+                .state
+                .active_timeline_editor()
+                .selected_transient_marker
+                .filter(|(selected_track, selected_clip, _)| {
+                    *selected_track == track_id && *selected_clip == clip.id
+                })
+                .map(|(_, _, source_frame)| source_frame),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -96,7 +106,13 @@ impl App {
         .size(10)
         .color(th::text_muted());
 
-        let header_row = row![label, horizontal_space(), clip_info]
+        let marker_summary = text(format!(
+            "{} TRANSIENTS · RIGHT-CLICK WAVEFORM",
+            clip.transient_markers.as_slice().len()
+        ))
+        .size(8)
+        .color(th::text_muted());
+        let header_row = row![label, marker_summary, horizontal_space(), clip_info]
             .spacing(4)
             .align_y(iced::Alignment::Center);
 

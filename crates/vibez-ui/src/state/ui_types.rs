@@ -15,6 +15,7 @@ use vibez_core::track::{
     AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
     InputMonitoring, MediaSourceRef,
 };
+use vibez_core::transient::TransientMarkers;
 
 /// A clip as represented in the UI.
 #[derive(Debug, Clone)]
@@ -39,6 +40,7 @@ pub struct UiClip {
     pub gain_db: ClipGainDb,
     pub fades: ClipFades,
     pub playback_direction: ClipPlaybackDirection,
+    pub transient_markers: TransientMarkers,
     pub transpose: ClipTranspose,
     /// Nominal BPM of the underlying sample. `None` until detected or
     /// entered manually.

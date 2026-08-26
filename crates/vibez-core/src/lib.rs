@@ -10,3 +10,4 @@ pub mod onset;
 pub mod perform;
 pub mod time;
 pub mod track;
+pub mod transient;

@@ -1,10 +1,9 @@
 //! Offline transient / onset detection and BPM estimation for audio
 //! clips.
 //!
-//! Pure time-domain detector suited for drum and percussion material:
-//! high-pass pre-emphasis, full-wave rectification, one-pole envelope,
-//! positive-flux onset-detection function, adaptive threshold, and
-//! peak picking with a refractory window. No external deps.
+//! Transient detection is a Rust port of aubio 0.4.9's established HFC onset
+//! pipeline. Tempo estimation retains a separate onset-envelope signal for its
+//! autocorrelation input.
 //!
 //! Two entrypoints:
 //! - `detect_onsets` returns `Vec<u64>` of absolute frame indices.
@@ -17,12 +16,26 @@
 
 use crate::audio_buffer::DecodedAudio;
 
-/// Minimum gap between successive onsets. Prevents multi-triggering
-/// on a single transient.
-const REFRACTORY_MS: f32 = 30.0;
+mod aubio;
 
-/// Lookback used for the adaptive threshold's mean + std estimate.
-const THRESHOLD_WINDOW_MS: f32 = 100.0;
+/// Producer-facing amount of transient detail to retain during analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransientDetectionDetail {
+    Fewer,
+    #[default]
+    Balanced,
+    More,
+}
+
+impl TransientDetectionDetail {
+    pub fn sensitivity(self) -> f32 {
+        match self {
+            Self::Fewer => 3.0,
+            Self::Balanced => 1.5,
+            Self::More => 0.75,
+        }
+    }
+}
 
 /// Sample-count used to measure envelope-level change (onset function).
 const FLUX_WINDOW: usize = 64;
@@ -41,65 +54,19 @@ const PREEMPHASIS: f32 = 0.97;
 /// (tight). `1.5` is a reasonable default for drum loops.
 pub fn detect_onsets(audio: &DecodedAudio, sensitivity: f32) -> Vec<u64> {
     let frames = audio.num_frames();
-    if frames < FLUX_WINDOW * 2 {
+    if frames < 1_024 || audio.sample_rate == 0 {
         return Vec::new();
     }
-    let sr = audio.sample_rate as f32;
-    if sr <= 0.0 {
-        return Vec::new();
-    }
-
     let mono = mix_to_mono(audio, frames);
-    let hp = high_pass_rectify(&mono);
-    let env = envelope(&hp, sr);
-    let odf = onset_flux(&env);
-
-    let refractory = ((REFRACTORY_MS * 0.001) * sr) as usize;
-    let threshold_window = ((THRESHOLD_WINDOW_MS * 0.001) * sr) as usize;
-    let sensitivity = sensitivity.clamp(0.25, 5.0);
-
-    // O(N) adaptive threshold via running prefix sums. The old O(N * W)
-    // path turned into a multi-second hang on long clips.
-    let mut prefix_sum = vec![0.0f64; odf.len() + 1];
-    let mut prefix_sq = vec![0.0f64; odf.len() + 1];
-    for i in 0..odf.len() {
-        let v = odf[i] as f64;
-        prefix_sum[i + 1] = prefix_sum[i] + v;
-        prefix_sq[i + 1] = prefix_sq[i] + v * v;
-    }
-
-    let mut onsets = Vec::new();
-    let mut last_peak: Option<usize> = None;
-
-    for i in 1..frames.saturating_sub(1) {
-        let window_start = i.saturating_sub(threshold_window);
-        let window_end = i;
-        let n = (window_end - window_start) as f64;
-        if n < 1.0 {
-            continue;
-        }
-        let sum = prefix_sum[window_end] - prefix_sum[window_start];
-        let sum_sq = prefix_sq[window_end] - prefix_sq[window_start];
-        let mean = sum / n;
-        let variance = (sum_sq / n - mean * mean).max(0.0);
-        let std = variance.sqrt() as f32;
-        let threshold = mean as f32 + sensitivity * std.max(1e-6);
-
-        let current = odf[i];
-        let prev = odf[i - 1];
-        let next = odf[i + 1];
-        let is_peak = current > threshold && current >= prev && current >= next;
-        if !is_peak {
-            continue;
-        }
-        if let Some(last) = last_peak {
-            if i - last < refractory {
-                continue;
-            }
-        }
-        onsets.push(i as u64);
-        last_peak = Some(i);
-    }
+    let mut onsets = aubio::detect_onsets(
+        &mono,
+        audio.sample_rate,
+        aubio::Config::for_sensitivity(sensitivity),
+    );
+    // Clip start is already an explicit boundary in Vibez. Aubio reports a
+    // non-silent file start as an onset, but showing that as a suggested
+    // transient marker adds no editable information.
+    onsets.retain(|&frame| frame > 0 && frame < frames as u64);
     onsets
 }
 
@@ -374,16 +341,17 @@ mod tests {
         }
     }
 
-    fn impulse_train(sr: u32, intervals_frames: &[usize]) -> DecodedAudio {
+    fn burst_train(sr: u32, intervals_frames: &[usize]) -> DecodedAudio {
         let total: usize = intervals_frames.iter().sum::<usize>() + 1024;
         let mut buf = vec![0.0f32; total];
         let mut pos = 512usize;
         for &gap in intervals_frames {
-            if pos < buf.len() {
-                buf[pos] = 1.0;
-                if pos + 1 < buf.len() {
-                    buf[pos + 1] = -0.8;
+            for offset in 0..1_024 {
+                if pos + offset >= buf.len() {
+                    break;
                 }
+                let phase = std::f32::consts::TAU * 120.0 * offset as f32 / sr as f32;
+                buf[pos + offset] += phase.sin() * (-(offset as f32) / 300.0).exp() * 0.8;
             }
             pos += gap;
         }
@@ -423,7 +391,7 @@ mod tests {
     #[test]
     fn impulse_train_detects_hits() {
         // 8 hits at 8820-sample spacing = 200ms at 44.1kHz.
-        let audio = impulse_train(44_100, &[8_820; 8]);
+        let audio = burst_train(44_100, &[8_820; 8]);
         let onsets = detect_onsets(&audio, 1.2);
         assert!(
             onsets.len() >= 6,
@@ -444,14 +412,16 @@ mod tests {
         // Two spikes 10ms apart: should collapse to one onset (refractory 30ms).
         let sr = 44_100u32;
         let mut buf = vec![0.0f32; 22_050];
-        buf[5_000] = 1.0;
-        buf[5_001] = -0.8;
-        buf[5_441] = 1.0; // 10ms later
-        buf[5_442] = -0.8;
+        for pos in [5_000usize, 5_441] {
+            for offset in 0..1_024 {
+                let phase = std::f32::consts::TAU * 120.0 * offset as f32 / sr as f32;
+                buf[pos + offset] += phase.sin() * (-(offset as f32) / 300.0).exp() * 0.8;
+            }
+        }
         let audio = make_audio(vec![buf.clone(), buf], sr);
         let onsets = detect_onsets(&audio, 1.0);
         assert!(
-            onsets.len() <= 1,
+            onsets.len() == 1,
             "refractory violated: {} onsets {:?}",
             onsets.len(),
             onsets
@@ -464,8 +434,10 @@ mod tests {
         let mut buf = vec![0.0f32; 44_100];
         let expected = [5_000usize, 15_000, 25_000, 35_000];
         for &pos in &expected {
-            buf[pos] = 1.0;
-            buf[pos + 1] = -0.8;
+            for offset in 0..1_024 {
+                let phase = std::f32::consts::TAU * 120.0 * offset as f32 / sr as f32;
+                buf[pos + offset] += phase.sin() * (-(offset as f32) / 300.0).exp() * 0.8;
+            }
         }
         let audio = make_audio(vec![buf.clone(), buf], sr);
         let onsets = detect_onsets(&audio, 1.2);
@@ -478,6 +450,12 @@ mod tests {
                 exp, onsets
             );
         }
+    }
+
+    #[test]
+    fn onset_detection_is_deterministic_for_identical_audio() {
+        let audio = burst_train(44_100, &[8_820; 8]);
+        assert_eq!(detect_onsets(&audio, 1.5), detect_onsets(&audio, 1.5));
     }
 
     #[test]

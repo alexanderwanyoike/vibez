@@ -111,9 +111,13 @@ impl TimelineEditorState {
         else {
             return action;
         };
+        let previous_audio_frames = clip.audio.num_frames().max(1);
         clip.audio = Arc::clone(&success.audio);
         let replaces_geometry = success.geometry.is_some();
         if let Some(geometry) = success.geometry {
+            let marker_ratio = success.audio.num_frames() as f64 / previous_audio_frames as f64;
+            clip.transient_markers
+                .scale_source_frames(marker_ratio, success.audio.num_frames() as u64);
             clip.fades = clip.fades.scaled(clip.duration, geometry.duration);
             clip.source_offset = geometry.source_offset;
             clip.start_marker = geometry.start_marker;
@@ -292,6 +296,8 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
+                clip.transient_markers
+                    .retain_source_range(new_start, new_end);
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 clip.loop_start = clip.loop_start.clamp(new_start, new_end);

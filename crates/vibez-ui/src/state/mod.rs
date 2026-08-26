@@ -180,6 +180,13 @@ pub enum ContextMenuTarget {
         end_beats: f64,
         track_id: Option<TrackId>,
     },
+    AudioClipDetail {
+        location: vibez_project::TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+        marker: Option<u64>,
+    },
     ArrangementEmpty,
 }
 
@@ -359,6 +366,8 @@ pub struct TimelineEditorState {
     pub selected_track: Option<TrackId>,
     pub selected_clips: HashSet<ArrangementSelection>,
     pub selected_note_clip: Option<(TrackId, ClipId)>,
+    /// Runtime-only Transient Marker focus in the Audio Clip editor.
+    pub selected_transient_marker: Option<(TrackId, ClipId, u64)>,
     // Time selection (visible brackets; independent from the loop).
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
@@ -390,11 +399,23 @@ impl TimelineEditorState {
             .retain(|(clip_id, _), _| existing.contains(clip_id));
         self.audio_clip_transpose_debounce
             .retain(|clip_id, _| existing.contains(clip_id));
+        if let Some((track_id, clip_id, source_frame)) = self.selected_transient_marker {
+            let marker_exists = self
+                .timeline
+                .by_track
+                .get(&track_id)
+                .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
+                .is_some_and(|clip| clip.transient_markers.contains(source_frame));
+            if !marker_exists {
+                self.selected_transient_marker = None;
+            }
+        }
     }
 
     pub fn discard_audio_clip_inspector_edits(&mut self) {
         self.audio_clip_inspector_edits.clear();
         self.audio_clip_transpose_debounce.clear();
+        self.selected_transient_marker = None;
     }
 
     pub fn discard_audio_clip_inspector_edits_for(&mut self, clip_id: ClipId) {
@@ -411,6 +432,7 @@ impl Default for TimelineEditorState {
             selected_track: None,
             selected_clips: HashSet::new(),
             selected_note_clip: None,
+            selected_transient_marker: None,
             time_selection_active: false,
             selection_start_beats: 0.0,
             selection_end_beats: 0.0,

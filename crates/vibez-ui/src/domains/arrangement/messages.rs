@@ -119,6 +119,32 @@ pub enum ArrangementMsg {
     },
     ToggleClipLoop(TrackId, ClipId),
     ToggleClipReverse(TrackId, ClipId),
+    SelectTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: Option<u64>,
+    },
+    AddTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
+    MoveTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        from: u64,
+        to: u64,
+    },
+    RemoveTransientMarker {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frame: u64,
+    },
+    ReplaceDetectedTransientMarkers {
+        track_id: TrackId,
+        clip_id: ClipId,
+        source_frames: Vec<u64>,
+    },
     SetClipLoopRegion {
         track_id: TrackId,
         clip_id: ClipId,
@@ -245,6 +271,11 @@ impl ArrangementMsg {
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
+                | Self::SelectTransientMarker { .. }
+                | Self::AddTransientMarker { .. }
+                | Self::MoveTransientMarker { .. }
+                | Self::RemoveTransientMarker { .. }
+                | Self::ReplaceDetectedTransientMarkers { .. }
                 | Self::SetClipLoopRegion { .. }
                 | Self::SetClipStartMarker { .. }
                 | Self::SetTimeSelection { .. }
@@ -300,6 +331,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::AudioClipInspectorInputChanged { .. }
                 | ArrangementMsg::DiscardAudioClipInspectorEdit { .. }
                 | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
+                | ArrangementMsg::SelectTransientMarker { .. }
         )
     }
 
@@ -320,7 +352,12 @@ impl ArrangementMsg {
         self.is_clipboard_project_edit()
             || matches!(
                 self,
-                Self::SubmitAudioClipInspectorField { .. } | Self::SetAudioClipFade { .. }
+                Self::SubmitAudioClipInspectorField { .. }
+                    | Self::SetAudioClipFade { .. }
+                    | Self::AddTransientMarker { .. }
+                    | Self::MoveTransientMarker { .. }
+                    | Self::RemoveTransientMarker { .. }
+                    | Self::ReplaceDetectedTransientMarkers { .. }
             )
     }
 }

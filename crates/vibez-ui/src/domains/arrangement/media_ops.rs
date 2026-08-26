@@ -103,6 +103,10 @@ impl TimelineEditorState {
                                     local_start,
                                     fragment.duration,
                                 );
+                                fragment.transient_markers.retain_source_range(
+                                    fragment.source_offset,
+                                    fragment.source_offset.saturating_add(fragment.duration),
+                                );
                                 fragment
                             })
                         })
@@ -238,6 +242,10 @@ impl TimelineEditorState {
                 if clip.loop_enabled {
                     clip.clamp_loop_to_clip();
                 }
+                clip.transient_markers.retain_source_range(
+                    clip.source_offset,
+                    clip.source_offset.saturating_add(clip.duration),
+                );
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 sync_data = Some((
                     Arc::clone(&clip.audio),
@@ -313,6 +321,10 @@ impl TimelineEditorState {
         });
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
+                let marker_ratio =
+                    success.audio.num_frames() as f64 / clip.audio.num_frames().max(1) as f64;
+                clip.transient_markers
+                    .scale_source_frames(marker_ratio, success.audio.num_frames() as u64);
                 clip.fades = clip.fades.scaled(clip.duration, success.new_duration);
                 clip.audio = Arc::clone(&success.audio);
                 clip.duration = success.new_duration;
@@ -465,6 +477,7 @@ impl TimelineEditorState {
                 gain_db,
                 fades: Default::default(),
                 playback_direction: Default::default(),
+                transient_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -643,6 +656,7 @@ impl TimelineEditorState {
                 gain_db: Default::default(),
                 fades: Default::default(),
                 playback_direction: Default::default(),
+                transient_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -866,6 +880,10 @@ impl TimelineEditorState {
                 left.start_marker = left.source_offset;
                 left.duration = left_duration;
                 left.fades = clip.fades.for_fragment(clip.duration, 0, left.duration);
+                left.transient_markers.retain_source_range(
+                    left.source_offset,
+                    left.source_offset.saturating_add(left.duration),
+                );
 
                 let mut right = clip.clone();
                 right.id = ClipId::new();
@@ -878,6 +896,10 @@ impl TimelineEditorState {
                 right.source_offset =
                     audio_fragment_source_start(clip, left_duration, right.duration);
                 right.start_marker = right.source_offset;
+                right.transient_markers.retain_source_range(
+                    right.source_offset,
+                    right.source_offset.saturating_add(right.duration),
+                );
                 (left, right)
             });
         if let Some((left, right)) = split {

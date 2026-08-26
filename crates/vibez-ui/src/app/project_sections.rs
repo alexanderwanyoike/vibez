@@ -35,6 +35,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
             gain_db: clip.gain_db,
             fades: clip.fades,
             playback_direction: clip.playback_direction,
+            transient_markers: clip.transient_markers.clone(),
             transpose: clip.transpose,
             original_bpm: clip.original_bpm,
             warped: clip.warped,
@@ -140,6 +141,11 @@ pub(super) fn install_loaded_clip(
     let start_marker = loaded
         .info
         .resolved_start_marker(loaded.audio.num_frames() as u64);
+    let source_end = source_offset
+        .saturating_add(loaded.info.duration)
+        .min(loaded.audio.num_frames() as u64);
+    let mut transient_markers = loaded.info.transient_markers;
+    transient_markers.retain_source_range(source_offset, source_end);
     timeline.ensure(loaded.info.track_id).clips.push(UiClip {
         id: loaded.info.id,
         name: loaded.info.name,
@@ -155,6 +161,7 @@ pub(super) fn install_loaded_clip(
         gain_db: loaded.info.gain_db,
         fades: loaded.info.fades.clamped_to(loaded.info.duration),
         playback_direction: loaded.info.playback_direction,
+        transient_markers,
         transpose: loaded.info.transpose,
         original_bpm: loaded.info.original_bpm,
         warped: loaded.info.warped,
@@ -304,6 +311,7 @@ mod tests {
                     gain_db: Default::default(),
                     fades,
                     playback_direction: Default::default(),
+                    transient_markers: Default::default(),
                     transpose: Default::default(),
                     original_bpm: None,
                     warped: false,
