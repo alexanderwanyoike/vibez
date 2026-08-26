@@ -105,6 +105,12 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         new_duration: u64,
     },
+    SetAudioClipFade {
+        track_id: TrackId,
+        clip_id: ClipId,
+        edge: crate::state::AudioClipFadeEdge,
+        frames: u64,
+    },
     MoveClipToTrack {
         source_track: TrackId,
         target_track: TrackId,
@@ -233,6 +239,7 @@ impl ArrangementMsg {
                 | Self::MoveAudioClip { .. }
                 | Self::MoveNoteClipPosition { .. }
                 | Self::ResizeAudioClip { .. }
+                | Self::SetAudioClipFade { .. }
                 | Self::MoveClipToTrack { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::SetClipLoopRegion { .. }
@@ -301,6 +308,16 @@ impl ArrangementMsg {
 
     pub(crate) const fn is_clipboard_project_edit(&self) -> bool {
         matches!(self, Self::CutSelectedClips | Self::PasteClips)
+    }
+
+    /// Edits whose domain result decides whether canonical state changed.
+    /// The app must defer its snapshot and dirty flag until after `update`.
+    pub(crate) const fn defers_project_edit(&self) -> bool {
+        self.is_clipboard_project_edit()
+            || matches!(
+                self,
+                Self::SubmitAudioClipInspectorField { .. } | Self::SetAudioClipFade { .. }
+            )
     }
 }
 

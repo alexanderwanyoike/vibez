@@ -21,43 +21,8 @@ use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
+use super::clip_drag::ClipDragAction;
 use super::*;
-
-/// Drag action in progress on the clip canvas.
-#[derive(Debug, Clone)]
-pub enum ClipDragAction {
-    MoveClip {
-        undo_gesture: UndoGestureId,
-        clip_id: ClipId,
-        is_note_clip: bool,
-        /// Initial local x pixel where the drag started.
-        start_local_x: f32,
-        start_scroll_beats: f64,
-        original_position_beats: f64,
-        start_y: f32,
-    },
-    ResizeClip {
-        undo_gesture: UndoGestureId,
-        clip_id: ClipId,
-        is_note_clip: bool,
-        clip_start_beat: f64,
-    },
-    PendingSeek {
-        beat: f64,
-        start_x: f32,
-        /// Press point in column coordinates, so a drag that leaves this
-        /// lane is still resolvable against the whole arrangement.
-        anchor_column_y: f32,
-    },
-    RegionSelect {
-        anchor_beat: f64,
-        anchor_column_y: f32,
-    },
-    PanViewport {
-        start_local_x: f32,
-        start_scroll_beats: f64,
-    },
-}
 
 /// Pointer travel before a press becomes a rubber-band rather than a seek.
 const MARQUEE_MIN_PX: f32 = 4.0;
@@ -203,6 +168,8 @@ impl TrackClipCanvas {
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
+                fade_in_frames: c.fades.fade_in_frames(),
+                fade_out_frames: c.fades.fade_out_frames(),
                 warp_stale: c.warped
                     && c.warped_to_bpm
                         .map(|b| (b - bpm).abs() > 0.01)
@@ -475,6 +442,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
             return match drag {
                 ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
+                ClipDragAction::FadeClip(_) => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
@@ -482,6 +450,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
+            if self.fade_handle_hit(pos).is_some() {
+                return mouse::Interaction::ResizingHorizontally;
+            }
             if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
                 if near_right && in_title_bar {
@@ -528,6 +499,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
             //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
+                    if let Some(drag) = self.fade_handle_hit(pos) {
+                        state.drag = Some(ClipDragAction::FadeClip(drag));
+                        return (canvas::event::Status::Captured, None);
+                    }
                     if let Some((clip_id, is_note_clip, near_right, pos_beats, _dur_beats)) =
                         self.hit_test(pos.x)
                     {
@@ -832,6 +807,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                         .in_undo_gesture(*undo_gesture);
                                     return (canvas::event::Status::Captured, Some(edit));
                                 }
+                            }
+                            ClipDragAction::FadeClip(drag) => {
+                                let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {
+                                    track_id,
+                                    clip_id: drag.clip_id,
+                                    edge: drag.edge,
+                                    frames: drag.frames_at_x(local_x),
+                                })
+                                .in_undo_gesture(drag.undo_gesture);
+                                return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::PanViewport {
                                 start_local_x,

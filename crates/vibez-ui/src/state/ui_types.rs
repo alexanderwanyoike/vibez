@@ -145,6 +145,12 @@ pub enum AudioClipInspectorField {
     Transpose,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClipFadeEdge {
+    In,
+    Out,
+}
+
 /// Inspector fields that can be controlled by a rotary widget.
 ///
 /// Keeping this narrower than [`AudioClipInspectorField`] makes it impossible

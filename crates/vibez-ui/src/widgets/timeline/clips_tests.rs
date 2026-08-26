@@ -10,6 +10,7 @@ use iced::keyboard::{Event, Key, Location, Modifiers};
 use iced::widget::canvas;
 use iced::{mouse, Color, Point, Rectangle, Size};
 
+use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent};
@@ -352,6 +353,8 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
         warp_stale: false,
     });
     let (status, message) = right_click(&canvas, Point::new(10.0, 10.0));
@@ -433,6 +436,8 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        fade_in_frames: 0,
+        fade_out_frames: 0,
         warp_stale: false,
     });
 
@@ -441,4 +446,71 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         preview_id
     );
     assert!(canvas.hit_test(10.0).is_none());
+}
+
+#[test]
+fn selected_audio_fade_handle_drag_emits_realtime_edits_in_one_undo_gesture() {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 44_100,
+        name: "Clip".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 11_025,
+        fade_out_frames: 0,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let mut state = ClipInteractionState::default();
+    let handle = Point::new(10.0, FADE_HANDLE_Y);
+
+    let (status, message) = <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(handle),
+    );
+    assert_eq!(status, canvas::event::Status::Captured);
+    assert!(message.is_none());
+
+    let drag = |state: &mut ClipInteractionState, x: f32| {
+        <TrackClipCanvas as canvas::Program<Message>>::update(
+            &canvas,
+            state,
+            canvas::Event::Mouse(iced::mouse::Event::CursorMoved {
+                position: Point::new(x, FADE_HANDLE_Y),
+            }),
+            bounds,
+            mouse::Cursor::Available(Point::new(x, FADE_HANDLE_Y)),
+        )
+        .1
+    };
+    let first = drag(&mut state, 20.0);
+    let second = drag(&mut state, 30.0);
+
+    let extract = |message: Option<Message>| match message {
+        Some(Message::UndoGesture { id, edit }) => match *edit {
+            Message::Arrangement(ArrangementMsg::SetAudioClipFade {
+                clip_id: edited,
+                edge: crate::state::AudioClipFadeEdge::In,
+                frames,
+                ..
+            }) => Some((id, edited, frames)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (first_gesture, first_clip, first_frames) = extract(first).expect("first fade edit");
+    let (second_gesture, second_clip, second_frames) = extract(second).expect("second fade edit");
+    assert_eq!(first_gesture, second_gesture);
+    assert_eq!((first_clip, second_clip), (clip_id, clip_id));
+    assert_eq!((first_frames, second_frames), (22_050, 33_075));
 }

@@ -179,6 +179,7 @@ impl App {
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
         let clipboard_message = msg.is_clipboard_message();
+        let deferred_project_edit = msg.defers_project_edit();
         let section_content_changed = msg.marks_dirty();
         let editing_section = if clipboard_message {
             clipboard_targets_section(
@@ -255,7 +256,11 @@ impl App {
                 ctx,
             );
             self.state.perform.commit_selected_section_timeline();
-            if section_content_changed {
+            if if deferred_project_edit {
+                action.mark_dirty
+            } else {
+                section_content_changed
+            } {
                 if let Some(section_id) = self.state.perform.selected_section {
                     self.refresh_playing_section_after_edit(section_id);
                 }
