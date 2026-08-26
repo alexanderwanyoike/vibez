@@ -1055,6 +1055,93 @@ mod tests {
     }
 
     #[test]
+    fn clip_bounce_keeps_reverse_warp_and_shaped_fades_in_one_render() {
+        let mut track = bare_track("audio");
+        track.pan = DEFAULT_TRACK_PAN;
+        let track_id = track.id;
+        let clip_id = ClipId::new();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![0.0, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0, 0.5]],
+            sample_rate: 44_100,
+        });
+        let mut warp_markers = vibez_core::warp_marker::WarpMarkers::default();
+        assert!(warp_markers.add(2, 3, 0, 8, 8));
+        let fades = vibez_core::track::ClipFades::new(3, 3, 8)
+            .with_fade_in_curve(vibez_core::track::FadeCurve::new(70))
+            .with_fade_out_curve(vibez_core::track::FadeCurve::new(-60));
+        let clip = ClipInfo {
+            id: clip_id,
+            track_id,
+            name: "edited".into(),
+            position: 0,
+            source_offset: 0,
+            start_marker: None,
+            duration: 8,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 8,
+            gain_db: Default::default(),
+            fades,
+            playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
+            transient_markers: Default::default(),
+            warp_markers: warp_markers.clone(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: true,
+            warped_to_bpm: Some(120.0),
+        };
+        let request = BounceRequest {
+            master: None,
+            buses: Vec::new(),
+            tracks: vec![track],
+            audio_clips: vec![clip],
+            note_clips: Vec::new(),
+            clip_audio: HashMap::from([(clip_id, Arc::clone(&audio))]),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Clip {
+                track_id,
+                clip_id,
+                is_note_clip: false,
+            },
+            range_samples: (0, 8),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let mut live = vec![0.0; 8];
+        PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 8,
+                linear_gain: 1.0,
+                fades,
+                playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
+                warp_markers,
+            }],
+            Vec::new(),
+            Vec::new(),
+        )
+        .render_audio(&mut live, 0, 8, 1, None);
+
+        let bounced = render_offline(&request);
+        let pan = std::f32::consts::FRAC_1_SQRT_2;
+        for (frame, expected) in live.into_iter().enumerate() {
+            assert!((bounced.audio.channels[0][frame] - expected * pan).abs() < 1e-6);
+            assert!((bounced.audio.channels[1][frame] - expected * pan).abs() < 1e-6);
+        }
+    }
+
+    #[test]
     fn mute_silences_master_bounce() {
         let mut track = bare_track("audio");
         track.mute = true;

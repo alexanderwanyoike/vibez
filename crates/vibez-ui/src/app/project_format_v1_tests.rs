@@ -4,7 +4,9 @@ use super::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::ClipId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
-use vibez_core::track::{ClipPlaybackDirection, InstrumentStateInfo, TrackInfo};
+use vibez_core::track::{
+    ClipFades, ClipPlaybackDirection, FadeCurve, InstrumentStateInfo, TrackInfo,
+};
 use vibez_core::transient::{TransientMarker, TransientMarkerKind, TransientMarkers};
 use vibez_core::warp_marker::{WarpMarker, WarpMarkers};
 use vibez_engine::commands::{AuditionStart, EngineCommand};
@@ -110,6 +112,10 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             imported.num_frames() as u64,
             imported.num_frames() as u64,
         );
+        let duration = imported.num_frames() as u64;
+        let fades = ClipFades::new(duration / 10, duration / 8, duration)
+            .with_fade_in_curve(FadeCurve::new(65))
+            .with_fade_out_curve(FadeCurve::new(-45));
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
             tracks: vec![track.clone()],
@@ -121,14 +127,14 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
                     position: 0,
                     source_offset: 0,
                     start_marker: None,
-                    duration: imported.num_frames() as u64,
+                    duration,
                     source: Some(staged),
                     file_path: None,
                     loop_enabled: false,
                     loop_start: 0,
                     loop_end: 0,
                     gain_db: Default::default(),
-                    fades: Default::default(),
+                    fades,
                     playback_direction: ClipPlaybackDirection::Reverse,
                     transient_markers,
                     warp_markers,
@@ -172,6 +178,10 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         assert_eq!(
             reopened.project.arrange.clips[0].playback_direction,
             ClipPlaybackDirection::Reverse,
+            "{file_name}"
+        );
+        assert_eq!(
+            reopened.project.arrange.clips[0].fades, fades,
             "{file_name}"
         );
         assert_eq!(
