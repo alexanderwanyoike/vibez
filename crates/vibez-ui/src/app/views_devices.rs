@@ -846,9 +846,9 @@ impl App {
                 .size(9)
                 .color(th::text_muted()),
             horizontal_space(),
-            bank_button("‹  [", selected_bank.checked_sub(1)),
+            bank_button("‹", selected_bank.checked_sub(1)),
             bank_button(
-                "]  ›",
+                "›",
                 (selected_bank + 1 < bank_count).then_some(selected_bank + 1)
             ),
         ]

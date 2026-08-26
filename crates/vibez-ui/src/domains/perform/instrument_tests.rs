@@ -301,7 +301,7 @@ fn perform_messages_send_transformed_notes_through_the_existing_engine_path() {
 }
 
 #[test]
-fn bracket_navigation_moves_a_drum_rack_by_complete_sixteen_pad_banks() {
+fn instrument_pads_fire_the_visible_drum_rack_bank() {
     let mut track = ProjectTrack::new(TrackId::new(), "Drum Rack".into(), 0);
     track.kind = vibez_core::midi::TrackKind::Midi;
     track.has_instrument = true;
@@ -317,11 +317,47 @@ fn bracket_navigation_moves_a_drum_rack_by_complete_sixteen_pad_banks() {
         ..PerformState::default()
     };
     let mut engine = RecordingEngine::default();
+    let now = std::time::Instant::now();
+
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z".into(),
+            occurred_at: now,
+        },
+        &mut engine,
+        ctx,
+    );
+    assert!(matches!(
+        engine.0.last(),
+        Some(vibez_engine::commands::EngineCommand::ExternalNoteOn { pitch: 36, .. })
+    ));
+    state.update(
+        PerformMsg::ComputerKeyReleased {
+            key_id: "z".into(),
+            occurred_at: now,
+        },
+        &mut engine,
+        ctx,
+    );
 
     state.update(PerformMsg::NextBank, &mut engine, ctx);
 
     assert_eq!(state.instrument_pad_preview(position(0)).pitch, 52);
     assert_eq!(state.instrument_pad_preview(position(15)).pitch, 67);
+    state.update(
+        PerformMsg::ComputerKeyPressed {
+            key: ComputerKey::Z,
+            key_id: "z-bank-two".into(),
+            occurred_at: now,
+        },
+        &mut engine,
+        ctx,
+    );
+    assert!(matches!(
+        engine.0.last(),
+        Some(vibez_engine::commands::EngineCommand::ExternalNoteOn { pitch: 52, .. })
+    ));
 
     for _ in 0..8 {
         state.update(PerformMsg::NextBank, &mut engine, ctx);
