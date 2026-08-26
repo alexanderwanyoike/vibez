@@ -268,14 +268,6 @@ impl TrackClipCanvas {
                     let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
                     let top = clip_y + CLIP_TITLE_HEIGHT + 2.0;
                     let bottom = clip_y + clip_h - 2.0;
-                    let curve_gain =
-                        |progress: f32, equal_power: bool, curve: vibez_core::track::FadeCurve| {
-                            if equal_power {
-                                (progress * std::f32::consts::FRAC_PI_2).sin()
-                            } else {
-                                curve.gain(progress)
-                            }
-                        };
                     let envelope = canvas::Path::new(|builder| {
                         builder.move_to(iced::Point::new(clip_x, bottom));
                         for step in 1..=12 {
@@ -283,15 +275,16 @@ impl TrackClipCanvas {
                             let x = clip_x + (fade_in_x - clip_x) * progress;
                             let y = bottom
                                 - (bottom - top)
-                                    * curve_gain(progress, clip.crossfade_in, clip.fade_in_curve);
+                                    * clip.fade_in_curve.gain_for(progress, clip.crossfade_in);
                             builder.line_to(iced::Point::new(x, y));
                         }
                         builder.line_to(iced::Point::new(fade_out_x, top));
                         for step in 1..=12 {
                             let progress = step as f32 / 12.0;
                             let x = fade_out_x + (clip_x + clip_w - fade_out_x) * progress;
-                            let gain =
-                                curve_gain(1.0 - progress, clip.crossfade_out, clip.fade_out_curve);
+                            let gain = clip
+                                .fade_out_curve
+                                .gain_for(1.0 - progress, clip.crossfade_out);
                             let y = bottom - (bottom - top) * gain;
                             builder.line_to(iced::Point::new(x, y));
                         }

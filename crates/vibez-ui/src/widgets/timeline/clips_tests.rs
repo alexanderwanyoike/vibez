@@ -596,3 +596,49 @@ fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
         )
     ));
 }
+
+#[test]
+fn overlapping_fade_controls_choose_the_handle_nearest_the_pointer() {
+    let mut canvas = empty_track_canvas();
+    let clip_id = ClipId::new();
+    canvas.clips.push(TimelineClip {
+        clip_id,
+        position: 0,
+        duration: 44_100,
+        name: "Short steep fade".into(),
+        peaks: Arc::new(Vec::new()),
+        peak_span_frames: None,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: 44_100,
+        fade_in_frames: 11_025,
+        fade_out_frames: 0,
+        fade_in_curve: vibez_core::track::FadeCurve::new(100),
+        fade_out_curve: Default::default(),
+        crossfade_in: false,
+        crossfade_out: false,
+        warp_stale: false,
+    });
+    canvas.selected_clips.insert(clip_id);
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0));
+    let clip_width = canvas.geometry().width_for_beats(2.0);
+    let (length_x, _) = fade_drag::fade_handle_xs(0.0, clip_width, &canvas.clips[0]);
+    let curve = fade_drag::fade_curve_handle(
+        0.0,
+        clip_width,
+        bounds.height,
+        &canvas.clips[0],
+        crate::state::AudioClipFadeEdge::In,
+    )
+    .unwrap();
+    let length = Point::new(length_x, FADE_HANDLE_Y);
+
+    assert!(matches!(
+        canvas.fade_control_hit(length, bounds.height),
+        Some(fade_drag::FadeControlDrag::Length(_))
+    ));
+    assert!(matches!(
+        canvas.fade_control_hit(curve, bounds.height),
+        Some(fade_drag::FadeControlDrag::Curve(_))
+    ));
+}

@@ -24,6 +24,8 @@ use vibez_core::id::{ClipId, TrackId};
 use super::clip_drag::ClipDragAction;
 use super::*;
 
+mod hit_test;
+
 /// Pointer travel before a press becomes a rubber-band rather than a seek.
 const MARQUEE_MIN_PX: f32 = 4.0;
 
@@ -339,35 +341,6 @@ impl TrackClipCanvas {
             .position(|row| column_y >= row.top && column_y < row.bottom())
     }
 
-    /// Build the marquee message for a drag from `anchor` to the pointer,
-    /// both already in column coordinates.
-    fn marquee_message(
-        &self,
-        anchor_beat: f64,
-        anchor_column_y: f32,
-        current_x: f32,
-        current_column_y: f32,
-        additive: bool,
-    ) -> Message {
-        let current_beat = self.snapped_beat(self.geometry().x_to_beat(current_x));
-        let span = marquee::resolve(
-            anchor_beat,
-            current_beat,
-            anchor_column_y,
-            current_column_y,
-            &self.row_spans,
-        );
-        Message::Arrangement(ArrangementMsg::MarqueeSelect {
-            anchor_track: self.track_id,
-            start_beats: span.start_beats,
-            end_beats: span.end_beats,
-            top_y: span.top_y,
-            bottom_y: span.bottom_y,
-            track_ids: span.track_ids,
-            additive,
-        })
-    }
-
     /// Samples per beat.
     pub(super) fn spb(&self) -> f64 {
         if self.bpm > 0.0 {
@@ -375,51 +348,6 @@ impl TrackClipCanvas {
         } else {
             1.0
         }
-    }
-
-    /// Hit test: find a clip at the given pixel x position.
-    /// Returns (clip_id, is_note_clip, near_right_edge, position_beats, duration_beats).
-    pub(super) fn hit_test(&self, pos_x: f32) -> Option<(ClipId, bool, bool, f64, f64)> {
-        let geometry = self.geometry();
-        let spb = self.spb();
-
-        // Check audio clips
-        for clip in &self.clips {
-            let clip_start_beat = clip.position as f64 / spb;
-            let clip_dur_beats = clip.duration as f64 / spb;
-            let clip_x = self.beat_to_x(clip_start_beat);
-            let clip_w = geometry.width_for_beats(clip_dur_beats);
-
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
-                return Some((
-                    clip.clip_id,
-                    false,
-                    near_right,
-                    clip_start_beat,
-                    clip_dur_beats,
-                ));
-            }
-        }
-
-        // Check note clips
-        for note_clip in &self.note_clips {
-            let clip_x = self.beat_to_x(note_clip.position_beats);
-            let clip_w = geometry.width_for_beats(note_clip.duration_beats);
-
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                let near_right = pos_x > clip_x + clip_w - RESIZE_EDGE_PX;
-                return Some((
-                    note_clip.clip_id,
-                    true,
-                    near_right,
-                    note_clip.position_beats,
-                    note_clip.duration_beats,
-                ));
-            }
-        }
-
-        None
     }
 }
 
@@ -455,11 +383,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
         }
 
         if let Some(pos) = cursor.position_in(bounds) {
-            if self.fade_curve_hit(pos, bounds.height).is_some() {
-                return mouse::Interaction::ResizingVertically;
-            }
-            if self.fade_handle_hit(pos).is_some() {
-                return mouse::Interaction::ResizingHorizontally;
+            if let Some(control) = self.fade_control_hit(pos, bounds.height) {
+                return match control {
+                    fade_drag::FadeControlDrag::Length(_) => {
+                        mouse::Interaction::ResizingHorizontally
+                    }
+                    fade_drag::FadeControlDrag::Curve(_) => mouse::Interaction::ResizingVertically,
+                };
             }
             if let Some((_, _, near_right, _, _)) = self.hit_test(pos.x) {
                 let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
@@ -507,12 +437,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
             //   Body (below title):    seek / region-select
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
-                    if let Some(drag) = self.fade_curve_hit(pos, bounds.height) {
-                        state.drag = Some(ClipDragAction::FadeCurve(drag));
-                        return (canvas::event::Status::Captured, None);
-                    }
-                    if let Some(drag) = self.fade_handle_hit(pos) {
-                        state.drag = Some(ClipDragAction::FadeClip(drag));
+                    if let Some(control) = self.fade_control_hit(pos, bounds.height) {
+                        state.drag = Some(match control {
+                            fade_drag::FadeControlDrag::Length(drag) => {
+                                ClipDragAction::FadeClip(drag)
+                            }
+                            fade_drag::FadeControlDrag::Curve(drag) => {
+                                ClipDragAction::FadeCurve(drag)
+                            }
+                        });
                         return (canvas::event::Status::Captured, None);
                     }
                     if let Some((clip_id, is_note_clip, near_right, pos_beats, _dur_beats)) =

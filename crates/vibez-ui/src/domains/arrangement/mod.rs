@@ -28,6 +28,7 @@ pub use messages::{
 };
 mod clipboard;
 mod crossfades;
+mod fade_edits;
 mod slice_to_drum_rack;
 mod slicing;
 pub(crate) use slicing::slice_region_count;
@@ -352,87 +353,13 @@ impl TimelineEditorState {
                 clip_id,
                 edge,
                 frames,
-            } => {
-                let changes_audible_fades = self
-                    .find_content(track_id)
-                    .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
-                    .is_some_and(|clip| {
-                        let next = match edge {
-                            crate::state::AudioClipFadeEdge::In => {
-                                clip.fades.with_fade_in(frames, clip.duration)
-                            }
-                            crate::state::AudioClipFadeEdge::Out => {
-                                clip.fades.with_fade_out(frames, clip.duration)
-                            }
-                        };
-                        next.fade_in_frames() != clip.fades.fade_in_frames()
-                            || next.fade_out_frames() != clip.fades.fade_out_frames()
-                    });
-                if !changes_audible_fades {
-                    return ArrangementAction::default();
-                }
-                self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
-                if let Some(clip) = self
-                    .find_content_mut(track_id)
-                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
-                {
-                    let fades = match edge {
-                        crate::state::AudioClipFadeEdge::In => {
-                            clip.fades.with_fade_in(frames, clip.duration)
-                        }
-                        crate::state::AudioClipFadeEdge::Out => {
-                            clip.fades.with_fade_out(frames, clip.duration)
-                        }
-                    };
-                    clip.fades = fades;
-                    engine.send(EngineCommand::SetClipFades {
-                        track_id,
-                        clip_id,
-                        fades,
-                    });
-                    self.discard_audio_clip_inspector_edits_for(clip_id);
-                    action.mark_dirty = true;
-                }
-            }
+            } => return self.set_audio_clip_fade(engine, track_id, clip_id, edge, frames),
             ArrangementMsg::SetAudioClipFadeCurve {
                 track_id,
                 clip_id,
                 edge,
                 curve,
-            } => {
-                let changes_curve = self
-                    .find_content(track_id)
-                    .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
-                    .is_some_and(|clip| match edge {
-                        crate::state::AudioClipFadeEdge::In => {
-                            clip.fades.fade_in_frames() > 0 && clip.fades.fade_in_curve() != curve
-                        }
-                        crate::state::AudioClipFadeEdge::Out => {
-                            clip.fades.fade_out_frames() > 0 && clip.fades.fade_out_curve() != curve
-                        }
-                    });
-                if !changes_curve {
-                    return ArrangementAction::default();
-                }
-                self.unlink_crossfade_edge_for_clip(engine, track_id, clip_id, edge);
-                if let Some(clip) = self
-                    .find_content_mut(track_id)
-                    .and_then(|content| content.clips.iter_mut().find(|clip| clip.id == clip_id))
-                {
-                    clip.fades = match edge {
-                        crate::state::AudioClipFadeEdge::In => clip.fades.with_fade_in_curve(curve),
-                        crate::state::AudioClipFadeEdge::Out => {
-                            clip.fades.with_fade_out_curve(curve)
-                        }
-                    };
-                    engine.send(EngineCommand::SetClipFades {
-                        track_id,
-                        clip_id,
-                        fades: clip.fades,
-                    });
-                    action.mark_dirty = true;
-                }
-            }
+            } => return self.set_audio_clip_fade_curve(engine, track_id, clip_id, edge, curve),
             ArrangementMsg::MoveClipToTrack {
                 source_track,
                 target_track,
