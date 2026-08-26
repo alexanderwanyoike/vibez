@@ -54,6 +54,7 @@ fn source_with_looping(
                     loop_start: 0,
                     loop_end: 0,
                     linear_gain: 1.0,
+                    fades: Default::default(),
                 }],
                 Vec::new(),
                 Vec::new(),

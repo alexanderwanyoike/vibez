@@ -140,6 +140,9 @@ impl TimelineEditorState {
                     let mut fragment = clip.clone();
                     fragment.position = 0;
                     fragment.duration = duration.max(1);
+                    fragment.fades =
+                        clip.fades
+                            .for_fragment(clip.duration, delta, fragment.duration);
                     fragment.source_offset = clip.timeline().source_at(delta);
                     fragment.start_marker = fragment.source_offset;
                     copied.push(ClipboardClip::Audio {
@@ -338,6 +341,7 @@ impl TimelineEditorState {
                         loop_start: clip.loop_start,
                         loop_end: clip.loop_end,
                         linear_gain: clip.gain_db.linear(),
+                        fades: clip.fades,
                     });
                     selected.insert(ArrangementSelection::AudioClip {
                         track_id,

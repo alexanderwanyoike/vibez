@@ -4,7 +4,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use vibez_core::id::{ClipId, SectionId};
-use vibez_core::track::{ClipGainDb, ClipInfo, ClipTranspose, MediaSourceRef, TrackInfo};
+use vibez_core::track::{
+    ClipFades, ClipGainDb, ClipInfo, ClipTranspose, MediaSourceRef, TrackInfo,
+};
 use vibez_project::project_format_v1::{
     detect_project_format, hex_sha256, representative_document, save_project_v1, stage_local_file,
     stage_remote_file, strip_staged_sources, sweep_staging_root, ProjectContainer,
@@ -172,6 +174,7 @@ fn project_with_source(source: MediaSourceRef) -> Project {
                 loop_start: 0,
                 loop_end: 128,
                 gain_db: ClipGainDb::new(-3.0).unwrap(),
+                fades: ClipFades::new(16, 24, 128),
                 transpose: ClipTranspose::new(7),
                 original_bpm: Some(120.0),
                 warped: false,
@@ -208,6 +211,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
         loop_start: 0,
         loop_end: 128,
         gain_db: Default::default(),
+        fades: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -290,6 +294,10 @@ fn production_save_is_self_contained_incremental_and_save_as_reuses_media() {
         panic!("committed project must reference Project Media");
     };
     assert_eq!(document.project.arrange.clips[0].gain_db.db(), -3.0);
+    assert_eq!(
+        document.project.arrange.clips[0].fades,
+        ClipFades::new(16, 24, 128)
+    );
     assert_eq!(document.project.arrange.clips[0].transpose.semitones(), 7);
     assert_eq!(container.read_media(id).unwrap(), bytes);
     let fingerprint = container.media_fingerprint(id).unwrap();

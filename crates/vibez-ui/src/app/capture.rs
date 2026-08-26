@@ -506,6 +506,7 @@ fn add_audio_clip_command(
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
         linear_gain: clip.gain_db.linear(),
+        fades: clip.fades,
     }
 }
 
@@ -602,6 +603,7 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             gain_db: Default::default(),
+            fades: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

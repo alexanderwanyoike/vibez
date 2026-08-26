@@ -587,6 +587,7 @@ impl TimelineEditorState {
                             loop_start: clip.loop_start,
                             loop_end: clip.loop_end,
                             linear_gain: clip.gain_db.linear(),
+                            fades: clip.fades,
                         });
                         // Add to UI target track
                         if let Some(track) = self.find_content_mut(target_track) {
@@ -669,6 +670,7 @@ impl TimelineEditorState {
                                         loop_start: duplicate.loop_start,
                                         loop_end: duplicate.loop_end,
                                         linear_gain: duplicate.gain_db.linear(),
+                                        fades: duplicate.fades,
                                     });
                                     let new_id = duplicate.id;
                                     if let Some(track) = self.find_content_mut(*track_id) {

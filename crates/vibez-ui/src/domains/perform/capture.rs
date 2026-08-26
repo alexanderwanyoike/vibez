@@ -603,12 +603,16 @@ fn append_timeline_window(
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
                 gain_db: clip.gain_db,
+                fades: clip.fades,
                 transpose: clip.transpose,
                 original_bpm: clip.original_bpm,
                 warped: clip.warped,
                 warped_to_bpm: clip.warped_to_bpm,
                 original_audio: clip.original_audio.as_ref().map(Arc::clone),
             };
+            fragment.fades = clip
+                .fades
+                .for_fragment(clip.duration, delta, fragment.duration);
             if fragment.loop_enabled && fragment.loop_end <= fragment.loop_start {
                 fragment.loop_enabled = false;
             }
@@ -720,6 +724,7 @@ mod tests {
                 loop_start: 0,
                 loop_end: 0,
                 gain_db: Default::default(),
+                fades: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

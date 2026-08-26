@@ -13,6 +13,7 @@ use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
+use vibez_core::track::ClipFades;
 
 #[cfg(test)]
 thread_local! {
@@ -42,6 +43,7 @@ pub struct EngineClip {
     pub loop_end: u64,
     /// Pre-channel scalar resolved on the UI thread from the persisted dB value.
     pub linear_gain: f32,
+    pub fades: ClipFades,
 }
 
 impl EngineClip {
@@ -363,6 +365,7 @@ impl PreparedPlaybackSource {
                 }
                 let clip_frame = (global_frame - clip.position) as usize;
                 let source_frame = clip.timeline().source_at(clip_frame as u64) as usize;
+                let fade_gain = clip.fades.gain_at(clip_frame as u64, clip.duration);
                 for ch in 0..channels {
                     let sample = if source_frame >= source_end {
                         0.0
@@ -373,7 +376,7 @@ impl PreparedPlaybackSource {
                     } else {
                         0.0
                     };
-                    output[frame * channels + ch] += sample * clip.linear_gain;
+                    output[frame * channels + ch] += sample * clip.linear_gain * fade_gain;
                 }
                 clip_rendered = true;
             }
@@ -427,6 +430,7 @@ mod tests {
 
     use vibez_core::audio_buffer::DecodedAudio;
     use vibez_core::id::{ClipId, TrackId};
+    use vibez_core::track::ClipFades;
 
     use super::*;
     use crate::mixer::EngineTrack;
@@ -501,6 +505,7 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             linear_gain: 1.0,
+            fades: Default::default(),
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
@@ -513,6 +518,64 @@ mod tests {
         assert!(existing_path.render(0, 4, 1, None));
         assert!(prepared_path.render(0, 4, 1, None));
         assert_eq!(existing_path.mix_buffer, prepared_path.mix_buffer);
+    }
+
+    #[test]
+    fn audio_clip_fades_are_applied_at_timeline_edges() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![1.0; 8]],
+            sample_rate: 48_000,
+        });
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 8,
+                linear_gain: 1.0,
+                fades: ClipFades::new(4, 4, 8),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.25, 0.5, 0.75, 0.75, 0.5, 0.25, 0.0]);
+    }
+
+    #[test]
+    fn loop_wraps_do_not_restart_the_clip_fade() {
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![1.0; 4]],
+            sample_rate: 48_000,
+        });
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 1.0,
+                fades: ClipFades::new(2, 0, 8),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]
@@ -533,6 +596,7 @@ mod tests {
                 loop_start: 0,
                 loop_end: 0,
                 linear_gain: 1.0,
+                fades: Default::default(),
             }],
             Vec::new(),
             Vec::new(),

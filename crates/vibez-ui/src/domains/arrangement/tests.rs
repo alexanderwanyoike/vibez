@@ -282,6 +282,7 @@ fn add_audio_clip(
         loop_start: 0,
         loop_end: 0,
         gain_db: Default::default(),
+        fades: Default::default(),
         transpose: Default::default(),
         original_bpm: None,
         warped: false,
@@ -363,6 +364,7 @@ fn split_audio_clip_replaces_clip_with_two_halves() {
     let mut a = arrangement_with_tracks(1);
     let (tid, cid) = add_audio_clip(&mut a, 0, 0, 1000);
     let mut engine = RecordingEngine::default();
+    a.tracks[0].clips[0].fades = vibez_core::track::ClipFades::new(100, 200, 1000);
     a.update(
         ArrangementMsg::SplitAudioClip {
             track_id: tid,
@@ -377,6 +379,10 @@ fn split_audio_clip_replaces_clip_with_two_halves() {
     assert_eq!(a.tracks[0].clips[1].duration, 600);
     assert_eq!(a.tracks[0].clips[1].position, 400);
     assert_eq!(a.tracks[0].clips[1].source_offset, 400);
+    assert_eq!(a.tracks[0].clips[0].fades.fade_in_frames(), 100);
+    assert_eq!(a.tracks[0].clips[0].fades.fade_out_frames(), 0);
+    assert_eq!(a.tracks[0].clips[1].fades.fade_in_frames(), 0);
+    assert_eq!(a.tracks[0].clips[1].fades.fade_out_frames(), 200);
     assert!(matches!(engine.0[0], EngineCommand::RemoveClip(..)));
 }
 
@@ -714,6 +720,48 @@ fn inspector_gain_and_source_bounds_reach_the_resident_clip() {
     assert!(clip.loop_enabled);
     assert_eq!(clip.loop_start, 11_025);
     assert_eq!(clip.loop_end, 44_100);
+}
+
+#[test]
+fn inspector_fades_commit_in_frames_and_clamp_as_one_pair() {
+    let mut a = arrangement_with_tracks(1);
+    let (tid, cid) = add_audio_clip(&mut a, 0, 0, 44_100);
+    let mut engine = RecordingEngine::default();
+
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::FadeIn), "0.750".into());
+    let action = a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::FadeIn,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    assert!(action.mark_dirty);
+    assert_eq!(a.tracks[0].clips[0].fades.fade_in_frames(), 33_075);
+    assert!(matches!(
+        engine.0.last(),
+        Some(EngineCommand::SetClipFades { fades, .. })
+            if fades.fade_in_frames() == 33_075 && fades.fade_out_frames() == 0
+    ));
+
+    a.audio_clip_inspector_edits
+        .insert((cid, AudioClipInspectorField::FadeOut), "0.750".into());
+    a.update(
+        ArrangementMsg::SubmitAudioClipInspectorField {
+            track_id: tid,
+            clip_id: cid,
+            field: AudioClipInspectorField::FadeOut,
+        },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+    let fades = a.tracks[0].clips[0].fades;
+    assert_eq!(fades.fade_in_frames(), 11_025);
+    assert_eq!(fades.fade_out_frames(), 33_075);
+    assert_eq!(fades.fade_in_frames() + fades.fade_out_frames(), 44_100);
 }
 
 #[test]

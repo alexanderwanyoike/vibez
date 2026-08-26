@@ -241,6 +241,7 @@ impl AudioEngine {
                     loop_start,
                     loop_end,
                     linear_gain,
+                    fades,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.playback_source.clips.push(EngineClip {
@@ -254,6 +255,7 @@ impl AudioEngine {
                             loop_start,
                             loop_end,
                             linear_gain,
+                            fades: fades.clamped_to(duration),
                         });
                     }
                     self.recalculate_audio_length();
@@ -283,6 +285,7 @@ impl AudioEngine {
                         {
                             clip.audio = audio;
                             clip.duration = duration;
+                            clip.fades = clip.fades.clamped_to(duration);
                             clip.source_offset = source_offset;
                             clip.start_marker = start_marker;
                             clip.loop_start = loop_start;
@@ -348,6 +351,26 @@ impl AudioEngine {
                         clip.linear_gain = linear_gain;
                     }
                 }
+                EngineCommand::SetClipFades {
+                    track_id,
+                    clip_id,
+                    fades,
+                } => {
+                    if let Some(clip) = self
+                        .tracks
+                        .iter_mut()
+                        .find(|track| track.id == track_id)
+                        .and_then(|track| {
+                            track
+                                .playback_source
+                                .clips
+                                .iter_mut()
+                                .find(|clip| clip.id == clip_id)
+                        })
+                    {
+                        clip.fades = fades.clamped_to(clip.duration);
+                    }
+                }
                 EngineCommand::SetClipBounds {
                     track_id,
                     clip_id,
@@ -372,6 +395,7 @@ impl AudioEngine {
                         clip.source_offset = source_offset;
                         clip.start_marker = start_marker;
                         clip.duration = duration;
+                        clip.fades = clip.fades.clamped_to(duration);
                         clip.loop_start = loop_start;
                         clip.loop_end = loop_end;
                     }

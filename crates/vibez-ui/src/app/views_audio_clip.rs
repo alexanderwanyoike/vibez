@@ -109,6 +109,8 @@ impl App {
         let start = clip.start_marker as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;
         let loop_end = clip.loop_end as f64 / sample_rate;
+        let fade_in = clip.fades.fade_in_frames() as f64 / sample_rate;
+        let fade_out = clip.fades.fade_out_frames() as f64 / sample_rate;
 
         let parameter = |label_text: &'static str,
                          rotary_field: AudioClipRotaryField,
@@ -315,12 +317,25 @@ impl App {
             ),
         ]
         .spacing(3);
+        let fade_bounds = column![
+            text("FADES").size(8).color(th::text_muted()),
+            range_row(
+                "FADE IN",
+                AudioClipInspectorField::FadeIn,
+                format!("{fade_in:.3}"),
+                "FADE OUT",
+                AudioClipInspectorField::FadeOut,
+                format!("{fade_out:.3}"),
+            ),
+        ]
+        .spacing(3);
 
         let timing_controls = column![
             self.view_audio_warp_row(track_id, clip),
             divider(),
             source_bounds,
             loop_bounds,
+            fade_bounds,
         ]
         .spacing(6)
         .width(Length::Fill);

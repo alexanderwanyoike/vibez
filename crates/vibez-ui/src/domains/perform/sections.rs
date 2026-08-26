@@ -205,6 +205,7 @@ impl Section {
                         loop_start: clip.loop_start,
                         loop_end: clip.loop_end,
                         linear_gain: clip.gain_db.linear(),
+                        fades: clip.fades.clamped_to(clip.duration),
                     })
                     .collect();
                 let note_clips = content
@@ -337,6 +338,7 @@ mod tests {
                 loop_start: 0,
                 loop_end: 64,
                 gain_db,
+                fades: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
