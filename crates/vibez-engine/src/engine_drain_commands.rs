@@ -243,6 +243,7 @@ impl AudioEngine {
                     linear_gain,
                     fades,
                     playback_direction,
+                    warp_markers,
                 } => {
                     if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
                         track.playback_source.clips.push(EngineClip {
@@ -258,6 +259,7 @@ impl AudioEngine {
                             linear_gain,
                             fades: fades.clamped_to(duration),
                             playback_direction,
+                            warp_markers,
                         });
                     }
                     self.recalculate_audio_length();
@@ -382,6 +384,17 @@ impl AudioEngine {
                         track
                             .playback_source
                             .set_clip_playback_direction(clip_id, direction);
+                    }
+                }
+                EngineCommand::SetClipWarpMarkers {
+                    track_id,
+                    clip_id,
+                    warp_markers,
+                } => {
+                    if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+                        track
+                            .playback_source
+                            .set_clip_warp_markers(clip_id, warp_markers);
                     }
                 }
                 EngineCommand::SetClipBounds {

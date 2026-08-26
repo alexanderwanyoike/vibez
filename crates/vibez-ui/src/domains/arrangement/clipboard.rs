@@ -145,8 +145,11 @@ impl TimelineEditorState {
                     fragment.fades =
                         clip.fades
                             .for_fragment(clip.duration, delta, fragment.duration);
-                    fragment.source_offset = clip.timeline().source_at(delta);
-                    fragment.start_marker = fragment.source_offset;
+                    (
+                        fragment.source_offset,
+                        fragment.start_marker,
+                        fragment.warp_markers,
+                    ) = clip.warp_geometry_for_fragment(delta, fragment.duration);
                     copied.push(ClipboardClip::Audio {
                         track_id: *track_id,
                         track_offset: 0,
@@ -348,6 +351,7 @@ impl TimelineEditorState {
                         linear_gain: clip.gain_db.linear(),
                         fades: clip.fades,
                         playback_direction: clip.playback_direction,
+                        warp_markers: clip.warp_markers.clone(),
                     });
                     selected.insert(ArrangementSelection::AudioClip {
                         track_id,

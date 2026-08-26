@@ -8,6 +8,7 @@ use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 use crate::perform::SwingOffset;
 use crate::transient::TransientMarkers;
+use crate::warp_marker::WarpMarkers;
 
 /// Persisted hardware-input channel selection for an Audio Project Track.
 /// Channel indexes are zero-based internally and presented as one-based labels.
@@ -643,6 +644,9 @@ pub struct ClipInfo {
     /// Source-frame Transient Markers used by later Warp and Slice operations.
     #[serde(default, skip_serializing_if = "TransientMarkers::is_neutral")]
     pub transient_markers: TransientMarkers,
+    /// Piecewise source-to-Clip timing map. Empty means identity timing.
+    #[serde(default, skip_serializing_if = "WarpMarkers::is_neutral")]
+    pub warp_markers: WarpMarkers,
     /// Duration-preserving pitch offset in semitones.
     #[serde(default, skip_serializing_if = "ClipTranspose::is_neutral")]
     pub transpose: ClipTranspose,
@@ -784,6 +788,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -840,6 +845,8 @@ mod tests {
         clip.playback_direction = ClipPlaybackDirection::Reverse;
         clip.transient_markers.add_authored(12_345);
         clip.transient_markers.replace_suggestions([4_410, 22_050]);
+        clip.warp_markers
+            .add(22_050, 30_000, clip.source_offset, 89_200, clip.duration);
         clip.transpose = ClipTranspose::new(7);
         clip.warped = true;
         clip.warped_to_bpm = Some(140.0);
@@ -857,6 +864,7 @@ mod tests {
         assert_eq!(clip.fades, deserialized.fades);
         assert_eq!(clip.playback_direction, deserialized.playback_direction);
         assert_eq!(clip.transient_markers, deserialized.transient_markers);
+        assert_eq!(clip.warp_markers, deserialized.warp_markers);
         assert_eq!(clip.transpose, deserialized.transpose);
         assert_eq!(clip.warped, deserialized.warped);
         assert_eq!(clip.warped_to_bpm, deserialized.warped_to_bpm);
@@ -892,6 +900,7 @@ mod tests {
         assert_eq!(clip.fades, ClipFades::default());
         assert_eq!(clip.playback_direction, ClipPlaybackDirection::Forward);
         assert!(clip.transient_markers.is_empty());
+        assert!(clip.warp_markers.is_empty());
         assert_eq!(clip.transpose, ClipTranspose::default());
         assert_eq!(clip.start_marker, None);
     }

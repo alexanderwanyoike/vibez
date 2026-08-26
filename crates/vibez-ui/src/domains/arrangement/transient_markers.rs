@@ -7,11 +7,7 @@ use vibez_core::transient::TransientMarkerKind;
 fn source_bounds(clip: &UiClip) -> (u64, u64) {
     let audio_end = clip.audio.num_frames() as u64;
     let start = clip.source_offset.min(audio_end);
-    let end = clip
-        .source_offset
-        .saturating_add(clip.duration)
-        .min(audio_end)
-        .max(start);
+    let end = clip.source_end().min(audio_end).max(start);
     (start, end)
 }
 
@@ -29,6 +25,7 @@ impl TimelineEditorState {
             } => {
                 self.selected_transient_marker =
                     source_frame.map(|frame| (track_id, clip_id, frame));
+                self.selected_warp_marker = None;
             }
             ArrangementMsg::AddTransientMarker {
                 track_id,
@@ -47,6 +44,7 @@ impl TimelineEditorState {
                     });
                 if let Some(source_frame) = added_frame {
                     self.selected_transient_marker = Some((track_id, clip_id, source_frame));
+                    self.selected_warp_marker = None;
                     action.status = Some("Added Transient Marker".into());
                     action.mark_dirty = true;
                 }

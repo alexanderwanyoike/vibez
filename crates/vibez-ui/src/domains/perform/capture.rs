@@ -589,7 +589,9 @@ fn append_timeline_window(
                 continue;
             }
             let delta = overlap_start - clip.position;
-            let fragment_start = captured_audio_offset(clip, delta);
+            let fragment_duration = overlap_end - overlap_start;
+            let (fragment_start, fragment_start_marker, fragment_warp_markers) =
+                clip.warp_geometry_for_fragment(delta, fragment_duration);
             let mut fragment = UiClip {
                 id: ClipId::new(),
                 name: format!("Capture · {} · {}", source.name, clip.name),
@@ -597,8 +599,8 @@ fn append_timeline_window(
                 source: clip.source.clone(),
                 position: destination_start_samples + (overlap_start - window_start_samples),
                 source_offset: fragment_start,
-                start_marker: fragment_start,
-                duration: overlap_end - overlap_start,
+                start_marker: fragment_start_marker,
+                duration: fragment_duration,
                 loop_enabled: clip.loop_enabled,
                 loop_start: clip.loop_start,
                 loop_end: clip.loop_end,
@@ -606,6 +608,7 @@ fn append_timeline_window(
                 fades: clip.fades,
                 playback_direction: clip.playback_direction,
                 transient_markers: clip.transient_markers.clone(),
+                warp_markers: fragment_warp_markers,
                 transpose: clip.transpose,
                 original_bpm: clip.original_bpm,
                 warped: clip.warped,
@@ -615,10 +618,9 @@ fn append_timeline_window(
             fragment.fades = clip
                 .fades
                 .for_fragment(clip.duration, delta, fragment.duration);
-            fragment.transient_markers.retain_source_range(
-                fragment.source_offset,
-                fragment.source_offset.saturating_add(fragment.duration),
-            );
+            fragment
+                .transient_markers
+                .retain_source_range(fragment.source_offset, fragment.source_end());
             if fragment.loop_enabled && fragment.loop_end <= fragment.loop_start {
                 fragment.loop_enabled = false;
             }
@@ -669,7 +671,7 @@ fn append_timeline_window(
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
-    clip.timeline().source_at(timeline_delta)
+    clip.source_frame_at(timeline_delta)
 }
 
 pub(crate) fn captured_visible_notes(
@@ -733,6 +735,7 @@ mod tests {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

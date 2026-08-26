@@ -258,6 +258,7 @@ fn render_offline_inner(
                         linear_gain: clip.gain_db.linear(),
                         fades: clip.fades.clamped_to(clip.duration),
                         playback_direction: clip.playback_direction,
+                        warp_markers: clip.warp_markers.clone(),
                     });
                 }
                 None => warnings.push(format!("Clip '{}' audio missing, skipped", clip.name)),
@@ -651,6 +652,7 @@ fn clip_included_for_mode(clip_id: ClipId, mode: BounceMode, is_note_clip: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::playback_source::PreparedPlaybackSource;
     use vibez_core::constants::{DEFAULT_TRACK_GAIN, DEFAULT_TRACK_PAN};
     use vibez_core::effect::{EffectInfo, EffectType, ParamDescriptor, PluginDeviceInfo};
     use vibez_core::id::EffectId;
@@ -804,6 +806,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -872,6 +875,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -931,6 +935,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: vibez_core::track::ClipPlaybackDirection::Reverse,
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -968,6 +973,88 @@ mod tests {
     }
 
     #[test]
+    fn offline_and_prepared_live_paths_share_the_exact_piecewise_warp_map() {
+        let mut track = bare_track("audio");
+        track.pan = DEFAULT_TRACK_PAN;
+        let track_id = track.id;
+        let clip_id = ClipId::new();
+        let audio = Arc::new(DecodedAudio {
+            channels: vec![vec![0.0, 10.0, 20.0, 30.0, 40.0]],
+            sample_rate: 44_100,
+        });
+        let mut warp_markers = vibez_core::warp_marker::WarpMarkers::default();
+        assert!(warp_markers.add(1, 2, 0, 4, 4));
+        let clip = ClipInfo {
+            id: clip_id,
+            track_id,
+            name: "piecewise".into(),
+            position: 0,
+            source_offset: 0,
+            start_marker: None,
+            duration: 4,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 4,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: warp_markers.clone(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        };
+        let request = BounceRequest {
+            master: None,
+            buses: Vec::new(),
+            tracks: vec![track],
+            audio_clips: vec![clip],
+            note_clips: Vec::new(),
+            clip_audio: HashMap::from([(clip_id, Arc::clone(&audio))]),
+            sampler_audio: HashMap::new(),
+            drum_pad_audio: HashMap::new(),
+            mode: BounceMode::Master,
+            range_samples: (0, 4),
+            bpm: 120.0,
+            sample_rate: 44_100,
+            swing: vibez_core::perform::SwingAmount::STRAIGHT,
+        };
+        let mut live = vec![0.0; 4];
+        PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: clip_id,
+                audio,
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 4,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 1.0,
+                fades: Default::default(),
+                playback_direction: Default::default(),
+                warp_markers,
+            }],
+            Vec::new(),
+            Vec::new(),
+        )
+        .render_audio(&mut live, 0, 4, 1, None);
+
+        assert_eq!(live, vec![0.0, 5.0, 10.0, 25.0]);
+        let offline = render_offline(&request);
+        let pan = std::f32::consts::FRAC_1_SQRT_2;
+        assert_eq!(
+            offline.audio.channels[0],
+            live.iter().map(|sample| sample * pan).collect::<Vec<_>>()
+        );
+        assert_eq!(offline.audio.channels[1], offline.audio.channels[0]);
+    }
+
+    #[test]
     fn mute_silences_master_bounce() {
         let mut track = bare_track("audio");
         track.mute = true;
@@ -991,6 +1078,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1042,6 +1130,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1094,6 +1183,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1116,6 +1206,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1386,6 +1477,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -1462,6 +1554,7 @@ mod tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,

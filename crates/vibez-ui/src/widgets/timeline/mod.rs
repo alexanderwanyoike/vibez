@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
 use vibez_core::clip_timeline::BeatClipTimeline;
@@ -69,6 +70,7 @@ struct PeakCacheKey {
     loop_start: u64,
     loop_end: u64,
     playback_direction: vibez_core::track::ClipPlaybackDirection,
+    warp_map: u64,
 }
 
 struct PeakCacheEntry {
@@ -81,6 +83,8 @@ thread_local! {
 }
 
 pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
+    let mut warp_hasher = DefaultHasher::new();
+    clip.warp_markers.hash(&mut warp_hasher);
     let key = PeakCacheKey {
         audio: Arc::as_ptr(&clip.audio) as usize,
         source_offset: clip.source_offset,
@@ -90,6 +94,7 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         loop_start: clip.loop_start,
         loop_end: clip.loop_end,
         playback_direction: clip.playback_direction,
+        warp_map: warp_hasher.finish(),
     };
     if let Some(peaks) = PEAK_CACHE.with(|cache| {
         cache.borrow().get(&key).and_then(|entry| {
@@ -107,6 +112,18 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
     let loop_start = timeline.loop_start as usize;
     let loop_end = timeline.loop_end as usize;
     let loop_len = if looping { loop_end - loop_start } else { 0 };
+    let map_source = |timeline_frame: u64| {
+        if clip.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        clip.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(clip.source_offset) as f64,
+            clip.source_offset,
+            clip.warp_timeline_end(),
+        )
+    };
+    let mapped_loop_start = map_source(timeline.loop_start).floor() as usize;
+    let mapped_loop_end = map_source(timeline.loop_end).ceil() as usize;
     let channels = clip.audio.num_channels();
     if channels == 0 {
         return Arc::new(vec![(0.0, 0.0); num_peaks]);
@@ -125,7 +142,7 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
 
     // Cache full loop region peak for spans >= loop_len
     let full_loop_peak = if looping {
-        Some(peak_for_range(loop_start, loop_end))
+        Some(peak_for_range(mapped_loop_start, mapped_loop_end))
     } else {
         None
     };
@@ -137,29 +154,28 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
             let span = cf_end.saturating_sub(cf_start).max(1);
 
             if !looping {
-                let src_start = timeline.source_at(cf_start as u64) as usize;
-                let source_end = clip
-                    .source_offset
-                    .saturating_add(clip.duration)
-                    .min(clip.audio.num_frames() as u64) as usize;
+                let src_start = map_source(timeline.source_at(cf_start as u64)).floor() as usize;
+                let source_end = clip.source_end() as usize;
                 if src_start >= source_end {
                     (0.0, 0.0)
                 } else {
-                    let src_end = (timeline.source_at(cf_end as u64) as usize).min(source_end);
+                    let src_end = (map_source(timeline.source_at(cf_end as u64)).ceil() as usize)
+                        .min(source_end);
                     peak_for_range(src_start, src_end)
                 }
             } else if span >= loop_len {
                 full_loop_peak.unwrap()
             } else {
-                let src_start = timeline.source_at(cf_start as u64) as usize;
-                let src_end = timeline.source_at(cf_end as u64) as usize;
+                let src_start = map_source(timeline.source_at(cf_start as u64)).floor() as usize;
+                let src_end = map_source(timeline.source_at(cf_end as u64)).ceil() as usize;
 
                 if src_start <= src_end {
                     peak_for_range(src_start, src_end.max(src_start + 1))
                 } else {
                     // Wraps around loop boundary
-                    let (mn1, mx1) = peak_for_range(src_start, loop_end);
-                    let (mn2, mx2) = peak_for_range(loop_start, src_end.max(loop_start + 1));
+                    let (mn1, mx1) = peak_for_range(src_start, mapped_loop_end);
+                    let (mn2, mx2) =
+                        peak_for_range(mapped_loop_start, src_end.max(mapped_loop_start + 1));
                     (mn1.min(mn2), mx1.max(mx2))
                 }
             }
@@ -248,6 +264,7 @@ mod performance_tests {
             fades: Default::default(),
             playback_direction: Default::default(),
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -285,6 +302,7 @@ mod performance_tests {
             fades: Default::default(),
             playback_direction: ClipPlaybackDirection::Forward,
             transient_markers: Default::default(),
+            warp_markers: Default::default(),
             transpose: Default::default(),
             original_bpm: None,
             warped: false,
@@ -299,5 +317,10 @@ mod performance_tests {
         assert_eq!(forward.as_slice(), &[(0.0, 0.25), (0.0, 0.75)]);
         assert_eq!(reverse.as_slice(), &[(0.0, 0.75), (0.0, 0.25)]);
         assert!(!Arc::ptr_eq(&forward, &reverse));
+
+        clip.playback_direction = ClipPlaybackDirection::Forward;
+        assert!(clip.warp_markers.add(50, 100, 0, 200, 200));
+        let warped = compute_clip_peaks(&clip);
+        assert!(!Arc::ptr_eq(&forward, &warped));
     }
 }

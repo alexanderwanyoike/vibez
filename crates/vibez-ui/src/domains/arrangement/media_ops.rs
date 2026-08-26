@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::message::{AudioQuantizeSuccess, AutoWarpOutcome, ClipWarpSuccess};
+use crate::message::AudioQuantizeSuccess;
 use std::sync::Arc;
 
 use vibez_core::automation::AutomationTarget;
@@ -11,8 +11,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_engine::commands::EngineCommand;
 
-use super::audio_clip_inspector::clear_warp_request;
-use super::fragment_geometry::{audio_fragment_source_start, unmuted_beat_ranges, visible_notes};
+use super::fragment_geometry::{audio_fragment_geometry, unmuted_beat_ranges, visible_notes};
 use super::EngineHandle;
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, TimelineEditorState, UiClip, UiNoteClip,
@@ -91,12 +90,15 @@ impl TimelineEditorState {
                                 let mut fragment = clip.clone();
                                 fragment.id = ClipId::new();
                                 fragment.position = start_sample;
-                                fragment.source_offset = audio_fragment_source_start(
+                                (
+                                    fragment.source_offset,
+                                    fragment.start_marker,
+                                    fragment.warp_markers,
+                                ) = audio_fragment_geometry(
                                     clip,
                                     local_start,
                                     end_sample - start_sample,
                                 );
-                                fragment.start_marker = fragment.source_offset;
                                 fragment.duration = end_sample - start_sample;
                                 fragment.fades = clip.fades.for_fragment(
                                     clip.duration,
@@ -105,7 +107,7 @@ impl TimelineEditorState {
                                 );
                                 fragment.transient_markers.retain_source_range(
                                     fragment.source_offset,
-                                    fragment.source_offset.saturating_add(fragment.duration),
+                                    fragment.source_end(),
                                 );
                                 fragment
                             })
@@ -236,16 +238,23 @@ impl TimelineEditorState {
         let mut clip_end_beat = None;
         if let Some(track) = self.find_content_mut(track_id) {
             if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                let old_mapping_end = clip.warp_timeline_end();
+                let new_mapping_end = new_duration
+                    .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
+                clip.warp_markers = clip.warp_markers.resized_timeline(
+                    old_mapping_end,
+                    new_mapping_end,
+                    clip.source_offset,
+                    clip.audio.num_frames() as u64,
+                );
                 clip.duration = new_duration;
                 clip.clamp_fades_to_clip();
                 clip.clamp_start_to_source();
                 if clip.loop_enabled {
                     clip.clamp_loop_to_clip();
                 }
-                clip.transient_markers.retain_source_range(
-                    clip.source_offset,
-                    clip.source_offset.saturating_add(clip.duration),
-                );
+                clip.transient_markers
+                    .retain_source_range(clip.source_offset, clip.source_end());
                 clip_end_beat = Some((clip.position + clip.duration) as f64 / ctx.samples_per_beat);
                 sync_data = Some((
                     Arc::clone(&clip.audio),
@@ -259,6 +268,7 @@ impl TimelineEditorState {
                     clip.gain_db.linear(),
                     clip.fades,
                     clip.playback_direction,
+                    clip.warp_markers.clone(),
                 ));
             }
         }
@@ -274,6 +284,7 @@ impl TimelineEditorState {
             linear_gain,
             fades,
             playback_direction,
+            warp_markers,
         )) = sync_data
         {
             engine.send(EngineCommand::RemoveClip(track_id, clip_id));
@@ -291,128 +302,11 @@ impl TimelineEditorState {
                 linear_gain,
                 fades,
                 playback_direction,
+                warp_markers,
             });
         }
         action.scroll_to_beat = clip_end_beat;
         self.drag_resize_active = true;
-        action
-    }
-
-    /// A background warp finished: swap in the stretched audio and
-    /// record the warp geometry on the clip.
-    pub fn apply_clip_warp_success(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        success: ClipWarpSuccess,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        self.unlink_crossfades_for_clip(engine, track_id, clip_id);
-        engine.send(EngineCommand::ReplaceClipAudio {
-            track_id,
-            clip_id,
-            audio: Arc::clone(&success.audio),
-            duration: success.new_duration,
-            source_offset: success.new_source_offset,
-            start_marker: success.new_start_marker,
-            loop_start: success.new_loop_start,
-            loop_end: success.new_loop_end,
-        });
-        if let Some(track) = self.find_content_mut(track_id) {
-            if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                let marker_ratio =
-                    success.audio.num_frames() as f64 / clip.audio.num_frames().max(1) as f64;
-                clip.transient_markers
-                    .scale_source_frames(marker_ratio, success.audio.num_frames() as u64);
-                clip.fades = clip.fades.scaled(clip.duration, success.new_duration);
-                clip.audio = Arc::clone(&success.audio);
-                clip.duration = success.new_duration;
-                clip.source_offset = success.new_source_offset;
-                clip.start_marker = success.new_start_marker;
-                clip.loop_start = success.new_loop_start;
-                clip.loop_end = success.new_loop_end;
-                clip.original_bpm = Some(success.detected_bpm);
-                clip.warped = true;
-                clip.warped_to_bpm = Some(success.warped_to_bpm);
-                clip.original_audio = Some(Arc::clone(&success.original_audio));
-                engine.send(EngineCommand::SetClipFades {
-                    track_id,
-                    clip_id,
-                    fades: clip.fades,
-                });
-            }
-        }
-        self.discard_audio_clip_inspector_edits_for(clip_id);
-        action.status = Some(format!("Warped to {:.0} BPM", success.warped_to_bpm));
-        action.mark_dirty = true;
-        action
-    }
-
-    /// An auto-warp-on-import attempt finished.
-    pub fn apply_auto_warp_outcome(
-        &mut self,
-        engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-        outcome: AutoWarpOutcome,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        match outcome {
-            AutoWarpOutcome::NotDetected => {
-                // Nothing to apply. Point the user at the manual
-                // workflow in the clip detail panel.
-                action.status = Some(
-                    "Auto-warp: could not detect BPM. Select the clip and type the source \
-                     BPM in the Warp row, then press Enter and click Warp."
-                        .to_string(),
-                );
-            }
-            AutoWarpOutcome::DetectedOnly { bpm, confidence } => {
-                if let Some(track) = self.find_content_mut(track_id) {
-                    if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.original_bpm = Some(bpm);
-                    }
-                }
-                action.status = Some(format!(
-                    "Auto-warp skipped: detected {:.1} BPM at low confidence {:.2}. \
-                     Use the clip's Warp button to apply it manually.",
-                    bpm, confidence
-                ));
-                action.mark_dirty = true;
-            }
-            AutoWarpOutcome::Warped { success, .. } => {
-                return self.apply_clip_warp_success(engine, track_id, clip_id, success);
-            }
-        }
-        action
-    }
-
-    /// Restore a warped clip's original audio (or just drop the warp
-    /// flags when the original is gone).
-    pub fn apply_clear_clip_warp(
-        &mut self,
-        _engine: &mut impl EngineHandle,
-        track_id: TrackId,
-        clip_id: ClipId,
-    ) -> ArrangementAction {
-        let mut action = ArrangementAction::default();
-        if let Some(clip) = self
-            .find_content_mut(track_id)
-            .and_then(|track| track.clips.iter_mut().find(|clip| clip.id == clip_id))
-        {
-            if clip.original_audio.is_some() {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-                action.transpose_render = clear_warp_request(track_id, clip);
-                action.status = Some("Returning Clip to raw timing...".into());
-            } else {
-                clip.warped = false;
-                clip.warped_to_bpm = None;
-                action.status = Some("Clip uses raw timing".into());
-            }
-        }
-        action.mark_dirty = true;
         action
     }
 
@@ -460,6 +354,7 @@ impl TimelineEditorState {
             linear_gain: gain_db.linear(),
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -478,6 +373,7 @@ impl TimelineEditorState {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -639,6 +535,7 @@ impl TimelineEditorState {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
@@ -657,6 +554,7 @@ impl TimelineEditorState {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,
@@ -811,6 +709,7 @@ impl TimelineEditorState {
                 linear_gain: clip.gain_db.linear(),
                 fades: clip.fades,
                 playback_direction: clip.playback_direction,
+                warp_markers: clip.warp_markers.clone(),
             });
         }
         if let Some(content) = self.find_content_mut(track_id) {
@@ -876,14 +775,12 @@ impl TimelineEditorState {
                 let mut left = clip.clone();
                 left.id = ClipId::new();
                 left.name = format!("{} L", clip.name);
-                left.source_offset = audio_fragment_source_start(clip, 0, left_duration);
-                left.start_marker = left.source_offset;
+                (left.source_offset, left.start_marker, left.warp_markers) =
+                    audio_fragment_geometry(clip, 0, left_duration);
                 left.duration = left_duration;
                 left.fades = clip.fades.for_fragment(clip.duration, 0, left.duration);
-                left.transient_markers.retain_source_range(
-                    left.source_offset,
-                    left.source_offset.saturating_add(left.duration),
-                );
+                left.transient_markers
+                    .retain_source_range(left.source_offset, left.source_end());
 
                 let mut right = clip.clone();
                 right.id = ClipId::new();
@@ -893,13 +790,11 @@ impl TimelineEditorState {
                 right.fades = clip
                     .fades
                     .for_fragment(clip.duration, left_duration, right.duration);
-                right.source_offset =
-                    audio_fragment_source_start(clip, left_duration, right.duration);
-                right.start_marker = right.source_offset;
-                right.transient_markers.retain_source_range(
-                    right.source_offset,
-                    right.source_offset.saturating_add(right.duration),
-                );
+                (right.source_offset, right.start_marker, right.warp_markers) =
+                    audio_fragment_geometry(clip, left_duration, right.duration);
+                right
+                    .transient_markers
+                    .retain_source_range(right.source_offset, right.source_end());
                 (left, right)
             });
         if let Some((left, right)) = split {

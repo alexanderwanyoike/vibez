@@ -90,6 +90,15 @@ impl App {
                     *selected_track == track_id && *selected_clip == clip.id
                 })
                 .map(|(_, _, source_frame)| source_frame),
+            warp_markers: clip.warp_markers.clone(),
+            selected_warp_marker: self
+                .state
+                .active_timeline_editor()
+                .selected_warp_marker
+                .filter(|(selected_track, selected_clip, _)| {
+                    *selected_track == track_id && *selected_clip == clip.id
+                })
+                .map(|(_, _, source_frame)| source_frame),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -107,8 +116,9 @@ impl App {
         .color(th::text_muted());
 
         let marker_summary = text(format!(
-            "{} TRANSIENTS · RIGHT-CLICK WAVEFORM",
-            clip.transient_markers.as_slice().len()
+            "{} TRANSIENTS · {} WARP · RIGHT-CLICK WAVEFORM",
+            clip.transient_markers.as_slice().len(),
+            clip.warp_markers.interior().len(),
         ))
         .size(8)
         .color(th::text_muted());
@@ -118,10 +128,7 @@ impl App {
 
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
-        let source_end_frames = clip
-            .source_offset
-            .saturating_add(clip.duration)
-            .min(clip.audio.num_frames() as u64);
+        let source_end_frames = clip.source_end();
         let source_end = source_end_frames as f64 / sample_rate;
         let start = clip.start_marker as f64 / sample_rate;
         let loop_start = clip.loop_start as f64 / sample_rate;

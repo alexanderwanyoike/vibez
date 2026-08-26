@@ -56,6 +56,7 @@ fn source_with_looping(
                     linear_gain: 1.0,
                     fades: Default::default(),
                     playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 }],
                 Vec::new(),
                 Vec::new(),

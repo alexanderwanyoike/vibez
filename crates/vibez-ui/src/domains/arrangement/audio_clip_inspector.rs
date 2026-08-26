@@ -49,7 +49,7 @@ pub(super) fn clear_warp_request(
     let ratio = original_frames as f64 / current_frames;
     let scale = |frames: u64| (frames as f64 * ratio).round() as u64;
     let source_offset = scale(clip.source_offset).min(original_frames);
-    let source_end = scale(clip.source_offset.saturating_add(clip.duration))
+    let source_end = scale(clip.source_end())
         .min(original_frames)
         .max(source_offset);
     Some(ClipTransposeRenderRequest {
@@ -278,10 +278,7 @@ impl TimelineEditorState {
                         Some("Source boundary must be a positive time in seconds".into());
                     return action;
                 };
-                let current_end = clip
-                    .source_offset
-                    .saturating_add(clip.duration)
-                    .min(source_frames);
+                let current_end = clip.source_end().min(source_frames);
                 let (new_start, new_end) = match field {
                     AudioClipInspectorField::SourceStart => (value, current_end),
                     AudioClipInspectorField::SourceEnd => (clip.source_offset, value),
@@ -296,6 +293,7 @@ impl TimelineEditorState {
                 }
                 clip.source_offset = new_start;
                 clip.duration = new_end - new_start;
+                let cleared_warp_markers = clip.warp_markers.clear();
                 clip.transient_markers
                     .retain_source_range(new_start, new_end);
                 clip.clamp_fades_to_clip();
@@ -321,6 +319,13 @@ impl TimelineEditorState {
                     clip_id,
                     fades: clip.fades,
                 });
+                if cleared_warp_markers {
+                    engine.send(EngineCommand::SetClipWarpMarkers {
+                        track_id,
+                        clip_id,
+                        warp_markers: Default::default(),
+                    });
+                }
                 engine.send(EngineCommand::SetClipLoop {
                     track_id,
                     clip_id,
@@ -328,11 +333,22 @@ impl TimelineEditorState {
                     loop_start: clip.loop_start,
                     loop_end: clip.loop_end,
                 });
-                action.status = Some(format!(
-                    "Source {:.3} to {:.3} s",
-                    format_seconds(new_start),
-                    format_seconds(new_end)
-                ));
+                action.status = Some(if cleared_warp_markers {
+                    format!(
+                        "Source {:.3} to {:.3} s · Warp Markers cleared",
+                        format_seconds(new_start),
+                        format_seconds(new_end)
+                    )
+                } else {
+                    format!(
+                        "Source {:.3} to {:.3} s",
+                        format_seconds(new_start),
+                        format_seconds(new_end)
+                    )
+                });
+                if cleared_warp_markers {
+                    self.selected_warp_marker = None;
+                }
             }
             AudioClipInspectorField::Start => {
                 let Some(value) = text.parse::<f64>().ok().and_then(seconds_to_frames) else {

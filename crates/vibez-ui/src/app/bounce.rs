@@ -147,6 +147,7 @@ impl App {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         });
 
         if self.state.find_track(track_id).is_some() {
@@ -166,6 +167,7 @@ impl App {
                 fades: Default::default(),
                 playback_direction: Default::default(),
                 transient_markers: Default::default(),
+                warp_markers: Default::default(),
                 transpose: Default::default(),
                 original_bpm: None,
                 warped: false,

@@ -14,6 +14,7 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
 use vibez_core::track::{ClipFades, ClipPlaybackDirection};
+use vibez_core::warp_marker::WarpMarkers;
 
 #[cfg(test)]
 thread_local! {
@@ -45,6 +46,7 @@ pub struct EngineClip {
     pub linear_gain: f32,
     pub fades: ClipFades,
     pub playback_direction: ClipPlaybackDirection,
+    pub warp_markers: WarpMarkers,
 }
 
 impl EngineClip {
@@ -65,6 +67,26 @@ impl EngineClip {
     pub fn is_active(&self, pos: u64, frames: u64) -> bool {
         let end = pos.saturating_add(frames);
         self.position < end && self.end_position() > pos
+    }
+
+    fn source_frame_at(
+        &self,
+        clip_frame: u64,
+        timeline: FrameClipTimeline,
+        warp_timeline_end: u64,
+    ) -> f64 {
+        let timeline_frame = timeline.source_at(
+            self.playback_direction
+                .map_clip_frame(clip_frame, self.duration),
+        );
+        if self.warp_markers.is_empty() {
+            return timeline_frame as f64;
+        }
+        self.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(self.source_offset) as f64,
+            self.source_offset,
+            warp_timeline_end,
+        )
     }
 }
 
@@ -340,6 +362,12 @@ impl PreparedPlaybackSource {
         }
     }
 
+    pub fn set_clip_warp_markers(&mut self, clip_id: ClipId, warp_markers: WarpMarkers) {
+        if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == clip_id) {
+            clip.warp_markers = warp_markers;
+        }
+    }
+
     /// Render this resident source into a caller-owned channel buffer.
     /// Channel processing remains outside this type.
     pub fn render_audio(
@@ -364,10 +392,16 @@ impl PreparedPlaybackSource {
                 continue;
             }
             let audio_channels = clip.audio.num_channels();
-            let source_end = clip
+            let identity_source_end = clip
                 .source_offset
                 .saturating_add(clip.duration)
-                .min(clip.audio.num_frames() as u64) as usize;
+                .min(clip.audio.num_frames() as u64);
+            let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
+            let timeline = clip.timeline();
+            let identity_timeline_end = clip
+                .duration
+                .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
+            let warp_timeline_end = clip.warp_markers.timeline_end(identity_timeline_end);
             let mut clip_rendered = false;
             for frame in 0..frames {
                 let global_frame = apply_loop_wrap(pos + frame as u64, loop_region);
@@ -375,18 +409,15 @@ impl PreparedPlaybackSource {
                     continue;
                 }
                 let clip_frame = global_frame - clip.position;
-                let source_frame = clip.timeline().source_at(
-                    clip.playback_direction
-                        .map_clip_frame(clip_frame, clip.duration),
-                ) as usize;
+                let source_frame = clip.source_frame_at(clip_frame, timeline, warp_timeline_end);
                 let fade_gain = clip.fades.gain_at(clip_frame, clip.duration);
                 for ch in 0..channels {
-                    let sample = if source_frame >= source_end {
+                    let sample = if source_frame >= source_end as f64 {
                         0.0
                     } else if ch < audio_channels {
-                        clip.audio.sample(ch, source_frame)
+                        clip.audio.sample_linear(ch, source_frame)
                     } else if audio_channels > 0 {
-                        clip.audio.sample(audio_channels - 1, source_frame)
+                        clip.audio.sample_linear(audio_channels - 1, source_frame)
                     } else {
                         0.0
                     };
@@ -521,6 +552,7 @@ mod tests {
             linear_gain: 1.0,
             fades: Default::default(),
             playback_direction: Default::default(),
+            warp_markers: Default::default(),
         };
 
         let mut existing_path = EngineTrack::new(TrackId::new());
@@ -555,6 +587,7 @@ mod tests {
                 linear_gain: 1.0,
                 fades: ClipFades::new(4, 4, 8),
                 playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -563,6 +596,38 @@ mod tests {
 
         assert!(source.render_audio(&mut output, 0, 8, 1, None));
         assert_eq!(output, vec![0.0, 0.25, 0.5, 0.75, 0.75, 0.5, 0.25, 0.0]);
+    }
+
+    #[test]
+    fn piecewise_warp_composes_with_reverse_loops_gain_and_edge_fades() {
+        let mut warp_markers = WarpMarkers::default();
+        assert!(warp_markers.add(1, 2, 0, 4, 4));
+        let source = PreparedPlaybackSource::new(
+            vec![EngineClip {
+                id: ClipId::new(),
+                audio: Arc::new(DecodedAudio {
+                    channels: vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]],
+                    sample_rate: 48_000,
+                }),
+                position: 0,
+                source_offset: 0,
+                start_marker: 0,
+                duration: 8,
+                loop_enabled: true,
+                loop_start: 0,
+                loop_end: 4,
+                linear_gain: 0.5,
+                fades: ClipFades::new(2, 2, 8),
+                playback_direction: ClipPlaybackDirection::Reverse,
+                warp_markers,
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut output = vec![0.0; 8];
+
+        assert!(source.render_audio(&mut output, 0, 8, 1, None));
+        assert_eq!(output, vec![0.0, 0.25, 0.25, 0.0, 1.25, 0.5, 0.125, 0.0]);
     }
 
     #[test]
@@ -585,6 +650,7 @@ mod tests {
                 linear_gain: 1.0,
                 fades: ClipFades::new(2, 0, 8),
                 playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -617,6 +683,7 @@ mod tests {
                 linear_gain: 1.0,
                 fades: Default::default(),
                 playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -652,6 +719,7 @@ mod tests {
                 linear_gain: 1.0,
                 fades: ClipFades::new(2, 2, 8),
                 playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),
@@ -685,6 +753,7 @@ mod tests {
                     linear_gain: 1.0,
                     fades: ClipFades::default().linked_fade_out(4, incoming_id, 8),
                     playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 },
                 EngineClip {
                     id: incoming_id,
@@ -702,6 +771,7 @@ mod tests {
                     linear_gain: 1.0,
                     fades: ClipFades::default().linked_fade_in(4, outgoing_id, 8),
                     playback_direction: Default::default(),
+                    warp_markers: Default::default(),
                 },
             ],
             Vec::new(),
@@ -736,6 +806,7 @@ mod tests {
                 linear_gain: 1.0,
                 fades: Default::default(),
                 playback_direction: Default::default(),
+                warp_markers: Default::default(),
             }],
             Vec::new(),
             Vec::new(),

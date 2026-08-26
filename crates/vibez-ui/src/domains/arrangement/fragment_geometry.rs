@@ -2,7 +2,7 @@
 
 use vibez_core::automation::AutomationLane;
 use vibez_core::midi::MidiNote;
-use vibez_core::track::ClipPlaybackDirection;
+use vibez_core::warp_marker::WarpMarkers;
 
 use crate::state::{UiClip, UiNoteClip};
 
@@ -10,15 +10,12 @@ use crate::state::{UiClip, UiNoteClip};
 /// result exactly matches `[local_start, local_start + duration)` of the
 /// original clip. Reverse playback traverses clip time from the opposite edge,
 /// so its phase is measured from the original clip's right edge.
-pub(super) fn audio_fragment_source_start(clip: &UiClip, local_start: u64, duration: u64) -> u64 {
-    let phase = match clip.playback_direction {
-        ClipPlaybackDirection::Forward => local_start,
-        ClipPlaybackDirection::Reverse => clip
-            .duration
-            .saturating_sub(local_start)
-            .saturating_sub(duration),
-    };
-    clip.timeline().source_at(phase)
+pub(super) fn audio_fragment_geometry(
+    clip: &UiClip,
+    local_start: u64,
+    duration: u64,
+) -> (u64, u64, WarpMarkers) {
+    clip.warp_geometry_for_fragment(local_start, duration)
 }
 
 pub(super) fn visible_notes(clip: &UiNoteClip, local_start: f64, local_end: f64) -> Vec<MidiNote> {
