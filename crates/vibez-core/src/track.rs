@@ -482,8 +482,29 @@ impl MediaSourceRef {
 }
 
 /// Persisted state for a future native drum rack.
+pub const DRUM_RACK_PAD_COUNT: usize = 16;
+pub const DRUM_RACK_BASE_NOTE: u8 = 36;
+
+pub const fn drum_rack_pad_pitch(pad_index: usize) -> Option<u8> {
+    if pad_index < DRUM_RACK_PAD_COUNT {
+        Some(DRUM_RACK_BASE_NOTE + pad_index as u8)
+    } else {
+        None
+    }
+}
+
+pub const fn drum_rack_pad_index(pitch: u8) -> Option<usize> {
+    if pitch >= DRUM_RACK_BASE_NOTE && pitch < DRUM_RACK_BASE_NOTE + DRUM_RACK_PAD_COUNT as u8 {
+        Some((pitch - DRUM_RACK_BASE_NOTE) as usize)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DrumPadState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub source: Option<MediaSourceRef>,
     pub gain: f32,
     pub pan: f32,

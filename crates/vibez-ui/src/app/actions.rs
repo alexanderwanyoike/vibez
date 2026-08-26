@@ -54,6 +54,16 @@ fn prepare_playing_section_refresh(
         .map(|section| section.prepare_playback_source(project_tracks))
 }
 
+fn section_to_refresh_after_project_track_replay(
+    replayed_track: Option<vibez_core::id::TrackId>,
+    location: vibez_project::TimelineLocation,
+) -> Option<SectionId> {
+    match (replayed_track, location) {
+        (Some(_), vibez_project::TimelineLocation::Section(section_id)) => Some(section_id),
+        _ => None,
+    }
+}
+
 impl App {
     fn begin_section_residency(&mut self, section_id: SectionId) -> Task<Message> {
         let Some(section) = self.state.perform.sections.by_id(section_id).cloned() else {
@@ -274,6 +284,17 @@ impl App {
                     crate::domains::transport::TransportCtx::default(),
                 );
             }
+        }
+        let replayed_project_track = action.replay_project_track.take();
+        if let Some(track_id) = replayed_project_track {
+            if let Some(track) = self.state.find_track(track_id).cloned() {
+                self.replay_track_to_engine(&track);
+            }
+        }
+        if let Some(section_id) =
+            section_to_refresh_after_project_track_replay(replayed_project_track, location)
+        {
+            self.refresh_playing_section_after_edit(section_id);
         }
         if let Some(track_id) = action.close_track_guis {
             if let Some(ref mut mgr) = self.plugin_window_manager {
@@ -630,7 +651,7 @@ impl App {
                 track.sample_source = None;
                 track.sample_audio = None;
                 track.instrument_params.clear();
-                track.drum_rack_pads = (0..16)
+                track.drum_rack_pads = (0..vibez_core::track::DRUM_RACK_PAD_COUNT)
                     .map(|_| crate::state::UiDrumPad::default())
                     .collect();
                 track.selected_drum_pad = 0;
@@ -970,5 +991,33 @@ mod perform_action_tests {
             other_id,
         )
         .is_none());
+    }
+
+    #[test]
+    fn section_slice_refresh_is_requested_only_after_a_new_project_track_is_replayed() {
+        let section_id = crate::domains::perform::Section::new(0).id;
+        let track_id = TrackId::new();
+
+        assert_eq!(
+            section_to_refresh_after_project_track_replay(
+                Some(track_id),
+                vibez_project::TimelineLocation::Section(section_id),
+            ),
+            Some(section_id)
+        );
+        assert_eq!(
+            section_to_refresh_after_project_track_replay(
+                None,
+                vibez_project::TimelineLocation::Section(section_id),
+            ),
+            None
+        );
+        assert_eq!(
+            section_to_refresh_after_project_track_replay(
+                Some(track_id),
+                vibez_project::TimelineLocation::Arrange,
+            ),
+            None
+        );
     }
 }

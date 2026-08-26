@@ -152,6 +152,12 @@ pub struct LoadedDrumRackPadData {
 }
 
 #[derive(Debug, Clone)]
+pub struct PreparedDrumRackAudio {
+    pub source: MediaSourceRef,
+    pub audio: Arc<DecodedAudio>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SampleLibraryScanResult {
     pub entries: Vec<SampleBrowserEntry>,
     pub folders: Vec<SampleBrowserFolder>,
@@ -453,6 +459,17 @@ pub enum Message {
     Devices(crate::domains::devices::DevicesMsg),
     /// Arrangement domain (tracks, selection; clips arriving next).
     Arrangement(crate::domains::arrangement::ArrangementMsg),
+    SetDrumRackSliceMarkers(crate::domains::arrangement::AudioSliceMarkers),
+    ConfirmDrumRackSlice,
+    CancelDrumRackSlice,
+    AudioClipDrumRackPrepared {
+        location: TimelineLocation,
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: crate::domains::arrangement::AudioSliceMarkers,
+        expected_clip: Box<crate::state::UiClip>,
+        result: Result<PreparedDrumRackAudio, String>,
+    },
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),

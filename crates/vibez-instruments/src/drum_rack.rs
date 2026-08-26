@@ -3,12 +3,10 @@ use std::sync::Arc;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
-use vibez_core::track::DrumPadState;
+use vibez_core::track::{drum_rack_pad_index, DrumPadState, DRUM_RACK_PAD_COUNT};
 
 use crate::Instrument;
 
-const PAD_COUNT: usize = 16;
-const BASE_PAD_NOTE: u8 = 36;
 const MAX_VOICES: usize = 32;
 
 #[derive(Debug, Clone)]
@@ -91,14 +89,13 @@ impl DrumRack {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             sample_rate,
-            pads: (0..PAD_COUNT).map(|_| Pad::default()).collect(),
+            pads: (0..DRUM_RACK_PAD_COUNT).map(|_| Pad::default()).collect(),
             voices: (0..MAX_VOICES).map(|_| Voice::inactive()).collect(),
         }
     }
 
     fn pitch_to_pad(pitch: u8) -> Option<usize> {
-        let offset = pitch.checked_sub(BASE_PAD_NOTE)? as usize;
-        (offset < PAD_COUNT).then_some(offset)
+        drum_rack_pad_index(pitch)
     }
 
     fn frame_range(pad: &Pad, sample: &DecodedAudio) -> Option<(usize, usize)> {
@@ -301,9 +298,9 @@ impl Instrument for DrumRack {
             pad.fine_tune = state.fine_tune;
             pad.one_shot = state.one_shot;
             pad.choke_group = state.choke_group;
-            if pad.sample_name.is_none() {
-                pad.sample_name = state.source.as_ref().map(|source| source.display_name());
-            }
+            pad.sample_name = state
+                .name
+                .or_else(|| state.source.as_ref().map(|source| source.display_name()));
         }
     }
 }

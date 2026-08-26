@@ -150,20 +150,39 @@ impl UiClip {
     }
 
     pub(crate) fn source_frame_at(&self, clip_frame: u64) -> u64 {
+        self.source_frame_position_at(clip_frame).round() as u64
+    }
+
+    pub(crate) fn source_frame_position_at(&self, clip_frame: u64) -> f64 {
         let timeline_frame = self.timeline().source_at(
             self.playback_direction
                 .map_clip_frame(clip_frame, self.duration),
         );
         if self.warp_markers.is_empty() {
-            return timeline_frame;
+            return timeline_frame as f64;
         }
-        self.warp_markers
-            .source_at_timeline(
-                timeline_frame.saturating_sub(self.source_offset) as f64,
-                self.source_offset,
-                self.warp_timeline_end(),
-            )
-            .round() as u64
+        self.warp_markers.source_at_timeline(
+            timeline_frame.saturating_sub(self.source_offset) as f64,
+            self.source_offset,
+            self.warp_timeline_end(),
+        )
+    }
+
+    pub(crate) fn has_same_audible_geometry(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.audio, &other.audio)
+            && self.duration == other.duration
+            && self.source_offset == other.source_offset
+            && self.start_marker == other.start_marker
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start == other.loop_start
+            && self.loop_end == other.loop_end
+            && self.gain_db == other.gain_db
+            && self.fades == other.fades
+            && self.playback_direction == other.playback_direction
+            && self.warp_markers == other.warp_markers
+            && self.transpose == other.transpose
+            && self.warped == other.warped
+            && self.warped_to_bpm == other.warped_to_bpm
     }
 
     pub(crate) fn timeline_frame_at_source(&self, source_frame: u64) -> u64 {
@@ -283,6 +302,7 @@ impl Default for UiDrumPad {
 impl UiDrumPad {
     pub fn to_state(&self) -> DrumPadState {
         DrumPadState {
+            name: self.name.clone(),
             source: self.source.clone(),
             gain: self.gain,
             pan: self.pan,
@@ -297,7 +317,10 @@ impl UiDrumPad {
 
     pub fn from_state(state: &DrumPadState) -> Self {
         Self {
-            name: state.source.as_ref().map(MediaSourceRef::display_name),
+            name: state
+                .name
+                .clone()
+                .or_else(|| state.source.as_ref().map(MediaSourceRef::display_name)),
             source: state.source.clone(),
             audio: None,
             gain: state.gain,

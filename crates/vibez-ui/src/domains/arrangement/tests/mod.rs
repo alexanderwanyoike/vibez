@@ -8,8 +8,8 @@ use super::*;
 use crate::domains::test_support::RecordingEngine;
 use crate::state::{AudioClipInspectorField, UiClip};
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
-use vibez_core::midi::MidiNote;
-use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection};
+use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection, MediaSourceRef};
 use vibez_core::transient::{TransientMarker, TransientMarkerKind};
 use vibez_core::warp_marker::WarpMarker;
 fn add_audio_clip(

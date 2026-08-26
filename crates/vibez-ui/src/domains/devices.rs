@@ -300,7 +300,7 @@ impl DevicesState {
                     track.sample_source = None;
                     track.sample_audio = None;
                     track.instrument_params = instrument_params.clone();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.drum_rack_pads = crate::state::default_drum_rack_pads();
                     track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
                     track.plugin_instrument_ref = None;
@@ -329,7 +329,7 @@ impl DevicesState {
                     track.sample_source = None;
                     track.sample_audio = None;
                     track.instrument_params.clear();
-                    track.drum_rack_pads = (0..16).map(|_| UiDrumPad::default()).collect();
+                    track.drum_rack_pads = crate::state::default_drum_rack_pads();
                     track.selected_drum_pad = 0;
                     track.plugin_instrument_name = None;
                     track.plugin_instrument_ref = None;
@@ -355,7 +355,9 @@ impl DevicesState {
             }
             DevicesMsg::SelectDrumRackPad(track_id, pad_index) => {
                 // Audition the pad like Ableton: hear it on click.
-                let pitch = 36 + pad_index.min(127) as u8;
+                let Some(pitch) = vibez_core::track::drum_rack_pad_pitch(pad_index) else {
+                    return action;
+                };
                 engine.send(EngineCommand::AuditionNote {
                     track_id,
                     pitch,

@@ -76,31 +76,17 @@ impl ArrangementState {
         let mut action = ArrangementAction::default();
         match msg {
             ArrangementMsg::AddTrack => {
-                let track_num = project_tracks.next_unique_track_number("Track");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                project_tracks.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("Track {track_num}");
-                engine.send(EngineCommand::AddTrack(id, name.clone()));
-                let mut track = ProjectTrack::new(id, name, color_index);
-                attach_channel_eq(engine, &mut track);
-                project_tracks.tracks.push(track);
+                let id = project_tracks.add_numbered_track("Track", TrackKind::Audio, engine);
                 Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));
             }
             ArrangementMsg::AddMidiTrack | ArrangementMsg::AddInstrumentTrack => {
-                let track_num = project_tracks.next_unique_track_number("MIDI");
-                let color_index = (track_num.wrapping_sub(1) % 8) as u8;
-                project_tracks.next_track_number = track_num + 1;
-                let id = TrackId::new();
-                let name = format!("MIDI {track_num}");
-                engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
-                let mut track =
-                    ProjectTrack::new_instrument(id, name, TrackKind::Midi, color_index);
-                track.has_instrument = false;
-                attach_channel_eq(engine, &mut track);
-                project_tracks.tracks.push(track);
+                let id = project_tracks.add_numbered_track("MIDI", TrackKind::Midi, engine);
+                project_tracks
+                    .find_mut(id)
+                    .expect("new Project Track")
+                    .has_instrument = false;
                 Arc::make_mut(&mut self.timeline).ensure(id);
                 self.selected_track = Some(id);
                 action.status = Some(format!("{} tracks", project_tracks.tracks.len()));

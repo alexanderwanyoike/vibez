@@ -28,7 +28,9 @@ pub use messages::{
 };
 mod clipboard;
 mod crossfades;
+mod slice_to_drum_rack;
 mod slicing;
+pub(crate) use slicing::slice_region_count;
 
 /// Every channel carries a flat SSL-style EQ. Also used for the master
 /// bus, which is why it is crate-visible.
@@ -66,6 +68,31 @@ impl ProjectTracksState {
             }
             self.next_track_number += 1;
         }
+    }
+
+    /// Create one numbered Project Track with the standard channel strip.
+    /// Callers remain responsible for adding its timeline lane and selecting it.
+    pub(crate) fn add_numbered_track(
+        &mut self,
+        prefix: &str,
+        kind: TrackKind,
+        engine: &mut impl EngineHandle,
+    ) -> TrackId {
+        let track_number = self.next_unique_track_number(prefix);
+        self.next_track_number = track_number + 1;
+        let id = TrackId::new();
+        let name = format!("{prefix} {track_number}");
+        let color_index = (track_number.wrapping_sub(1) % 8) as u8;
+        let mut track = if kind.is_midi() {
+            engine.send(EngineCommand::AddMidiTrack(id, name.clone()));
+            ProjectTrack::new_instrument(id, name, kind, color_index)
+        } else {
+            engine.send(EngineCommand::AddTrack(id, name.clone()));
+            ProjectTrack::new(id, name, color_index)
+        };
+        attach_channel_eq(engine, &mut track);
+        self.tracks.push(track);
+        id
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
@@ -785,6 +812,28 @@ impl TimelineEditorState {
                 markers,
             } => {
                 return self.slice_audio_clip_at_markers(engine, track_id, clip_id, markers);
+            }
+            ArrangementMsg::RequestSliceAudioClipToDrumRack { .. } => {
+                return ArrangementAction::default();
+            }
+            ArrangementMsg::SliceAudioClipToDrumRack {
+                track_id,
+                clip_id,
+                markers,
+                source,
+                audio,
+            } => {
+                return self.slice_audio_clip_to_drum_rack(
+                    project_tracks,
+                    track_id,
+                    clip_id,
+                    slice_to_drum_rack::DrumRackSliceMaterial {
+                        markers,
+                        source,
+                        audio,
+                    },
+                    ctx,
+                );
             }
             ArrangementMsg::SplitNoteClip {
                 track_id,

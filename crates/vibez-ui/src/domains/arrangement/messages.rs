@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::track::ClipTranspose;
+use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
 use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
 
@@ -228,6 +228,17 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         markers: AudioSliceMarkers,
     },
+    RequestSliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
+    SliceAudioClipToDrumRack {
+        track_id: TrackId,
+        clip_id: ClipId,
+        markers: AudioSliceMarkers,
+        source: MediaSourceRef,
+        audio: Arc<DecodedAudio>,
+    },
     SplitNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -331,6 +342,8 @@ impl ArrangementMsg {
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
+                | Self::RequestSliceAudioClipToDrumRack { .. }
+                | Self::SliceAudioClipToDrumRack { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
@@ -371,6 +384,7 @@ impl ArrangementMsg {
                 | ArrangementMsg::PreviewAudioClipRotaryValue { .. }
                 | ArrangementMsg::SelectTransientMarker { .. }
                 | ArrangementMsg::SelectWarpMarker { .. }
+                | ArrangementMsg::RequestSliceAudioClipToDrumRack { .. }
         )
     }
 
@@ -401,6 +415,7 @@ impl ArrangementMsg {
                     | Self::MoveWarpMarker { .. }
                     | Self::RemoveWarpMarker { .. }
                     | Self::SliceAudioClipAtMarkers { .. }
+                    | Self::SliceAudioClipToDrumRack { .. }
             )
     }
 }
@@ -413,6 +428,9 @@ pub struct ArrangementAction {
     pub close_track_guis: Option<TrackId>,
     /// Remove this shared identity from every Section timeline too.
     pub remove_track_from_sections: Option<TrackId>,
+    /// Seed one newly-created Project Track and its Arrange content through
+    /// the canonical replay path after all project stores have been updated.
+    pub replay_project_track: Option<TrackId>,
     /// Status bar text.
     pub status: Option<String>,
     /// Selecting a clip focuses the detail panel's Clip tab.

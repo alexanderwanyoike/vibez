@@ -863,7 +863,7 @@ pub(super) async fn load_project_async(
                                 pad_index,
                                 source: source.clone(),
                                 audio: Arc::new(audio),
-                                name: source.display_name(),
+                                name: pad.name.clone().unwrap_or_else(|| source.display_name()),
                                 state: pad.clone(),
                             }),
                             Err(err) => warnings.push(format!("Skipped {label} ({err})")),
