@@ -1626,7 +1626,7 @@ mod tests {
                     .push(Command::AddNote {
                         track_id: tid,
                         clip_id: clip.id,
-                        note: note.clone(),
+                        note: *note,
                     })
                     .unwrap();
             }
@@ -1708,7 +1708,7 @@ mod tests {
             .insert(effect_id, Box::new(EchoPluginEffect::new()));
         let exported = render_offline_with_plugins(&request, &mut plugins, |_| {}).unwrap();
         assert!(exported.warnings.is_empty());
-        for (frame, expected) in live.chunks_exact(2).enumerate() {
+        for (frame, expected) in live.as_chunks::<2>().0.iter().enumerate() {
             for (channel, expected) in expected.iter().enumerate() {
                 assert!((exported.audio.channels[channel][frame] - expected).abs() < 1e-6,
                     "{kind:?} insert echo differs at frame {frame}, channel {channel}: export={}, live={expected}",
