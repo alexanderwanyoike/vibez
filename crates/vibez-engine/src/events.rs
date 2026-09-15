@@ -81,6 +81,12 @@ pub enum EngineEvent {
     },
     ClipRequestRetired(Box<crate::playback_source::PreparedClipPlayback>),
     ClipBatchRetired(Vec<Box<crate::playback_source::PreparedClipPlayback>>),
+    ClipSourceRefreshed {
+        track_id: TrackId,
+        request_id: u64,
+        position: u64,
+        effective_at_samples: u64,
+    },
     ClipCaptureSource {
         track_id: TrackId,
         position: u64,

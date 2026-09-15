@@ -5,6 +5,30 @@ use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedCli
 use vibez_core::perform::MusicalBoundary;
 
 impl AudioEngine {
+    pub(super) fn edit_clip(
+        &mut self,
+        active: Box<PreparedClipPlayback>,
+        mut queued: Box<PreparedClipPlayback>,
+    ) {
+        if let Some(track) = self.tracks.iter_mut().find(|t| t.id == active.track_id) {
+            if track
+                .active_clip
+                .is_some_and(|playing| Some(playing.clip_id) == active.clip_id)
+            {
+                track.release_edited_launcher_notes(&active.source);
+            }
+            if let Some(pending) = track
+                .queued_clip
+                .as_mut()
+                .filter(|pending| pending.prepared.clip_id == queued.clip_id)
+            {
+                std::mem::swap(&mut pending.prepared, &mut queued);
+            }
+        }
+        self.clip_event(EngineEvent::ClipRequestRetired(queued));
+        self.refresh_clip(active);
+    }
+
     pub(super) fn clip_event(&mut self, event: EngineEvent) {
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             // Source owners must be reclaimed on the UI thread, never in the callback.

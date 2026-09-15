@@ -190,16 +190,29 @@ impl AudioEngine {
                 if !recording_free {
                     active.length = prepared.length_samples.max(1);
                     active.looping = prepared.looping;
-                    active.position %= active.length;
+                    active.position = if active.looping {
+                        active.position % active.length
+                    } else {
+                        active.position.min(active.length)
+                    };
                 }
                 refreshed = Some((track.id, active.position));
             }
         }
         if let Some((track_id, position)) = refreshed {
-            self.clip_event(EngineEvent::ClipCaptureSource {
-                track_id,
-                position,
-                effective_at_samples: self.performance_position,
+            self.clip_event(if prepared.request_id == 0 {
+                EngineEvent::ClipCaptureSource {
+                    track_id,
+                    position,
+                    effective_at_samples: self.performance_position,
+                }
+            } else {
+                EngineEvent::ClipSourceRefreshed {
+                    track_id,
+                    request_id: prepared.request_id,
+                    position,
+                    effective_at_samples: self.performance_position,
+                }
             });
         }
         self.clip_event(EngineEvent::ClipRequestRetired(prepared));

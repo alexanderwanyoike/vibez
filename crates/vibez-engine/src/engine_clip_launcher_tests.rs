@@ -495,3 +495,71 @@ fn clip_segments_keep_live_input_and_resample_capture_aligned_across_wraps() {
         assert!((out - source - live).abs() < 1e-6);
     }
 }
+
+#[test]
+fn live_edit_updates_active_and_queued_sources_without_moving_their_clocks() {
+    let (mut engine, mut commands, mut events, a, b) = setup();
+    let original = clip(a, 1, &[0.1; 32], true);
+    let id = original.clip_id;
+    launch(
+        &mut commands,
+        vec![original, clip(b, 2, &[0.01, 0.02, 0.03, 0.04], true)],
+        MusicalBoundary::Immediate,
+    );
+    engine.process(&mut [0.0; 3], 1);
+    let mut relaunch = clip(a, 3, &[0.1; 32], true);
+    relaunch.clip_id = id;
+    launch(&mut commands, vec![relaunch], MusicalBoundary::OneBar);
+    let mut active = clip(a, 4, &[0.2; 32], true);
+    active.clip_id = id;
+    let mut queued = clip(a, 5, &[0.2; 32], true);
+    queued.clip_id = id;
+    commands
+        .push(EngineCommand::EditClip { active, queued })
+        .unwrap();
+    let mut output = [0.0; 14];
+    engine.process(&mut output, 1);
+    for (index, sample) in output.iter().enumerate() {
+        let expected = 0.2 + [0.01, 0.02, 0.03, 0.04][(index + 3) % 4];
+        assert!((sample - expected).abs() < 1e-6, "frame {index}: {sample}");
+    }
+    assert_eq!(engine.tracks[0].active_clip.unwrap().position, 1);
+    let events: Vec<_> = std::iter::from_fn(|| events.pop().ok()).collect();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EngineEvent::ClipSourceRefreshed {
+            request_id: 4,
+            position: 3,
+            effective_at_samples: 3,
+            ..
+        }
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        EngineEvent::ClipTransitioned {
+            request_id: 5,
+            effective_at_samples: 16,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn shortening_a_playing_one_shot_past_its_position_finishes_it() {
+    let (mut engine, mut commands, _events, a, _) = setup();
+    let original = clip(a, 1, &[0.1; 16], false);
+    let id = original.clip_id;
+    launch(&mut commands, vec![original], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 6], 1);
+    let mut active = clip(a, 2, &[0.2; 4], false);
+    active.clip_id = id;
+    let mut queued = clip(a, 3, &[0.2; 4], false);
+    queued.clip_id = id;
+    commands
+        .push(EngineCommand::EditClip { active, queued })
+        .unwrap();
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_eq!(output, [0.0; 4]);
+    assert!(engine.tracks[0].active_clip.is_none());
+}

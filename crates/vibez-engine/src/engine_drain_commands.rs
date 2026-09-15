@@ -15,6 +15,7 @@ impl AudioEngine {
                 } => self.arm_clip_record(prepared, count_in_bars, free_length),
                 EngineCommand::StopClipRecord { immediate } => self.stop_clip_record(immediate),
                 EngineCommand::RefreshClip(prepared) => self.refresh_clip(prepared),
+                EngineCommand::EditClip { active, queued } => self.edit_clip(active, queued),
                 EngineCommand::BeginClipPerformance => self.begin_clip_performance(),
                 EngineCommand::QueueClips {
                     clips,

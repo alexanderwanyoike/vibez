@@ -349,9 +349,15 @@ spans feed the existing timeline-window materializer, producing independent
 Arrange clips and preserving silence, live notes, mutes and mixer automation.
 A completed take remains one Undo transaction. This does not create or derive
 Sections. Runtime Clip playheads, queues and editor selection are not persisted.
-Authored source edits become audible on the next launch. Recording previews and
-cell Loop/One-shot changes refresh the matching active Clip without restarting
-its local playhead; source refreshes publish a Capture boundary.
+Committed Clip edits refresh matching active and queued sources at the next
+engine callback, preserving local playheads and queued launch boundaries. The
+application compares canonical Clip timelines after each message, so shared
+editor gestures, background audio results and Clip-only undo use one update
+path. Clip-only undo keeps the existing channel strips and devices resident.
+Changed MIDI schedules release their old voices; unaffected pitches keep
+sustaining. Each refresh acknowledges an immutable source version and local
+offset for Capture. Direct recording retains its separate preview updates.
+Cell Loop/One-shot changes use the same live edit path.
 Track colours identify column names and musical thumbnails. MIDI thumbnails
 use the editor's loop-aware note occurrences; audio thumbnails use the shared
 waveform peak cache. The canvas retains its source timeline so copy-on-write
