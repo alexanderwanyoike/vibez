@@ -53,7 +53,7 @@ fn audio_recording_transport_guard(
 }
 
 impl App {
-    pub(super) fn update(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update_and_refresh_clips(&mut self, message: Message) -> Task<Message> {
         let before = Arc::clone(&self.state.perform.clips);
         let recording = self
             .state
@@ -62,7 +62,7 @@ impl App {
             .session
             .as_ref()
             .map(|s| s.working.id);
-        let task = self.update_message(message);
+        let task = self.update(message);
         let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
         super::clip_launcher::refresh_edited_clips(
             &before,
@@ -74,7 +74,7 @@ impl App {
         task
     }
 
-    fn update_message(&mut self, message: Message) -> Task<Message> {
+    pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         let message = match message {
             Message::SectionTimeline(edit) => {
                 if super::update_timeline::section_timeline_claims_focus(
