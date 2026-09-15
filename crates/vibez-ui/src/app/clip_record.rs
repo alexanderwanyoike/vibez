@@ -386,10 +386,7 @@ impl App {
         };
         let spb = session.sample_rate as f64 * 60.0 / session.bpm;
         let beats = session.length_samples.map_or_else(
-            || {
-                ((now.saturating_sub(session.start.unwrap()) as f64 / spb / 4.0).ceil() * 4.0)
-                    .max(4.0)
-            },
+            || free_recording_beats(now.saturating_sub(session.start.unwrap()), spb),
             |length| length as f64 / spb,
         );
         let clip = apply_midi_take(&session.working, &take, beats);
