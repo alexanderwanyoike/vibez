@@ -79,6 +79,7 @@ impl AudioEngine {
                 self.clip_event(EngineEvent::ClipRequestRetired(prepared));
                 continue;
             };
+            let request_id = prepared.request_id;
             let track_id = prepared.track_id;
             let clip_id = prepared.clip_id;
             if let Some(old) = self.tracks[index].queued_clip.replace(QueuedClipPlayback {
@@ -87,9 +88,11 @@ impl AudioEngine {
             }) {
                 self.clip_event(EngineEvent::ClipRequestRetired(old.prepared));
             }
-            let _ = self
-                .event_tx
-                .push(EngineEvent::ClipQueued { track_id, clip_id });
+            let _ = self.event_tx.push(EngineEvent::ClipQueued {
+                request_id,
+                track_id,
+                clip_id,
+            });
         }
         self.clip_event(EngineEvent::ClipBatchRetired(clips));
         self.apply_clip_boundaries(now);

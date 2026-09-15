@@ -94,12 +94,15 @@ impl App {
                         project_tracks.master.peak_l = self.state.peak_l;
                         project_tracks.master.peak_r = self.state.peak_r;
                     }
-                    EngineEvent::ClipQueued { track_id, clip_id } => {
+                    EngineEvent::ClipQueued {
+                        request_id,
+                        track_id,
+                        clip_id,
+                    } => {
                         self.state
                             .perform
                             .clip_editor
-                            .queued
-                            .insert(track_id, clip_id);
+                            .queue_request(track_id, clip_id, request_id);
                     }
                     EngineEvent::ClipBatchRetired(retired) => drop(retired),
                     EngineEvent::ClipRequestRetired(retired) => {
@@ -161,9 +164,7 @@ impl App {
                         ..
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
-                        if request_id != 0 {
-                            editor.queued.remove(&track_id);
-                        }
+                        editor.acknowledge_transition(track_id, request_id);
                         editor.started_at.insert(track_id, effective_at_samples);
                         if let Some(clip) = editor.pending.remove(&request_id) {
                             editor.playing.insert(track_id, clip);
@@ -188,7 +189,7 @@ impl App {
                         self.state.perform.clip_editor.running = false;
                         self.state.perform.clip_editor.playing.clear();
                         self.state.perform.clip_editor.started_at.clear();
-                        self.state.perform.clip_editor.queued.clear();
+                        self.state.perform.clip_editor.clear_queue();
                         self.state.perform.clip_editor.pending.clear();
                         self.state.transport.playing = false;
                         self.state.perform.playing_section = None;

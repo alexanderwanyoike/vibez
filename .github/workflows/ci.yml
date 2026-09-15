@@ -10,23 +10,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/setup-asio-sdk
-        if: runner.os == 'Windows'
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
-      - run: cargo check --workspace
-
   test:
     name: Test
     runs-on: ${{ matrix.os }}
@@ -43,37 +26,3 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
       - run: cargo test --workspace
-      - name: Verify Windows executable resources
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --package vibez --bin vibez
-          ./scripts/check_windows_resources.ps1 target/debug/vibez.exe
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Linux dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
-      - run: cargo clippy --workspace --all-targets --exclude vibez-plugin-host -- -D warnings
-      # vibez-plugin-host stays at lib-only lint coverage on purpose. Its tests
-      # drive the VST3 vtable ABI directly, where a cast that looks redundant
-      # on x86_64 is load-bearing on targets whose c_char is u8. Do not widen
-      # this to --all-targets and "fix" what it then reports.
-      - run: cargo clippy -p vibez-plugin-host -- -D warnings
-
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check

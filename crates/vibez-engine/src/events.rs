@@ -69,6 +69,7 @@ pub enum EngineEvent {
     /// Monotonic, zero-based time for the current Perform session.
     PerformancePosition(u64),
     ClipQueued {
+        request_id: u64,
         track_id: TrackId,
         clip_id: Option<vibez_core::id::ClipId>,
     },

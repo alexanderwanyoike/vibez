@@ -335,11 +335,12 @@ channel strip. Empty and stopped Tracks still render live instruments and
 effect tails without falling back to Arrange content. Prepared owners return
 through events for disposal on the UI thread.
 
-The 16 physical grid keys launch addressed Clips; Shift plus a grid key stops
-that Track. Alt plus any grid key launches its row across all Project Tracks,
+The 16 physical grid keys toggle addressed Clips. Pressing a playing or queued
+Clip again stops its Track; an empty cell also stops the Track. Requested queue
+state updates immediately so quick repeat presses toggle the latest intent. Alt plus any grid key launches its row across all Project Tracks,
 including columns outside the keyboard window. Empty row slots stop their
 Tracks. The prototype uses one-bar quantization; the first launch starts
-immediately, and relaunching a playing Clip restarts it at the next boundary.
+immediately. Launches and toggle stops take effect at the next boundary.
 F5 toggles Capture. Space starts a silent Perform clock or stops playback and
 finishes the take. Tempo stays fixed until transport stops.
 
@@ -362,11 +363,16 @@ Track colours identify column names and musical thumbnails. MIDI thumbnails
 use the editor's loop-aware note occurrences; audio thumbnails use the shared
 waveform peak cache. The canvas retains its source timeline so copy-on-write
 edits invalidate cached geometry, including asynchronous media hydration.
-Keyboard badges identify the controller window without outlining every slot.
-Each occupied Clip cell has a play control and an × delete control, routed through
-the same launch and Undo-aware delete actions as the keyboard and editor.
+Keyboard labels identify the controller window.
+The Clip grid uses black backgrounds and continuous dividers while retaining
+track-coloured MIDI and waveform previews. Cell controls use the shared native
+icon helper: play/stop, record, Loop/One-shot, and delete. Empty cell clicks stop
+the Track; double-click creates a MIDI part or imports audio. The play control
+and keyboard share one toggle policy, while delete remains Undo-aware.
 Track and Clip names edit in place on double-click. Arrow keys remain grid
-navigation while the piano roll is open. Playing Clips
+navigation while the piano roll is open. Clicking in the Browser gives its
+Results the arrow keys for selection and audition; clicking outside returns
+navigation to the workspace. Playing Clips
 show a progress line in the grid and their shared Audio/MIDI inspector.
 In Clip Projects, Instrument and Track Mutes dock square pads on the left and
 reuse the Clip grid beside them, with the existing draggable Perform divider.
@@ -399,7 +405,7 @@ The Clip renderer passes live input and resampling buffers through its normal
 channel strip at every boundary. Sections retain their recording controls and
 layout.
 
-Cells default to Loop. The cell's LOOP/1x control changes the same loop property
+Cells default to Loop. The cell's repeat/one-shot icon changes the same loop property
 used by its shared editor and saved timeline. One-shot playback stops at the
 clip end. Recording into an existing one-shot cycles for the take and preserves
 its saved playback mode when recording finishes.

@@ -880,12 +880,16 @@ impl PerformState {
                         ctx.project_tracks
                             .get(self.clip_editor.first_track + position.column as usize)
                             .and_then(|track| {
-                                self.clips.at(
-                                    track.id,
-                                    self.clip_editor.first_row + u32::from(position.row),
-                                )
+                                self.clips
+                                    .at(
+                                        track.id,
+                                        self.clip_editor.first_row + u32::from(position.row),
+                                    )
+                                    .map_or(
+                                        Some(clip_launcher::ClipLaunchRequest::Stop(track.id)),
+                                        |clip| self.toggle_clip_request(clip.id),
+                                    )
                             })
-                            .map(|clip| clip_launcher::ClipLaunchRequest::Clip(clip.id))
                     } else {
                         None
                     },

@@ -60,6 +60,7 @@ impl LocalRootCatalogState {
 #[derive(Debug, Clone)]
 pub struct BrowserState {
     pub open: bool,
+    pub keyboard_focus: bool,
     /// Remembered user width. The rendered width may temporarily yield to a
     /// narrow window without overwriting this preference.
     pub dock_width: f32,
@@ -130,6 +131,7 @@ impl Default for BrowserState {
     fn default() -> Self {
         Self {
             open: true,
+            keyboard_focus: false,
             dock_width: BROWSER_DOCK_DEFAULT_WIDTH,
             dock_resize_active: false,
             search: String::new(),

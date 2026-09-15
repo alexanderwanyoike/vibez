@@ -59,6 +59,7 @@ pub struct ClipEditor {
     pub pending: HashMap<u64, LauncherClip>,
     pub playing: HashMap<TrackId, LauncherClip>,
     pub queued: HashMap<TrackId, Option<ClipId>>,
+    queued_requests: HashMap<TrackId, u64>,
     pub next_request: u64,
     pub running: bool,
     pub started_at: HashMap<TrackId, u64>,
@@ -68,9 +69,39 @@ pub struct ClipEditor {
     pub first_row: u32,
 }
 
+impl ClipEditor {
+    pub fn queue_request(&mut self, track: TrackId, clip: Option<ClipId>, request: u64) {
+        if self
+            .queued_requests
+            .get(&track)
+            .is_none_or(|latest| request >= *latest)
+        {
+            self.queued_requests.insert(track, request);
+            self.queued.insert(track, clip);
+        }
+    }
+
+    pub fn acknowledge_transition(&mut self, track: TrackId, request: u64) {
+        if request != 0
+            && self
+                .queued_requests
+                .get(&track)
+                .is_none_or(|latest| request >= *latest)
+        {
+            self.queued.remove(&track);
+            self.queued_requests.remove(&track);
+        }
+    }
+
+    pub fn clear_queue(&mut self) {
+        self.queued.clear();
+        self.queued_requests.clear();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipMsg {
-    Launch(ClipId),
+    Toggle(ClipId),
     StopTrack(TrackId),
     LaunchRow(u32),
     StopAll,
@@ -101,6 +132,26 @@ impl ClipMsg {
 }
 
 impl PerformState {
+    pub fn toggle_clip_request(&self, id: ClipId) -> Option<ClipLaunchRequest> {
+        let clip = self.clips.by_id(id)?;
+        Some(if self.clip_is_triggered(clip) {
+            ClipLaunchRequest::Stop(clip.track_id)
+        } else {
+            ClipLaunchRequest::Clip(id)
+        })
+    }
+
+    pub fn clip_is_triggered(&self, clip: &LauncherClip) -> bool {
+        match self.clip_editor.queued.get(&clip.track_id) {
+            Some(queued) => *queued == Some(clip.id),
+            None => self
+                .clip_editor
+                .playing
+                .get(&clip.track_id)
+                .is_some_and(|active| active.id == clip.id),
+        }
+    }
+
     pub fn selected_timeline_location(&self) -> Option<vibez_project::TimelineLocation> {
         match self.layout {
             PerformLayout::Sections => self
@@ -163,9 +214,9 @@ impl PerformState {
         }
         let mut selected = None;
         match msg {
-            ClipMsg::Launch(id) => {
+            ClipMsg::Toggle(id) => {
                 return PerformAction {
-                    clip_launch: Some(ClipLaunchRequest::Clip(id)),
+                    clip_launch: self.toggle_clip_request(id),
                     ..Default::default()
                 }
             }
