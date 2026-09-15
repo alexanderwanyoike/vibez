@@ -162,6 +162,11 @@ pub fn latest_audio_pass(frames: &[[f32; 2]], length: usize) -> Vec<[f32; 2]> {
     result
 }
 
+pub fn free_recording_beats(elapsed_samples: u64, samples_per_beat: f64) -> f64 {
+    // Independently rounded start/stop boundaries can differ from whole bars by one sample.
+    (((elapsed_samples as f64 - 1.0).max(0.0) / samples_per_beat / 4.0).ceil() * 4.0).max(4.0)
+}
+
 pub fn recorded_audio_window(
     frames: &[[f32; 2]],
     bridge_start: u64,
@@ -186,6 +191,19 @@ mod tests {
     use super::super::loop_record::{LoopRecordInput, RecordedLoopNote};
     use super::*;
     use vibez_core::perform::GrooveGrid;
+
+    #[test]
+    fn free_recording_does_not_add_a_bar_for_sample_rounding() {
+        let spb = 44_100.0 * 60.0 / 124.0;
+        for start_bar in 0..8 {
+            for bars in 1..32 {
+                let start = (start_bar as f64 * 4.0 * spb).round() as u64;
+                let stop = ((start_bar + bars) as f64 * 4.0 * spb).round() as u64;
+                assert_eq!(free_recording_beats(stop - start, spb), bars as f64 * 4.0);
+            }
+        }
+        assert_eq!(free_recording_beats((4.5 * spb) as u64, spb), 8.0);
+    }
 
     #[test]
     fn audio_window_excludes_count_in_and_tail_and_replaces_each_loop_pass() {
