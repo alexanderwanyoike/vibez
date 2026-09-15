@@ -154,7 +154,7 @@ impl App {
         let width = self.perform_workspace_width();
         let compact = self.state.view.window_height < 800.0;
         let slot_height = if compact {
-            ((self.state.view.window_height - 480.0) / 5.0).clamp(30.0, 58.0)
+            ((self.state.view.window_height - 480.0) / 5.0).clamp(26.0, 58.0)
         } else {
             58.0
         };
