@@ -8,6 +8,13 @@ impl AudioEngine {
     pub(super) fn drain_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.pop() {
             match cmd {
+                EngineCommand::ArmClipRecord {
+                    free_length,
+                    prepared,
+                    count_in_bars,
+                } => self.arm_clip_record(prepared, count_in_bars, free_length),
+                EngineCommand::StopClipRecord { immediate } => self.stop_clip_record(immediate),
+                EngineCommand::RefreshClip(prepared) => self.refresh_clip(prepared),
                 EngineCommand::BeginClipPerformance => self.begin_clip_performance(),
                 EngineCommand::QueueClips {
                     clips,

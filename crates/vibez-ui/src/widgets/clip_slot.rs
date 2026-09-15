@@ -17,10 +17,18 @@ pub struct ClipSlot<'a> {
     pub color: Color,
     pub key: &'a str,
     pub selected: bool,
+    pub recording: bool,
+    pub audio_recording: Option<ClipRecordingWaveform>,
     pub playing: bool,
     pub progress: Option<f32>,
     pub queued: bool,
     pub compact: bool,
+}
+
+pub struct ClipRecordingWaveform {
+    pub preview: crate::domains::audio_recording::AudioRecordingPreview,
+    pub offset: u64,
+    pub loop_length: Option<u64>,
 }
 
 #[derive(Default)]
@@ -145,6 +153,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         self.key.hash(&mut hash);
         (
             self.selected,
+            self.recording,
             self.compact,
             self.playing,
             self.queued,
@@ -195,7 +204,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             frame.fill_rectangle(
                 Point::ORIGIN,
                 Size::new(w, if self.playing { 4.0 } else { 2.0 }),
-                self.color,
+                if self.recording {
+                    th::danger()
+                } else {
+                    self.color
+                },
             );
             if self.selected {
                 let edge =
@@ -217,7 +230,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             label(
                 frame,
                 &fit(
-                    slot.name(),
+                    if self.recording && slot.timeline.get(slot.track_id).is_none() {
+                        "Recording audio"
+                    } else {
+                        slot.name()
+                    },
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
                 ),
@@ -239,7 +256,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             } else {
                 Rectangle::new(
                     Point::new(9.0, 28.0),
-                    Size::new(w - 18.0, (h - 38.0).max(3.0)),
+                    Size::new(w - 18.0, (h - 51.0).max(3.0)),
                 )
             };
             let Some(content) = slot.timeline.get(slot.track_id) else {
@@ -331,6 +348,38 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 label(frame, "MEDIA UNAVAILABLE", plot.x, plot.y, 9.0, ink, true);
             }
         })];
+        if let Some(recording) = &self.audio_recording {
+            let preview = &recording.preview;
+            let elapsed = preview.duration.saturating_sub(recording.offset);
+            let duration = recording.loop_length.unwrap_or(elapsed).max(1);
+            let width = (bounds.width - 18.0).max(1.0) as usize;
+            let height = (bounds.height - 51.0).max(3.0);
+            let mut overlay = canvas::Frame::new(renderer, bounds.size());
+            overlay.fill_rectangle(
+                Point::new(9.0, 28.0),
+                Size::new(width as f32, height),
+                th::display_bg(),
+            );
+            for x in 0..width {
+                let local = x as u64 * duration / width as u64;
+                let pass = elapsed.saturating_sub(local + 1) / duration;
+                let sample = local + pass * duration;
+                if sample >= elapsed {
+                    continue;
+                }
+                let index = (recording.offset + sample) as usize / preview.frames_per_peak;
+                if let Some(&(low, high)) = preview.peaks.get(index) {
+                    let top = 28.0 + height * (0.5 - high.clamp(-1.0, 1.0) * 0.48);
+                    let bottom = 28.0 + height * (0.5 - low.clamp(-1.0, 1.0) * 0.48);
+                    overlay.fill_rectangle(
+                        Point::new(9.0 + x as f32, top),
+                        Size::new(1.0, (bottom - top).max(1.0)),
+                        self.color,
+                    );
+                }
+            }
+            geometry.push(overlay.into_geometry());
+        }
         if self.progress.is_some() || self.queued {
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
             if let Some(progress) = self.progress {
@@ -341,7 +390,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 );
             }
             if !self.compact {
-                let x = (bounds.width - 54.0).max(0.0);
+                let x = (bounds.width - 90.0).max(0.0);
                 overlay.fill_rectangle(
                     Point::new(x, bounds.height - 15.0),
                     Size::new(54.0, 13.0),

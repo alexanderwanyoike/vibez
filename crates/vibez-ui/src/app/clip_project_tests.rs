@@ -107,3 +107,79 @@ fn legacy_documents_keep_sections_and_discover_launcher_ids() {
         .timeline(TimelineLocation::LauncherClip(id))
         .is_some());
 }
+
+#[tokio::test]
+async fn recorded_audio_cells_reopen_from_container_and_legacy_project_files() {
+    let directory = tempfile::tempdir().unwrap();
+    for extension in ["vzp", "vibez"] {
+        let track = vibez_core::track::TrackInfo::new("Recorded hats");
+        let id = ClipId::new();
+        let outcome = super::audio_take_finalization::finalize_audio_take(
+            super::audio_take_finalization::FinalizeAudioTake {
+                track_id: track.id,
+                start_position_samples: 999,
+                sample_rate: 48_000,
+                frames: vec![[0.125, -0.25]; 960],
+                recording_source:
+                    crate::domains::audio_recording::AudioRecordingSource::HardwareInput,
+                completion_label: "Recorded audio".into(),
+                truncated: false,
+                underrun_frames: 0,
+            },
+        )
+        .await
+        .unwrap();
+        let info = vibez_core::track::ClipInfo {
+            id,
+            track_id: track.id,
+            name: "Hats".into(),
+            position: 0,
+            source_offset: 0,
+            start_marker: Some(0),
+            duration: 960,
+            source: Some(outcome.source),
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 960,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        };
+        let project = Project {
+            perform_layout: PerformLayout::Clips,
+            tracks: vec![track.clone()],
+            launcher_clips: vec![LauncherClipInfo {
+                id,
+                track_id: track.id,
+                row: 2,
+                timeline: vibez_project::TimelineInfo {
+                    clips: vec![info],
+                    ..Default::default()
+                },
+            }],
+            ..Default::default()
+        };
+        let path = directory.path().join(format!("recording.{extension}"));
+        save_project_async(path.clone(), None, project)
+            .await
+            .unwrap();
+        let reopened = load_project_async(path, None).await.unwrap();
+        assert!(reopened.unresolved_clips.is_empty());
+        assert_eq!(reopened.clips.len(), 1);
+        assert_eq!(
+            reopened.clips[0].location,
+            TimelineLocation::LauncherClip(id)
+        );
+        assert_eq!(reopened.clips[0].clip.audio.channels[0], vec![0.125; 960]);
+        assert!(!reopened.project.launcher_clips[0].timeline.clips[0].loop_enabled);
+        assert!(reopened.project.arrange.clips.is_empty());
+        assert!(reopened.project.sections.is_empty());
+    }
+}

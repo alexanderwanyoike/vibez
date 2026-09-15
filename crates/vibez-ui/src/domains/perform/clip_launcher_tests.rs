@@ -259,3 +259,36 @@ fn keyboard_window_launches_later_tracks_without_changing_the_edit_selection_or_
     assert_eq!(perform.update(key, &mut engine, ctx).clip_launch, None);
     assert!(engine.0.is_empty());
 }
+
+#[test]
+fn loop_is_default_and_cell_toggle_updates_the_selected_editor_and_prepared_source() {
+    let tracks = tracks(1);
+    let track_id = tracks[0].id;
+    let mut state = PerformState {
+        layout: PerformLayout::Clips,
+        ..Default::default()
+    };
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(track_id),
+    };
+    state.update_clips(ClipMsg::CreateMidi { track_id, row: 0 }, ctx);
+    let id = state.clip_editor.selected.unwrap();
+    assert!(state.clips.by_id(id).unwrap().prepare(0, 100.0).looping);
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+    assert!(!state.clips.by_id(id).unwrap().prepare(0, 100.0).looping);
+    assert!(
+        !state
+            .clip_editor
+            .editor
+            .timeline
+            .get(track_id)
+            .unwrap()
+            .note_clips[0]
+            .loop_enabled
+    );
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+    assert!(state.clips.by_id(id).unwrap().prepare(0, 100.0).looping);
+    assert!(state.sections.sections.is_empty());
+}

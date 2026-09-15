@@ -119,7 +119,7 @@ impl App {
         if clip_layout {
             pad_grid_height
                 .min(
-                    (self.state.view.window_height - self.effective_detail_height() - 274.0)
+                    (self.state.view.window_height - self.effective_detail_height() - 306.0)
                         .max(112.0),
                 )
                 .min((surface_width - 28.0 - rail_width).max(1.0))

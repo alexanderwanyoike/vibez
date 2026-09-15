@@ -1,8 +1,8 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
-    stack, text, text_input, tooltip,
+    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row,
+    scrollable, stack, text, text_input, tooltip,
 };
 use iced::{Color, Element, Length, Theme};
 use vibez_project::PerformLayout;
@@ -179,20 +179,97 @@ impl App {
             .height(Length::Fill)
             .into()
         };
-        container(column![self.view_perform_mode_selector(width), content])
-            .width(Length::Fill)
-            .height(Length::FillPortion(5))
-            .style(surface)
-            .into()
+        container(column![
+            self.view_perform_mode_selector(width),
+            self.view_clip_record_controls(),
+            content
+        ])
+        .width(Length::Fill)
+        .height(Length::FillPortion(5))
+        .style(surface)
+        .into()
+    }
+
+    fn view_clip_record_controls(&self) -> Element<'_, Message> {
+        use crate::domains::perform::clip_record::{ClipRecordMsg, RecordLength};
+        use crate::domains::perform::loop_record::{
+            LoopRecordCountIn, LoopRecordMode, LoopRecordQuantization,
+        };
+        let record = &self.state.perform.clip_record;
+        let msg = |value| Message::Perform(PerformMsg::ClipRecord(value));
+        let status = record
+            .session
+            .as_ref()
+            .map(|session| {
+                let phase = if session.stop.is_some() {
+                    "FINISHING"
+                } else if session.start.is_some() {
+                    "RECORDING"
+                } else {
+                    "COUNT-IN / ARMED"
+                };
+                format!(
+                    "{phase} · {}",
+                    self.state
+                        .find_track(session.working.track_id)
+                        .map_or("Track", |track| track.name.as_str())
+                )
+            })
+            .unwrap_or_else(|| "Record beside a cell".into());
+        let controls = row![
+            text("NEW CLIP")
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(th::text_dim()),
+            pick_list(RecordLength::ALL, Some(record.length), move |v| msg(
+                ClipRecordMsg::SetLength(v)
+            ))
+            .text_size(10)
+            .padding([4, 6]),
+            pick_list(
+                LoopRecordCountIn::ALL,
+                Some(record.notes.count_in),
+                move |v| msg(ClipRecordMsg::SetCountIn(v))
+            )
+            .text_size(10)
+            .padding([4, 6]),
+            text("MIDI")
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(th::text_dim()),
+            pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| msg(
+                ClipRecordMsg::SetMode(v)
+            ))
+            .text_size(10)
+            .padding([4, 6]),
+            pick_list(
+                LoopRecordQuantization::ALL,
+                Some(record.notes.quantization),
+                move |v| msg(ClipRecordMsg::SetQuantization(v))
+            )
+            .text_size(10)
+            .padding([4, 6]),
+            text(status)
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(if record.is_active() {
+                    th::danger()
+                } else {
+                    th::text_dim()
+                }),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        container(controls).padding([5, 12]).into()
     }
 
     fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
         let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
         let slot_height = if compact {
-            ((self.state.view.window_height - 480.0) / 5.0).clamp(48.0, 72.0)
+            ((self.state.view.window_height - 510.0) / 5.0).clamp(48.0, 64.0)
         } else {
-            (64.0 + (self.state.view.window_height - 800.0) * 0.08).min(80.0)
+            (56.0 + (self.state.view.window_height - 800.0) * 0.08).min(72.0)
         };
         let mut workspace = column![];
         let move_window = |label: &'static str, tracks, rows| {
@@ -374,6 +451,35 @@ impl App {
                             color: track_color,
                             key,
                             selected,
+                            recording: self.state.perform.clip_record.session.as_ref().is_some_and(
+                                |session| {
+                                    session.working.track_id == track.id
+                                        && session.working.row == slot_row
+                                },
+                            ),
+                            audio_recording: self
+                                .state
+                                .perform
+                                .clip_record
+                                .session
+                                .as_ref()
+                                .filter(|session| {
+                                    session.audio
+                                        && session.working.track_id == track.id
+                                        && session.working.row == slot_row
+                                })
+                                .and_then(|session| {
+                                    Some(crate::widgets::clip_slot::ClipRecordingWaveform {
+                                        preview: self
+                                            .state
+                                            .audio_recording
+                                            .preview_for_track(track.id)?,
+                                        offset: session.output_start?.saturating_sub(
+                                            self.input_bridge.record_start_position()?,
+                                        ),
+                                        loop_length: session.length_samples,
+                                    })
+                                }),
                             progress: slot.and_then(|clip| {
                                 let active = self
                                     .state
@@ -445,20 +551,49 @@ impl App {
                                     self.view_clip_cell_action(
                                         icons::PLAY,
                                         "Launch clip",
-                                        ClipMsg::Launch(clip.id),
+                                        PerformMsg::Clips(ClipMsg::Launch(clip.id)),
                                         track_color
                                     ),
                                     horizontal_space(),
                                     self.view_clip_cell_action(
                                         icons::X,
                                         "Delete clip",
-                                        ClipMsg::Delete(clip.id),
+                                        PerformMsg::Clips(ClipMsg::Delete(clip.id)),
                                         th::danger()
                                     ),
                                 ]
                                 .width(Length::Fill)
                             )
                             .padding([3, 3]),
+                        ]
+                        .into()
+                    } else {
+                        cell
+                    };
+                    let cell: Element<'_, Message> = if let Some(clip) = slot {
+                        let (_, looping) = clip.length_and_loop(
+                            self.state.transport.sample_rate as f64 * 60.0
+                                / self.state.transport.bpm,
+                        );
+                        stack![
+                            cell,
+                            container(self.view_clip_cell_action(
+                                if looping {
+                                    icons::REPEAT
+                                } else {
+                                    icons::SKIP_FORWARD
+                                },
+                                if looping {
+                                    "Loop · switch to One-shot"
+                                } else {
+                                    "One-shot · switch to Loop"
+                                },
+                                PerformMsg::Clips(ClipMsg::ToggleLoop(clip.id)),
+                                track_color,
+                            ))
+                            .align_right(Length::Fill)
+                            .align_bottom(Length::Fill)
+                            .padding([2, 3])
                         ]
                         .into()
                     } else {
@@ -478,7 +613,41 @@ impl App {
                     } else {
                         cell
                     };
-                    lane = lane.push(cell);
+                    let recording =
+                        self.state
+                            .perform
+                            .clip_record
+                            .session
+                            .as_ref()
+                            .is_some_and(|session| {
+                                session.working.track_id == track.id
+                                    && session.working.row == slot_row
+                            });
+                    lane = lane.push(
+                        row![
+                            self.view_clip_cell_action(
+                                if recording {
+                                    icons::STOP
+                                } else {
+                                    icons::CIRCLE
+                                },
+                                if recording {
+                                    "Finish recording"
+                                } else {
+                                    "Record into this cell"
+                                },
+                                PerformMsg::ClipRecord(
+                                    crate::domains::perform::clip_record::ClipRecordMsg::Slot(
+                                        track.id, slot_row
+                                    )
+                                ),
+                                th::danger(),
+                            ),
+                            cell,
+                        ]
+                        .spacing(3)
+                        .height(slot_height),
+                    );
                 }
                 grid = grid.push(lane);
             }
@@ -514,22 +683,32 @@ impl App {
         &self,
         icon: char,
         hint: &'static str,
-        action: ClipMsg,
+        action: PerformMsg,
         active_color: Color,
     ) -> Element<'_, Message> {
+        let recording = matches!(action, PerformMsg::ClipRecord(crate::domains::perform::clip_record::ClipRecordMsg::Slot(track, row))
+            if self.state.perform.clip_record.session.as_ref().is_some_and(|session| session.working.track_id == track && session.working.row == row));
+        let playback_mode = matches!(&action, PerformMsg::Clips(ClipMsg::ToggleLoop(_)));
+        let glyph: Element<'_, Message> = if playback_mode {
+            text(if icon == icons::REPEAT { "LOOP" } else { "1x" })
+                .font(PERFORM_TECH)
+                .size(8)
+                .into()
+        } else {
+            icons::icon(icon).size(11).into()
+        };
         tooltip(
-            button(center(icons::icon(icon).size(11)))
-                .width(20)
+            button(center(glyph))
+                .width(if playback_mode { 34 } else { 20 })
                 .height(20)
                 .padding(0)
-                .on_press(Message::Perform(PerformMsg::Clips(action)))
+                .on_press(Message::Perform(action))
                 .style(move |_, status| button::Style {
                     background: matches!(status, button::Status::Hovered | button::Status::Pressed)
                         .then(|| th::bg_hover().into()),
-                    text_color: if matches!(
-                        status,
-                        button::Status::Hovered | button::Status::Pressed
-                    ) {
+                    text_color: if recording
+                        || matches!(status, button::Status::Hovered | button::Status::Pressed)
+                    {
                         active_color
                     } else {
                         th::text_dim()

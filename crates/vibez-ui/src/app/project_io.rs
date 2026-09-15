@@ -102,6 +102,7 @@ impl App {
         self.state.perform.layout = Default::default();
         self.state.perform.clips = Default::default();
         self.state.perform.clip_editor = Default::default();
+        self.state.perform.clip_record = Default::default();
         self.state.perform.selected_section = None;
         self.state.perform.section_editor.clear();
         self.state.perform.editing_section_name = None;

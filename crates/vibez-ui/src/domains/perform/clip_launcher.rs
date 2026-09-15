@@ -78,6 +78,7 @@ pub enum ClipMsg {
     CreateMidi { track_id: TrackId, row: u32 },
     Select(ClipId),
     Delete(ClipId),
+    ToggleLoop(ClipId),
     Duplicate(ClipId),
     MoveWindow { tracks: i32, rows: i32 },
 }
@@ -94,7 +95,7 @@ impl ClipMsg {
     pub const fn marks_dirty(&self) -> bool {
         matches!(
             self,
-            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_)
+            Self::CreateMidi { .. } | Self::Delete(_) | Self::Duplicate(_) | Self::ToggleLoop(_)
         )
     }
 }
@@ -184,6 +185,26 @@ impl PerformState {
                 return PerformAction {
                     clip_launch: Some(ClipLaunchRequest::StopAll),
                     ..Default::default()
+                }
+            }
+            ClipMsg::ToggleLoop(id) => {
+                if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
+                    let content = Arc::make_mut(&mut clip.timeline).ensure(clip.track_id);
+                    let looping = content
+                        .note_clips
+                        .first()
+                        .map(|clip| clip.loop_enabled)
+                        .or_else(|| content.clips.first().map(|clip| clip.loop_enabled))
+                        .unwrap_or(true);
+                    for clip in &mut content.note_clips {
+                        clip.loop_enabled = !looping;
+                    }
+                    for clip in &mut content.clips {
+                        clip.loop_enabled = !looping;
+                    }
+                }
+                if self.clip_editor.selected == Some(id) {
+                    self.select_launcher_clip(id);
                 }
             }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
@@ -296,7 +317,7 @@ impl LauncherClip {
                 clip.loop_enabled,
             )
         } else {
-            (1, false)
+            (1, true)
         }
     }
     pub fn prepare(

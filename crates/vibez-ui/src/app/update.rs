@@ -5,6 +5,7 @@ use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -89,7 +90,54 @@ impl App {
         };
         let message =
             apply_project_track_deletion_policy(message, self.state.confirm_project_track_deletion);
+        if self.state.perform.clip_record.is_active()
+            && matches!(
+                &message,
+                Message::Perform(PerformMsg::Clips(
+                    crate::domains::perform::ClipMsg::Delete(_)
+                        | crate::domains::perform::ClipMsg::ToggleLoop(_)
+                )) | Message::Project(ProjectMsg::Undo | ProjectMsg::Redo)
+                    | Message::SaveProject
+                    | Message::SaveProjectAs
+                    | Message::Arrangement(
+                        ArrangementMsg::RequestRemoveTrack(_)
+                            | ArrangementMsg::RemoveTrack(_)
+                            | ArrangementMsg::ConfirmRemoveTrack(_)
+                    )
+            )
+        {
+            self.state.status_text =
+                "Finish the Clip take before editing playback mode, deleting, saving or using Undo"
+                    .into();
+            return Task::none();
+        }
+        if self.state.perform.clip_record.is_active()
+            && matches!(
+                &message,
+                Message::Transport(TransportMsg::Stop | TransportMsg::TogglePlayback)
+            )
+        {
+            self.send_command(EngineCommand::StopClipRecord { immediate: true });
+            self.send_command(EngineCommand::Stop);
+            return Task::none();
+        }
+        if self.state.perform.clip_record.is_active()
+            && matches!(&message, Message::Perform(PerformMsg::Capture(_)))
+        {
+            self.state.status_text = "Finish Clip recording before Capture".into();
+            return Task::none();
+        }
         if let Message::Transport(transport) = &message {
+            if self.state.perform.clip_record.is_active()
+                && audio_recording_transport_guard(
+                    crate::domains::audio_recording::AudioRecordingPhase::Recording,
+                    transport,
+                ) == AudioRecordingTransportGuard::BlockTimelineChange
+            {
+                self.state.status_text =
+                    "Finish Clip recording before changing position, loop, or tempo".into();
+                return Task::none();
+            }
             match audio_recording_transport_guard(self.state.audio_recording.phase, transport) {
                 AudioRecordingTransportGuard::StopRecording => {
                     return self.stop_audio_recording();

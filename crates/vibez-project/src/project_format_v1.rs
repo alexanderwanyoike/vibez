@@ -641,6 +641,56 @@ fn first_dangling_project_media(project: &mut Project, staged: &[StagedMedia]) -
     dangling
 }
 
+pub fn preserve_generated_media_for_legacy(
+    destination: &Path,
+    project: &mut Project,
+) -> Result<(), ProjectFormatError> {
+    let mut result = Ok(());
+    visit_sources_mut(project, &mut |source| {
+        if result.is_err() {
+            return;
+        }
+        if let MediaSourceRef::StagedProjectMedia {
+            staging_path,
+            source_path,
+            file_name,
+            ..
+        } = source
+        {
+            if source_path.is_file() {
+                return;
+            }
+            result = (|| {
+                // Generated takes have no durable source to fall back to when JSON strips staging.
+                let content = fs::read(&*staging_path)?;
+                let folder = destination.with_file_name(format!(
+                    "{}.media",
+                    destination
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ));
+                fs::create_dir_all(&folder)?;
+                let extension = Path::new(file_name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .filter(|value| {
+                        value.len() <= 8 && value.chars().all(|c| c.is_ascii_alphanumeric())
+                    })
+                    .unwrap_or("bin");
+                let durable =
+                    folder
+                        .canonicalize()?
+                        .join(format!("{}.{}", hex_sha256(&content), extension));
+                fs::write(&durable, content)?;
+                *source_path = durable;
+                Ok(())
+            })();
+        }
+    });
+    result
+}
+
 /// Rewrites transient staged references back to durable Source Storage
 /// identity for legacy JSON documents, which have no Project Media table. A
 /// serialized staging path would dangle as soon as the staging cache is

@@ -24,6 +24,13 @@ impl App {
         &mut self,
         msg: crate::domains::perform::PerformMsg,
     ) -> Task<Message> {
+        if let crate::domains::perform::PerformMsg::ClipRecord(msg) = msg {
+            return self.update_clip_record(msg);
+        }
+        let changed_clip_mode = match &msg {
+            PerformMsg::Clips(crate::domains::perform::ClipMsg::ToggleLoop(id)) => Some(*id),
+            _ => None,
+        };
         self.state.perform.section_record.sync_clock(
             self.state.transport.playing,
             self.state.transport.bpm,
@@ -38,6 +45,12 @@ impl App {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             self.state.perform.update(msg, &mut engine, ctx)
         };
+        if let Some(clip) = changed_clip_mode
+            .and_then(|id| self.state.perform.clips.by_id(id))
+            .cloned()
+        {
+            self.publish_recorded_clip(clip, true);
+        }
         self.apply_perform_action(action)
     }
 
@@ -77,7 +90,7 @@ impl App {
             .state
             .perform
             .sections
-            .by_id(request.section_id)
+            .by_id(request.target_id)
             .cloned()
         else {
             self.state.perform.section_record.cancel();
@@ -119,7 +132,7 @@ impl App {
     ) {
         if !self.section_residency_request.finish(request_id)
             || self.state.perform.section_record.target()
-                != Some((request.section_id, request.track_id))
+                != Some((request.target_id, request.track_id))
         {
             return;
         }
@@ -135,7 +148,7 @@ impl App {
     ) {
         self.state.perform.section_record.mark_arm_sent();
         self.send_command(EngineCommand::ArmSectionRecord {
-            section_id: request.section_id,
+            section_id: request.target_id,
             track_id: request.track_id,
             prepared,
             count_in_bars: request.count_in_bars,
@@ -170,7 +183,7 @@ impl App {
 
     fn apply_completed_section_recording(&mut self, recording: CompletedSectionRecording) -> bool {
         let Some(section) =
-            Arc::make_mut(&mut self.state.perform.sections).by_id_mut(recording.section_id)
+            Arc::make_mut(&mut self.state.perform.sections).by_id_mut(recording.target_id)
         else {
             return false;
         };
@@ -179,7 +192,7 @@ impl App {
             self.state
                 .perform
                 .sync_selected_timeline_editor(self.state.arrangement.selected_track);
-            self.refresh_playing_section_after_edit(recording.section_id);
+            self.refresh_playing_section_after_edit(recording.target_id);
         }
         changed
     }
@@ -308,7 +321,7 @@ mod tests {
             },
         );
         let recording = CompletedSectionRecording {
-            section_id: section.id,
+            target_id: section.id,
             track_id,
             notes: vec![
                 RecordedSectionNote {
