@@ -330,8 +330,12 @@ This first slice supports project creation, grid navigation and Audio/MIDI Clip
 authoring through the existing inspectors. Independent playback, quantized
 launch/stop, row launch and Clip Capture are subsequent prototype slices. The
 keyboard window and editor selection are runtime state, not project content.
-Track colours identify columns and filled slots; the keyboard window has its
-own outline. Arrow keys remain grid navigation while the piano roll is open.
+Track colours identify column names and musical thumbnails. MIDI thumbnails
+use the editor's loop-aware note occurrences; audio thumbnails use the shared
+waveform peak cache. The canvas retains its source timeline so copy-on-write
+edits invalidate cached geometry, including asynchronous media hydration.
+Keyboard badges identify the controller window without outlining every slot.
+Arrow keys remain grid navigation while the piano roll is open.
 Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
 and operations that create multitrack or multi-clip slot content are deferred;
 the current router rejects those operations to preserve one part per slot.
