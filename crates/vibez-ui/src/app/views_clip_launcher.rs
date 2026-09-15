@@ -200,7 +200,7 @@ impl App {
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center);
-        workspace = workspace.push(container(toolbar).padding([10, 12]));
+        workspace = workspace.push(container(toolbar).padding([if compact { 4 } else { 10 }, 12]));
         if self.state.project_tracks.tracks.is_empty() {
             workspace = workspace.push(
                 center(
@@ -303,7 +303,22 @@ impl App {
                             row: slot_row,
                         }
                     };
-                    let slot_cell = button(
+                    let slot_content: Element<'_, Message> = if compact {
+                        row![
+                            text(format!("{:02}", slot_row + 1))
+                                .font(PERFORM_TECH)
+                                .size(9)
+                                .color(th::text_dim()),
+                            text(super::keyboard::truncate_end(label, 18))
+                                .size(10)
+                                .color(if filled { th::text() } else { th::text_dim() })
+                                .width(Length::Fill),
+                            text(key).font(PERFORM_TECH).size(10).color(th::accent()),
+                        ]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center)
+                        .into()
+                    } else {
                         column![
                             row![
                                 text(if filled { "●" } else { "" })
@@ -324,32 +339,34 @@ impl App {
                                     th::text_dim()
                                 }),
                         ]
-                        .spacing(if compact { 2 } else { 7 }),
-                    )
-                    .on_press(message)
-                    .padding([if compact { 3 } else { 8 }, 10])
-                    .width(Length::Fill)
-                    .height(slot_height)
-                    .style(move |_theme: &Theme, status| {
-                        let mut style = choice_style(false, status);
-                        if filled {
-                            style.background = Some(
-                                th::blend(
-                                    th::bg_elevated(),
-                                    track_color,
-                                    if selected { 0.26 } else { 0.12 },
-                                )
-                                .into(),
-                            );
-                        }
-                        if selected {
-                            style.border.color = track_color;
-                            style.border.width = 2.0;
-                        } else if in_window {
-                            style.border.color = th::accent_dim();
-                        }
-                        style
-                    });
+                        .spacing(if compact { 2 } else { 7 })
+                        .into()
+                    };
+                    let slot_cell = button(slot_content)
+                        .on_press(message)
+                        .padding([if compact { 3 } else { 8 }, 10])
+                        .width(Length::Fill)
+                        .height(slot_height)
+                        .style(move |_theme: &Theme, status| {
+                            let mut style = choice_style(false, status);
+                            if filled {
+                                style.background = Some(
+                                    th::blend(
+                                        th::bg_elevated(),
+                                        track_color,
+                                        if selected { 0.26 } else { 0.12 },
+                                    )
+                                    .into(),
+                                );
+                            }
+                            if selected {
+                                style.border.color = track_color;
+                                style.border.width = 2.0;
+                            } else if in_window {
+                                style.border.color = th::accent_dim();
+                            }
+                            style
+                        });
                     let cell: Element<'_, Message> = if !track.kind.is_midi()
                         && slot.is_none()
                         && self.state.browser.drag_source.is_some()
@@ -400,7 +417,7 @@ impl App {
                     .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::Delete(id)))),
             );
         }
-        workspace = workspace.push(container(footer).padding([8, 12]));
+        workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
         container(workspace)
             .width(Length::Fill)
             .height(Length::FillPortion(5))
