@@ -1,7 +1,7 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
 };
 use iced::{Element, Length, Theme};
 use vibez_project::PerformLayout;
@@ -154,9 +154,9 @@ impl App {
         let width = self.perform_workspace_width();
         let compact = self.state.view.window_height < 800.0;
         let slot_height = if compact {
-            ((self.state.view.window_height - 480.0) / 5.0).clamp(26.0, 58.0)
+            ((self.state.view.window_height - 480.0) / 5.0).clamp(26.0, 72.0)
         } else {
-            58.0
+            (64.0 + (self.state.view.window_height - 800.0) * 0.08).min(80.0)
         };
         let mut workspace = column![self.view_perform_mode_selector(width)].spacing(0);
         if self.state.perform.mode != PerformMode::Sections {
@@ -176,11 +176,8 @@ impl App {
                 .style(|_theme, status| choice_style(false, status))
         };
         let toolbar = row![
-            text("CLIP GRID")
-                .font(PERFORM_LABEL)
-                .size(11)
-                .color(th::text()),
-            text("AUTHORING")
+            text("CLIPS").font(PERFORM_LABEL).size(11).color(th::text()),
+            text(format!("{} TRACKS", self.state.project_tracks.tracks.len()))
                 .font(PERFORM_TECH)
                 .size(9)
                 .color(th::text_dim()),
@@ -223,8 +220,30 @@ impl App {
             let first_track = self.state.perform.clip_editor.first_track;
             let first_row = self.state.perform.clip_editor.first_row;
             let visible_tracks = ((width - 54.0) / 145.0).floor().max(4.0) as usize;
-            let lane_width = ((width - 29.0) / visible_tracks as f32).min(180.0);
-            let mut grid = row![].spacing(5).width(Length::Fill);
+            let shown_tracks = self
+                .state
+                .project_tracks
+                .tracks
+                .len()
+                .saturating_sub(first_track)
+                .min(visible_tracks)
+                .max(4);
+            let lane_width = ((width - 58.0) / shown_tracks as f32 - 8.0).min(210.0);
+            let header_height = if compact { 26.0 } else { 42.0 };
+            let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(6);
+            for offset in 0..6u32 {
+                numbers = numbers.push(
+                    container(
+                        text(format!("{:02}", first_row + offset + 1))
+                            .font(PERFORM_TECH)
+                            .size(10)
+                            .color(th::text_dim()),
+                    )
+                    .padding([if compact { 3 } else { 8 }, 0])
+                    .height(slot_height),
+                );
+            }
+            let mut grid = row![numbers.width(22)].spacing(8).width(Length::Fill);
             for (column_index, track) in self
                 .state
                 .project_tracks
@@ -237,9 +256,9 @@ impl App {
                 let track_color = th::track_color(track.color_index);
                 let mut header = column![text(&track.name)
                     .font(PERFORM_LABEL)
-                    .size(12)
-                    .color(th::text())]
-                .spacing(4);
+                    .size(13)
+                    .color(track_color)]
+                .spacing(3);
                 if !compact {
                     header = header.push(
                         text(if track.kind.is_midi() {
@@ -252,21 +271,12 @@ impl App {
                         .color(th::text_dim()),
                     );
                 }
-                let mut lane = column![
-                    container(iced::widget::Space::new(Length::Fill, 3)).style(move |_| {
-                        container::Style {
-                            background: Some(track_color.into()),
-                            ..Default::default()
-                        }
-                    }),
-                    container(header).padding([if compact { 4 } else { 8 }, 10])
-                ]
-                .spacing(5)
-                .width(Length::Fixed(lane_width));
+                let mut lane = column![container(header).padding([3, 8]).height(header_height)]
+                    .spacing(6)
+                    .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
                     let slot = self.state.perform.clips.at(track.id, slot_row);
-                    let filled = slot.is_some();
                     let selected = slot.is_some_and(|clip| {
                         self.state.perform.clip_editor.selected == Some(clip.id)
                     });
@@ -283,13 +293,6 @@ impl App {
                     } else {
                         ""
                     };
-                    let label = slot
-                        .map(|clip| clip.name())
-                        .unwrap_or(if track.kind.is_midi() {
-                            "+ MIDI clip"
-                        } else {
-                            "+ Browser sample"
-                        });
                     let message = if let Some(clip) = slot {
                         Message::Perform(PerformMsg::Clips(ClipMsg::Select(clip.id)))
                     } else if track.kind.is_midi() {
@@ -303,70 +306,26 @@ impl App {
                             row: slot_row,
                         }
                     };
-                    let slot_content: Element<'_, Message> = if compact {
-                        row![
-                            text(format!("{:02}", slot_row + 1))
-                                .font(PERFORM_TECH)
-                                .size(9)
-                                .color(th::text_dim()),
-                            text(super::keyboard::truncate_end(label, 18))
-                                .size(10)
-                                .color(if filled { th::text() } else { th::text_dim() })
-                                .width(Length::Fill),
-                            text(key).font(PERFORM_TECH).size(10).color(th::accent()),
-                        ]
-                        .spacing(6)
-                        .align_y(iced::Alignment::Center)
-                        .into()
-                    } else {
-                        column![
-                            row![
-                                text(if filled { "●" } else { "" })
-                                    .size(9)
-                                    .color(track_color),
-                                text(format!("{:02}", slot_row + 1))
-                                    .font(PERFORM_TECH)
-                                    .size(9)
-                                    .color(th::text_dim()),
-                                horizontal_space(),
-                                text(key).font(PERFORM_TECH).size(10).color(th::accent())
-                            ],
-                            text(super::keyboard::truncate_end(label, 22))
-                                .size(11)
-                                .color(if slot.is_some() {
-                                    th::text()
-                                } else {
-                                    th::text_dim()
-                                }),
-                        ]
-                        .spacing(if compact { 2 } else { 7 })
-                        .into()
-                    };
-                    let slot_cell = button(slot_content)
-                        .on_press(message)
-                        .padding([if compact { 3 } else { 8 }, 10])
+                    let slot_cell = button(
+                        canvas(crate::widgets::clip_slot::ClipSlot {
+                            clip: slot,
+                            color: track_color,
+                            key,
+                            selected,
+                            compact,
+                        })
                         .width(Length::Fill)
-                        .height(slot_height)
-                        .style(move |_theme: &Theme, status| {
-                            let mut style = choice_style(false, status);
-                            if filled {
-                                style.background = Some(
-                                    th::blend(
-                                        th::bg_elevated(),
-                                        track_color,
-                                        if selected { 0.26 } else { 0.12 },
-                                    )
-                                    .into(),
-                                );
-                            }
-                            if selected {
-                                style.border.color = track_color;
-                                style.border.width = 2.0;
-                            } else if in_window {
-                                style.border.color = th::accent_dim();
-                            }
-                            style
-                        });
+                        .height(Length::Fill),
+                    )
+                    .on_press(message)
+                    .padding(0)
+                    .width(Length::Fill)
+                    .height(slot_height)
+                    .style(|_, _| button::Style {
+                        background: None,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    });
                     let cell: Element<'_, Message> = if !track.kind.is_midi()
                         && slot.is_none()
                         && self.state.browser.drag_source.is_some()
