@@ -1,4 +1,4 @@
-use vibez_core::id::{SectionId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
 use crate::playback_source::PreparedSectionPlaybackSource;
@@ -68,6 +68,31 @@ pub enum EngineEvent {
 
     /// Monotonic, zero-based time for the current Perform session.
     PerformancePosition(u64),
+    ClipQueued {
+        request_id: u64,
+        track_id: TrackId,
+        clip_id: Option<vibez_core::id::ClipId>,
+    },
+    ClipTransitioned {
+        track_id: TrackId,
+        clip_id: Option<vibez_core::id::ClipId>,
+        request_id: u64,
+        effective_at_samples: u64,
+        retired: Option<Box<crate::playback_source::PreparedClipPlayback>>,
+    },
+    ClipRequestRetired(Box<crate::playback_source::PreparedClipPlayback>),
+    ClipBatchRetired(Vec<Box<crate::playback_source::PreparedClipPlayback>>),
+    ClipSourceRefreshed {
+        track_id: TrackId,
+        request_id: u64,
+        position: u64,
+        effective_at_samples: u64,
+    },
+    ClipCaptureSource {
+        track_id: TrackId,
+        position: u64,
+        effective_at_samples: u64,
+    },
 
     /// Peak and RMS meter readings for the most recent audio buffer.
     Metering {
@@ -107,7 +132,9 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
     /// A second Pad Gesture cancelled the pending Track Mute.
-    TrackMuteQueueCancelled { track_id: TrackId },
+    TrackMuteQueueCancelled {
+        track_id: TrackId,
+    },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
     AutomationOverrideChanged {
@@ -151,6 +178,22 @@ pub enum EngineEvent {
         section_position_samples: Option<u64>,
     },
 
+    ClipRecordArmed {
+        clip_id: ClipId,
+        track_id: TrackId,
+        start: u64,
+        output_start: u64,
+    },
+    ClipRecordStarted {
+        clip_id: ClipId,
+        at: u64,
+    },
+    ClipRecordStopped {
+        clip_id: ClipId,
+        at: u64,
+        started: bool,
+    },
+
     /// Section Record is waiting for an engine-owned musical boundary.
     SectionRecordArmed {
         section_id: SectionId,
@@ -187,7 +230,9 @@ pub enum EngineEvent {
     },
 
     /// Capture into Arrange stopped on this exact engine boundary.
-    PerformanceCaptureStopped { effective_at_samples: u64 },
+    PerformanceCaptureStopped {
+        effective_at_samples: u64,
+    },
 
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.

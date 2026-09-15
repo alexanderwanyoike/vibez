@@ -24,6 +24,9 @@ impl App {
         &mut self,
         msg: crate::domains::perform::PerformMsg,
     ) -> Task<Message> {
+        if let crate::domains::perform::PerformMsg::ClipRecord(msg) = msg {
+            return self.update_clip_record(msg);
+        }
         self.state.perform.section_record.sync_clock(
             self.state.transport.playing,
             self.state.transport.bpm,
@@ -77,7 +80,7 @@ impl App {
             .state
             .perform
             .sections
-            .by_id(request.section_id)
+            .by_id(request.target_id)
             .cloned()
         else {
             self.state.perform.section_record.cancel();
@@ -119,7 +122,7 @@ impl App {
     ) {
         if !self.section_residency_request.finish(request_id)
             || self.state.perform.section_record.target()
-                != Some((request.section_id, request.track_id))
+                != Some((request.target_id, request.track_id))
         {
             return;
         }
@@ -135,7 +138,7 @@ impl App {
     ) {
         self.state.perform.section_record.mark_arm_sent();
         self.send_command(EngineCommand::ArmSectionRecord {
-            section_id: request.section_id,
+            section_id: request.target_id,
             track_id: request.track_id,
             prepared,
             count_in_bars: request.count_in_bars,
@@ -170,7 +173,7 @@ impl App {
 
     fn apply_completed_section_recording(&mut self, recording: CompletedSectionRecording) -> bool {
         let Some(section) =
-            Arc::make_mut(&mut self.state.perform.sections).by_id_mut(recording.section_id)
+            Arc::make_mut(&mut self.state.perform.sections).by_id_mut(recording.target_id)
         else {
             return false;
         };
@@ -178,8 +181,8 @@ impl App {
         if changed {
             self.state
                 .perform
-                .sync_selected_section_editor(self.state.arrangement.selected_track);
-            self.refresh_playing_section_after_edit(recording.section_id);
+                .sync_selected_timeline_editor(self.state.arrangement.selected_track);
+            self.refresh_playing_section_after_edit(recording.target_id);
         }
         changed
     }
@@ -308,7 +311,7 @@ mod tests {
             },
         );
         let recording = CompletedSectionRecording {
-            section_id: section.id,
+            target_id: section.id,
             track_id,
             notes: vec![
                 RecordedSectionNote {

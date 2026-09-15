@@ -305,6 +305,118 @@ runtime UI/engine state and is not persisted.
 
 ## Project Tracks and timeline content
 
+### Clip Project prototype
+
+The prototype branch adds a project-owned `PerformLayout`: Sections or Clips.
+New Project chooses it once; opening an existing project restores it. Missing
+layout fields default to Sections. Instrument and Track Mutes remain runtime
+Perform modes in either layout.
+
+Clip Projects own a separate `ClipStore`, keyed by stable Clip identities with
+Project Track and row coordinates. No Section is created to represent a Clip
+slot. Each slot supplies local content to the existing Timeline Editor;
+`PerformState` resolves the selected source at the application boundary.
+Arrange, Section and Clip sources share editing operations while only Arrange
+edits directly update Arrange playback. Background editor results retain their
+`TimelineLocation`, including the independent `LauncherClip` location.
+
+The Clip store participates in copy-on-write Undo snapshots and the Project
+document's common timeline traversal for media collection, hydration and ID
+discovery. Clip Project containers use document version 2 inside the unchanged
+SQLite container schema. Section Projects keep document version 1. Earlier
+builds reject version 2 instead of silently discarding unfamiliar Clip data.
+
+Clip Projects support independent Audio/MIDI playback and Capture. Each engine
+Track holds its own resident Clip source, local playhead and replaceable launch
+queue. Row actions transfer one prepared batch, so every Track uses the same
+engine-owned musical boundary. The renderer splits callbacks at launch, stop
+and loop boundaries, then feeds each local source through the existing shared
+channel strip. Empty and stopped Tracks still render live instruments and
+effect tails without falling back to Arrange content. Prepared owners return
+through events for disposal on the UI thread.
+
+The 16 physical grid keys toggle addressed Clips. Pressing a playing or queued
+Clip again stops its Track; an empty cell also stops the Track. Requested queue
+state updates immediately so quick repeat presses toggle the latest intent. Alt plus any grid key launches its row across all Project Tracks,
+including columns outside the keyboard window. Empty row slots stop their
+Tracks. The prototype uses one-bar quantization; the first launch starts
+immediately. Launches and toggle stops take effect at the next boundary.
+F5 toggles Capture. Space starts a silent Perform clock or stops playback and
+finishes the take. Tempo stays fixed until transport stops.
+
+Capture snapshots the exact source associated with each engine transition,
+including independent local offsets when recording starts mid-loop. Per-Track
+spans feed the existing timeline-window materializer, producing independent
+Arrange clips and preserving silence, live notes, mutes and mixer automation.
+A completed take remains one Undo transaction. This does not create or derive
+Sections. Runtime Clip playheads, queues and editor selection are not persisted.
+Committed Clip edits refresh matching active and queued sources at the next
+engine callback, preserving local playheads and queued launch boundaries. The
+application compares canonical Clip timelines after each message, so shared
+editor gestures, background audio results and Clip-only undo use one update
+path. Clip-only undo keeps the existing channel strips and devices resident.
+Changed MIDI schedules release their old voices; unaffected pitches keep
+sustaining. Each refresh acknowledges an immutable source version and local
+offset for Capture. Direct recording retains its separate preview updates.
+Cell Loop/One-shot changes use the same live edit path.
+Track colours identify column names and musical thumbnails. MIDI thumbnails
+use the editor's loop-aware note occurrences; audio thumbnails use the shared
+waveform peak cache. The canvas retains its source timeline so copy-on-write
+edits invalidate cached geometry, including asynchronous media hydration.
+Keyboard labels identify the controller window.
+The Clip grid uses black backgrounds and continuous dividers while retaining
+track-coloured MIDI and waveform previews. Cell controls use the shared native
+icon helper: play/stop, record, Loop/One-shot, and delete. Empty cell clicks stop
+the Track; double-click creates a MIDI part or imports audio. The play control
+and keyboard share one toggle policy, while delete remains Undo-aware.
+Track and Clip names edit in place on double-click. Arrow keys remain grid
+navigation while the piano roll is open. Clicking in the Browser gives its
+Results the arrow keys for selection and audition; clicking outside returns
+navigation to the workspace. Playing Clips
+show a progress line in the grid and their shared Audio/MIDI inspector.
+In Clip Projects, Instrument and Track Mutes dock square pads on the left and
+reuse the Clip grid beside them, with the existing draggable Perform divider.
+The grid shows the playing combination while keyboard badges stay on the active
+controller surface. Narrow workspaces scroll the dock horizontally. Section
+Projects retain their existing pad sizing and construction layout.
+Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
+and operations that create multitrack or multi-clip slot content are deferred;
+the current router rejects those operations to preserve one part per slot.
+
+### Direct Clip recording
+
+Each cell has its own record control. A second press finishes at the next bar
+and leaves playback running; transport Stop finishes immediately. There is no
+F4 binding for Clip recording. New cells offer free length or a defined 1, 2, 4,
+8 or 16 bar loop. Defined loops continue recording across passes until stopped.
+Existing cells record across their current length. MIDI offers Replace and
+Overdub; audio replaces each crossed portion of the loop, without layering.
+Each completed take is one Undo transaction. Capture into Arrange and direct
+Clip recording are separate takes and cannot run simultaneously.
+
+`LoopRecordState<T>` shares note pairing, quantization, count-in settings and
+held-note handling between the existing Section coordinator and Clip recording.
+Clip passes use the same recorder with Clip identities. A MIDI cell remains one
+editable part: its Pocket grid applies to overdubbed notes; an empty part adopts
+the first recorded grid. Audio reuses the input bridge, source routing, live
+peak preview, WAV finalizer and media staging. Its monotonic output-clock stamp
+lets the finalizer remove count-in frames and callback tail samples precisely.
+The Clip renderer passes live input and resampling buffers through its normal
+channel strip at every boundary. Sections retain their recording controls and
+layout.
+
+Cells default to Loop. The cell's repeat/one-shot icon changes the same loop property
+used by its shared editor and saved timeline. One-shot playback stops at the
+clip end. Recording into an existing one-shot cycles for the take and preserves
+its saved playback mode when recording finishes.
+
+Recorded audio is embedded in `.vzp` containers. Legacy JSON projects have no
+media table, so generated audio without a durable source is copied to a sibling
+`<project filename>.media` directory before staging references are stripped.
+That directory must travel with the legacy project.
+
+### Shared content ownership
+
 Project Tracks exist once per project. `ProjectTracksState` owns their stable
 `TrackId`, channel name/type, instruments, effects, routing, sends, and mixer
 state. Arrange does not own or duplicate those channels.

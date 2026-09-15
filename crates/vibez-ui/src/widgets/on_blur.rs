@@ -8,6 +8,7 @@ pub struct OnBlur<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     enabled: bool,
     message: Message,
+    focus_message: Option<Message>,
 }
 
 pub fn on_blur<'a, Message, Theme, Renderer>(
@@ -19,6 +20,24 @@ pub fn on_blur<'a, Message, Theme, Renderer>(
         content: content.into(),
         enabled,
         message,
+        focus_message: None,
+    }
+}
+
+impl<Message, Theme, Renderer> OnBlur<'_, Message, Theme, Renderer> {
+    pub fn on_focus(mut self, message: Message) -> Self {
+        self.focus_message = Some(message);
+        self
+    }
+}
+
+fn pointer_pressed_inside(event: &Event, cursor: mouse::Cursor, bounds: Rectangle) -> bool {
+    match event {
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => cursor.is_over(bounds),
+        Event::Touch(iced::touch::Event::FingerPressed { position, .. }) => {
+            bounds.contains(*position)
+        }
+        _ => false,
     }
 }
 
@@ -88,6 +107,12 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> event::Status {
+        // Observe before the child, since text inputs and result rows capture clicks.
+        if !self.enabled && pointer_pressed_inside(&event, cursor, layout.bounds()) {
+            if let Some(message) = &self.focus_message {
+                shell.publish(message.clone());
+            }
+        }
         let status = self.content.as_widget_mut().on_event(
             &mut tree.children[0],
             event.clone(),
@@ -190,5 +215,29 @@ mod tests {
             outside,
             bounds,
         ));
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use iced::Point;
+
+    #[test]
+    fn pointer_focus_requires_a_press_inside_the_panel_not_a_hover() {
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(100.0, 100.0));
+        let inside = mouse::Cursor::Available(Point::new(25.0, 25.0));
+        let outside = mouse::Cursor::Available(Point::new(125.0, 25.0));
+        let press = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        assert!(pointer_pressed_inside(&press, inside, bounds));
+        assert!(!pointer_pressed_inside(&press, outside, bounds));
+        assert!(!pointer_pressed_inside(
+            &Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::new(25.0, 25.0)
+            }),
+            inside,
+            bounds
+        ));
+        assert!(pointer_pressed_outside(true, &press, outside, bounds));
     }
 }

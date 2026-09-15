@@ -18,6 +18,8 @@ use vibez_core::track::{InstrumentStateInfo, MediaProvenance, MediaSourceRef, Tr
 use crate::Project;
 
 pub const FORMAT_VERSION: u32 = 1;
+// Older builds must reject Clip Projects instead of saving away their slots.
+const CLIP_PROTOTYPE_DOCUMENT_VERSION: u32 = 2;
 /// ASCII `VZP1`, stored in SQLite's application-id header field.
 pub const APPLICATION_ID: u32 = 0x565a_5031;
 static STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -71,9 +73,21 @@ pub struct ProjectDocumentV1 {
 }
 
 impl ProjectDocumentV1 {
+    fn supported_version(&self) -> bool {
+        self.format_version
+            == match self.project.perform_layout {
+                crate::PerformLayout::Sections => FORMAT_VERSION,
+                crate::PerformLayout::Clips => CLIP_PROTOTYPE_DOCUMENT_VERSION,
+            }
+    }
+
     pub fn new(project: Project) -> Self {
         Self {
-            format_version: FORMAT_VERSION,
+            format_version: if project.perform_layout == crate::PerformLayout::Clips {
+                CLIP_PROTOTYPE_DOCUMENT_VERSION
+            } else {
+                FORMAT_VERSION
+            },
             project,
             project_media: Vec::new(),
         }
@@ -244,9 +258,9 @@ impl ProjectContainer {
             |row| row.get(0),
         )?;
         let document: ProjectDocumentV1 = serde_json::from_slice(&json)?;
-        if document.format_version != FORMAT_VERSION {
+        if !document.supported_version() {
             return Err(ProjectFormatError::InvalidContainer(format!(
-                "document version is {}, expected {FORMAT_VERSION}",
+                "unsupported document version {} for this Perform layout",
                 document.format_version
             )));
         }
@@ -350,7 +364,7 @@ impl ProjectContainer {
             .and_then(|_| {
                 let copied = Self::open(&temporary)?;
                 let document = copied.load_document()?;
-                if document.format_version != FORMAT_VERSION {
+                if !document.supported_version() {
                     return Err(ProjectFormatError::InvalidContainer(
                         "Save As lost format marker".into(),
                     ));
@@ -627,6 +641,56 @@ fn first_dangling_project_media(project: &mut Project, staged: &[StagedMedia]) -
     dangling
 }
 
+pub fn preserve_generated_media_for_legacy(
+    destination: &Path,
+    project: &mut Project,
+) -> Result<(), ProjectFormatError> {
+    let mut result = Ok(());
+    visit_sources_mut(project, &mut |source| {
+        if result.is_err() {
+            return;
+        }
+        if let MediaSourceRef::StagedProjectMedia {
+            staging_path,
+            source_path,
+            file_name,
+            ..
+        } = source
+        {
+            if source_path.is_file() {
+                return;
+            }
+            result = (|| {
+                // Generated takes have no durable source to fall back to when JSON strips staging.
+                let content = fs::read(&*staging_path)?;
+                let folder = destination.with_file_name(format!(
+                    "{}.media",
+                    destination
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ));
+                fs::create_dir_all(&folder)?;
+                let extension = Path::new(file_name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .filter(|value| {
+                        value.len() <= 8 && value.chars().all(|c| c.is_ascii_alphanumeric())
+                    })
+                    .unwrap_or("bin");
+                let durable =
+                    folder
+                        .canonicalize()?
+                        .join(format!("{}.{}", hex_sha256(&content), extension));
+                fs::write(&durable, content)?;
+                *source_path = durable;
+                Ok(())
+            })();
+        }
+    });
+    result
+}
+
 /// Rewrites transient staged references back to durable Source Storage
 /// identity for legacy JSON documents, which have no Project Media table. A
 /// serialized staging path would dangle as soon as the staging cache is
@@ -862,9 +926,9 @@ fn write_document(
     transaction: &Transaction<'_>,
     document: &ProjectDocumentV1,
 ) -> Result<(), ProjectFormatError> {
-    if document.format_version != FORMAT_VERSION {
+    if !document.supported_version() {
         return Err(ProjectFormatError::InvalidContainer(format!(
-            "cannot save document version {} as version {FORMAT_VERSION}",
+            "cannot save document version {} with this Perform layout",
             document.format_version
         )));
     }
@@ -988,6 +1052,8 @@ pub fn representative_document() -> ProjectDocumentV1 {
         master: Some(TrackInfo::new("Master")),
         buses: vec![TrackInfo::new("Return A")],
         sections: Vec::new(),
+        perform_layout: Default::default(),
+        launcher_clips: Vec::new(),
     };
     ProjectDocumentV1::new(project)
 }

@@ -8,7 +8,21 @@ impl AudioEngine {
     pub(super) fn drain_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.pop() {
             match cmd {
+                EngineCommand::ArmClipRecord {
+                    free_length,
+                    prepared,
+                    count_in_bars,
+                } => self.arm_clip_record(prepared, count_in_bars, free_length),
+                EngineCommand::StopClipRecord { immediate } => self.stop_clip_record(immediate),
+                EngineCommand::RefreshClip(prepared) => self.refresh_clip(prepared),
+                EngineCommand::EditClip { active, queued } => self.edit_clip(active, queued),
+                EngineCommand::BeginClipPerformance => self.begin_clip_performance(),
+                EngineCommand::QueueClips {
+                    clips,
+                    quantization,
+                } => self.queue_clips(clips, quantization),
                 EngineCommand::Play => {
+                    self.clear_clip_performance();
                     self.clock_domain = ClockDomain::Arrange;
                     self.transport.play();
                     let audition_queued = self.audition.resync_on_transport_start(
@@ -36,6 +50,7 @@ impl AudioEngine {
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
                         effective_at_samples: self.effective_position(),
                     });
+                    self.clear_clip_performance();
                     self.transport.stop();
                     self.arrangement_recording = false;
                     self.clock_domain = ClockDomain::Arrange;
@@ -69,7 +84,8 @@ impl AudioEngine {
                 EngineCommand::SetBpm(bpm) => {
                     // V1 Perform holds one project tempo from the first
                     // Section transition until transport stop.
-                    if self.active_section.is_none()
+                    if !self.clip_performance
+                        && self.active_section.is_none()
                         && self.pending_section_record.is_none()
                         && self.active_section_record.is_none()
                     {
@@ -82,6 +98,7 @@ impl AudioEngine {
                     self.project_swing = swing;
                 }
                 EngineCommand::LaunchSection(prepared) => {
+                    self.clear_clip_performance();
                     if self.pending_section_record.is_some() || self.active_section_record.is_some()
                     {
                         let event = EngineEvent::SectionQueueCancelled { retired: prepared };
@@ -168,6 +185,9 @@ impl AudioEngine {
                 ),
                 EngineCommand::StopSectionRecord => self.stop_section_record(),
                 EngineCommand::StartPerformanceCapture => {
+                    if self.clip_performance {
+                        self.apply_clip_boundaries(self.performance_position);
+                    }
                     let section_id = self.active_section.map(|section| section.section_id);
                     let section_position_samples =
                         self.active_section.map(|section| section.position_samples);
@@ -176,6 +196,15 @@ impl AudioEngine {
                         section_id,
                         section_position_samples,
                     });
+                    for track in &self.tracks {
+                        if let Some(active) = track.active_clip {
+                            let _ = self.event_tx.push(EngineEvent::ClipCaptureSource {
+                                track_id: track.id,
+                                position: active.position,
+                                effective_at_samples: self.performance_position,
+                            });
+                        }
+                    }
                 }
                 EngineCommand::StopPerformanceCapture => {
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
@@ -186,11 +215,15 @@ impl AudioEngine {
                     let len = audio.num_frames() as u64;
                     self.audio = Some(audio);
                     self.arrangement_audio_length = Some(len);
-                    if self.active_section.is_none() && !self.arrangement_recording {
+                    if !self.clip_performance
+                        && self.active_section.is_none()
+                        && !self.arrangement_recording
+                    {
                         self.transport.set_audio_length(Some(len));
                     }
                 }
                 EngineCommand::UnloadAudio => {
+                    self.clear_clip_performance();
                     self.stop_section_record();
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
                         effective_at_samples: self.effective_position(),
@@ -1157,7 +1190,7 @@ impl AudioEngine {
         } else {
             self.audio.as_ref().map(|audio| audio.num_frames() as u64)
         };
-        if self.active_section.is_none() && !self.arrangement_recording {
+        if !self.clip_performance && self.active_section.is_none() && !self.arrangement_recording {
             self.transport
                 .set_audio_length(self.arrangement_audio_length);
         }

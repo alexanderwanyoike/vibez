@@ -14,10 +14,10 @@ pub(super) struct PendingSectionRecord {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CountInClickTiming {
-    start: u64,
-    beat_samples: u64,
-    boundary: u64,
+pub(super) struct CountInClickTiming {
+    pub(super) start: u64,
+    pub(super) beat_samples: u64,
+    pub(super) boundary: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -211,7 +211,7 @@ impl AudioEngine {
         }
         if timing.boundary >= block_end {
             self.render_idle_instruments(output, frames, channels, block_start, None, None);
-            self.mix_section_record_count_in_click(output, frames, channels, block_start, timing);
+            self.mix_record_count_in_click(output, frames, channels, block_start, timing);
             return true;
         }
 
@@ -225,7 +225,7 @@ impl AudioEngine {
                 None,
                 None,
             );
-            self.mix_section_record_count_in_click(
+            self.mix_record_count_in_click(
                 &mut output[..frames_before * channels],
                 frames_before,
                 channels,
@@ -247,7 +247,7 @@ impl AudioEngine {
         true
     }
 
-    fn mix_section_record_count_in_click(
+    pub(super) fn mix_record_count_in_click(
         &self,
         output: &mut [f32],
         frames: usize,

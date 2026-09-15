@@ -99,7 +99,7 @@ fn perform_mode_tab_width(surface_width: f32) -> f32 {
         .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
 }
 
-fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
+pub(super) fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
     let maximum = (workspace_width
         - SECTION_CONSTRUCTION_MIN_WIDTH
         - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
@@ -118,6 +118,9 @@ pub(super) fn perform_pad_grid_height(window_height: f32) -> f32 {
 
 impl App {
     pub(super) fn view_perform(&self) -> Element<'_, Message> {
+        if self.state.perform.layout == vibez_project::PerformLayout::Clips {
+            return self.view_clip_perform();
+        }
         let workspace_width = self.perform_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
@@ -182,10 +185,17 @@ impl App {
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
         let workspace_width = self.perform_workspace_width();
         let workspace_left = self.state.view.window_width - workspace_width;
-        effective_perform_surface_width(cursor_x - workspace_left, workspace_width)
+        effective_perform_surface_width(
+            cursor_x - workspace_left,
+            if self.state.perform.layout == vibez_project::PerformLayout::Clips {
+                workspace_width.max(900.0)
+            } else {
+                workspace_width
+            },
+        )
     }
 
-    fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
+    pub(super) fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
         let tab_width = perform_mode_tab_width(surface_width);
         let mut modes = row![].height(Length::Fill).spacing(1);
         for mode in PerformMode::ALL {
@@ -195,7 +205,12 @@ impl App {
             } else {
                 th::blend(th::text_dim(), th::text(), 0.38)
             };
-            let label = mode.label().to_uppercase();
+            let label = if mode == PerformMode::Sections {
+                self.state.perform.layout.label()
+            } else {
+                mode.label()
+            }
+            .to_uppercase();
             let shortcut_color = if active {
                 th::blend(th::accent_dim(), th::accent(), 0.48)
             } else {
@@ -298,7 +313,7 @@ impl App {
             .into()
     }
 
-    fn view_perform_surface_splitter(&self) -> Element<'_, Message> {
+    pub(super) fn view_perform_surface_splitter(&self) -> Element<'_, Message> {
         super::views_shell::horizontal_pane_splitter(
             self.state.view.perform_surface_resize_active,
             Message::View(crate::domains::view::ViewMsg::BeginPerformSurfaceResize),

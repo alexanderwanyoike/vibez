@@ -268,11 +268,7 @@ impl App {
                 .into()
         };
 
-        let panel_height = effective_detail_panel_height(
-            self.state.view.detail_panel_height,
-            self.state.view.window_height,
-            self.detail_editor_preferred_height(),
-        );
+        let panel_height = self.effective_detail_height();
         container(detail_content)
             .width(Length::Fill)
             .height(Length::Fixed(panel_height))
@@ -286,6 +282,54 @@ impl App {
                 ..Default::default()
             })
             .into()
+    }
+
+    pub(super) fn detail_playhead_samples(&self) -> Option<u64> {
+        if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+        {
+            let id = self.state.perform.clip_editor.selected?;
+            let active = self
+                .state
+                .perform
+                .clip_editor
+                .playing
+                .values()
+                .find(|clip| clip.id == id)?;
+            let start = *self
+                .state
+                .perform
+                .clip_editor
+                .started_at
+                .get(&active.track_id)?;
+            let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+            let (length, looping) = active.length_and_loop(spb);
+            let elapsed = self
+                .state
+                .perform
+                .performance_position_samples
+                .saturating_sub(start);
+            return Some(if looping {
+                elapsed % length
+            } else {
+                elapsed.min(length)
+            });
+        }
+        resolved_detail_playhead_samples(
+            self.state.view.workspace == crate::state::Workspace::Perform,
+            self.state.perform.selected_section,
+            self.state.perform.playing_section,
+            self.state.transport.position_samples,
+            self.state.perform.section_playhead_samples,
+        )
+    }
+
+    pub(super) fn effective_detail_height(&self) -> f32 {
+        effective_detail_panel_height(
+            self.state.view.detail_panel_height,
+            self.state.view.window_height,
+            self.detail_editor_preferred_height(),
+        )
     }
 
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
@@ -314,18 +358,13 @@ impl App {
     ) -> Element<'_, Message> {
         use crate::state::PianoRollEditMode;
 
-        let playhead_beats = resolved_detail_playhead_samples(
-            self.state.view.workspace == crate::state::Workspace::Perform,
-            self.state.perform.selected_section,
-            self.state.perform.playing_section,
-            self.state.transport.position_samples,
-            self.state.perform.section_playhead_samples,
-        )
-        .map(|samples| {
-            samples as f64 * self.state.transport.bpm
-                / (f64::from(self.state.transport.sample_rate.max(1)) * 60.0)
-        })
-        .unwrap_or(-1.0);
+        let playhead_beats = self
+            .detail_playhead_samples()
+            .map(|samples| {
+                samples as f64 * self.state.transport.bpm
+                    / (f64::from(self.state.transport.sample_rate.max(1)) * 60.0)
+            })
+            .unwrap_or(-1.0);
 
         let visible_clip = self
             .visible_piano_roll_clip()
@@ -335,7 +374,7 @@ impl App {
                 content.note_clips.iter().find(|clip| clip.id == clip_id)
             });
 
-        let (piano_widget, velocity_widget) = match visible_clip {
+        let (mut piano_widget, velocity_widget) = match visible_clip {
             Some(clip) => {
                 let clip_relative_playhead = playhead_beats - clip.position_beats;
                 (
@@ -364,6 +403,10 @@ impl App {
             ),
         };
 
+        piano_widget.reserve_arrow_keys = self.state.view.workspace
+            == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && self.state.perform.mode == crate::domains::perform::PerformMode::Sections;
         let piano_canvas: Element<'_, Message> = canvas(piano_widget)
             .width(Length::Fill)
             .height(Length::Fill)

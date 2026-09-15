@@ -32,7 +32,16 @@ impl Default for TrackMuteQuantizationSetting {
 
 impl PerformState {
     pub const fn track_mute_quantization(&self) -> TrackMuteQuantization {
-        self.track_mute_quantization.0
+        if matches!(self.layout, vibez_project::PerformLayout::Clips)
+            && matches!(
+                self.track_mute_quantization.0,
+                TrackMuteQuantization::EndOfSection
+            )
+        {
+            TrackMuteQuantization::OneBar
+        } else {
+            self.track_mute_quantization.0
+        }
     }
 
     pub fn set_track_mute_quantization(&mut self, quantization: TrackMuteQuantization) {

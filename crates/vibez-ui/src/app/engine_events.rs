@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use vibez_engine::events::EngineEvent;
 
-use crate::domains::perform::CapturedSectionSource;
+use crate::domains::perform::CapturedTimelineSource;
 use crate::state::AuditionMode;
 
 use super::*;
@@ -66,12 +66,16 @@ fn apply_drum_pad_flash(
 
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
+        let mut clip_record_events = Vec::new();
         let mut completed_section_recordings = Vec::new();
         let mut completed_captures = Vec::new();
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    event @ (EngineEvent::ClipRecordArmed { .. }
+                    | EngineEvent::ClipRecordStarted { .. }
+                    | EngineEvent::ClipRecordStopped { .. }) => clip_record_events.push(event),
                     EngineEvent::DisposeEffect(cell) => {
                         // Plugin teardown remains on the UI thread.
                         drop(cell.take());
@@ -90,7 +94,103 @@ impl App {
                         project_tracks.master.peak_l = self.state.peak_l;
                         project_tracks.master.peak_r = self.state.peak_r;
                     }
+                    EngineEvent::ClipQueued {
+                        request_id,
+                        track_id,
+                        clip_id,
+                    } => {
+                        self.state
+                            .perform
+                            .clip_editor
+                            .queue_request(track_id, clip_id, request_id);
+                    }
+                    EngineEvent::ClipBatchRetired(retired) => drop(retired),
+                    EngineEvent::ClipRequestRetired(retired) => {
+                        self.state
+                            .perform
+                            .clip_editor
+                            .pending
+                            .remove(&retired.request_id);
+                    }
+                    EngineEvent::ClipSourceRefreshed {
+                        track_id,
+                        request_id,
+                        position,
+                        effective_at_samples,
+                    } => {
+                        let editor = &mut self.state.perform.clip_editor;
+                        if let Some(clip) = editor.pending.remove(&request_id) {
+                            let spb = self.state.transport.sample_rate as f64 * 60.0
+                                / self.state.transport.bpm;
+                            let source = CapturedTimelineSource::from_clip(&clip, spb);
+                            editor
+                                .started_at
+                                .insert(track_id, effective_at_samples.saturating_sub(position));
+                            editor.playing.insert(track_id, clip);
+                            self.state.perform.capture.clip_transition(
+                                track_id,
+                                Some(source),
+                                effective_at_samples,
+                                position,
+                            );
+                        }
+                    }
+                    EngineEvent::ClipCaptureSource {
+                        track_id,
+                        position,
+                        effective_at_samples,
+                    } => {
+                        let spb = self.state.transport.sample_rate as f64 * 60.0
+                            / self.state.transport.bpm;
+                        let source = self
+                            .state
+                            .perform
+                            .clip_editor
+                            .playing
+                            .get(&track_id)
+                            .map(|clip| CapturedTimelineSource::from_clip(clip, spb));
+                        self.state.perform.capture.clip_transition(
+                            track_id,
+                            source,
+                            effective_at_samples,
+                            position,
+                        );
+                    }
+                    EngineEvent::ClipTransitioned {
+                        track_id,
+                        request_id,
+                        retired,
+                        effective_at_samples,
+                        ..
+                    } => {
+                        let editor = &mut self.state.perform.clip_editor;
+                        editor.acknowledge_transition(track_id, request_id);
+                        editor.started_at.insert(track_id, effective_at_samples);
+                        if let Some(clip) = editor.pending.remove(&request_id) {
+                            editor.playing.insert(track_id, clip);
+                        } else {
+                            editor.playing.remove(&track_id);
+                        }
+                        let spb = self.state.transport.sample_rate as f64 * 60.0
+                            / self.state.transport.bpm;
+                        let source = editor
+                            .playing
+                            .get(&track_id)
+                            .map(|clip| CapturedTimelineSource::from_clip(clip, spb));
+                        self.state.perform.capture.clip_transition(
+                            track_id,
+                            source,
+                            effective_at_samples,
+                            0,
+                        );
+                        drop(retired);
+                    }
                     EngineEvent::PlaybackStopped => {
+                        self.state.perform.clip_editor.running = false;
+                        self.state.perform.clip_editor.playing.clear();
+                        self.state.perform.clip_editor.started_at.clear();
+                        self.state.perform.clip_editor.clear_queue();
+                        self.state.perform.clip_editor.pending.clear();
                         self.state.transport.playing = false;
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
@@ -214,6 +314,17 @@ impl App {
                         canonical_section_position_samples,
                         ..
                     } => {
+                        clip_record_events.push(EngineEvent::NoteRepeated {
+                            track_id,
+                            pitch,
+                            velocity,
+                            rate,
+                            effective_at_samples,
+                            canonical_at_samples,
+                            section_id,
+                            section_position_samples: None,
+                            canonical_section_position_samples,
+                        });
                         self.state.perform.capture.repeated_note(
                             track_id,
                             pitch,
@@ -241,6 +352,15 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
+                        clip_record_events.push(EngineEvent::InstrumentNoteInput {
+                            track_id,
+                            pitch,
+                            velocity,
+                            on,
+                            effective_at_samples,
+                            section_id,
+                            section_position_samples,
+                        });
                         self.state.perform.capture.input_note(
                             track_id,
                             pitch,
@@ -250,13 +370,13 @@ impl App {
                         );
                         self.state.perform.section_record.input_note(
                             crate::domains::perform::section_record::SectionRecordInput {
-                                section_id,
+                                target_id: section_id,
                                 track_id,
                                 pitch,
                                 velocity,
                                 on,
                                 effective_at_samples,
-                                section_position_samples,
+                                local_position_samples: section_position_samples,
                             },
                         );
                     }
@@ -318,7 +438,7 @@ impl App {
                                     .sections
                                     .by_id(section_id)
                                     .map(|section| {
-                                        (CapturedSectionSource::from_section(section), position)
+                                        (CapturedTimelineSource::from_section(section), position)
                                     })
                             },
                         );
@@ -346,7 +466,7 @@ impl App {
                             .perform
                             .sections
                             .by_id(section_id)
-                            .map(CapturedSectionSource::from_section);
+                            .map(CapturedTimelineSource::from_section);
                         if let Some(source) = captured_source {
                             self.state
                                 .perform
@@ -401,7 +521,7 @@ impl App {
                                 .perform
                                 .sections
                                 .by_id(section_id)
-                                .map(CapturedSectionSource::from_section)
+                                .map(CapturedTimelineSource::from_section)
                             {
                                 self.state.perform.capture.refresh(
                                     source,
@@ -415,6 +535,10 @@ impl App {
                 }
             }
         }
+        for event in clip_record_events {
+            self.clip_record_event(event);
+        }
+        self.refresh_clip_record(self.state.perform.performance_position_samples);
         for completed in completed_section_recordings {
             self.finish_section_record_session(completed);
         }

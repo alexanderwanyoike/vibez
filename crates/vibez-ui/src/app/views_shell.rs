@@ -162,6 +162,8 @@ impl App {
         // answer to "are you about to lose work" has to be the visible one.
         if self.state.project.close_confirm_open {
             stack![base_layout, self.view_close_confirm_overlay()].into()
+        } else if self.state.project.new_project_layout.is_some() {
+            stack![base_layout, self.view_new_project_overlay()].into()
         } else if self
             .state
             .arrangement
@@ -183,7 +185,10 @@ impl App {
             stack![base_layout, self.view_edit_menu_overlay()].into()
         } else if self.state.view.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
-        } else if self.state.view.editing_clip_name.is_some() {
+        } else if self.state.view.editing_clip_name.is_some()
+            && !(self.state.view.workspace == Workspace::Perform
+                && self.state.perform.layout == vibez_project::PerformLayout::Clips)
+        {
             stack![base_layout, self.view_rename_overlay()].into()
         } else if self.state.devices.context_menu.is_some() {
             stack![base_layout, self.view_device_context_menu_overlay()].into()

@@ -133,8 +133,13 @@ impl OutputCallback {
         let mut processed = false;
         if let Ok(mut guard) = self.engine_slot.try_lock() {
             if let Some(engine) = guard.as_mut() {
-                self.input_bridge
-                    .latch_record_start_position(engine.arrangement_position_samples());
+                self.input_bridge.latch_record_start_position(
+                    if self.input_bridge.uses_output_clock() {
+                        engine.output_position_samples()
+                    } else {
+                        engine.arrangement_position_samples()
+                    },
+                );
                 let live_input = self.input_scratch.get_mut(..data.len()).map(|scratch| {
                     let target = self.input_bridge.clock_output(scratch, self.channels);
                     (target, &*scratch)

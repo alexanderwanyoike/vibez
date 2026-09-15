@@ -15,6 +15,10 @@ impl EngineTrack {
             id,
             playback_source: Box::new(playback_source),
             section_playback_source: Box::new(PreparedPlaybackSource::default()),
+            launcher_source: Box::default(),
+            empty_launcher_source: Box::default(),
+            active_clip: None,
+            queued_clip: None,
             gain: DEFAULT_TRACK_GAIN,
             pan: DEFAULT_TRACK_PAN,
             mute: false,
@@ -145,8 +149,15 @@ impl EngineTrack {
         target: vibez_core::automation::AutomationTarget,
         beat: f64,
         section_active: bool,
+        clips_active: bool,
     ) -> f32 {
-        let source = if section_active {
+        let source = if clips_active {
+            if self.active_clip.is_some() {
+                self.launcher_source.as_ref()
+            } else {
+                self.empty_launcher_source.as_ref()
+            }
+        } else if section_active {
             self.section_playback_source.as_ref()
         } else {
             self.playback_source.as_ref()
@@ -283,6 +294,46 @@ impl EngineTrack {
         self.ensure_buffer(buf_size);
         for s in self.mix_buffer[..buf_size].iter_mut() {
             *s = 0.0;
+        }
+    }
+
+    pub(crate) fn release_edited_launcher_notes(
+        &mut self,
+        source: &crate::playback_source::PreparedPlaybackSource,
+    ) {
+        for clip in &source.note_clips {
+            if let Some(old) = self
+                .launcher_source
+                .note_clips
+                .iter()
+                .find(|old| old.id == clip.id)
+            {
+                clip.inherit_groove_latch(old);
+            }
+        }
+        let mut sounding = self.active_notes;
+        while sounding != 0 {
+            let pitch = sounding.trailing_zeros() as u8;
+            sounding &= sounding - 1;
+            let unchanged = self
+                .launcher_source
+                .note_clips
+                .iter()
+                .filter(|clip| clip.notes.iter().any(|note| note.pitch == pitch))
+                .all(|old| {
+                    source
+                        .note_clips
+                        .iter()
+                        .any(|new| old.id == new.id && old.same_pitch_schedule(new, pitch))
+                });
+            // The old note-off disappears with an edited schedule. Unchanged voices
+            // keep sustaining, and live instrument input is not in this mask.
+            if !unchanged {
+                if let Some(instrument) = self.instrument.as_mut() {
+                    instrument.note_off(pitch);
+                }
+                self.active_notes &= !(1u128 << pitch);
+            }
         }
     }
 

@@ -39,14 +39,24 @@ pub enum CaptureAction {
 }
 
 #[derive(Debug, Clone)]
-pub struct CapturedSectionSource {
+pub struct CapturedTimelineSource {
     pub name: String,
     pub length_beats: f64,
     pub looping: bool,
     pub timeline: Arc<ArrangementTimeline>,
 }
 
-impl CapturedSectionSource {
+impl CapturedTimelineSource {
+    pub fn from_clip(clip: &super::LauncherClip, samples_per_beat: f64) -> Self {
+        let (length, looping) = clip.length_and_loop(samples_per_beat);
+        Self {
+            name: clip.name().into(),
+            length_beats: length as f64 / samples_per_beat,
+            looping,
+            timeline: Arc::clone(&clip.timeline),
+        }
+    }
+
     pub fn from_section(section: &Section) -> Self {
         Self {
             name: section.name.clone(),
@@ -66,14 +76,14 @@ struct CaptureClock {
 
 #[derive(Debug, Clone)]
 struct ActiveSpan {
-    source: CapturedSectionSource,
+    source: CapturedTimelineSource,
     effective_start_samples: u64,
     source_start_samples: u64,
 }
 
 #[derive(Debug, Clone)]
-struct CapturedSectionSpan {
-    source: CapturedSectionSource,
+struct CapturedTimelineSpan {
+    source: CapturedTimelineSource,
     effective_start_samples: u64,
     effective_end_samples: u64,
     source_start_samples: u64,
@@ -84,7 +94,8 @@ struct CaptureSession {
     clock: CaptureClock,
     engine_start_samples: u64,
     active: Option<ActiveSpan>,
-    spans: Vec<CapturedSectionSpan>,
+    active_clips: HashMap<TrackId, ActiveSpan>,
+    spans: Vec<CapturedTimelineSpan>,
     controlled_tracks: Vec<(TrackId, bool)>,
     mute_changes: Vec<CapturedMuteChange>,
     performance: PerformanceLog,
@@ -95,7 +106,7 @@ pub struct CompletedCapture {
     clock: CaptureClock,
     engine_start_samples: u64,
     engine_end_samples: u64,
-    spans: Vec<CapturedSectionSpan>,
+    spans: Vec<CapturedTimelineSpan>,
     controlled_tracks: Vec<(TrackId, bool)>,
     mute_changes: Vec<CapturedMuteChange>,
     performance: CompletedPerformanceLog,
@@ -350,7 +361,7 @@ impl CaptureState {
     pub fn start(
         &mut self,
         effective_at_samples: u64,
-        active: Option<(CapturedSectionSource, u64)>,
+        active: Option<(CapturedTimelineSource, u64)>,
     ) {
         if self.phase != CapturePhase::Starting {
             return;
@@ -368,6 +379,7 @@ impl CaptureState {
                 source_start_samples,
             }),
             spans: Vec::new(),
+            active_clips: HashMap::new(),
             controlled_tracks: std::mem::take(&mut self.prepared_controlled_tracks),
             mute_changes: Vec::new(),
             performance: PerformanceLog::default(),
@@ -491,13 +503,13 @@ impl CaptureState {
         );
     }
 
-    pub fn transition(&mut self, source: CapturedSectionSource, effective_at_samples: u64) {
+    pub fn transition(&mut self, source: CapturedTimelineSource, effective_at_samples: u64) {
         self.refresh(source, effective_at_samples, 0);
     }
 
     pub fn refresh(
         &mut self,
-        source: CapturedSectionSource,
+        source: CapturedTimelineSource,
         effective_at_samples: u64,
         source_start_samples: u64,
     ) {
@@ -512,12 +524,40 @@ impl CaptureState {
         });
     }
 
+    pub fn clip_transition(
+        &mut self,
+        track_id: TrackId,
+        source: Option<CapturedTimelineSource>,
+        effective_at_samples: u64,
+        source_start_samples: u64,
+    ) {
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        if let Some(active) = session.active_clips.remove(&track_id) {
+            close_span(&mut session.spans, active, effective_at_samples);
+        }
+        if let Some(source) = source {
+            session.active_clips.insert(
+                track_id,
+                ActiveSpan {
+                    source,
+                    effective_start_samples: effective_at_samples,
+                    source_start_samples,
+                },
+            );
+        }
+    }
+
     pub fn finish(&mut self, effective_at_samples: u64) -> Option<CompletedCapture> {
         let Some(mut session) = self.session.take() else {
             self.cancel();
             return None;
         };
         close_active_span(&mut session, effective_at_samples);
+        for (_, active) in session.active_clips.drain() {
+            close_span(&mut session.spans, active, effective_at_samples);
+        }
         let performance = session.performance.finish(effective_at_samples);
         self.phase = CapturePhase::Idle;
         self.prepared_clock = None;
@@ -548,8 +588,16 @@ fn close_active_span(session: &mut CaptureSession, effective_end_samples: u64) {
     let Some(active) = session.active.take() else {
         return;
     };
+    close_span(&mut session.spans, active, effective_end_samples);
+}
+
+fn close_span(
+    spans: &mut Vec<CapturedTimelineSpan>,
+    active: ActiveSpan,
+    effective_end_samples: u64,
+) {
     if effective_end_samples > active.effective_start_samples {
-        session.spans.push(CapturedSectionSpan {
+        spans.push(CapturedTimelineSpan {
             source: active.source,
             effective_start_samples: active.effective_start_samples,
             effective_end_samples,
@@ -568,7 +616,7 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
 
 fn append_timeline_window(
     destination: &mut HashMap<TrackId, TrackTimelineContent>,
-    source: &CapturedSectionSource,
+    source: &CapturedTimelineSource,
     window_start_samples: u64,
     window_end_samples: u64,
     destination_start_samples: u64,
@@ -594,7 +642,11 @@ fn append_timeline_window(
                 clip.warp_geometry_for_fragment(delta, fragment_duration);
             let mut fragment = UiClip {
                 id: ClipId::new(),
-                name: format!("Capture · {} · {}", source.name, clip.name),
+                name: if source.name == clip.name {
+                    format!("Capture · {}", clip.name)
+                } else {
+                    format!("Capture · {} · {}", source.name, clip.name)
+                },
                 audio: Arc::clone(&clip.audio),
                 source: clip.source.clone(),
                 position: destination_start_samples + (overlap_start - window_start_samples),
@@ -643,7 +695,11 @@ fn append_timeline_window(
             let notes = captured_visible_notes(clip, local_start, local_end);
             let fragment = UiNoteClip {
                 id: ClipId::new(),
-                name: format!("Capture · {} · {}", source.name, clip.name),
+                name: if source.name == clip.name {
+                    format!("Capture · {}", clip.name)
+                } else {
+                    format!("Capture · {} · {}", source.name, clip.name)
+                },
                 position_beats: destination_start_beats + (overlap_start - window_start_beats),
                 duration_beats: overlap_end - overlap_start,
                 notes,
@@ -797,9 +853,9 @@ mod tests {
 
         let mut capture = starting_capture();
         capture.prepare(40, 8, 120.0);
-        capture.start(3, Some((CapturedSectionSource::from_section(&first), 0)));
+        capture.start(3, Some((CapturedTimelineSource::from_section(&first), 0)));
         assert_eq!(capture.arrange_start_samples(), Some(40));
-        capture.transition(CapturedSectionSource::from_section(&second), 10);
+        capture.transition(CapturedTimelineSource::from_section(&second), 10);
         let completed = capture.finish(15).unwrap();
         assert_eq!(capture.arrange_start_samples(), None);
         let materialized = completed.materialize();
@@ -827,8 +883,8 @@ mod tests {
 
         let mut capture = starting_capture();
         capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
-        capture.refresh(CapturedSectionSource::from_section(&refreshed), 4, 4);
+        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
+        capture.refresh(CapturedTimelineSource::from_section(&refreshed), 4, 4);
         let materialized = capture.finish(8).unwrap().materialize();
         let clips = &materialized.by_track[&track_id].clips;
 
@@ -852,7 +908,7 @@ mod tests {
         let track_id = *section.timeline.by_track.keys().next().unwrap();
         let mut capture = starting_capture();
         capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedSectionSource::from_section(&section), 0)));
+        capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
         let clips = &capture.finish(10).unwrap().materialize().by_track[&track_id].clips;
 
         assert_eq!(clips.len(), 3);
@@ -878,8 +934,8 @@ mod tests {
         ];
         let mut capture = starting_capture();
         capture.prepare(8, 8, 120.0);
-        capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
-        capture.transition(CapturedSectionSource::from_section(&second), 5);
+        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
+        capture.transition(CapturedTimelineSource::from_section(&second), 5);
         let clips = &capture.finish(9).unwrap().materialize().by_track[&track_id].note_clips;
 
         assert_eq!(clips.len(), 2);
@@ -901,7 +957,7 @@ mod tests {
         let mut capture = starting_capture();
         capture.prepare(0, 8, 120.0);
         capture.prepare_controlled_tracks([(track_id, false)]);
-        capture.start(0, Some((CapturedSectionSource::from_section(&section), 0)));
+        capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
         capture.input_note(track_id, 36, 127, true, 0);
         capture.input_note(track_id, 36, 0, false, 1);
 
@@ -929,9 +985,9 @@ mod tests {
         let track_id = *first.timeline.by_track.keys().next().unwrap();
         let mut capture = starting_capture();
         capture.prepare(0, 8, 120.0);
-        capture.start(0, Some((CapturedSectionSource::from_section(&first), 0)));
+        capture.start(0, Some((CapturedTimelineSource::from_section(&first), 0)));
         let completed = capture.finish(4).unwrap();
-        capture.transition(CapturedSectionSource::from_section(&second), 6);
+        capture.transition(CapturedTimelineSource::from_section(&second), 6);
 
         let clips = &completed.materialize().by_track[&track_id].clips;
         assert_eq!(clips.len(), 1);
@@ -947,7 +1003,7 @@ mod tests {
         capture.prepare(20, 8, 120.0);
         capture.start(
             100,
-            Some((CapturedSectionSource::from_section(&section), 0)),
+            Some((CapturedTimelineSource::from_section(&section), 0)),
         );
         Arc::make_mut(&mut section.timeline)
             .ensure(track_id)
@@ -968,11 +1024,11 @@ mod tests {
         capture.prepare_controlled_tracks([(track_id, false)]);
         capture.start(
             100,
-            Some((CapturedSectionSource::from_section(&section), 0)),
+            Some((CapturedTimelineSource::from_section(&section), 0)),
         );
         capture.track_mute_changed(track_id, true, 103);
         // A Section transition while held must not synthesize another gesture.
-        capture.transition(CapturedSectionSource::from_section(&section), 105);
+        capture.transition(CapturedTimelineSource::from_section(&section), 105);
         let materialized = capture.finish(110).unwrap().materialize();
         let lane = materialized.by_track[&track_id]
             .automation
@@ -990,5 +1046,136 @@ mod tests {
         assert_eq!(lane.value_at(10.5), Some(0.0));
         assert_eq!(lane.value_at(11.0), Some(1.0));
         assert_eq!(lane.value_at(12.5), Some(0.0));
+    }
+}
+
+#[cfg(test)]
+mod clip_capture_tests {
+    use super::*;
+    use crate::domains::perform::LauncherClip;
+
+    fn source(track_id: TrackId, pitch: u8, beats: f64) -> LauncherClip {
+        let id = ClipId::new();
+        let mut timeline = ArrangementTimeline::default();
+        timeline.ensure(track_id).note_clips.push(UiNoteClip {
+            id,
+            name: "Part".into(),
+            position_beats: 0.0,
+            duration_beats: beats,
+            notes: vec![MidiNote {
+                pitch,
+                velocity: 100,
+                start_beat: 0.0,
+                duration_beats: beats,
+            }],
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: beats,
+            groove_grid: Default::default(),
+        });
+        LauncherClip {
+            id,
+            track_id,
+            row: 0,
+            timeline: Arc::new(timeline),
+        }
+    }
+
+    #[test]
+    fn independent_combinations_capture_mid_loop_replacements_and_silence() {
+        let bass = TrackId::new();
+        let hat = TrackId::new();
+        let mut bass_clip = source(bass, 36, 4.0);
+        let hat_clip = source(hat, 42, 1.0);
+        let replacement = source(bass, 40, 2.0);
+        let mut capture = CaptureState::default();
+        capture.update(CaptureMsg::Toggle);
+        capture.prepare(40, 8, 120.0);
+        capture.prepare_controlled_tracks([(bass, false), (hat, false)]);
+        capture.start(6, None);
+        capture.clip_transition(
+            bass,
+            Some(CapturedTimelineSource::from_clip(&bass_clip, 4.0)),
+            6,
+            6,
+        );
+        capture.clip_transition(
+            hat,
+            Some(CapturedTimelineSource::from_clip(&hat_clip, 4.0)),
+            8,
+            0,
+        );
+        capture.clip_transition(hat, None, 12, 0);
+        capture.clip_transition(
+            bass,
+            Some(CapturedTimelineSource::from_clip(&replacement, 4.0)),
+            16,
+            0,
+        );
+        Arc::make_mut(&mut bass_clip.timeline)
+            .ensure(bass)
+            .note_clips[0]
+            .notes[0]
+            .pitch = 99;
+        let take = capture.finish(20).unwrap().materialize();
+        assert_eq!(
+            (take.arrange_start_samples, take.arrange_end_samples),
+            (40, 54)
+        );
+        let bass_notes = &take.by_track[&bass].note_clips;
+        assert_eq!(bass_notes.len(), 2);
+        assert_eq!(
+            (bass_notes[0].position_beats, bass_notes[0].duration_beats),
+            (10.0, 2.5)
+        );
+        assert_eq!(bass_notes[0].notes[0].pitch, 36);
+        assert_eq!(
+            (bass_notes[1].position_beats, bass_notes[1].duration_beats),
+            (12.5, 1.0)
+        );
+        assert_eq!(bass_notes[1].notes[0].pitch, 40);
+        let hats = &take.by_track[&hat].note_clips;
+        assert_eq!(hats.len(), 1);
+        assert_eq!(
+            (hats[0].position_beats, hats[0].duration_beats),
+            (10.5, 1.0)
+        );
+        assert_ne!(hats[0].id, hat_clip.id);
+        assert!(take.controlled_track_ids.contains(&hat));
+    }
+
+    #[test]
+    fn independent_loops_flatten_without_moving_other_tracks_boundaries() {
+        let a = TrackId::new();
+        let b = TrackId::new();
+        let mut capture = CaptureState::default();
+        capture.update(CaptureMsg::Toggle);
+        capture.prepare(0, 8, 120.0);
+        capture.start(0, None);
+        capture.clip_transition(
+            a,
+            Some(CapturedTimelineSource::from_clip(&source(a, 36, 1.0), 4.0)),
+            0,
+            0,
+        );
+        capture.clip_transition(
+            b,
+            Some(CapturedTimelineSource::from_clip(&source(b, 48, 3.0), 4.0)),
+            2,
+            0,
+        );
+        let take = capture.finish(14).unwrap().materialize();
+        let a_clips = &take.by_track[&a].note_clips;
+        assert_eq!(
+            a_clips
+                .iter()
+                .map(|clip| (clip.position_beats, clip.duration_beats))
+                .collect::<Vec<_>>(),
+            [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0), (3.0, 0.5)]
+        );
+        assert_eq!(take.by_track[&b].note_clips.len(), 1);
+        assert_eq!(take.by_track[&b].note_clips[0].position_beats, 0.5);
     }
 }

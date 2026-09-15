@@ -112,6 +112,10 @@ pub struct EngineTrack {
     /// `playback_source` only around Section rendering, preserving Arrange as
     /// the editable source while sharing the exact same renderer.
     pub section_playback_source: Box<PreparedPlaybackSource>,
+    pub(crate) launcher_source: Box<PreparedPlaybackSource>,
+    pub(crate) empty_launcher_source: Box<PreparedPlaybackSource>,
+    pub(crate) active_clip: Option<crate::playback_source::ActiveClipPlayback>,
+    pub(crate) queued_clip: Option<crate::playback_source::QueuedClipPlayback>,
     pub gain: f32,
     pub pan: f32,
     pub mute: bool,

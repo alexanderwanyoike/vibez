@@ -12,7 +12,7 @@ use super::*;
 impl App {
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {
         if self.state.view.workspace != Workspace::Perform
-            || self.state.perform.editor_focus != PerformEditorFocus::SectionConstruction
+            || self.state.perform.editor_focus != PerformEditorFocus::TimelineEditor
         {
             return false;
         }
@@ -150,10 +150,31 @@ impl App {
         let ctx = crate::domains::view::ViewCtx {
             total_beats: self.state.total_beats(),
         };
-        let action =
-            self.state
-                .view
-                .update(msg, self.state.arrangement.resolve_timeline().editor, ctx);
-        self.apply_view_action(action)
+        let editor = if self.state.view.workspace == Workspace::Perform
+            && (self.state.perform.has_selected_timeline()
+                || self.state.perform.layout == vibez_project::PerformLayout::Clips)
+        {
+            self.state.perform.timeline_editor()
+        } else {
+            self.state.arrangement.resolve_timeline().editor
+        };
+        let focus_name = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && matches!(
+                msg,
+                ViewMsg::StartEditingClipName(..) | ViewMsg::StartEditingTrackName { .. }
+            );
+        let action = self.state.view.update(msg, editor, ctx);
+        let task = self.apply_view_action(action);
+        if focus_name {
+            let id = iced::widget::text_input::Id::new("launcher-name");
+            Task::batch([
+                task,
+                iced::widget::text_input::focus(id.clone()),
+                iced::widget::text_input::select_all(id),
+            ])
+        } else {
+            task
+        }
     }
 }
