@@ -98,10 +98,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             event,
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) {
-            if let Some(point) = cursor
-                .position_in(bounds)
-                .filter(|point| point.y < 25.0 && point.x >= 26.0 && point.x < bounds.width - 48.0)
-            {
+            if let Some(point) = cursor.position_in(bounds).filter(|point| {
+                point.y < 25.0
+                    && point.x >= 26.0
+                    && point.x < bounds.width - if self.key.is_empty() { 26.0 } else { 48.0 }
+            }) {
                 if let Some(clip) = self.clip {
                     if state.double_click.press(
                         std::time::Instant::now(),
@@ -207,10 +208,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 );
             }
             let tight = self.compact && h < 44.0;
+            let key_space = if self.key.is_empty() { 0.0 } else { 22.0 };
             let title_width = if tight {
-                (w * 0.42).max(25.0).min((w - 72.0).max(0.0))
+                (w * 0.42).max(25.0).min((w - 50.0 - key_space).max(0.0))
             } else {
-                w - 72.0
+                w - 50.0 - key_space
             };
             label(
                 frame,
