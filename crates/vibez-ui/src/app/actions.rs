@@ -117,6 +117,9 @@ impl App {
         action: crate::domains::perform::PerformAction,
     ) -> Task<Message> {
         let mut tasks = Vec::new();
+        if let Some(request) = action.clip_launch {
+            self.launch_clips(request);
+        }
         if action.focus_clip_tab {
             self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
         }

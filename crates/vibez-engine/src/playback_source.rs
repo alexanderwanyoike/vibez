@@ -469,6 +469,38 @@ impl ArrangementPlaybackSource {
     }
 }
 
+/// A single independent launcher slot, or a stop when `clip_id` is absent.
+pub struct PreparedClipPlayback {
+    pub track_id: TrackId,
+    pub clip_id: Option<ClipId>,
+    pub request_id: u64,
+    pub length_samples: u64,
+    pub looping: bool,
+    pub source: Box<PreparedPlaybackSource>,
+}
+
+impl std::fmt::Debug for PreparedClipPlayback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedClipPlayback")
+            .field("track_id", &self.track_id)
+            .field("clip_id", &self.clip_id)
+            .field("request_id", &self.request_id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ActiveClipPlayback {
+    pub position: u64,
+    pub length: u64,
+    pub looping: bool,
+}
+
+pub(crate) struct QueuedClipPlayback {
+    pub prepared: Box<PreparedClipPlayback>,
+    pub effective_at: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

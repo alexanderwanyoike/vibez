@@ -102,8 +102,44 @@ fn perform_bank_button(
 }
 
 impl App {
+    fn perform_pad_grid_size(&self, surface_width: f32) -> f32 {
+        let mode = self.state.perform.mode;
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
+        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
+            - if mode == PerformMode::Instrument {
+                82.0
+            } else {
+                0.0
+            };
+        let rail_width = if mode == PerformMode::Instrument {
+            (surface_width * 0.3).clamp(154.0, 176.0) + 10.0
+        } else {
+            0.0
+        };
+        if clip_layout {
+            pad_grid_height
+                .min(
+                    (self.state.view.window_height - self.effective_detail_height() - 274.0)
+                        .max(112.0),
+                )
+                .min((surface_width - 28.0 - rail_width).max(1.0))
+        } else {
+            pad_grid_height
+        }
+    }
+
+    pub(super) fn clip_pad_surface_width(&self, available_width: f32) -> f32 {
+        let rail_width = if self.state.perform.mode == PerformMode::Instrument {
+            (available_width * 0.3).clamp(154.0, 176.0) + 10.0
+        } else {
+            0.0
+        };
+        available_width.min(self.perform_pad_grid_size(available_width) + rail_width + 28.0)
+    }
+
     pub(super) fn view_pad_surface(&self, surface_width: f32) -> Element<'_, Message> {
         let mode = self.state.perform.mode;
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
         let heading = column![
             text("PERFORM SURFACE")
                 .font(PERFORM_LABEL)
@@ -141,7 +177,68 @@ impl App {
                 "ORDER BOTTOM-LEFT".to_string(),
             ),
         };
-        let header: Element<'_, Message> = if mode == PerformMode::Instrument {
+        let mute_quantization = || {
+            pick_list(
+                TrackMuteQuantization::ALL
+                    .into_iter()
+                    .filter(|value| !clip_layout || *value != TrackMuteQuantization::EndOfSection)
+                    .collect::<Vec<_>>(),
+                Some(self.state.perform.track_mute_quantization()),
+                |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
+            )
+            .width(126)
+            .padding([4, 7])
+            .text_size(9)
+        };
+        let header: Element<'_, Message> = if clip_layout {
+            let mut title = row![
+                text(mode.label().to_uppercase())
+                    .font(PERFORM_LABEL)
+                    .size(11)
+                    .color(th::text()),
+                horizontal_space(),
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+            if mode == PerformMode::TrackMutes {
+                title = title
+                    .push(
+                        text(format!("BANK {bank}"))
+                            .font(PERFORM_TECH)
+                            .size(9)
+                            .color(th::text_dim()),
+                    )
+                    .push(perform_bank_button(
+                        "‹",
+                        "PREVIOUS BANK  [",
+                        PerformMsg::PreviousBank,
+                    ))
+                    .push(perform_bank_button(
+                        "›",
+                        "NEXT BANK  ]",
+                        PerformMsg::NextBank,
+                    ));
+            }
+            let detail: Element<'_, Message> = if mode == PerformMode::TrackMutes {
+                row![
+                    text("MUTE")
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(th::text_dim()),
+                    mute_quantization(),
+                ]
+                .spacing(7)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                text("HOLD SHIFT FOR TARGETS")
+                    .font(PERFORM_TECH)
+                    .size(9)
+                    .color(th::text_dim())
+                    .into()
+            };
+            column![title, detail].spacing(8).into()
+        } else if mode == PerformMode::Instrument {
             row![
                 heading,
                 horizontal_space(),
@@ -168,14 +265,6 @@ impl App {
             .spacing(5)
             .align_y(iced::Alignment::Center);
             if mode == PerformMode::TrackMutes {
-                let quantization = pick_list(
-                    TrackMuteQuantization::ALL,
-                    Some(self.state.perform.track_mute_quantization()),
-                    |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
-                )
-                .width(Length::Fixed(126.0))
-                .padding([4, 7])
-                .text_size(9);
                 row![
                     heading,
                     horizontal_space(),
@@ -183,7 +272,7 @@ impl App {
                         .font(PERFORM_TECH)
                         .size(9)
                         .color(th::text_dim()),
-                    quantization,
+                    mute_quantization(),
                     bank_navigation
                 ]
                 .spacing(7)
@@ -196,14 +285,13 @@ impl App {
             }
         };
 
-        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
-            - if mode == PerformMode::Instrument {
-                82.0
-            } else {
-                0.0
-            };
+        let pad_grid_height = self.perform_pad_grid_size(surface_width);
         let mut grid = column![]
-            .width(Length::Fill)
+            .width(if clip_layout {
+                Length::Fixed(pad_grid_height)
+            } else {
+                Length::Fill
+            })
             .height(Length::Fixed(pad_grid_height))
             .spacing(8);
         for row_index in 0..4 {
@@ -216,7 +304,11 @@ impl App {
                 .copied()
                 .filter(|position| position.row == row_index)
             {
-                pad_row = pad_row.push(self.view_perform_pad(position, mode));
+                pad_row = pad_row.push(self.view_perform_pad(
+                    position,
+                    mode,
+                    (pad_grid_height - 24.0) / 4.0,
+                ));
             }
             grid = grid.push(pad_row);
         }
@@ -226,16 +318,29 @@ impl App {
 
         let content = if mode == PerformMode::Instrument {
             let rail_width = (surface_width * 0.3).clamp(154.0, 176.0);
-            column![
-                header,
-                row![
-                    grid,
-                    self.view_instrument_control_rail(bank, pad_grid_height)
-                        .width(Length::Fixed(rail_width))
-                ]
-                .spacing(10)
-            ]
-            .spacing(12)
+            let controls = self
+                .view_instrument_control_rail(
+                    bank,
+                    if clip_layout {
+                        pad_grid_height.max(320.0)
+                    } else {
+                        pad_grid_height
+                    },
+                )
+                .width(Length::Fixed(if clip_layout {
+                    rail_width - 8.0
+                } else {
+                    rail_width
+                }));
+            let rail: Element<'_, Message> = if clip_layout {
+                iced::widget::scrollable(controls)
+                    .height(Length::Fixed(pad_grid_height))
+                    .width(Length::Fixed(rail_width))
+                    .into()
+            } else {
+                controls.into()
+            };
+            column![header, row![grid, rail].spacing(10)].spacing(12)
         } else {
             column![header, grid].spacing(12)
         };
@@ -260,7 +365,12 @@ impl App {
             .into()
     }
 
-    fn view_perform_pad(&self, position: PadPosition, mode: PerformMode) -> Element<'_, Message> {
+    fn view_perform_pad(
+        &self,
+        position: PadPosition,
+        mode: PerformMode,
+        pad_size: f32,
+    ) -> Element<'_, Message> {
         let visible_bank =
             if mode == PerformMode::Instrument && !self.state.perform.instrument_target_overlay {
                 0
@@ -357,7 +467,9 @@ impl App {
             PerformMode::TrackMutes => {
                 if let Some(track) = mute_track {
                     let state = if let Some(pending) = pending_mute {
-                        let current_samples = if self.state.perform.playing_section.is_some() {
+                        let current_samples = if self.state.perform.playing_section.is_some()
+                            || self.state.perform.clip_editor.running
+                        {
                             self.state.perform.performance_position_samples
                         } else {
                             self.state.transport.position_samples
@@ -443,7 +555,28 @@ impl App {
         let number_color = th::blend(color, th::text(), 0.3);
         let coordinate_color = th::blend(th::text_dim(), th::text(), 0.2);
 
-        let pad_face = container(
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
+        let small = clip_layout && pad_size < 60.0;
+        let title_size = if small { 9.0 } else { 13.0 };
+        let title_limit =
+            ((pad_size - if small { 4.0 } else { 16.0 }) / (title_size * 0.62)).max(2.0) as usize;
+        let title = if clip_layout && title.chars().count() > title_limit {
+            format!(
+                "{}…",
+                title.chars().take(title_limit - 1).collect::<String>()
+            )
+        } else {
+            title
+        };
+        let face: Element<'_, Message> = if small {
+            center(
+                text(title.clone())
+                    .font(PERFORM_DISPLAY)
+                    .size(title_size)
+                    .color(th::text()),
+            )
+            .into()
+        } else {
             column![
                 row![
                     text(format!("{ordinal:02}"))
@@ -471,54 +604,56 @@ impl App {
                     0.12
                 ))
             ]
-            .height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(8)
-        .style(move |_theme: &Theme| container::Style {
-            background: Some(
-                iced::gradient::Linear::new(2.35)
-                    .add_stop(
-                        0.0,
-                        if record_target {
-                            th::blend(th::danger(), color, 0.2)
-                        } else if pressed || playing {
-                            th::blend(th::accent_dim(), color, 0.35)
-                        } else if queued {
-                            th::blend(th::accent_dim(), th::bg_hover(), 0.42)
-                        } else if pending_mute.is_some() {
-                            th::blend(th::accent_dim(), color, 0.24)
-                        } else if muted {
-                            th::blend(th::mute_active(), color, 0.28)
-                        } else if selected {
-                            th::bg_hover()
-                        } else {
-                            th::perform_pad_highlight()
-                        },
-                    )
-                    .add_stop(1.0, th::perform_pad_lowlight())
-                    .into(),
-            ),
-            border: iced::Border {
-                color: if record_target {
-                    th::danger()
-                } else if pressed || playing {
-                    th::accent()
-                } else if queued || selected {
-                    th::accent_dim()
-                } else if pending_mute.is_some() {
-                    th::accent()
-                } else if muted {
-                    th::mute_active()
-                } else {
-                    th::blend(th::border_light(), color, 0.38)
+            .height(Length::Fill)
+            .into()
+        };
+        let pad_face = container(face)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(if small { 2 } else { 8 })
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(
+                    iced::gradient::Linear::new(2.35)
+                        .add_stop(
+                            0.0,
+                            if record_target {
+                                th::blend(th::danger(), color, 0.2)
+                            } else if pressed || playing {
+                                th::blend(th::accent_dim(), color, 0.35)
+                            } else if queued {
+                                th::blend(th::accent_dim(), th::bg_hover(), 0.42)
+                            } else if pending_mute.is_some() {
+                                th::blend(th::accent_dim(), color, 0.24)
+                            } else if muted {
+                                th::blend(th::mute_active(), color, 0.28)
+                            } else if selected {
+                                th::bg_hover()
+                            } else {
+                                th::perform_pad_highlight()
+                            },
+                        )
+                        .add_stop(1.0, th::perform_pad_lowlight())
+                        .into(),
+                ),
+                border: iced::Border {
+                    color: if record_target {
+                        th::danger()
+                    } else if pressed || playing {
+                        th::accent()
+                    } else if queued || selected {
+                        th::accent_dim()
+                    } else if pending_mute.is_some() {
+                        th::accent()
+                    } else if muted {
+                        th::mute_active()
+                    } else {
+                        th::blend(th::border_light(), color, 0.38)
+                    },
+                    width: 1.0,
+                    radius: 5.0.into(),
                 },
-                width: 1.0,
-                radius: 5.0.into(),
-            },
-            ..Default::default()
-        });
+                ..Default::default()
+            });
 
         let pad: Element<'_, Message> = container(pad_face)
             .width(Length::FillPortion(1))

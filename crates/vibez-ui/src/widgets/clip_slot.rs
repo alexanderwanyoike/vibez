@@ -17,12 +17,16 @@ pub struct ClipSlot<'a> {
     pub color: Color,
     pub key: &'a str,
     pub selected: bool,
+    pub playing: bool,
+    pub progress: Option<f32>,
+    pub queued: bool,
     pub compact: bool,
 }
 
 #[derive(Default)]
 pub struct ClipSlotState {
     cache: canvas::Cache,
+    double_click: crate::widgets::double_click::DoubleClick,
     fingerprint: Cell<u64>,
     source: RefCell<Option<Arc<crate::state::ArrangementTimeline>>>,
 }
@@ -83,6 +87,47 @@ fn preview_onsets(
 impl canvas::Program<Message> for ClipSlot<'_> {
     type State = ClipSlotState;
 
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> (canvas::event::Status, Option<Message>) {
+        if matches!(
+            event,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        ) {
+            if let Some(point) = cursor
+                .position_in(bounds)
+                .filter(|point| point.y < 25.0 && point.x < bounds.width - 28.0)
+            {
+                if let Some(clip) = self.clip {
+                    if state.double_click.press(
+                        std::time::Instant::now(),
+                        point,
+                        std::time::Duration::from_millis(300),
+                        Some(5.0),
+                    ) {
+                        state.double_click.clear();
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(
+                                crate::domains::view::ViewMsg::StartEditingClipName(
+                                    clip.track_id,
+                                    clip.id,
+                                ),
+                            )),
+                        );
+                    }
+                }
+            } else {
+                state.double_click.clear();
+            }
+        }
+        (canvas::event::Status::Ignored, None)
+    }
+
     fn draw(
         &self,
         state: &Self::State,
@@ -97,7 +142,15 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             .map(|c| Arc::as_ptr(&c.timeline) as usize)
             .hash(&mut hash);
         self.key.hash(&mut hash);
-        (self.selected, self.compact, hovered, th::epoch()).hash(&mut hash);
+        (
+            self.selected,
+            self.compact,
+            self.playing,
+            self.queued,
+            hovered,
+            th::epoch(),
+        )
+            .hash(&mut hash);
         for component in [self.color.r, self.color.g, self.color.b, self.color.a] {
             component.to_bits().hash(&mut hash);
         }
@@ -108,7 +161,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             // an allocator-reused address from keeping stale thumbnail geometry.
             *state.source.borrow_mut() = self.clip.map(|clip| Arc::clone(&clip.timeline));
         }
-        vec![state.cache.draw(renderer, bounds.size(), |frame| {
+        let mut geometry = vec![state.cache.draw(renderer, bounds.size(), |frame| {
             let w = frame.width();
             let h = frame.height();
             if w < 8.0 || h < 8.0 {
@@ -138,7 +191,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 th::display_bg()
             };
             frame.fill_rectangle(Point::ORIGIN, Size::new(w, h), paper);
-            frame.fill_rectangle(Point::ORIGIN, Size::new(w, 2.0), self.color);
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                Size::new(w, if self.playing { 4.0 } else { 2.0 }),
+                self.color,
+            );
             if self.selected {
                 let edge =
                     canvas::Path::rectangle(Point::new(1.0, 1.0), Size::new(w - 2.0, h - 2.0));
@@ -271,7 +328,114 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             } else if !tight {
                 label(frame, "MEDIA UNAVAILABLE", plot.x, plot.y, 9.0, ink, true);
             }
-        })]
+        })];
+        if self.progress.is_some() || self.queued {
+            let mut overlay = canvas::Frame::new(renderer, bounds.size());
+            if let Some(progress) = self.progress {
+                overlay.fill_rectangle(
+                    Point::new(0.0, bounds.height - 2.0),
+                    Size::new(bounds.width * progress.clamp(0.0, 1.0), 2.0),
+                    self.color,
+                );
+            }
+            if !self.compact {
+                let x = (bounds.width - 54.0).max(0.0);
+                overlay.fill_rectangle(
+                    Point::new(x, bounds.height - 15.0),
+                    Size::new(54.0, 13.0),
+                    th::display_bg(),
+                );
+                label(
+                    &mut overlay,
+                    if self.queued { "QUEUED" } else { "PLAY" },
+                    x + 5.0,
+                    bounds.height - 14.0,
+                    8.0,
+                    if self.queued { th::text() } else { self.color },
+                    true,
+                );
+            } else if self.queued {
+                overlay.fill_rectangle(Point::ORIGIN, Size::new(bounds.width, 2.0), th::text());
+            }
+            geometry.push(overlay.into_geometry());
+        }
+        geometry
+    }
+}
+
+pub struct LauncherTrackName<'a> {
+    pub track_id: vibez_core::id::TrackId,
+    pub name: &'a str,
+    pub color: Color,
+}
+
+impl canvas::Program<Message> for LauncherTrackName<'_> {
+    type State = crate::widgets::double_click::DoubleClick;
+    fn draw(
+        &self,
+        _: &Self::State,
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        label(
+            &mut frame,
+            &fit(self.name, bounds.width, 13.0),
+            0.0,
+            0.0,
+            13.0,
+            self.color,
+            false,
+        );
+        vec![frame.into_geometry()]
+    }
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> (canvas::event::Status, Option<Message>) {
+        if matches!(
+            event,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        ) {
+            if let Some(point) = cursor.position_in(bounds) {
+                if state.press(
+                    std::time::Instant::now(),
+                    point,
+                    std::time::Duration::from_millis(300),
+                    Some(5.0),
+                ) {
+                    state.clear();
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::View(
+                            crate::domains::view::ViewMsg::StartEditingTrackName {
+                                track_id: self.track_id,
+                                name: self.name.into(),
+                            },
+                        )),
+                    );
+                }
+                return (canvas::event::Status::Captured, None);
+            }
+        }
+        (canvas::event::Status::Ignored, None)
+    }
+    fn mouse_interaction(
+        &self,
+        _: &Self::State,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if cursor.is_over(bounds) {
+            mouse::Interaction::Text
+        } else {
+            mouse::Interaction::default()
+        }
     }
 }
 
@@ -294,5 +458,28 @@ mod tests {
         assert_eq!(preview_onsets(timeline, 1.5, 64), vec![0.5, 2.5]);
         let once = BeatClipTimeline::new(1.0, 0.0, 2.0, 4.0, false);
         assert!(preview_onsets(once, 0.5, 64).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    use iced::widget::canvas::Program;
+    #[test]
+    fn a_track_name_needs_two_clicks_to_start_editing() {
+        let track_id = vibez_core::id::TrackId::new();
+        let name = LauncherTrackName {
+            track_id,
+            name: "Bass",
+            color: Color::WHITE,
+        };
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(120.0, 20.0));
+        let cursor = mouse::Cursor::Available(Point::new(10.0, 10.0));
+        let mut state = Default::default();
+        let click = || canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        assert!(name.update(&mut state, click(), bounds, cursor).1.is_none());
+        assert!(
+            matches!(name.update(&mut state, click(), bounds, cursor).1, Some(Message::View(crate::domains::view::ViewMsg::StartEditingTrackName { track_id: id, .. })) if id == track_id)
+        );
     }
 }

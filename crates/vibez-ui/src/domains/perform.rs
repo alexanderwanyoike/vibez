@@ -21,10 +21,10 @@ mod instrument;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
-pub use clip_launcher::{ClipEditor, ClipMsg, ClipStore, LauncherClip};
+pub use clip_launcher::{ClipEditor, ClipLaunchRequest, ClipMsg, ClipStore, LauncherClip};
 mod track_mutes;
 pub use capture::{
-    CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedSectionSource,
+    CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedTimelineSource,
     MaterializedCapture,
 };
 pub use input_mapping::{ComputerKey, PerformInputMapping};
@@ -331,6 +331,7 @@ pub struct PerformAction {
     pub track_swing_request: Option<TrackSwingRequest>,
     pub select_project_track: Option<TrackId>,
     pub section_launch: Option<SectionId>,
+    pub clip_launch: Option<clip_launcher::ClipLaunchRequest>,
     pub section_content_changed: Option<SectionId>,
     pub capture: Option<CaptureAction>,
     pub section_record: Option<SectionRecordAction>,
@@ -868,6 +869,21 @@ impl PerformState {
                     track_mute_request,
                     track_swing_request: None,
                     select_project_track: selected_instrument_target,
+                    clip_launch: if self.layout == vibez_project::PerformLayout::Clips
+                        && self.mode == PerformMode::Sections
+                    {
+                        ctx.project_tracks
+                            .get(self.clip_editor.first_track + position.column as usize)
+                            .and_then(|track| {
+                                self.clips.at(
+                                    track.id,
+                                    self.clip_editor.first_row + u32::from(position.row),
+                                )
+                            })
+                            .map(|clip| clip_launcher::ClipLaunchRequest::Clip(clip.id))
+                    } else {
+                        None
+                    },
                     section_launch,
                     section_content_changed: None,
                     capture: None,

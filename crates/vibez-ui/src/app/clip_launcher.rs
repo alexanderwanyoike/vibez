@@ -80,3 +80,92 @@ impl App {
         self.schedule_auto_detect_clip_transients(TimelineLocation::LauncherClip(id), track_id, id)
     }
 }
+
+impl App {
+    pub(super) fn launch_clips(&mut self, request: crate::domains::perform::ClipLaunchRequest) {
+        use crate::domains::perform::ClipLaunchRequest;
+        use vibez_engine::{commands::EngineCommand, playback_source::PreparedClipPlayback};
+        if self.state.perform.layout != PerformLayout::Clips {
+            return;
+        }
+        let targets: Vec<_> = match request {
+            ClipLaunchRequest::Clip(id) => self
+                .state
+                .perform
+                .clips
+                .by_id(id)
+                .map(|clip| vec![(clip.track_id, Some(clip.clone()))])
+                .unwrap_or_default(),
+            ClipLaunchRequest::Stop(track_id) => vec![(track_id, None)],
+            ClipLaunchRequest::Row(row) => self
+                .state
+                .project_tracks
+                .tracks
+                .iter()
+                .map(|track| {
+                    (
+                        track.id,
+                        self.state.perform.clips.at(track.id, row).cloned(),
+                    )
+                })
+                .collect(),
+            ClipLaunchRequest::StopAll => self
+                .state
+                .project_tracks
+                .tracks
+                .iter()
+                .map(|track| (track.id, None))
+                .collect(),
+        };
+        if !self.state.perform.clip_editor.running && targets.iter().all(|(_, clip)| clip.is_none())
+        {
+            return;
+        }
+        if targets
+            .iter()
+            .filter_map(|(_, clip)| clip.as_ref())
+            .any(|clip| {
+                clip.timeline.get(clip.track_id).is_some_and(|content| {
+                    content
+                        .clips
+                        .iter()
+                        .any(|audio| audio.audio.num_frames() == 0)
+                })
+            })
+        {
+            self.state.status_text = "Clip media is not ready".into();
+            return;
+        }
+        let samples_per_beat =
+            self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+        let mut prepared = Vec::new();
+        for (track_id, clip) in targets {
+            self.state.perform.clip_editor.next_request += 1;
+            let request_id = self.state.perform.clip_editor.next_request;
+            if let Some(clip) = clip {
+                prepared.push(clip.prepare(request_id, samples_per_beat));
+                self.state
+                    .perform
+                    .clip_editor
+                    .pending
+                    .insert(request_id, clip);
+            } else {
+                prepared.push(Box::new(PreparedClipPlayback {
+                    track_id,
+                    clip_id: None,
+                    request_id,
+                    length_samples: 1,
+                    looping: false,
+                    source: Box::default(),
+                }));
+            }
+        }
+        if !prepared.is_empty() {
+            self.state.perform.clip_editor.running = true;
+            self.send_command(EngineCommand::QueueClips {
+                clips: prepared,
+                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+            });
+        }
+    }
+}

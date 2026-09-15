@@ -68,6 +68,24 @@ pub enum EngineEvent {
 
     /// Monotonic, zero-based time for the current Perform session.
     PerformancePosition(u64),
+    ClipQueued {
+        track_id: TrackId,
+        clip_id: Option<vibez_core::id::ClipId>,
+    },
+    ClipTransitioned {
+        track_id: TrackId,
+        clip_id: Option<vibez_core::id::ClipId>,
+        request_id: u64,
+        effective_at_samples: u64,
+        retired: Option<Box<crate::playback_source::PreparedClipPlayback>>,
+    },
+    ClipRequestRetired(Box<crate::playback_source::PreparedClipPlayback>),
+    ClipBatchRetired(Vec<Box<crate::playback_source::PreparedClipPlayback>>),
+    ClipCaptureSource {
+        track_id: TrackId,
+        position: u64,
+        effective_at_samples: u64,
+    },
 
     /// Peak and RMS meter readings for the most recent audio buffer.
     Metering {
@@ -107,7 +125,9 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
     /// A second Pad Gesture cancelled the pending Track Mute.
-    TrackMuteQueueCancelled { track_id: TrackId },
+    TrackMuteQueueCancelled {
+        track_id: TrackId,
+    },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
     AutomationOverrideChanged {
@@ -187,7 +207,9 @@ pub enum EngineEvent {
     },
 
     /// Capture into Arrange stopped on this exact engine boundary.
-    PerformanceCaptureStopped { effective_at_samples: u64 },
+    PerformanceCaptureStopped {
+        effective_at_samples: u64,
+    },
 
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.

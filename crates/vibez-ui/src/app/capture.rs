@@ -40,6 +40,10 @@ impl App {
                         .iter()
                         .map(|track| (track.id, track.mute)),
                 );
+                if self.state.perform.layout == vibez_project::PerformLayout::Clips {
+                    self.state.perform.clip_editor.running = true;
+                    self.send_command(EngineCommand::BeginClipPerformance);
+                }
                 self.send_command(EngineCommand::StartPerformanceCapture);
                 self.state.status_text = "Starting Capture into Arrange…".into();
             }
@@ -48,7 +52,7 @@ impl App {
                 // Transport Stop publishes the Capture boundary first, then
                 // stops Section playback in the same audio callback.
                 self.send_command(capture_stop_command());
-                self.state.status_text = "Stopping Capture and Section playback…".into();
+                self.state.status_text = "Stopping Capture and playback…".into();
             }
         }
         Task::none()
@@ -191,7 +195,7 @@ impl App {
     pub(super) fn finish_performance_capture(&mut self, completed: Option<CompletedCapture>) {
         let Some(completed) = completed else {
             self.discard_capture_transaction();
-            self.state.status_text = "Capture stopped · no Section content recorded".into();
+            self.state.status_text = "Capture stopped · no performance content recorded".into();
             return;
         };
         let materialized = completed.materialize();
@@ -199,7 +203,7 @@ impl App {
             && !capture_replaces_existing_content(&self.state.arrangement.timeline, &materialized)
         {
             self.discard_capture_transaction();
-            self.state.status_text = "Capture stopped · no Section content recorded".into();
+            self.state.status_text = "Capture stopped · no performance content recorded".into();
             return;
         }
         for (track_id, muted) in &materialized.pre_capture_mutes {

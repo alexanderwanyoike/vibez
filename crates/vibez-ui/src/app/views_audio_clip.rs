@@ -16,7 +16,6 @@ use crate::widgets::on_blur::on_blur;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipGainDb, ClipTranspose};
 
-use super::views_detail::resolved_detail_playhead_samples;
 use super::*;
 
 fn audio_clip_value_input_style(
@@ -50,13 +49,7 @@ impl App {
         clip: &UiClip,
         track_color: Color,
     ) -> Element<'_, Message> {
-        let playhead_samples = resolved_detail_playhead_samples(
-            self.state.view.workspace == crate::state::Workspace::Perform,
-            self.state.perform.selected_section,
-            self.state.perform.playing_section,
-            self.state.transport.position_samples,
-            self.state.perform.section_playhead_samples,
-        );
+        let playhead_samples = self.detail_playhead_samples();
         let playhead_normalized = playhead_samples
             .filter(|playhead| {
                 clip.duration > 0

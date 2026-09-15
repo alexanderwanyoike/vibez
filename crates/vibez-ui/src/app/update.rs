@@ -170,6 +170,15 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                if self.state.view.workspace == crate::state::Workspace::Perform
+                    && self.state.perform.layout == vibez_project::PerformLayout::Clips
+                    && !self.state.transport.playing
+                    && matches!(msg, crate::domains::transport::TransportMsg::TogglePlayback)
+                {
+                    self.state.perform.clip_editor.running = true;
+                    self.send_command(vibez_engine::commands::EngineCommand::BeginClipPerformance);
+                    return Task::none();
+                }
                 if self.place_focused_section_playhead(&msg) {
                     return Task::none();
                 }
@@ -183,7 +192,8 @@ impl App {
                     self.end_capture_automation_gesture();
                     self.section_residency_request.cancel();
                 }
-                let perform_playback_active = self.state.perform.playing_section.is_some()
+                let perform_playback_active = self.state.perform.clip_editor.running
+                    || self.state.perform.playing_section.is_some()
                     || self.state.perform.queued_section.is_some()
                     || self.state.perform.section_record.is_active();
                 let ctx = crate::domains::transport::TransportCtx {
