@@ -102,8 +102,44 @@ fn perform_bank_button(
 }
 
 impl App {
+    fn perform_pad_grid_size(&self, surface_width: f32) -> f32 {
+        let mode = self.state.perform.mode;
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
+        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
+            - if mode == PerformMode::Instrument {
+                82.0
+            } else {
+                0.0
+            };
+        let rail_width = if mode == PerformMode::Instrument {
+            (surface_width * 0.3).clamp(154.0, 176.0) + 10.0
+        } else {
+            0.0
+        };
+        if clip_layout {
+            pad_grid_height
+                .min(
+                    (self.state.view.window_height - self.effective_detail_height() - 274.0)
+                        .max(112.0),
+                )
+                .min((surface_width - 28.0 - rail_width).max(1.0))
+        } else {
+            pad_grid_height
+        }
+    }
+
+    pub(super) fn clip_pad_surface_width(&self, available_width: f32) -> f32 {
+        let rail_width = if self.state.perform.mode == PerformMode::Instrument {
+            (available_width * 0.3).clamp(154.0, 176.0) + 10.0
+        } else {
+            0.0
+        };
+        available_width.min(self.perform_pad_grid_size(available_width) + rail_width + 28.0)
+    }
+
     pub(super) fn view_pad_surface(&self, surface_width: f32) -> Element<'_, Message> {
         let mode = self.state.perform.mode;
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
         let heading = column![
             text("PERFORM SURFACE")
                 .font(PERFORM_LABEL)
@@ -141,19 +177,67 @@ impl App {
                 "ORDER BOTTOM-LEFT".to_string(),
             ),
         };
-        let header: Element<'_, Message> = if self.state.view.window_height < 800.0 {
-            row![
+        let mute_quantization = || {
+            pick_list(
+                TrackMuteQuantization::ALL
+                    .into_iter()
+                    .filter(|value| !clip_layout || *value != TrackMuteQuantization::EndOfSection)
+                    .collect::<Vec<_>>(),
+                Some(self.state.perform.track_mute_quantization()),
+                |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
+            )
+            .width(126)
+            .padding([4, 7])
+            .text_size(9)
+        };
+        let header: Element<'_, Message> = if clip_layout {
+            let mut title = row![
                 text(mode.label().to_uppercase())
                     .font(PERFORM_LABEL)
                     .size(11)
                     .color(th::text()),
                 horizontal_space(),
-                text(format!("BANK {bank}"))
+            ]
+            .spacing(5)
+            .align_y(iced::Alignment::Center);
+            if mode == PerformMode::TrackMutes {
+                title = title
+                    .push(
+                        text(format!("BANK {bank}"))
+                            .font(PERFORM_TECH)
+                            .size(9)
+                            .color(th::text_dim()),
+                    )
+                    .push(perform_bank_button(
+                        "‹",
+                        "PREVIOUS BANK  [",
+                        PerformMsg::PreviousBank,
+                    ))
+                    .push(perform_bank_button(
+                        "›",
+                        "NEXT BANK  ]",
+                        PerformMsg::NextBank,
+                    ));
+            }
+            let detail: Element<'_, Message> = if mode == PerformMode::TrackMutes {
+                row![
+                    text("MUTE")
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(th::text_dim()),
+                    mute_quantization(),
+                ]
+                .spacing(7)
+                .align_y(iced::Alignment::Center)
+                .into()
+            } else {
+                text("HOLD SHIFT FOR TARGETS")
                     .font(PERFORM_TECH)
                     .size(9)
                     .color(th::text_dim())
-            ]
-            .into()
+                    .into()
+            };
+            column![title, detail].spacing(8).into()
         } else if mode == PerformMode::Instrument {
             row![
                 heading,
@@ -173,32 +257,14 @@ impl App {
                     .color(th::blend(th::text_dim(), th::text(), 0.24)),
                 perform_bank_button("‹", "PREVIOUS BANK  [", PerformMsg::PreviousBank),
                 perform_bank_button("›", "NEXT BANK  ]", PerformMsg::NextBank),
-                text(if mode == PerformMode::TrackMutes {
-                    String::new()
-                } else {
-                    format!("· {origin}")
-                })
-                .font(PERFORM_TECH)
-                .size(9)
-                .color(th::blend(th::text_dim(), th::text(), 0.24)),
+                text(format!("· {origin}"))
+                    .font(PERFORM_TECH)
+                    .size(9)
+                    .color(th::blend(th::text_dim(), th::text(), 0.24)),
             ]
             .spacing(5)
             .align_y(iced::Alignment::Center);
             if mode == PerformMode::TrackMutes {
-                let quantization = pick_list(
-                    TrackMuteQuantization::ALL
-                        .into_iter()
-                        .filter(|value| {
-                            self.state.perform.layout != vibez_project::PerformLayout::Clips
-                                || *value != TrackMuteQuantization::EndOfSection
-                        })
-                        .collect::<Vec<_>>(),
-                    Some(self.state.perform.track_mute_quantization()),
-                    |value| Message::Perform(PerformMsg::SetTrackMuteQuantization(value)),
-                )
-                .width(Length::Fixed(126.0))
-                .padding([4, 7])
-                .text_size(9);
                 row![
                     heading,
                     horizontal_space(),
@@ -206,7 +272,7 @@ impl App {
                         .font(PERFORM_TECH)
                         .size(9)
                         .color(th::text_dim()),
-                    quantization,
+                    mute_quantization(),
                     bank_navigation
                 ]
                 .spacing(7)
@@ -219,24 +285,13 @@ impl App {
             }
         };
 
-        let pad_grid_height = perform_pad_grid_height(self.state.view.window_height)
-            - if mode == PerformMode::Instrument {
-                82.0
-            } else {
-                0.0
-            };
-        let rail_width = if mode == PerformMode::Instrument {
-            (surface_width * 0.3).clamp(154.0, 176.0) + 10.0
-        } else {
-            0.0
-        };
-        let pad_grid_height = pad_grid_height
-            .min(
-                (self.state.view.window_height - self.effective_detail_height() - 274.0).max(112.0),
-            )
-            .min((surface_width - 28.0 - rail_width).max(1.0));
+        let pad_grid_height = self.perform_pad_grid_size(surface_width);
         let mut grid = column![]
-            .width(Length::Fixed(pad_grid_height))
+            .width(if clip_layout {
+                Length::Fixed(pad_grid_height)
+            } else {
+                Length::Fill
+            })
             .height(Length::Fixed(pad_grid_height))
             .spacing(8);
         for row_index in 0..4 {
@@ -263,20 +318,29 @@ impl App {
 
         let content = if mode == PerformMode::Instrument {
             let rail_width = (surface_width * 0.3).clamp(154.0, 176.0);
-            column![
-                header,
-                row![
-                    grid,
-                    iced::widget::scrollable(
-                        self.view_instrument_control_rail(bank, pad_grid_height.max(320.0))
-                            .width(Length::Fixed(rail_width - 8.0))
-                    )
+            let controls = self
+                .view_instrument_control_rail(
+                    bank,
+                    if clip_layout {
+                        pad_grid_height.max(320.0)
+                    } else {
+                        pad_grid_height
+                    },
+                )
+                .width(Length::Fixed(if clip_layout {
+                    rail_width - 8.0
+                } else {
+                    rail_width
+                }));
+            let rail: Element<'_, Message> = if clip_layout {
+                iced::widget::scrollable(controls)
                     .height(Length::Fixed(pad_grid_height))
                     .width(Length::Fixed(rail_width))
-                ]
-                .spacing(10)
-            ]
-            .spacing(12)
+                    .into()
+            } else {
+                controls.into()
+            };
+            column![header, row![grid, rail].spacing(10)].spacing(12)
         } else {
             column![header, grid].spacing(12)
         };
@@ -491,11 +555,12 @@ impl App {
         let number_color = th::blend(color, th::text(), 0.3);
         let coordinate_color = th::blend(th::text_dim(), th::text(), 0.2);
 
-        let small = pad_size < 60.0;
+        let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
+        let small = clip_layout && pad_size < 60.0;
         let title_size = if small { 9.0 } else { 13.0 };
         let title_limit =
             ((pad_size - if small { 4.0 } else { 16.0 }) / (title_size * 0.62)).max(2.0) as usize;
-        let title = if title.chars().count() > title_limit {
+        let title = if clip_layout && title.chars().count() > title_limit {
             format!(
                 "{}…",
                 title.chars().take(title_limit - 1).collect::<String>()

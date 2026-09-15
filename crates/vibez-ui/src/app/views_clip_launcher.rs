@@ -153,32 +153,47 @@ impl App {
 
     pub(super) fn view_clip_perform(&self) -> Element<'_, Message> {
         let width = self.perform_workspace_width();
+        let content = if self.state.perform.mode == PerformMode::Sections {
+            self.view_clip_grid(width)
+        } else {
+            let dock_width = width.max(900.0);
+            let pad_width = super::views_perform::effective_perform_surface_width(
+                self.state.view.perform_surface_width,
+                dock_width,
+            );
+            let pad_width = self.clip_pad_surface_width(pad_width);
+            let grid_width =
+                dock_width - pad_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH;
+            scrollable::Scrollable::with_direction(
+                row![
+                    self.view_pad_surface(pad_width),
+                    self.view_perform_surface_splitter(),
+                    container(self.view_clip_grid(grid_width)).width(grid_width),
+                ]
+                .width(dock_width)
+                .height(Length::Fill),
+                scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        };
+        container(column![self.view_perform_mode_selector(width), content])
+            .width(Length::Fill)
+            .height(Length::FillPortion(5))
+            .style(surface)
+            .into()
+    }
+
+    fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
+        let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
         let slot_height = if compact {
             ((self.state.view.window_height - 480.0) / 5.0).clamp(26.0, 72.0)
         } else {
             (64.0 + (self.state.view.window_height - 800.0) * 0.08).min(80.0)
         };
-        let mut workspace = column![self.view_perform_mode_selector(width)].spacing(0);
-        if self.state.perform.mode != PerformMode::Sections {
-            let pad_width = width.min(
-                super::views_perform::perform_pad_grid_height(self.state.view.window_height)
-                    + if self.state.perform.mode == PerformMode::Instrument {
-                        214.0
-                    } else {
-                        28.0
-                    },
-            );
-            return container(
-                workspace
-                    .push(container(self.view_clip_capture_button()).padding([5, 12]))
-                    .push(center(self.view_pad_surface(pad_width)).height(Length::Fill)),
-            )
-            .width(Length::Fill)
-            .height(Length::FillPortion(5))
-            .style(surface)
-            .into();
-        }
+        let mut workspace = column![];
         let move_window = |label: &'static str, tracks, rows| {
             button(text(label).font(PERFORM_TECH).size(12))
                 .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::MoveWindow {
@@ -188,7 +203,7 @@ impl App {
                 .padding([6, 10])
                 .style(|_theme, status| choice_style(false, status))
         };
-        let toolbar = row![
+        let heading = row![
             text(if width < 780.0 { "" } else { "CLIPS" })
                 .font(PERFORM_LABEL)
                 .size(11)
@@ -203,6 +218,10 @@ impl App {
             .size(9)
             .color(th::text_dim()),
             horizontal_space(),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+        let actions = row![
             button(text("+ Audio").size(11))
                 .padding([6, 10])
                 .style(|_theme, status| choice_style(false, status))
@@ -222,6 +241,14 @@ impl App {
         ]
         .spacing(6)
         .align_y(iced::Alignment::Center);
+        let toolbar: Element<'_, Message> = if width < 600.0 {
+            column![heading, actions].spacing(6).into()
+        } else {
+            row![heading, actions]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
         workspace = workspace.push(container(toolbar).padding([if compact { 4 } else { 10 }, 12]));
         if self.state.project_tracks.tracks.is_empty() {
             workspace = workspace.push(
@@ -315,7 +342,7 @@ impl App {
                         self.state.perform.clip_editor.selected == Some(clip.id)
                     });
                     let in_window = column_index < 4 && offset < 4;
-                    let key = if in_window {
+                    let key = if keyboard_active && in_window {
                         self.state
                             .perform
                             .input_mapping
@@ -434,10 +461,14 @@ impl App {
             );
         }
         let mut footer = row![
-            text("Keys launch · Shift + key stops · Alt + key launches row · F5 Capture")
-                .font(PERFORM_TECH)
-                .size(10)
-                .color(th::text_dim()),
+            text(if keyboard_active {
+                "Keys launch · Shift + key stops · Alt + key launches row · F5 Capture"
+            } else {
+                "F1 Clips · Double-click names to edit"
+            })
+            .font(PERFORM_TECH)
+            .size(10)
+            .color(th::text_dim()),
             horizontal_space()
         ]
         .spacing(8)
@@ -453,8 +484,7 @@ impl App {
         workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
         container(workspace)
             .width(Length::Fill)
-            .height(Length::FillPortion(5))
-            .style(surface)
+            .height(Length::Fill)
             .into()
     }
 }

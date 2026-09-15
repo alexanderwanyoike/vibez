@@ -359,8 +359,11 @@ Keyboard badges identify the controller window without outlining every slot.
 Track and Clip names edit in place on double-click. Arrow keys remain grid
 navigation while the piano roll is open. Playing Clips
 show a progress line in the grid and their shared Audio/MIDI inspector.
-Instrument and Track Mutes retain square pads constrained by the available
-workspace height, including when the Browser or detail panel is open.
+In Clip Projects, Instrument and Track Mutes dock square pads on the left and
+reuse the Clip grid beside them, with the existing draggable Perform divider.
+The grid shows the playing combination while keyboard badges stay on the active
+controller surface. Narrow workspaces scroll the dock horizontally. Section
+Projects retain their existing pad sizing and construction layout.
 Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
 and operations that create multitrack or multi-clip slot content are deferred;
 the current router rejects those operations to preserve one part per slot.
