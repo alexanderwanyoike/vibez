@@ -39,6 +39,11 @@ pub enum EngineCommand {
     SetProjectSwing(SwingAmount),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
+    QueueClips {
+        clips: Vec<Box<crate::playback_source::PreparedClipPlayback>>,
+        quantization: vibez_core::perform::MusicalBoundary,
+    },
+    BeginClipPerformance,
     /// Queue a complete resident Section for an engine-owned musical boundary.
     QueueSection {
         prepared: Box<PreparedSectionPlaybackSource>,

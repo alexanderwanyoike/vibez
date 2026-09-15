@@ -82,6 +82,10 @@ impl AudioEngine {
             return;
         }
 
+        if self.clip_performance {
+            self.process_clip_multitrack(output, frames, channels);
+            return;
+        }
         if self.active_section.is_some() {
             if frames > 0 {
                 self.start_section_record_if_due(
@@ -232,6 +236,13 @@ impl AudioEngine {
 
         for track_idx in 0..self.tracks.len() {
             let track = &mut self.tracks[track_idx];
+            let pos = if self.clip_performance {
+                track
+                    .active_clip
+                    .map_or(0, |clip| clip.position.saturating_add(pos))
+            } else {
+                pos
+            };
 
             // A soloed return still needs every source to render its
             // sends. Without a return solo, preserve normal track

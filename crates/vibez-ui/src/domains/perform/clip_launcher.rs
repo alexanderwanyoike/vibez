@@ -1,5 +1,6 @@
 //! Clip Projects own independent grid slots and a shared-editor selection.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
@@ -55,6 +56,12 @@ impl ClipStore {
 
 #[derive(Debug, Default)]
 pub struct ClipEditor {
+    pub pending: HashMap<u64, LauncherClip>,
+    pub playing: HashMap<TrackId, LauncherClip>,
+    pub queued: HashMap<TrackId, Option<ClipId>>,
+    pub next_request: u64,
+    pub running: bool,
+    pub started_at: HashMap<TrackId, u64>,
     pub selected: Option<ClipId>,
     pub editor: TimelineEditorState,
     pub first_track: usize,
@@ -63,11 +70,24 @@ pub struct ClipEditor {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipMsg {
+    Launch(ClipId),
+    StopTrack(TrackId),
+    LaunchRow(u32),
+    StopAll,
+
     CreateMidi { track_id: TrackId, row: u32 },
     Select(ClipId),
     Delete(ClipId),
     Duplicate(ClipId),
     MoveWindow { tracks: i32, rows: i32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClipLaunchRequest {
+    Clip(ClipId),
+    Stop(TrackId),
+    Row(u32),
+    StopAll,
 }
 
 impl ClipMsg {
@@ -142,6 +162,30 @@ impl PerformState {
         }
         let mut selected = None;
         match msg {
+            ClipMsg::Launch(id) => {
+                return PerformAction {
+                    clip_launch: Some(ClipLaunchRequest::Clip(id)),
+                    ..Default::default()
+                }
+            }
+            ClipMsg::StopTrack(id) => {
+                return PerformAction {
+                    clip_launch: Some(ClipLaunchRequest::Stop(id)),
+                    ..Default::default()
+                }
+            }
+            ClipMsg::LaunchRow(row) => {
+                return PerformAction {
+                    clip_launch: Some(ClipLaunchRequest::Row(row)),
+                    ..Default::default()
+                }
+            }
+            ClipMsg::StopAll => {
+                return PerformAction {
+                    clip_launch: Some(ClipLaunchRequest::StopAll),
+                    ..Default::default()
+                }
+            }
             ClipMsg::Select(id) => selected = self.select_launcher_clip(id),
             ClipMsg::CreateMidi { track_id, row } => {
                 if self.clips.at(track_id, row).is_some()
@@ -238,6 +282,39 @@ impl PerformState {
             focus_clip_tab: selected.is_some(),
             ..Default::default()
         }
+    }
+}
+
+impl LauncherClip {
+    pub fn length_and_loop(&self, samples_per_beat: f64) -> (u64, bool) {
+        let content = self.timeline.get(self.track_id);
+        if let Some(clip) = content.and_then(|content| content.clips.first()) {
+            (clip.duration.max(1), clip.loop_enabled)
+        } else if let Some(clip) = content.and_then(|content| content.note_clips.first()) {
+            (
+                (clip.duration_beats * samples_per_beat).round().max(1.0) as u64,
+                clip.loop_enabled,
+            )
+        } else {
+            (1, false)
+        }
+    }
+    pub fn prepare(
+        &self,
+        request_id: u64,
+        samples_per_beat: f64,
+    ) -> Box<vibez_engine::playback_source::PreparedClipPlayback> {
+        let (length_samples, looping) = self.length_and_loop(samples_per_beat);
+        Box::new(vibez_engine::playback_source::PreparedClipPlayback {
+            track_id: self.track_id,
+            clip_id: Some(self.id),
+            request_id,
+            length_samples,
+            looping,
+            source: Box::new(super::sections::prepare_track_source(
+                self.timeline.get(self.track_id),
+            )),
+        })
     }
 }
 

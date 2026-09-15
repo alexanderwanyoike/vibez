@@ -15,6 +15,10 @@ impl EngineTrack {
             id,
             playback_source: Box::new(playback_source),
             section_playback_source: Box::new(PreparedPlaybackSource::default()),
+            launcher_source: Box::default(),
+            empty_launcher_source: Box::default(),
+            active_clip: None,
+            queued_clip: None,
             gain: DEFAULT_TRACK_GAIN,
             pan: DEFAULT_TRACK_PAN,
             mute: false,
@@ -145,8 +149,15 @@ impl EngineTrack {
         target: vibez_core::automation::AutomationTarget,
         beat: f64,
         section_active: bool,
+        clips_active: bool,
     ) -> f32 {
-        let source = if section_active {
+        let source = if clips_active {
+            if self.active_clip.is_some() {
+                self.launcher_source.as_ref()
+            } else {
+                self.empty_launcher_source.as_ref()
+            }
+        } else if section_active {
             self.section_playback_source.as_ref()
         } else {
             self.playback_source.as_ref()

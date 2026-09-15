@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use vibez_engine::events::EngineEvent;
 
-use crate::domains::perform::CapturedSectionSource;
+use crate::domains::perform::CapturedTimelineSource;
 use crate::state::AuditionMode;
 
 use super::*;
@@ -90,7 +90,79 @@ impl App {
                         project_tracks.master.peak_l = self.state.peak_l;
                         project_tracks.master.peak_r = self.state.peak_r;
                     }
+                    EngineEvent::ClipQueued { track_id, clip_id } => {
+                        self.state
+                            .perform
+                            .clip_editor
+                            .queued
+                            .insert(track_id, clip_id);
+                    }
+                    EngineEvent::ClipBatchRetired(retired) => drop(retired),
+                    EngineEvent::ClipRequestRetired(retired) => {
+                        self.state
+                            .perform
+                            .clip_editor
+                            .pending
+                            .remove(&retired.request_id);
+                    }
+                    EngineEvent::ClipCaptureSource {
+                        track_id,
+                        position,
+                        effective_at_samples,
+                    } => {
+                        let spb = self.state.transport.sample_rate as f64 * 60.0
+                            / self.state.transport.bpm;
+                        let source = self
+                            .state
+                            .perform
+                            .clip_editor
+                            .playing
+                            .get(&track_id)
+                            .map(|clip| CapturedTimelineSource::from_clip(clip, spb));
+                        self.state.perform.capture.clip_transition(
+                            track_id,
+                            source,
+                            effective_at_samples,
+                            position,
+                        );
+                    }
+                    EngineEvent::ClipTransitioned {
+                        track_id,
+                        request_id,
+                        retired,
+                        effective_at_samples,
+                        ..
+                    } => {
+                        let editor = &mut self.state.perform.clip_editor;
+                        if request_id != 0 {
+                            editor.queued.remove(&track_id);
+                        }
+                        editor.started_at.insert(track_id, effective_at_samples);
+                        if let Some(clip) = editor.pending.remove(&request_id) {
+                            editor.playing.insert(track_id, clip);
+                        } else {
+                            editor.playing.remove(&track_id);
+                        }
+                        let spb = self.state.transport.sample_rate as f64 * 60.0
+                            / self.state.transport.bpm;
+                        let source = editor
+                            .playing
+                            .get(&track_id)
+                            .map(|clip| CapturedTimelineSource::from_clip(clip, spb));
+                        self.state.perform.capture.clip_transition(
+                            track_id,
+                            source,
+                            effective_at_samples,
+                            0,
+                        );
+                        drop(retired);
+                    }
                     EngineEvent::PlaybackStopped => {
+                        self.state.perform.clip_editor.running = false;
+                        self.state.perform.clip_editor.playing.clear();
+                        self.state.perform.clip_editor.started_at.clear();
+                        self.state.perform.clip_editor.queued.clear();
+                        self.state.perform.clip_editor.pending.clear();
                         self.state.transport.playing = false;
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
@@ -318,7 +390,7 @@ impl App {
                                     .sections
                                     .by_id(section_id)
                                     .map(|section| {
-                                        (CapturedSectionSource::from_section(section), position)
+                                        (CapturedTimelineSource::from_section(section), position)
                                     })
                             },
                         );
@@ -346,7 +418,7 @@ impl App {
                             .perform
                             .sections
                             .by_id(section_id)
-                            .map(CapturedSectionSource::from_section);
+                            .map(CapturedTimelineSource::from_section);
                         if let Some(source) = captured_source {
                             self.state
                                 .perform
@@ -401,7 +473,7 @@ impl App {
                                 .perform
                                 .sections
                                 .by_id(section_id)
-                                .map(CapturedSectionSource::from_section)
+                                .map(CapturedTimelineSource::from_section)
                             {
                                 self.state.perform.capture.refresh(
                                     source,

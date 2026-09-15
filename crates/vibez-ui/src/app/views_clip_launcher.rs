@@ -1,7 +1,8 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
+    stack, text, text_input,
 };
 use iced::{Element, Length, Theme};
 use vibez_project::PerformLayout;
@@ -160,11 +161,23 @@ impl App {
         };
         let mut workspace = column![self.view_perform_mode_selector(width)].spacing(0);
         if self.state.perform.mode != PerformMode::Sections {
-            return container(workspace.push(self.view_pad_surface(width)))
-                .width(Length::Fill)
-                .height(Length::FillPortion(5))
-                .style(surface)
-                .into();
+            let pad_width = width.min(
+                super::views_perform::perform_pad_grid_height(self.state.view.window_height)
+                    + if self.state.perform.mode == PerformMode::Instrument {
+                        214.0
+                    } else {
+                        28.0
+                    },
+            );
+            return container(
+                workspace
+                    .push(container(self.view_clip_capture_button()).padding([5, 12]))
+                    .push(center(self.view_pad_surface(pad_width)).height(Length::Fill)),
+            )
+            .width(Length::Fill)
+            .height(Length::FillPortion(5))
+            .style(surface)
+            .into();
         }
         let move_window = |label: &'static str, tracks, rows| {
             button(text(label).font(PERFORM_TECH).size(12))
@@ -176,11 +189,19 @@ impl App {
                 .style(|_theme, status| choice_style(false, status))
         };
         let toolbar = row![
-            text("CLIPS").font(PERFORM_LABEL).size(11).color(th::text()),
-            text(format!("{} TRACKS", self.state.project_tracks.tracks.len()))
-                .font(PERFORM_TECH)
-                .size(9)
-                .color(th::text_dim()),
+            text(if width < 780.0 { "" } else { "CLIPS" })
+                .font(PERFORM_LABEL)
+                .size(11)
+                .color(th::text()),
+            self.view_clip_capture_button(),
+            text(if width < 780.0 {
+                String::new()
+            } else {
+                format!("{} TRACKS", self.state.project_tracks.tracks.len())
+            })
+            .font(PERFORM_TECH)
+            .size(9)
+            .color(th::text_dim()),
             horizontal_space(),
             button(text("+ Audio").size(11))
                 .padding([6, 10])
@@ -190,6 +211,10 @@ impl App {
                 .padding([6, 10])
                 .style(|_theme, status| choice_style(false, status))
                 .on_press(Message::Arrangement(ArrangementMsg::AddMidiTrack)),
+            button(text(if width < 780.0 { "■" } else { "Stop clips" }).size(11))
+                .padding([6, 10])
+                .style(|_theme, status| choice_style(false, status))
+                .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::StopAll))),
             move_window("←", -4, 0),
             move_window("→", 4, 0),
             move_window("↑", 0, -4),
@@ -254,11 +279,20 @@ impl App {
                 .enumerate()
             {
                 let track_color = th::track_color(track.color_index);
-                let mut header = column![text(&track.name)
-                    .font(PERFORM_LABEL)
-                    .size(13)
-                    .color(track_color)]
-                .spacing(3);
+                let track_name: Element<'_, Message> =
+                    if self.state.view.editing_track_name == Some(track.id) {
+                        self.view_launcher_name_input()
+                    } else {
+                        canvas(crate::widgets::clip_slot::LauncherTrackName {
+                            track_id: track.id,
+                            name: &track.name,
+                            color: track_color,
+                        })
+                        .width(Length::Fill)
+                        .height(20)
+                        .into()
+                    };
+                let mut header = column![track_name].spacing(3);
                 if !compact {
                     header = header.push(
                         text(if track.kind.is_midi() {
@@ -312,6 +346,42 @@ impl App {
                             color: track_color,
                             key,
                             selected,
+                            progress: slot.and_then(|clip| {
+                                let active = self
+                                    .state
+                                    .perform
+                                    .clip_editor
+                                    .playing
+                                    .get(&track.id)
+                                    .filter(|active| active.id == clip.id)?;
+                                let start =
+                                    *self.state.perform.clip_editor.started_at.get(&track.id)?;
+                                let spb = self.state.transport.sample_rate as f64 * 60.0
+                                    / self.state.transport.bpm;
+                                let (length, looping) = active.length_and_loop(spb);
+                                let elapsed = self
+                                    .state
+                                    .perform
+                                    .performance_position_samples
+                                    .saturating_sub(start);
+                                Some(if looping {
+                                    (elapsed % length) as f32 / length as f32
+                                } else {
+                                    elapsed.min(length) as f32 / length as f32
+                                })
+                            }),
+                            playing: slot.is_some_and(|clip| {
+                                self.state
+                                    .perform
+                                    .clip_editor
+                                    .playing
+                                    .get(&track.id)
+                                    .is_some_and(|active| active.id == clip.id)
+                            }),
+                            queued: slot.is_some_and(|clip| {
+                                self.state.perform.clip_editor.queued.get(&track.id)
+                                    == Some(&Some(clip.id))
+                            }),
                             compact,
                         })
                         .width(Length::Fill)
@@ -339,6 +409,20 @@ impl App {
                     } else {
                         slot_cell.into()
                     };
+                    let cell = if slot.is_some_and(|clip| {
+                        self.state.view.editing_clip_name == Some((track.id, clip.id))
+                    }) {
+                        stack![
+                            cell,
+                            container(self.view_launcher_name_input())
+                                .padding([3, 6])
+                                .width(Length::Fill)
+                                .height(26)
+                        ]
+                        .into()
+                    } else {
+                        cell
+                    };
                     lane = lane.push(cell);
                 }
                 grid = grid.push(lane);
@@ -350,7 +434,7 @@ impl App {
             );
         }
         let mut footer = row![
-            text("Arrow keys move the keyboard window · Shift moves four slots")
+            text("Keys launch · Shift + key stops · Alt + key launches row · F5 Capture")
                 .font(PERFORM_TECH)
                 .size(10)
                 .color(th::text_dim()),
@@ -359,16 +443,6 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         if let Some(id) = self.state.perform.clip_editor.selected {
-            if let Some(clip) = self.state.perform.clips.by_id(id) {
-                footer = footer.push(
-                    button(text("Rename").size(10))
-                        .padding([5, 9])
-                        .style(|_theme, status| choice_style(false, status))
-                        .on_press(Message::View(
-                            crate::domains::view::ViewMsg::StartEditingClipName(clip.track_id, id),
-                        )),
-                );
-            }
             footer = footer.push(
                 button(text("Delete clip").size(10))
                     .padding([5, 9])
@@ -382,5 +456,42 @@ impl App {
             .height(Length::FillPortion(5))
             .style(surface)
             .into()
+    }
+}
+
+impl App {
+    fn view_launcher_name_input(&self) -> Element<'_, Message> {
+        text_input("Name", &self.state.view.edit_name_text)
+            .id("launcher-name")
+            .on_input(|name| Message::View(crate::domains::view::ViewMsg::EditNameText(name)))
+            .on_submit(Message::View(crate::domains::view::ViewMsg::FinishEditing))
+            .size(12)
+            .padding([2, 4])
+            .width(Length::Fill)
+            .into()
+    }
+
+    fn view_clip_capture_button(&self) -> Element<'_, Message> {
+        let active = self.state.perform.capture.is_active();
+        button(
+            row![
+                text(if active {
+                    "● CAPTURING"
+                } else {
+                    "○ CAPTURE"
+                })
+                .font(PERFORM_LABEL)
+                .size(10),
+                text("F5").font(PERFORM_TECH).size(9),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([6, 10])
+        .style(move |_, status| choice_style(active, status))
+        .on_press(Message::Perform(PerformMsg::Capture(
+            crate::domains::perform::CaptureMsg::Toggle,
+        )))
+        .into()
     }
 }

@@ -158,7 +158,23 @@ impl App {
         } else {
             self.state.arrangement.resolve_timeline().editor
         };
+        let focus_name = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && matches!(
+                msg,
+                ViewMsg::StartEditingClipName(..) | ViewMsg::StartEditingTrackName { .. }
+            );
         let action = self.state.view.update(msg, editor, ctx);
-        self.apply_view_action(action)
+        let task = self.apply_view_action(action);
+        if focus_name {
+            let id = iced::widget::text_input::Id::new("launcher-name");
+            Task::batch([
+                task,
+                iced::widget::text_input::focus(id.clone()),
+                iced::widget::text_input::select_all(id),
+            ])
+        } else {
+            task
+        }
     }
 }

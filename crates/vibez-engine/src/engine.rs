@@ -75,6 +75,7 @@ pub struct AudioEngine {
     /// for that block (segment-2 notes are legitimately sounding).
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
+    clip_performance: bool,
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
@@ -211,6 +212,7 @@ impl AudioEngine {
             event_tx,
             split_wrap_handled: false,
             active_section: None,
+            clip_performance: false,
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
@@ -669,3 +671,10 @@ mod section_record_tests;
 #[cfg(test)]
 #[path = "engine_capture_tests.rs"]
 mod capture_tests;
+
+#[path = "engine_clip_launcher.rs"]
+mod clip_launcher;
+
+#[cfg(test)]
+#[path = "engine_clip_launcher_tests.rs"]
+mod clip_launcher_tests;

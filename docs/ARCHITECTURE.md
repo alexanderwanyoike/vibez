@@ -326,16 +326,41 @@ discovery. Clip Project containers use document version 2 inside the unchanged
 SQLite container schema. Section Projects keep document version 1. Earlier
 builds reject version 2 instead of silently discarding unfamiliar Clip data.
 
-This first slice supports project creation, grid navigation and Audio/MIDI Clip
-authoring through the existing inspectors. Independent playback, quantized
-launch/stop, row launch and Clip Capture are subsequent prototype slices. The
-keyboard window and editor selection are runtime state, not project content.
+Clip Projects support independent Audio/MIDI playback and Capture. Each engine
+Track holds its own resident Clip source, local playhead and replaceable launch
+queue. Row actions transfer one prepared batch, so every Track uses the same
+engine-owned musical boundary. The renderer splits callbacks at launch, stop
+and loop boundaries, then feeds each local source through the existing shared
+channel strip. Empty and stopped Tracks still render live instruments and
+effect tails without falling back to Arrange content. Prepared owners return
+through events for disposal on the UI thread.
+
+The 16 physical grid keys launch addressed Clips; Shift plus a grid key stops
+that Track. Alt plus any grid key launches its row across all Project Tracks,
+including columns outside the keyboard window. Empty row slots stop their
+Tracks. The prototype uses one-bar quantization; the first launch starts
+immediately, and relaunching a playing Clip restarts it at the next boundary.
+F5 toggles Capture. Space starts a silent Perform clock or stops playback and
+finishes the take. Tempo stays fixed until transport stops.
+
+Capture snapshots the exact source associated with each engine transition,
+including independent local offsets when recording starts mid-loop. Per-Track
+spans feed the existing timeline-window materializer, producing independent
+Arrange clips and preserving silence, live notes, mutes and mixer automation.
+A completed take remains one Undo transaction. This does not create or derive
+Sections. Runtime Clip playheads, queues and editor selection are not persisted.
+Source edits become audible on the next launch; an already-playing source and
+its Capture snapshot stay stable.
 Track colours identify column names and musical thumbnails. MIDI thumbnails
 use the editor's loop-aware note occurrences; audio thumbnails use the shared
 waveform peak cache. The canvas retains its source timeline so copy-on-write
 edits invalidate cached geometry, including asynchronous media hydration.
 Keyboard badges identify the controller window without outlining every slot.
-Arrow keys remain grid navigation while the piano roll is open.
+Track and Clip names edit in place on double-click. Arrow keys remain grid
+navigation while the piano roll is open. Playing Clips
+show a progress line in the grid and their shared Audio/MIDI inspector.
+Instrument and Track Mutes retain square pads constrained by the available
+workspace height, including when the Browser or detail panel is open.
 Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
 and operations that create multitrack or multi-clip slot content are deferred;
 the current router rejects those operations to preserve one part per slot.

@@ -210,3 +210,52 @@ fn duplicate_creates_an_independent_alternative_and_editor_delete_frees_the_slot
     assert!(state.clip_editor.selected.is_none());
     assert!(engine.0.is_empty());
 }
+
+#[test]
+fn keyboard_window_launches_later_tracks_without_changing_the_edit_selection_or_repeating() {
+    use super::super::{ComputerKey, PerformMode, PerformMsg};
+    let tracks = tracks(8);
+    let mut perform = PerformState {
+        layout: PerformLayout::Clips,
+        mode: PerformMode::Sections,
+        ..Default::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: None,
+    };
+    perform.update(
+        PerformMsg::Clips(ClipMsg::CreateMidi {
+            track_id: tracks[5].id,
+            row: 7,
+        }),
+        &mut engine,
+        ctx,
+    );
+    let launched = perform.clip_editor.selected.unwrap();
+    perform.update(
+        PerformMsg::Clips(ClipMsg::CreateMidi {
+            track_id: tracks[0].id,
+            row: 0,
+        }),
+        &mut engine,
+        ctx,
+    );
+    let edited = perform.clip_editor.selected;
+    perform.clip_editor.first_track = 4;
+    perform.clip_editor.first_row = 7;
+    let key = PerformMsg::ComputerKeyPressed {
+        key: ComputerKey::Digit2,
+        key_id: "2".into(),
+        occurred_at: std::time::Instant::now(),
+    };
+    assert_eq!(
+        perform.update(key.clone(), &mut engine, ctx).clip_launch,
+        Some(ClipLaunchRequest::Clip(launched))
+    );
+    assert_eq!(perform.clip_editor.selected, edited);
+    assert_eq!(perform.update(key, &mut engine, ctx).clip_launch, None);
+    assert!(engine.0.is_empty());
+}

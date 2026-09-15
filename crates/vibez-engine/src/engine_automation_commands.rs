@@ -245,15 +245,31 @@ impl AudioEngine {
             .tracks
             .iter()
             .find(|track| track.id == track_id)
-            .map(|track| track.normalized_target_value(target, beat, section_active))
+            .map(|track| {
+                track.normalized_target_value(
+                    target,
+                    if self.clip_performance {
+                        self.samples_to_automation_beat(
+                            track.active_clip.map_or(0, |clip| clip.position),
+                        )
+                    } else {
+                        beat
+                    },
+                    section_active,
+                    self.clip_performance,
+                )
+            })
             .or_else(|| {
                 if self.master.id == track_id {
-                    Some(self.master.normalized_target_value(target, beat, false))
+                    Some(
+                        self.master
+                            .normalized_target_value(target, beat, false, false),
+                    )
                 } else {
                     self.buses
                         .iter()
                         .find(|track| track.id == track_id)
-                        .map(|track| track.normalized_target_value(target, beat, false))
+                        .map(|track| track.normalized_target_value(target, beat, false, false))
                 }
             });
         self.set_automation_override(track_id, target, false);

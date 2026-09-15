@@ -28,6 +28,11 @@ impl EdgeShortcutState {
         let edge_triggered = matches!(
             message,
             Message::Arrangement(ArrangementMsg::AddTrack | ArrangementMsg::AddInstrumentTrack)
+                | Message::Perform(PerformMsg::Clips(
+                    crate::domains::perform::ClipMsg::LaunchRow(_)
+                        | crate::domains::perform::ClipMsg::StopTrack(_)
+                ))
+                | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
         );
         if !edge_triggered {
             return true;
@@ -165,9 +170,44 @@ impl super::App {
             && self.state.perform.mode == PerformMode::Sections
         {
             if let iced::keyboard::Event::KeyPressed {
-                ref key, modifiers, ..
+                ref key,
+                physical_key,
+                modifiers,
+                ..
             } = event
             {
+                let clip_action = if modifiers == iced::keyboard::Modifiers::ALT {
+                    computer_key_from_physical(physical_key)
+                        .and_then(|key| self.state.perform.input_mapping.position_for(key))
+                        .map(|position| {
+                            crate::domains::perform::ClipMsg::LaunchRow(
+                                self.state.perform.clip_editor.first_row + u32::from(position.row),
+                            )
+                        })
+                } else if modifiers == iced::keyboard::Modifiers::SHIFT {
+                    computer_key_from_physical(physical_key)
+                        .and_then(|key| self.state.perform.input_mapping.position_for(key))
+                        .and_then(|position| {
+                            self.state.project_tracks.tracks.get(
+                                self.state.perform.clip_editor.first_track
+                                    + position.column as usize,
+                            )
+                        })
+                        .map(|track| crate::domains::perform::ClipMsg::StopTrack(track.id))
+                } else {
+                    None
+                };
+                if let Some(action) = clip_action {
+                    let message = Message::Perform(PerformMsg::Clips(action));
+                    if self.edge_shortcuts.should_dispatch(
+                        &format!("ClipKey:{}", runtime_key_id(key).to_ascii_lowercase()),
+                        &message,
+                        occurred_at,
+                    ) {
+                        return self.update(message);
+                    }
+                    return iced::Task::none();
+                }
                 if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
                     let amount = if modifiers.shift() { 4 } else { 1 };
                     let movement = match key {
@@ -240,6 +280,10 @@ impl super::App {
                 }
             }
             iced::keyboard::Event::KeyReleased { key, .. } => {
+                self.edge_shortcuts.release(
+                    &format!("ClipKey:{}", runtime_key_id(&key).to_ascii_lowercase()),
+                    occurred_at,
+                );
                 let key_id = runtime_key_id(&key);
                 self.edge_shortcuts.release(&key_id, occurred_at);
                 if is_note_repeat_release(
