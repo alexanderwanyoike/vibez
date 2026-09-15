@@ -44,6 +44,15 @@ pub enum EngineCommand {
         quantization: vibez_core::perform::MusicalBoundary,
     },
     BeginClipPerformance,
+    ArmClipRecord {
+        free_length: bool,
+        prepared: Box<crate::playback_source::PreparedClipPlayback>,
+        count_in_bars: u8,
+    },
+    StopClipRecord {
+        immediate: bool,
+    },
+    RefreshClip(Box<crate::playback_source::PreparedClipPlayback>),
     /// Queue a complete resident Section for an engine-owned musical boundary.
     QueueSection {
         prepared: Box<PreparedSectionPlaybackSource>,

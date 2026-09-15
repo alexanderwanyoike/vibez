@@ -1,4 +1,4 @@
-use vibez_core::id::{SectionId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
 use crate::playback_source::PreparedSectionPlaybackSource;
@@ -169,6 +169,22 @@ pub enum EngineEvent {
         effective_at_samples: u64,
         section_id: Option<SectionId>,
         section_position_samples: Option<u64>,
+    },
+
+    ClipRecordArmed {
+        clip_id: ClipId,
+        track_id: TrackId,
+        start: u64,
+        output_start: u64,
+    },
+    ClipRecordStarted {
+        clip_id: ClipId,
+        at: u64,
+    },
+    ClipRecordStopped {
+        clip_id: ClipId,
+        at: u64,
+        started: bool,
     },
 
     /// Section Record is waiting for an engine-owned musical boundary.

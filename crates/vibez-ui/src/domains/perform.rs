@@ -16,8 +16,10 @@ use crate::state::ProjectTrack;
 
 pub(crate) mod capture;
 pub mod clip_launcher;
+pub(crate) mod clip_record;
 mod input_mapping;
 mod instrument;
+pub(crate) mod loop_record;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
@@ -175,6 +177,7 @@ pub struct PerformState {
     pub layout: vibez_project::PerformLayout,
     pub clips: Arc<ClipStore>,
     pub clip_editor: ClipEditor,
+    pub clip_record: clip_record::ClipRecordState,
     pub mode: PerformMode,
     pub banks: PerformBanks,
     pub selected_pad: Option<PadPosition>,
@@ -220,6 +223,7 @@ pub enum PerformMsg {
     Clips(ClipMsg),
     Capture(CaptureMsg),
     SectionRecord(SectionRecordMsg),
+    ClipRecord(clip_record::ClipRecordMsg),
     SelectMode(PerformMode),
     FocusEditor(PerformEditorFocus),
     BeginKeyRebind(PadPosition),
@@ -423,6 +427,7 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
+            PerformMsg::ClipRecord(_) => return PerformAction::default(),
             PerformMsg::Clips(msg) => return self.update_clips(msg, ctx),
             PerformMsg::Capture(msg) => return self.capture.update(msg),
             PerformMsg::SectionRecord(msg) => {

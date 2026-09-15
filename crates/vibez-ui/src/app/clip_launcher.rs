@@ -117,6 +117,21 @@ impl App {
                 .map(|track| (track.id, None))
                 .collect(),
         };
+        if self
+            .state
+            .perform
+            .clip_record
+            .session
+            .as_ref()
+            .is_some_and(|session| {
+                targets
+                    .iter()
+                    .any(|(track, _)| *track == session.working.track_id)
+            })
+        {
+            self.state.perform.clip_record.notes.request_stop();
+            self.send_command(EngineCommand::StopClipRecord { immediate: false });
+        }
         if !self.state.perform.clip_editor.running && targets.iter().all(|(_, clip)| clip.is_none())
         {
             return;

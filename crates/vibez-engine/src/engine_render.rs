@@ -83,7 +83,13 @@ impl AudioEngine {
         }
 
         if self.clip_performance {
-            self.process_clip_multitrack(output, frames, channels);
+            self.process_clip_multitrack(
+                output,
+                frames,
+                channels,
+                live_input,
+                track_output_capture,
+            );
             return;
         }
         if self.active_section.is_some() {

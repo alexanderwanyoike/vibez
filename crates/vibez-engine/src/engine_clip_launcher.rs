@@ -5,7 +5,7 @@ use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedCli
 use vibez_core::perform::MusicalBoundary;
 
 impl AudioEngine {
-    fn clip_event(&mut self, event: EngineEvent) {
+    pub(super) fn clip_event(&mut self, event: EngineEvent) {
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
             // Source owners must be reclaimed on the UI thread, never in the callback.
             std::mem::forget(event);
@@ -72,6 +72,7 @@ impl AudioEngine {
     }
 
     pub(super) fn clear_clip_performance(&mut self) {
+        self.stop_clip_record(true);
         for index in 0..self.tracks.len() {
             if let Some(queued) = self.tracks[index].queued_clip.take() {
                 self.clip_event(EngineEvent::ClipRequestRetired(queued.prepared));
@@ -92,7 +93,8 @@ impl AudioEngine {
                 let mut prepared = track.queued_clip.take().expect("due Clip").prepared;
                 track.flush_notes();
                 std::mem::swap(&mut track.launcher_source, &mut prepared.source);
-                track.active_clip = prepared.clip_id.map(|_| ActiveClipPlayback {
+                track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
+                    clip_id,
                     position: 0,
                     length: prepared.length_samples.max(1),
                     looping: prepared.looping,
@@ -134,12 +136,18 @@ impl AudioEngine {
         output: &mut [f32],
         frames: usize,
         channels: usize,
+        live_input: Option<LiveInputBlock<'_>>,
+        mut capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
         let mut rendered = 0;
         while rendered < frames {
             let now = self.performance_position + rendered as u64;
+            self.apply_clip_record_boundary(now);
             self.apply_clip_boundaries(now);
             let mut count = frames - rendered;
+            if let Some(boundary) = self.next_clip_record_boundary() {
+                count = count.min(boundary.saturating_sub(now) as usize);
+            }
             for track in &self.tracks {
                 if let Some(queued) = &track.queued_clip {
                     count = count.min(queued.effective_at.saturating_sub(now) as usize);
@@ -149,6 +157,7 @@ impl AudioEngine {
                 }
             }
             let count = count.max(1);
+            let count_in = self.clip_count_in_timing();
             for track in &mut self.tracks {
                 // An inactive slot is silent while live instruments and effect tails still render.
                 if track.active_clip.is_some() {
@@ -165,9 +174,19 @@ impl AudioEngine {
                     frames: count,
                     channels,
                     loop_region: None,
-                    live_input: None,
+                    live_input: live_input.map(|input| LiveInputBlock {
+                        target_track_raw: input.target_track_raw,
+                        samples: &input.samples[rendered * channels..(rendered + count) * channels],
+                    }),
                 },
-                None,
+                capture
+                    .as_mut()
+                    .map(|tap| TrackOutputCapture {
+                        source_track_raw: tap.source_track_raw,
+                        samples: &mut tap.samples
+                            [rendered * channels..(rendered + count) * channels],
+                    })
+                    .as_mut(),
             );
             for track in &mut self.tracks {
                 if let Some(active) = &mut track.active_clip {
@@ -176,6 +195,15 @@ impl AudioEngine {
                 } else {
                     std::mem::swap(&mut track.playback_source, &mut track.empty_launcher_source);
                 }
+            }
+            if let Some(timing) = count_in {
+                self.mix_record_count_in_click(
+                    &mut output[rendered * channels..(rendered + count) * channels],
+                    count,
+                    channels,
+                    now,
+                    timing,
+                );
             }
             rendered += count;
         }

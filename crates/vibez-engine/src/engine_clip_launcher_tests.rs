@@ -311,3 +311,187 @@ fn midi_replacement_flushes_only_its_track_and_preserves_sustained_notes_elsewhe
     assert!(heard.contains(&(60, false)));
     assert!(heard.contains(&(64, true)));
 }
+
+#[test]
+fn clip_record_count_in_and_stop_split_callbacks_without_stopping_other_tracks() {
+    let (mut engine, mut commands, mut events, a, b) = setup();
+    engine.process(&mut [0.0; 7], 1);
+    let prepared = clip(a, 1, &[0.1; 16], true);
+    let id = prepared.clip_id.unwrap();
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: false,
+            prepared,
+            count_in_bars: 1,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 19], 1);
+    assert_eq!(engine.tracks[0].active_clip.unwrap().position, 3);
+    let armed = std::iter::from_fn(|| events.pop().ok()).collect::<Vec<_>>();
+    assert!(armed.iter().any(|e| matches!(e, EngineEvent::ClipRecordArmed { clip_id, start: 16, output_start: 23, .. } if *clip_id == id)));
+    assert!(armed
+        .iter()
+        .any(|e| matches!(e, EngineEvent::ClipRecordStarted { at: 16, .. })));
+    launch(
+        &mut commands,
+        vec![clip(b, 2, &[0.2; 5], true)],
+        MusicalBoundary::Immediate,
+    );
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: false })
+        .unwrap();
+    engine.process(&mut [0.0; 15], 1);
+    assert!(engine.transport.is_playing());
+    assert!(engine.clip_record.is_none());
+    assert_eq!(engine.tracks[1].active_clip.unwrap().position, 5);
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|e| matches!(
+        e,
+        EngineEvent::ClipRecordStopped {
+            at: 32,
+            started: true,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn clip_record_cancel_during_count_in_never_starts_the_clip() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: false,
+            prepared: clip(a, 1, &[0.1; 16], true),
+            count_in_bars: 1,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 3], 1);
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: false })
+        .unwrap();
+    engine.process(&mut [0.0; 20], 1);
+    assert!(engine.tracks[0].active_clip.is_none());
+    let events = std::iter::from_fn(|| events.pop().ok()).collect::<Vec<_>>();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        EngineEvent::ClipRecordStopped {
+            at: 3,
+            started: false,
+            ..
+        }
+    )));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, EngineEvent::ClipRecordStarted { .. })));
+}
+
+#[test]
+fn live_loop_mode_change_keeps_phase_and_one_shot_stops_at_clip_end() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    let first = clip(a, 1, &[0.1, 0.2, 0.3, 0.4], true);
+    let id = first.clip_id;
+    launch(&mut commands, vec![first], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 2], 1);
+    let mut replacement = clip(a, 2, &[0.1, 0.2, 0.3, 0.4], false);
+    replacement.clip_id = id;
+    commands
+        .push(EngineCommand::RefreshClip(replacement))
+        .unwrap();
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_eq!(output, [0.3, 0.4, 0.0, 0.0]);
+    assert!(engine.tracks[0].active_clip.is_none());
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|e| matches!(
+        e,
+        EngineEvent::ClipTransitioned {
+            clip_id: None,
+            effective_at_samples: 4,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn transport_stop_finishes_clip_take_on_its_actual_sample() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: false,
+            prepared: clip(a, 1, &[0.1; 16], true),
+            count_in_bars: 0,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 7], 1);
+    commands.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 4], 1);
+    assert!(!engine.transport.is_playing());
+    assert!(engine.clip_record.is_none());
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|e| matches!(
+        e,
+        EngineEvent::ClipRecordStopped {
+            at: 7,
+            started: true,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn free_recording_begins_its_first_loop_on_the_stop_boundary() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    let mut source = clip(a, 1, &[0.1; 32], false);
+    let id = source.clip_id;
+    source.length_samples = u64::MAX / 4;
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            prepared: source,
+            count_in_bars: 0,
+            free_length: true,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 14], 1);
+    let mut refreshed = clip(a, 2, &[0.2; 16], true);
+    refreshed.clip_id = id;
+    commands
+        .push(EngineCommand::RefreshClip(refreshed))
+        .unwrap();
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: false })
+        .unwrap();
+    let mut output = [0.0; 5];
+    engine.process(&mut output, 1);
+    assert_eq!(output, [0.2; 5]);
+    let active = engine.tracks[0].active_clip.unwrap();
+    assert_eq!(active.length, 16);
+    assert_eq!(active.position, 3);
+    assert!(active.looping);
+    assert!(std::iter::from_fn(|| events.pop().ok()).any(|e| matches!(
+        e,
+        EngineEvent::ClipRecordStopped {
+            at: 16,
+            started: true,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn clip_segments_keep_live_input_and_resample_capture_aligned_across_wraps() {
+    let (mut engine, mut commands, _, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1, 0.2, 0.3], true)],
+        MusicalBoundary::Immediate,
+    );
+    let input = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07];
+    let mut output = [0.0; 7];
+    let mut capture = [0.0; 7];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 1)
+            .with_live_input(b.raw(), &input)
+            .with_track_output_capture(a.raw(), &mut capture),
+    );
+    assert_eq!(capture, [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1]);
+    for ((out, source), live) in output.iter().zip(capture).zip(input) {
+        assert!((out - source - live).abs() < 1e-6);
+    }
+}

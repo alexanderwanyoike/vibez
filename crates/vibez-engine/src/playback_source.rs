@@ -491,6 +491,7 @@ impl std::fmt::Debug for PreparedClipPlayback {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ActiveClipPlayback {
+    pub clip_id: ClipId,
     pub position: u64,
     pub length: u64,
     pub looping: bool,

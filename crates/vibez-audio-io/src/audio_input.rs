@@ -140,6 +140,7 @@ pub struct AudioInputBridge {
     recording: AtomicBool,
     recording_stopped: AtomicBool,
     record_start_position: AtomicU64,
+    output_clock_recording: AtomicBool,
     overflowed: AtomicBool,
     underrun_frames: AtomicU64,
     peak_l: AtomicU32,
@@ -164,6 +165,7 @@ impl AudioInputBridge {
             recording: AtomicBool::new(false),
             recording_stopped: AtomicBool::new(true),
             record_start_position: AtomicU64::new(u64::MAX),
+            output_clock_recording: AtomicBool::new(false),
             overflowed: AtomicBool::new(false),
             underrun_frames: AtomicU64::new(0),
             peak_l: AtomicU32::new(0),
@@ -224,7 +226,21 @@ impl AudioInputBridge {
         }
     }
 
+    pub fn begin_output_clock_recording(&self) {
+        self.begin_recording_with_clock(true);
+    }
+
+    pub fn uses_output_clock(&self) -> bool {
+        self.output_clock_recording.load(Ordering::Acquire)
+    }
+
     pub fn begin_recording(&self) {
+        self.begin_recording_with_clock(false);
+    }
+
+    fn begin_recording_with_clock(&self, output_clock: bool) {
+        self.output_clock_recording
+            .store(output_clock, Ordering::Release);
         self.recorded.drain();
         self.overflowed.store(false, Ordering::Release);
         self.underrun_frames.store(0, Ordering::Release);
@@ -561,6 +577,23 @@ mod tests {
         assert!(!bridge.recording_stopped());
         bridge.clock_output(&mut silent_monitor, 2);
         assert!(bridge.recording_stopped());
+    }
+
+    #[test]
+    fn clip_clock_choice_resets_when_arrange_recording_starts() {
+        let bridge = AudioInputBridge::new(8);
+        bridge.set_target(Some(TrackId::new()), false);
+        bridge.begin_output_clock_recording();
+        assert!(bridge.uses_output_clock());
+        bridge.latch_record_start_position(12_345);
+        assert_eq!(bridge.record_start_position(), Some(12_345));
+        bridge.end_recording();
+        bridge.clock_output(&mut [0.0; 2], 2);
+        bridge.begin_recording();
+        assert!(!bridge.uses_output_clock());
+        assert_eq!(bridge.record_start_position(), None);
+        bridge.latch_record_start_position(120);
+        assert_eq!(bridge.record_start_position(), Some(120));
     }
 
     #[test]

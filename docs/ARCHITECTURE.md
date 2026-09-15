@@ -349,8 +349,9 @@ spans feed the existing timeline-window materializer, producing independent
 Arrange clips and preserving silence, live notes, mutes and mixer automation.
 A completed take remains one Undo transaction. This does not create or derive
 Sections. Runtime Clip playheads, queues and editor selection are not persisted.
-Source edits become audible on the next launch; an already-playing source and
-its Capture snapshot stay stable.
+Authored source edits become audible on the next launch. Recording previews and
+cell Loop/One-shot changes refresh the matching active Clip without restarting
+its local playhead; source refreshes publish a Capture boundary.
 Track colours identify column names and musical thumbnails. MIDI thumbnails
 use the editor's loop-aware note occurrences; audio thumbnails use the shared
 waveform peak cache. The canvas retains its source timeline so copy-on-write
@@ -369,6 +370,38 @@ Projects retain their existing pad sizing and construction layout.
 Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
 and operations that create multitrack or multi-clip slot content are deferred;
 the current router rejects those operations to preserve one part per slot.
+
+### Direct Clip recording
+
+Each cell has its own record control. A second press finishes at the next bar
+and leaves playback running; transport Stop finishes immediately. There is no
+F4 binding for Clip recording. New cells offer free length or a defined 1, 2, 4,
+8 or 16 bar loop. Defined loops continue recording across passes until stopped.
+Existing cells record across their current length. MIDI offers Replace and
+Overdub; audio replaces each crossed portion of the loop, without layering.
+Each completed take is one Undo transaction. Capture into Arrange and direct
+Clip recording are separate takes and cannot run simultaneously.
+
+`LoopRecordState<T>` shares note pairing, quantization, count-in settings and
+held-note handling between the existing Section coordinator and Clip recording.
+Clip passes use the same recorder with Clip identities. A MIDI cell remains one
+editable part: its Pocket grid applies to overdubbed notes; an empty part adopts
+the first recorded grid. Audio reuses the input bridge, source routing, live
+peak preview, WAV finalizer and media staging. Its monotonic output-clock stamp
+lets the finalizer remove count-in frames and callback tail samples precisely.
+The Clip renderer passes live input and resampling buffers through its normal
+channel strip at every boundary. Sections retain their recording controls and
+layout.
+
+Cells default to Loop. The cell's LOOP/1x control changes the same loop property
+used by its shared editor and saved timeline. One-shot playback stops at the
+clip end. Recording into an existing one-shot cycles for the take and preserves
+its saved playback mode when recording finishes.
+
+Recorded audio is embedded in `.vzp` containers. Legacy JSON projects have no
+media table, so generated audio without a durable source is copied to a sibling
+`<project filename>.media` directory before staging references are stripped.
+That directory must travel with the legacy project.
 
 ### Shared content ownership
 

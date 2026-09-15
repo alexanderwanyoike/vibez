@@ -91,6 +91,9 @@ impl App {
     }
 
     pub(super) fn route_auto_save_project(&mut self) -> Task<Message> {
+        if self.state.perform.clip_record.is_active() {
+            return Task::none();
+        }
         if !self.state.auto_save_enabled || !self.state.project.dirty {
             self.save_runtime.cancel_pending_auto_save();
             return Task::none();

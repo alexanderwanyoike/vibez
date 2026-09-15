@@ -66,12 +66,16 @@ fn apply_drum_pad_flash(
 
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
+        let mut clip_record_events = Vec::new();
         let mut completed_section_recordings = Vec::new();
         let mut completed_captures = Vec::new();
         if let Some(ref mut rx) = self.event_rx {
             while let Ok(event) = rx.pop() {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
+                    event @ (EngineEvent::ClipRecordArmed { .. }
+                    | EngineEvent::ClipRecordStarted { .. }
+                    | EngineEvent::ClipRecordStopped { .. }) => clip_record_events.push(event),
                     EngineEvent::DisposeEffect(cell) => {
                         // Plugin teardown remains on the UI thread.
                         drop(cell.take());
@@ -286,6 +290,17 @@ impl App {
                         canonical_section_position_samples,
                         ..
                     } => {
+                        clip_record_events.push(EngineEvent::NoteRepeated {
+                            track_id,
+                            pitch,
+                            velocity,
+                            rate,
+                            effective_at_samples,
+                            canonical_at_samples,
+                            section_id,
+                            section_position_samples: None,
+                            canonical_section_position_samples,
+                        });
                         self.state.perform.capture.repeated_note(
                             track_id,
                             pitch,
@@ -313,6 +328,15 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
+                        clip_record_events.push(EngineEvent::InstrumentNoteInput {
+                            track_id,
+                            pitch,
+                            velocity,
+                            on,
+                            effective_at_samples,
+                            section_id,
+                            section_position_samples,
+                        });
                         self.state.perform.capture.input_note(
                             track_id,
                             pitch,
@@ -322,13 +346,13 @@ impl App {
                         );
                         self.state.perform.section_record.input_note(
                             crate::domains::perform::section_record::SectionRecordInput {
-                                section_id,
+                                target_id: section_id,
                                 track_id,
                                 pitch,
                                 velocity,
                                 on,
                                 effective_at_samples,
-                                section_position_samples,
+                                local_position_samples: section_position_samples,
                             },
                         );
                     }
@@ -487,6 +511,10 @@ impl App {
                 }
             }
         }
+        for event in clip_record_events {
+            self.clip_record_event(event);
+        }
+        self.refresh_clip_record(self.state.perform.performance_position_samples);
         for completed in completed_section_recordings {
             self.finish_section_record_session(completed);
         }
