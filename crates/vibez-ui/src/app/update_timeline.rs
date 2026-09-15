@@ -1,4 +1,4 @@
-//! Routes shared editor messages to the active Arrange or Section adapter.
+//! Routes shared editor messages to the selected Arrange, Section or Clip source.
 
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ fn clipboard_targets_section(
 ) -> bool {
     workspace == Workspace::Perform
         && selected_section
-        && focus == PerformEditorFocus::SectionConstruction
+        && focus == PerformEditorFocus::TimelineEditor
 }
 
 pub(super) fn section_timeline_claims_focus(workspace: Workspace, selected_section: bool) -> bool {
@@ -70,10 +70,16 @@ fn focused_section_seek_beat(
 }
 
 impl App {
+    fn empty_clip_editor(&self) -> bool {
+        self.state.view.workspace == Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && !self.state.perform.has_selected_timeline()
+    }
+
     pub(super) fn active_timeline_location(&self) -> vibez_project::TimelineLocation {
         if self.state.view.workspace == Workspace::Perform {
-            if let Some(section_id) = self.state.perform.selected_section {
-                return vibez_project::TimelineLocation::Section(section_id);
+            if let Some(location) = self.state.perform.selected_timeline_location() {
+                return location;
             }
         }
         vibez_project::TimelineLocation::Arrange
@@ -86,6 +92,12 @@ impl App {
     ) -> Option<&crate::state::TrackTimelineContent> {
         match location {
             vibez_project::TimelineLocation::Arrange => self.state.arrange_content(track_id),
+            vibez_project::TimelineLocation::LauncherClip(id) => self
+                .state
+                .perform
+                .clips
+                .by_id(id)
+                .and_then(|clip| clip.timeline.get(track_id)),
             vibez_project::TimelineLocation::Section(section_id) => self
                 .state
                 .perform
@@ -98,7 +110,7 @@ impl App {
     pub(super) fn focused_editor_is_section(&self) -> bool {
         clipboard_targets_section(
             self.state.view.workspace,
-            self.state.perform.selected_section.is_some(),
+            self.state.perform.has_selected_timeline(),
             self.state.perform.editor_focus,
         )
     }
@@ -107,7 +119,7 @@ impl App {
     pub(super) fn editor_shortcuts_have_focus(&self) -> bool {
         editor_shortcuts_reach_a_focused_timeline(
             self.state.view.workspace,
-            self.state.perform.selected_section.is_some(),
+            self.state.perform.has_selected_timeline(),
             self.state.perform.editor_focus,
         )
     }
@@ -115,7 +127,7 @@ impl App {
     pub(super) fn focused_editor_playhead_beats(&self) -> f64 {
         focused_timeline_playhead_beats(
             self.state.view.workspace,
-            self.state.perform.selected_section.is_some(),
+            self.state.perform.has_selected_timeline(),
             self.state.perform.editor_focus,
             self.state.position_beats(),
             self.state.perform.section_editor.edit_cursor_beats(),
@@ -128,7 +140,7 @@ impl App {
     ) -> bool {
         let Some(beat) = focused_section_seek_beat(
             self.state.view.workspace,
-            self.state.perform.selected_section.is_some(),
+            self.state.perform.has_selected_timeline(),
             self.state.perform.editor_focus,
             msg,
         ) else {
@@ -142,16 +154,19 @@ impl App {
         &mut self,
         msg: AutomationMsg,
     ) -> AutomationAction {
+        if self.empty_clip_editor() {
+            return Default::default();
+        }
         let section_content_changed = msg.marks_dirty();
         let editing_section = self.state.view.workspace == Workspace::Perform
-            && self.state.perform.selected_section.is_some();
+            && self.state.perform.has_selected_timeline();
         let action = if editing_section {
             let mut engine = crate::domains::DiscardingEngine;
             self.state.automation_ui.update(
                 msg,
                 &mut engine,
                 Arc::make_mut(&mut self.state.project_tracks),
-                self.state.perform.section_editor.editor_mut(),
+                self.state.perform.timeline_editor_mut(),
             )
         } else {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
@@ -163,7 +178,7 @@ impl App {
             )
         };
         if editing_section {
-            self.state.perform.commit_selected_section_timeline();
+            self.state.perform.commit_selected_timeline();
             if section_content_changed {
                 if let Some(section_id) = self.state.perform.selected_section {
                     self.refresh_playing_section_after_edit(section_id);
@@ -178,27 +193,56 @@ impl App {
         msg: ArrangementMsg,
         ctx: ArrangementCtx,
     ) -> ArrangementAction {
+        if self.empty_clip_editor() && msg.is_timeline_editor_message() {
+            return ArrangementAction::default();
+        }
+        if self.state.view.workspace == Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && matches!(
+                &msg,
+                ArrangementMsg::MoveClipToTrack { .. }
+                    | ArrangementMsg::CopySelectedClips
+                    | ArrangementMsg::CutSelectedClips
+                    | ArrangementMsg::PasteClips
+                    | ArrangementMsg::SplitAudioClip { .. }
+                    | ArrangementMsg::SliceAudioClipAtMarkers { .. }
+                    | ArrangementMsg::RequestSliceAudioClipToDrumRack { .. }
+                    | ArrangementMsg::SliceAudioClipToDrumRack { .. }
+                    | ArrangementMsg::SplitNoteClip { .. }
+                    | ArrangementMsg::SplitSelectedAtPlayhead
+                    | ArrangementMsg::JoinSelectedClips
+                    | ArrangementMsg::CrossfadeSelectedAudioClips
+                    | ArrangementMsg::TrimSelectedByTrackMutes
+                    | ArrangementMsg::DeleteClipsInRegion { .. }
+                    | ArrangementMsg::SplitClipsAtRegion { .. }
+                    | ArrangementMsg::CreateClipFromSelection
+                    | ArrangementMsg::CreateNoteClipFromSelection(_)
+            )
+        {
+            return ArrangementAction {
+                status: Some(
+                    "Clip slots hold one part. Use Duplicate to make an alternative.".into(),
+                ),
+                ..Default::default()
+            };
+        }
         let clipboard_message = msg.is_clipboard_message();
         let deferred_project_edit = msg.defers_project_edit();
         let section_content_changed = msg.marks_dirty();
         let editing_section = if clipboard_message {
             clipboard_targets_section(
                 self.state.view.workspace,
-                self.state.perform.selected_section.is_some(),
+                self.state.perform.has_selected_timeline(),
                 self.state.perform.editor_focus,
             )
         } else {
             self.state.view.workspace == Workspace::Perform
-                && self.state.perform.selected_section.is_some()
+                && self.state.perform.has_selected_timeline()
         };
         if editing_section {
             if let ArrangementMsg::SelectTrack(track_id) = &msg {
                 self.state.arrangement.selected_track = Some(*track_id);
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .selected_track = Some(*track_id);
+                self.state.perform.timeline_editor_mut().selected_track = Some(*track_id);
                 self.state.perform.sync_instrument_target_from_selection(
                     Some(*track_id),
                     &self.state.project_tracks.tracks,
@@ -209,17 +253,13 @@ impl App {
         if clipboard_message {
             let action = if editing_section {
                 let mut engine = crate::domains::DiscardingEngine;
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .update_clipboard(
-                        &self.state.project_tracks,
-                        msg,
-                        &mut self.state.clip_clipboard,
-                        &mut engine,
-                        ctx,
-                    )
+                self.state.perform.timeline_editor_mut().update_clipboard(
+                    &self.state.project_tracks,
+                    msg,
+                    &mut self.state.clip_clipboard,
+                    &mut engine,
+                    ctx,
+                )
             } else {
                 let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                 self.state.arrangement.editor.update_clipboard(
@@ -231,13 +271,13 @@ impl App {
                 )
             };
             if editing_section {
-                self.state.perform.commit_selected_section_timeline();
+                self.state.perform.commit_selected_timeline();
                 if action.mark_dirty {
                     if let Some(section_id) = self.state.perform.selected_section {
                         self.refresh_playing_section_after_edit(section_id);
                     }
                 }
-                if let Some(track_id) = self.state.perform.section_editor.editor().selected_track {
+                if let Some(track_id) = self.state.perform.timeline_editor().selected_track {
                     self.state.arrangement.selected_track = Some(track_id);
                 }
             }
@@ -249,13 +289,13 @@ impl App {
         }
         if editing_section && msg.is_timeline_editor_message() {
             let mut engine = crate::domains::DiscardingEngine;
-            let action = self.state.perform.section_editor.editor_mut().update(
+            let action = self.state.perform.timeline_editor_mut().update(
                 Arc::make_mut(&mut self.state.project_tracks),
                 msg,
                 &mut engine,
                 ctx,
             );
-            self.state.perform.commit_selected_section_timeline();
+            self.state.perform.commit_selected_timeline();
             let changed = if deferred_project_edit {
                 action.mark_dirty
             } else {
@@ -266,7 +306,7 @@ impl App {
                     self.refresh_playing_section_after_edit(section_id);
                 }
             }
-            if let Some(track_id) = self.state.perform.section_editor.editor().selected_track {
+            if let Some(track_id) = self.state.perform.timeline_editor().selected_track {
                 self.state.arrangement.selected_track = Some(track_id);
             }
             self.state.perform.sync_instrument_target_from_selection(
@@ -295,9 +335,12 @@ impl App {
         msg: PianoRollMsg,
         ctx: PianoRollCtx,
     ) -> PianoRollAction {
+        if self.empty_clip_editor() {
+            return Default::default();
+        }
         let section_content_changed = msg.marks_dirty();
         let editing_section = self.state.view.workspace == Workspace::Perform
-            && self.state.perform.selected_section.is_some();
+            && self.state.perform.has_selected_timeline();
         if editing_section {
             if let PianoRollMsg::AddNoteClipToTrack(track_id) = &msg {
                 let midi_track = self
@@ -315,10 +358,10 @@ impl App {
             let action = self.state.piano_roll.update(
                 msg,
                 &mut engine,
-                self.state.perform.section_editor.editor_mut(),
+                self.state.perform.timeline_editor_mut(),
                 ctx,
             );
-            self.state.perform.commit_selected_section_timeline();
+            self.state.perform.commit_selected_timeline();
             if section_content_changed {
                 if let Some(section_id) = self.state.perform.selected_section {
                     self.refresh_playing_section_after_edit(section_id);
@@ -346,7 +389,7 @@ mod clipboard_focus_tests {
         assert!(clipboard_targets_section(
             Workspace::Perform,
             true,
-            PerformEditorFocus::SectionConstruction,
+            PerformEditorFocus::TimelineEditor,
         ));
         assert!(!clipboard_targets_section(
             Workspace::Perform,
@@ -356,12 +399,12 @@ mod clipboard_focus_tests {
         assert!(!clipboard_targets_section(
             Workspace::Arrange,
             true,
-            PerformEditorFocus::SectionConstruction,
+            PerformEditorFocus::TimelineEditor,
         ));
         assert!(!clipboard_targets_section(
             Workspace::Perform,
             false,
-            PerformEditorFocus::SectionConstruction,
+            PerformEditorFocus::TimelineEditor,
         ));
     }
 
@@ -371,7 +414,7 @@ mod clipboard_focus_tests {
             focused_timeline_playhead_beats(
                 Workspace::Arrange,
                 true,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
                 5.0,
                 11.0,
             ),
@@ -381,7 +424,7 @@ mod clipboard_focus_tests {
             focused_timeline_playhead_beats(
                 Workspace::Perform,
                 true,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
                 5.0,
                 11.0,
             ),
@@ -408,7 +451,7 @@ mod clipboard_focus_tests {
             focused_section_seek_beat(
                 Workspace::Perform,
                 true,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
                 &TransportMsg::SeekToBeat(13.0),
             ),
             Some(13.0)
@@ -417,7 +460,7 @@ mod clipboard_focus_tests {
             focused_section_seek_beat(
                 Workspace::Arrange,
                 true,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
                 &TransportMsg::SeekToBeat(13.0),
             ),
             None,
@@ -436,7 +479,7 @@ mod clipboard_focus_tests {
             focused_section_seek_beat(
                 Workspace::Perform,
                 true,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
                 &TransportMsg::Play,
             ),
             None,
@@ -469,7 +512,7 @@ mod editor_shortcut_focus_tests {
         assert!(editor_shortcuts_reach_a_focused_timeline(
             Workspace::Perform,
             true,
-            PerformEditorFocus::SectionConstruction,
+            PerformEditorFocus::TimelineEditor,
         ));
     }
 
@@ -480,7 +523,7 @@ mod editor_shortcut_focus_tests {
         // destroy clips the producer cannot see.
         for focus in [
             PerformEditorFocus::PadSurface,
-            PerformEditorFocus::SectionConstruction,
+            PerformEditorFocus::TimelineEditor,
         ] {
             assert!(!editor_shortcuts_reach_a_focused_timeline(
                 Workspace::Perform,
@@ -497,7 +540,7 @@ mod editor_shortcut_focus_tests {
         for selected_section in [false, true] {
             for focus in [
                 PerformEditorFocus::PadSurface,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
             ] {
                 assert!(editor_shortcuts_reach_a_focused_timeline(
                     Workspace::Arrange,
@@ -516,7 +559,7 @@ mod editor_shortcut_focus_tests {
         for selected_section in [false, true] {
             for focus in [
                 PerformEditorFocus::PadSurface,
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
             ] {
                 assert_eq!(
                     editor_shortcuts_reach_a_focused_timeline(

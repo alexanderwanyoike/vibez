@@ -146,6 +146,45 @@ impl super::App {
     ) -> iced::Task<Message> {
         use iced::keyboard::key::Named;
 
+        if self.state.project.new_project_layout.is_some() {
+            if let iced::keyboard::Event::KeyPressed { key, .. } = event {
+                return match key {
+                    iced::keyboard::Key::Named(Named::Escape) => {
+                        self.update(Message::CancelNewProject)
+                    }
+                    iced::keyboard::Key::Named(Named::Enter) => {
+                        self.update(Message::ConfirmNewProject)
+                    }
+                    _ => iced::Task::none(),
+                };
+            }
+            return iced::Task::none();
+        }
+        if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && self.state.perform.mode == PerformMode::Sections
+        {
+            if let iced::keyboard::Event::KeyPressed {
+                ref key, modifiers, ..
+            } = event
+            {
+                if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
+                    let amount = if modifiers.shift() { 4 } else { 1 };
+                    let movement = match key {
+                        iced::keyboard::Key::Named(Named::ArrowLeft) => Some((-amount, 0)),
+                        iced::keyboard::Key::Named(Named::ArrowRight) => Some((amount, 0)),
+                        iced::keyboard::Key::Named(Named::ArrowUp) => Some((0, -amount)),
+                        iced::keyboard::Key::Named(Named::ArrowDown) => Some((0, amount)),
+                        _ => None,
+                    };
+                    if let Some((tracks, rows)) = movement {
+                        return self.update(Message::Perform(PerformMsg::Clips(
+                            crate::domains::perform::ClipMsg::MoveWindow { tracks, rows },
+                        )));
+                    }
+                }
+            }
+        }
         let (perform_msg, fallback) = match event {
             iced::keyboard::Event::KeyPressed {
                 key,

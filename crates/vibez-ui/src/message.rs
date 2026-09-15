@@ -345,6 +345,10 @@ pub enum AutoWarpOutcome {
 
 #[derive(Debug, Clone)]
 pub enum BrowserImportTarget {
+    LauncherClipAt {
+        track_id: TrackId,
+        row: u32,
+    },
     ArrangementClip(Option<TrackId>),
     /// Drop a sample as an arrangement clip at a specific sample position.
     ArrangementClipAt {
@@ -570,6 +574,13 @@ pub enum Message {
 
     // File menu
     NewProject,
+    SelectNewProjectLayout(vibez_project::PerformLayout),
+    ConfirmNewProject,
+    CancelNewProject,
+    ImportLauncherClip {
+        track_id: TrackId,
+        row: u32,
+    },
     OpenProject,
     SaveProject,
     SaveProjectAs,

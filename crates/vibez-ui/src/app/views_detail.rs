@@ -335,7 +335,7 @@ impl App {
                 content.note_clips.iter().find(|clip| clip.id == clip_id)
             });
 
-        let (piano_widget, velocity_widget) = match visible_clip {
+        let (mut piano_widget, velocity_widget) = match visible_clip {
             Some(clip) => {
                 let clip_relative_playhead = playhead_beats - clip.position_beats;
                 (
@@ -364,6 +364,10 @@ impl App {
             ),
         };
 
+        piano_widget.reserve_arrow_keys = self.state.view.workspace
+            == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && self.state.perform.mode == crate::domains::perform::PerformMode::Sections;
         let piano_canvas: Element<'_, Message> = canvas(piano_widget)
             .width(Length::Fill)
             .height(Length::Fill)

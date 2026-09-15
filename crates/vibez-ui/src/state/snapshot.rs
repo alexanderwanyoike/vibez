@@ -15,6 +15,7 @@ pub struct ProjectSnapshot {
     pub project_tracks: Arc<ProjectTracksState>,
     pub arrange_timeline: Arc<ArrangementTimeline>,
     pub sections: Arc<crate::domains::perform::SectionStore>,
+    pub launcher_clips: Arc<crate::domains::perform::ClipStore>,
     pub bpm: f64,
     pub project_swing: vibez_core::perform::SwingAmount,
     pub loop_enabled: bool,
@@ -49,6 +50,7 @@ impl UndoGestureId {
 /// the dirty flag, and the undo/redo history.
 #[derive(Debug, Default)]
 pub struct ProjectState {
+    pub new_project_layout: Option<vibez_project::PerformLayout>,
     pub file_menu_open: bool,
     pub recent_projects_open: bool,
     pub recent_project_paths: Vec<PathBuf>,

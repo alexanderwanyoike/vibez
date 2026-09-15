@@ -156,6 +156,7 @@ impl App {
             .sync_project_tracks(&self.state.project_tracks.tracks);
         self.state.arrangement.timeline = snapshot.arrange_timeline;
         self.state.perform.sections = snapshot.sections;
+        self.state.perform.clips = snapshot.launcher_clips;
         self.state.transport.bpm = snapshot.bpm;
         self.state.transport.bpm_text = format!("{:.0}", snapshot.bpm);
         self.state.perform.set_project_swing(snapshot.project_swing);
@@ -164,7 +165,7 @@ impl App {
         self.state.transport.loop_end_beats = snapshot.loop_end_beats;
         self.state
             .perform
-            .sync_selected_section_editor(self.state.arrangement.selected_track);
+            .sync_selected_timeline_editor(self.state.arrangement.selected_track);
         self.state.perform.section_name_edit = self
             .state
             .perform

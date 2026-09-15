@@ -178,7 +178,7 @@ impl App {
         if changed {
             self.state
                 .perform
-                .sync_selected_section_editor(self.state.arrangement.selected_track);
+                .sync_selected_timeline_editor(self.state.arrangement.selected_track);
             self.refresh_playing_section_after_edit(recording.section_id);
         }
         changed

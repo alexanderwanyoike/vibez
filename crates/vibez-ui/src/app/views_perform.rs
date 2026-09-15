@@ -118,6 +118,9 @@ pub(super) fn perform_pad_grid_height(window_height: f32) -> f32 {
 
 impl App {
     pub(super) fn view_perform(&self) -> Element<'_, Message> {
+        if self.state.perform.layout == vibez_project::PerformLayout::Clips {
+            return self.view_clip_perform();
+        }
         let workspace_width = self.perform_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
@@ -185,7 +188,7 @@ impl App {
         effective_perform_surface_width(cursor_x - workspace_left, workspace_width)
     }
 
-    fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
+    pub(super) fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
         let tab_width = perform_mode_tab_width(surface_width);
         let mut modes = row![].height(Length::Fill).spacing(1);
         for mode in PerformMode::ALL {
@@ -195,7 +198,12 @@ impl App {
             } else {
                 th::blend(th::text_dim(), th::text(), 0.38)
             };
-            let label = mode.label().to_uppercase();
+            let label = if mode == PerformMode::Sections {
+                self.state.perform.layout.label()
+            } else {
+                mode.label()
+            }
+            .to_uppercase();
             let shortcut_color = if active {
                 th::blend(th::accent_dim(), th::accent(), 0.48)
             } else {

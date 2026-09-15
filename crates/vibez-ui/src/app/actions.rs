@@ -117,6 +117,9 @@ impl App {
         action: crate::domains::perform::PerformAction,
     ) -> Task<Message> {
         let mut tasks = Vec::new();
+        if action.focus_clip_tab {
+            self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
+        }
         if let Some(status) = action.section_record_status {
             self.state.status_text = status.into();
         }
@@ -183,12 +186,8 @@ impl App {
                 Some(track_id),
                 &self.state.project_tracks.tracks,
             );
-            if self.state.perform.selected_section.is_some() {
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .selected_track = Some(track_id);
+            if self.state.perform.has_selected_timeline() {
+                self.state.perform.timeline_editor_mut().selected_track = Some(track_id);
             }
             if let Some(track) = self.state.find_track(track_id) {
                 self.state.status_text = format!("Instrument Target: {}", track.name);
@@ -257,12 +256,7 @@ impl App {
         }
         if let Some(beat) = action.scroll_to_beat {
             if !self.state.arrangement.drag_resize_active
-                && !self
-                    .state
-                    .perform
-                    .section_editor
-                    .editor()
-                    .drag_resize_active
+                && !self.state.perform.timeline_editor().drag_resize_active
             {
                 self.auto_scroll_to_beat(beat);
             }
@@ -312,6 +306,15 @@ impl App {
         let track_removed = action.remove_track_from_sections.is_some();
         if let Some(track_id) = action.remove_track_from_sections {
             Arc::make_mut(&mut self.state.perform.sections).remove_track(track_id);
+            Arc::make_mut(&mut self.state.perform.clips)
+                .clips
+                .retain(|clip| clip.track_id != track_id);
+            self.state
+                .perform
+                .sync_project_tracks(&self.state.project_tracks.tracks);
+            self.state
+                .perform
+                .sync_selected_timeline_editor(self.state.arrangement.selected_track);
         }
         if let Some(status) = action.status {
             self.state.status_text = status;
@@ -356,11 +359,7 @@ impl App {
         }
         if action.end_drag_resize {
             self.state.arrangement.drag_resize_active = false;
-            self.state
-                .perform
-                .section_editor
-                .editor_mut()
-                .drag_resize_active = false;
+            self.state.perform.timeline_editor_mut().drag_resize_active = false;
         }
         if action.close_device_menu {
             self.state.devices.context_menu = None;
@@ -438,23 +437,17 @@ impl App {
     ) {
         if let Some(sel) = action.select_note_clip {
             if self.state.view.workspace == crate::state::Workspace::Perform
-                && self.state.perform.selected_section.is_some()
+                && self.state.perform.has_selected_timeline()
             {
+                self.state.perform.timeline_editor_mut().selected_note_clip = Some(sel);
                 self.state
                     .perform
-                    .section_editor
-                    .editor_mut()
-                    .selected_note_clip = Some(sel);
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
+                    .timeline_editor_mut()
                     .selected_clips
                     .clear();
                 self.state
                     .perform
-                    .section_editor
-                    .editor_mut()
+                    .timeline_editor_mut()
                     .selected_clips
                     .insert(ArrangementSelection::NoteClip {
                         track_id: sel.0,
@@ -469,36 +462,23 @@ impl App {
         if let Some(track_id) = action.select_track {
             self.state.arrangement.selected_track = Some(track_id);
             if self.state.view.workspace == crate::state::Workspace::Perform
-                && self.state.perform.selected_section.is_some()
+                && self.state.perform.has_selected_timeline()
             {
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .selected_track = Some(track_id);
+                self.state.perform.timeline_editor_mut().selected_track = Some(track_id);
             }
         }
         if let Some(beat) = action.scroll_to_beat {
             if !self.state.arrangement.drag_resize_active
-                && !self
-                    .state
-                    .perform
-                    .section_editor
-                    .editor()
-                    .drag_resize_active
+                && !self.state.perform.timeline_editor().drag_resize_active
             {
                 self.auto_scroll_to_beat(beat);
             }
         }
         if action.drag_resize_active {
             if self.state.view.workspace == crate::state::Workspace::Perform
-                && self.state.perform.selected_section.is_some()
+                && self.state.perform.has_selected_timeline()
             {
-                self.state
-                    .perform
-                    .section_editor
-                    .editor_mut()
-                    .drag_resize_active = true;
+                self.state.perform.timeline_editor_mut().drag_resize_active = true;
             } else {
                 self.state.arrangement.drag_resize_active = true;
             }
@@ -804,12 +784,7 @@ impl App {
         let cursor_x = self.state.view.cursor_x;
         let right_boundary = (self.state.view.window_width - TIMELINE_WINDOW_EDGE_INSET).max(1.0);
         let section_drag = self.state.view.workspace == crate::state::Workspace::Perform
-            && self
-                .state
-                .perform
-                .section_editor
-                .editor()
-                .drag_resize_active;
+            && self.state.perform.timeline_editor().drag_resize_active;
         if section_drag {
             let viewport_width = self.section_timeline_viewport_width();
             let left_boundary = (right_boundary - viewport_width).max(0.0);

@@ -619,7 +619,7 @@ impl App {
 
         mouse_area(construction)
             .on_press(Message::Perform(PerformMsg::FocusEditor(
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
             )))
             .into()
     }

@@ -15,11 +15,13 @@ use super::EngineHandle;
 use crate::state::ProjectTrack;
 
 pub(crate) mod capture;
+pub mod clip_launcher;
 mod input_mapping;
 mod instrument;
 mod note_repeat;
 pub(crate) mod section_record;
 mod sections;
+pub use clip_launcher::{ClipEditor, ClipMsg, ClipStore, LauncherClip};
 mod track_mutes;
 pub use capture::{
     CaptureAction, CaptureMsg, CapturePhase, CaptureState, CapturedSectionSource,
@@ -141,7 +143,7 @@ pub struct PadGesture {
 pub enum PerformEditorFocus {
     #[default]
     PadSurface,
-    SectionConstruction,
+    TimelineEditor,
 }
 
 /// Per-mode bank cursors are UI interaction state. Instrument target banks are
@@ -170,6 +172,9 @@ impl PerformBanks {
 /// undo.
 #[derive(Default)]
 pub struct PerformState {
+    pub layout: vibez_project::PerformLayout,
+    pub clips: Arc<ClipStore>,
+    pub clip_editor: ClipEditor,
     pub mode: PerformMode,
     pub banks: PerformBanks,
     pub selected_pad: Option<PadPosition>,
@@ -212,6 +217,7 @@ pub struct PerformState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PerformMsg {
+    Clips(ClipMsg),
     Capture(CaptureMsg),
     SectionRecord(SectionRecordMsg),
     SelectMode(PerformMode),
@@ -280,6 +286,9 @@ pub enum PerformMsg {
 
 impl PerformMsg {
     pub const fn marks_dirty(&self) -> bool {
+        if let Self::Clips(msg) = self {
+            return msg.marks_dirty();
+        }
         matches!(
             self,
             Self::CreateSectionAt(_)
@@ -315,6 +324,7 @@ pub struct TrackSwingRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PerformAction {
     pub keyboard_consumed: bool,
+    pub focus_clip_tab: bool,
     pub persist_settings: bool,
     pub gesture: Option<PadGesture>,
     pub track_mute_request: Option<TrackMuteRequest>,
@@ -412,8 +422,13 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
+            PerformMsg::Clips(msg) => return self.update_clips(msg, ctx),
             PerformMsg::Capture(msg) => return self.capture.update(msg),
-            PerformMsg::SectionRecord(msg) => return self.update_section_record(msg),
+            PerformMsg::SectionRecord(msg) => {
+                if self.layout == vibez_project::PerformLayout::Sections {
+                    return self.update_section_record(msg);
+                }
+            }
             PerformMsg::SelectMode(mode) => {
                 if ctx.workspace_visible {
                     self.mode = mode;
@@ -449,7 +464,10 @@ impl PerformState {
                 }
             }
             PerformMsg::CreateSectionAt(slot) => {
-                if ctx.workspace_visible && self.sections.at_slot(slot).is_none() {
+                if self.layout == vibez_project::PerformLayout::Sections
+                    && ctx.workspace_visible
+                    && self.sections.at_slot(slot).is_none()
+                {
                     let section = Section::new(slot);
                     let id = section.id;
                     Arc::make_mut(&mut self.sections).insert(section);
@@ -466,7 +484,10 @@ impl PerformState {
                 self.duplicate_source = None;
             }
             PerformMsg::DuplicateSectionTo(slot) => {
-                if ctx.workspace_visible && self.sections.at_slot(slot).is_none() {
+                if self.layout == vibez_project::PerformLayout::Sections
+                    && ctx.workspace_visible
+                    && self.sections.at_slot(slot).is_none()
+                {
                     let duplicate = self
                         .duplicate_source
                         .and_then(|id| self.sections.by_id(id))
@@ -584,7 +605,7 @@ impl PerformState {
                     {
                         editor.selected_note_clip = None;
                     }
-                    self.commit_selected_section_timeline();
+                    self.commit_selected_timeline();
                     return PerformAction {
                         section_content_changed: Some(section_id),
                         ..PerformAction::default()
@@ -821,18 +842,21 @@ impl PerformState {
                 let track_mute_request = (self.mode == PerformMode::TrackMutes)
                     .then(|| self.track_mute_request(position, ctx.project_tracks))
                     .flatten();
-                let section_launch =
-                    if self.mode == PerformMode::Sections && !self.section_record.is_active() {
-                        let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
-                        self.sections.at_slot(slot).map(|section| section.id)
-                    } else {
-                        None
-                    };
+                let section_launch = if self.layout == vibez_project::PerformLayout::Sections
+                    && self.mode == PerformMode::Sections
+                    && !self.section_record.is_active()
+                {
+                    let slot = u16::from(self.banks.sections) * 16 + position.index() as u16;
+                    self.sections.at_slot(slot).map(|section| section.id)
+                } else {
+                    None
+                };
                 if let Some(section_id) = section_launch {
                     self.select_section(section_id, ctx.selected_project_track);
                 }
                 return PerformAction {
                     keyboard_consumed: true,
+                    focus_clip_tab: false,
                     persist_settings: false,
                     gesture: Some(PadGesture {
                         position,
@@ -915,15 +939,28 @@ impl PerformState {
                 .load(id, Arc::clone(&section.timeline), selected_track);
             self.editing_section_name = None;
             self.section_name_edit = section.name.clone();
-            self.editor_focus = PerformEditorFocus::SectionConstruction;
+            self.editor_focus = PerformEditorFocus::TimelineEditor;
         }
     }
 
     pub fn sync_project_tracks(&mut self, tracks: &[ProjectTrack]) {
         self.sync_track_mute_slots(tracks);
+        self.clip_editor.first_track = self
+            .clip_editor
+            .first_track
+            .min(tracks.len().saturating_sub(4));
     }
 
-    pub fn sync_selected_section_editor(&mut self, selected_track: Option<TrackId>) {
+    pub fn sync_selected_timeline_editor(&mut self, selected_track: Option<TrackId>) {
+        if self.layout == vibez_project::PerformLayout::Clips {
+            if let Some(id) = self.clip_editor.selected {
+                if self.select_launcher_clip(id).is_none() {
+                    self.clip_editor.selected = None;
+                    self.clip_editor.editor = Default::default();
+                }
+            }
+            return;
+        }
         if let Some(section) = self.selected_section.and_then(|id| self.sections.by_id(id)) {
             self.section_editor
                 .load(section.id, Arc::clone(&section.timeline), selected_track);
@@ -933,7 +970,31 @@ impl PerformState {
         }
     }
 
-    pub fn commit_selected_section_timeline(&mut self) {
+    pub fn commit_selected_timeline(&mut self) {
+        if self.layout == vibez_project::PerformLayout::Clips {
+            let Some(id) = self.clip_editor.selected else {
+                return;
+            };
+            let has_content = |timeline: &crate::state::ArrangementTimeline| {
+                timeline
+                    .by_track
+                    .values()
+                    .any(|content| !content.clips.is_empty() || !content.note_clips.is_empty())
+            };
+            let deleted = self.clips.by_id(id).is_some_and(|clip| {
+                has_content(&clip.timeline) && !has_content(&self.clip_editor.editor.timeline)
+            });
+            if deleted {
+                Arc::make_mut(&mut self.clips)
+                    .clips
+                    .retain(|clip| clip.id != id);
+                self.clip_editor.selected = None;
+                self.clip_editor.editor = Default::default();
+            } else if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
+                clip.timeline = Arc::clone(&self.clip_editor.editor.timeline);
+            }
+            return;
+        }
         let Some(id) = self.selected_section else {
             return;
         };

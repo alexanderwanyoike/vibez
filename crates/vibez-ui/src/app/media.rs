@@ -478,6 +478,9 @@ impl App {
         payload: PreparedBrowserImport,
     ) -> Task<Message> {
         match target {
+            BrowserImportTarget::LauncherClipAt { track_id, row } => {
+                self.add_audio_launcher_clip(track_id, row, payload)
+            }
             BrowserImportTarget::ArrangementClip(preferred_track) => {
                 let track_id = self.ensure_audio_track_for_import(preferred_track);
                 let position = self.state.transport.position_samples;
@@ -721,7 +724,7 @@ impl App {
                         .unwrap()
                         .id,
                 });
-            self.state.perform.commit_selected_section_timeline();
+            self.state.perform.commit_selected_timeline();
         } else if let Some(section) =
             Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
         {

@@ -194,6 +194,7 @@ mod tests {
             }),
             arrange_timeline: std::sync::Arc::new(ArrangementTimeline::default()),
             sections: std::sync::Arc::new(crate::domains::perform::SectionStore::default()),
+            launcher_clips: Default::default(),
             bpm: 120.0,
             project_swing: vibez_core::perform::SwingAmount::default(),
             loop_enabled: false,
