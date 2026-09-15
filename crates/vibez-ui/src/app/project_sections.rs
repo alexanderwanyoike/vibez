@@ -128,6 +128,9 @@ pub(super) fn runtime_timeline_mut(
 ) -> Option<&mut Arc<ArrangementTimeline>> {
     match location {
         TimelineLocation::Arrange => Some(&mut state.arrangement.timeline),
+        TimelineLocation::LauncherClip(id) => Arc::make_mut(&mut state.perform.clips)
+            .by_id_mut(id)
+            .map(|clip| &mut clip.timeline),
         TimelineLocation::Section(id) => Arc::make_mut(&mut state.perform.sections)
             .by_id_mut(id)
             .map(|section| &mut section.timeline),

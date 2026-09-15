@@ -36,6 +36,34 @@ impl App {
         ) -> ArrangementAction,
     ) -> ArrangementAction {
         match location {
+            TimelineLocation::LauncherClip(id) => {
+                let mut engine = TimelineResultEngine::Section;
+                if self.state.perform.clip_editor.selected == Some(id) {
+                    let action = apply(
+                        &mut self.state.perform.clip_editor.editor,
+                        Arc::make_mut(&mut self.state.project_tracks),
+                        &mut engine,
+                    );
+                    self.state.perform.commit_selected_timeline();
+                    action
+                } else if let Some(clip) =
+                    Arc::make_mut(&mut self.state.perform.clips).by_id_mut(id)
+                {
+                    let mut editor = TimelineEditorState {
+                        timeline: Arc::clone(&clip.timeline),
+                        ..Default::default()
+                    };
+                    let action = apply(
+                        &mut editor,
+                        Arc::make_mut(&mut self.state.project_tracks),
+                        &mut engine,
+                    );
+                    clip.timeline = editor.timeline;
+                    action
+                } else {
+                    ArrangementAction::default()
+                }
+            }
             TimelineLocation::Arrange => {
                 let mut engine = TimelineResultEngine::Arrange(&mut self.cmd_tx);
                 apply(
@@ -53,7 +81,7 @@ impl App {
                     Arc::make_mut(&mut self.state.project_tracks),
                     &mut engine,
                 );
-                self.state.perform.commit_selected_section_timeline();
+                self.state.perform.commit_selected_timeline();
                 if action.mark_dirty {
                     self.refresh_playing_section_after_edit(section_id);
                 }

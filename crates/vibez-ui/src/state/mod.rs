@@ -795,6 +795,7 @@ impl AppState {
             project_tracks: Arc::clone(&self.project_tracks),
             arrange_timeline: Arc::clone(&self.arrangement.timeline),
             sections: Arc::clone(&self.perform.sections),
+            launcher_clips: Arc::clone(&self.perform.clips),
             bpm: self.transport.bpm,
             project_swing: self.perform.project_swing(),
             loop_enabled: self.transport.loop_enabled,
@@ -980,16 +981,22 @@ impl AppState {
     /// Workspace identity is resolved here at the application boundary; the
     /// editor and its widgets only receive the resolved target.
     pub fn active_timeline_editor(&self) -> &TimelineEditorState {
-        if self.view.workspace == Workspace::Perform && self.perform.selected_section.is_some() {
-            self.perform.section_editor.editor()
+        if self.view.workspace == Workspace::Perform
+            && (self.perform.layout == vibez_project::PerformLayout::Clips
+                || self.perform.has_selected_timeline())
+        {
+            self.perform.timeline_editor()
         } else {
             &self.arrangement.editor
         }
     }
 
     pub fn active_timeline_editor_mut(&mut self) -> &mut TimelineEditorState {
-        if self.view.workspace == Workspace::Perform && self.perform.selected_section.is_some() {
-            self.perform.section_editor.editor_mut()
+        if self.view.workspace == Workspace::Perform
+            && (self.perform.layout == vibez_project::PerformLayout::Clips
+                || self.perform.has_selected_timeline())
+        {
+            self.perform.timeline_editor_mut()
         } else {
             &mut self.arrangement.editor
         }

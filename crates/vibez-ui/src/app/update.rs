@@ -60,11 +60,28 @@ impl App {
                     self.state.perform.selected_section.is_some(),
                 ) {
                     self.state.perform.editor_focus =
-                        crate::domains::perform::PerformEditorFocus::SectionConstruction;
+                        crate::domains::perform::PerformEditorFocus::TimelineEditor;
                 }
                 *edit
             }
             message => message,
+        };
+        let message = if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && matches!(
+                &message,
+                Message::Arrangement(
+                    ArrangementMsg::DuplicateSelectedClip | ArrangementMsg::DuplicateNoteClip(..)
+                )
+            ) {
+            let Some(id) = self.state.perform.clip_editor.selected else {
+                return Task::none();
+            };
+            Message::Perform(PerformMsg::Clips(
+                crate::domains::perform::ClipMsg::Duplicate(id),
+            ))
+        } else {
+            message
         };
         let (message, undo_gesture) = match message {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
@@ -504,6 +521,42 @@ impl App {
             // -- Snap grid --
 
             // -- File menu --
+            Message::SelectNewProjectLayout(layout) => {
+                if self.state.project.new_project_layout.is_some() {
+                    self.state.project.new_project_layout = Some(layout);
+                }
+            }
+            Message::CancelNewProject => self.state.project.new_project_layout = None,
+            Message::ConfirmNewProject => {
+                if let Some(layout) = self.state.project.new_project_layout.take() {
+                    self.reset_to_new_project();
+                    self.state.perform.layout = layout;
+                    self.state.perform.mode = crate::domains::perform::PerformMode::Sections;
+                    self.state.view.workspace = crate::state::Workspace::Perform;
+                    self.state.status_text = format!("New {} project", layout.label());
+                }
+            }
+            Message::ImportLauncherClip { track_id, row } => {
+                if self.state.perform.layout != vibez_project::PerformLayout::Clips {
+                    return Task::none();
+                }
+                let source = self
+                    .state
+                    .browser
+                    .drag_source
+                    .take()
+                    .or_else(|| self.state.browser.selected_source.clone());
+                self.state.browser.cancel_media_drag();
+                if let Some(source) = source {
+                    return self.dispatch_drop_for_target(
+                        source,
+                        crate::message::BrowserImportTarget::LauncherClipAt { track_id, row },
+                    );
+                }
+                self.state.status_text =
+                    "Select a sample in the Browser, then add it to a Clip slot".into();
+                self.state.browser.open = true;
+            }
             Message::NewProject => {
                 return self.route_new_project();
             }
@@ -887,57 +940,10 @@ impl App {
                 result,
             } => match result {
                 Ok(success) => {
-                    let action = match location {
-                        vibez_project::TimelineLocation::Arrange => {
-                            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                            self.state.arrangement.apply_clip_transpose_success(
-                                &mut engine,
-                                track_id,
-                                clip_id,
-                                success,
-                            )
-                        }
-                        vibez_project::TimelineLocation::Section(section_id) => {
-                            if self.state.perform.selected_section == Some(section_id) {
-                                let action = {
-                                    let mut engine = crate::domains::DiscardingEngine;
-                                    self.state
-                                        .perform
-                                        .section_editor
-                                        .editor_mut()
-                                        .apply_clip_transpose_success(
-                                            &mut engine,
-                                            track_id,
-                                            clip_id,
-                                            success,
-                                        )
-                                };
-                                self.state.perform.commit_selected_section_timeline();
-                                self.refresh_playing_section_after_edit(section_id);
-                                action
-                            } else {
-                                let Some(section) = Arc::make_mut(&mut self.state.perform.sections)
-                                    .by_id_mut(section_id)
-                                else {
-                                    return Task::none();
-                                };
-                                let mut editor = crate::state::TimelineEditorState {
-                                    timeline: Arc::clone(&section.timeline),
-                                    ..crate::state::TimelineEditorState::default()
-                                };
-                                let mut engine = crate::domains::DiscardingEngine;
-                                let action = editor.apply_clip_transpose_success(
-                                    &mut engine,
-                                    track_id,
-                                    clip_id,
-                                    success,
-                                );
-                                section.timeline = editor.timeline;
-                                self.refresh_playing_section_after_edit(section_id);
-                                action
-                            }
-                        }
-                    };
+                    let action =
+                        self.with_timeline_editor_at(location, |editor, _tracks, engine| {
+                            editor.apply_clip_transpose_success(engine, track_id, clip_id, success)
+                        });
                     return self.apply_arrangement_action_at(action, location);
                 }
                 Err(error) => {

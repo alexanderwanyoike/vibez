@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, codex/epic-clip-launching-prototype]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, codex/epic-clip-launching-prototype]
 
 env:
   CARGO_TERM_COLOR: always

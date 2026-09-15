@@ -60,8 +60,12 @@ impl App {
     }
 
     pub(super) fn route_new_project(&mut self) -> Task<Message> {
-        self.reset_to_new_project();
-        Task::none()
+        let release = self.update(Message::Perform(
+            crate::domains::perform::PerformMsg::WindowUnfocused,
+        ));
+        self.state.project.file_menu_open = false;
+        self.state.project.new_project_layout = Some(vibez_project::PerformLayout::Sections);
+        release
     }
 
     pub(super) fn route_open_project(&mut self) -> Task<Message> {

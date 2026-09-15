@@ -305,6 +305,39 @@ runtime UI/engine state and is not persisted.
 
 ## Project Tracks and timeline content
 
+### Clip Project prototype
+
+The prototype branch adds a project-owned `PerformLayout`: Sections or Clips.
+New Project chooses it once; opening an existing project restores it. Missing
+layout fields default to Sections. Instrument and Track Mutes remain runtime
+Perform modes in either layout.
+
+Clip Projects own a separate `ClipStore`, keyed by stable Clip identities with
+Project Track and row coordinates. No Section is created to represent a Clip
+slot. Each slot supplies local content to the existing Timeline Editor;
+`PerformState` resolves the selected source at the application boundary.
+Arrange, Section and Clip sources share editing operations while only Arrange
+edits directly update Arrange playback. Background editor results retain their
+`TimelineLocation`, including the independent `LauncherClip` location.
+
+The Clip store participates in copy-on-write Undo snapshots and the Project
+document's common timeline traversal for media collection, hydration and ID
+discovery. Clip Project containers use document version 2 inside the unchanged
+SQLite container schema. Section Projects keep document version 1. Earlier
+builds reject version 2 instead of silently discarding unfamiliar Clip data.
+
+This first slice supports project creation, grid navigation and Audio/MIDI Clip
+authoring through the existing inspectors. Independent playback, quantized
+launch/stop, row launch and Clip Capture are subsequent prototype slices. The
+keyboard window and editor selection are runtime state, not project content.
+Track colours identify columns and filled slots; the keyboard window has its
+own outline. Arrow keys remain grid navigation while the piano roll is open.
+Duplicate creates a new slot on the same Track. Whole-clip clipboard, slicing,
+and operations that create multitrack or multi-clip slot content are deferred;
+the current router rejects those operations to preserve one part per slot.
+
+### Shared content ownership
+
 Project Tracks exist once per project. `ProjectTracksState` owns their stable
 `TrackId`, channel name/type, instruments, effects, routing, sends, and mixer
 state. Arrange does not own or duplicate those channels.

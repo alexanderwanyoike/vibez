@@ -162,6 +162,8 @@ impl App {
         // answer to "are you about to lose work" has to be the visible one.
         if self.state.project.close_confirm_open {
             stack![base_layout, self.view_close_confirm_overlay()].into()
+        } else if self.state.project.new_project_layout.is_some() {
+            stack![base_layout, self.view_new_project_overlay()].into()
         } else if self
             .state
             .arrangement

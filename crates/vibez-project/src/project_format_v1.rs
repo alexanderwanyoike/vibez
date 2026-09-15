@@ -18,6 +18,8 @@ use vibez_core::track::{InstrumentStateInfo, MediaProvenance, MediaSourceRef, Tr
 use crate::Project;
 
 pub const FORMAT_VERSION: u32 = 1;
+// Older builds must reject Clip Projects instead of saving away their slots.
+const CLIP_PROTOTYPE_DOCUMENT_VERSION: u32 = 2;
 /// ASCII `VZP1`, stored in SQLite's application-id header field.
 pub const APPLICATION_ID: u32 = 0x565a_5031;
 static STAGING_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -71,9 +73,21 @@ pub struct ProjectDocumentV1 {
 }
 
 impl ProjectDocumentV1 {
+    fn supported_version(&self) -> bool {
+        self.format_version
+            == match self.project.perform_layout {
+                crate::PerformLayout::Sections => FORMAT_VERSION,
+                crate::PerformLayout::Clips => CLIP_PROTOTYPE_DOCUMENT_VERSION,
+            }
+    }
+
     pub fn new(project: Project) -> Self {
         Self {
-            format_version: FORMAT_VERSION,
+            format_version: if project.perform_layout == crate::PerformLayout::Clips {
+                CLIP_PROTOTYPE_DOCUMENT_VERSION
+            } else {
+                FORMAT_VERSION
+            },
             project,
             project_media: Vec::new(),
         }
@@ -244,9 +258,9 @@ impl ProjectContainer {
             |row| row.get(0),
         )?;
         let document: ProjectDocumentV1 = serde_json::from_slice(&json)?;
-        if document.format_version != FORMAT_VERSION {
+        if !document.supported_version() {
             return Err(ProjectFormatError::InvalidContainer(format!(
-                "document version is {}, expected {FORMAT_VERSION}",
+                "unsupported document version {} for this Perform layout",
                 document.format_version
             )));
         }
@@ -350,7 +364,7 @@ impl ProjectContainer {
             .and_then(|_| {
                 let copied = Self::open(&temporary)?;
                 let document = copied.load_document()?;
-                if document.format_version != FORMAT_VERSION {
+                if !document.supported_version() {
                     return Err(ProjectFormatError::InvalidContainer(
                         "Save As lost format marker".into(),
                     ));
@@ -862,9 +876,9 @@ fn write_document(
     transaction: &Transaction<'_>,
     document: &ProjectDocumentV1,
 ) -> Result<(), ProjectFormatError> {
-    if document.format_version != FORMAT_VERSION {
+    if !document.supported_version() {
         return Err(ProjectFormatError::InvalidContainer(format!(
-            "cannot save document version {} as version {FORMAT_VERSION}",
+            "cannot save document version {} with this Perform layout",
             document.format_version
         )));
     }
@@ -988,6 +1002,8 @@ pub fn representative_document() -> ProjectDocumentV1 {
         master: Some(TrackInfo::new("Master")),
         buses: vec![TrackInfo::new("Return A")],
         sections: Vec::new(),
+        perform_layout: Default::default(),
+        launcher_clips: Vec::new(),
     };
     ProjectDocumentV1::new(project)
 }
