@@ -152,6 +152,12 @@ impl App {
 
     pub(super) fn view_clip_perform(&self) -> Element<'_, Message> {
         let width = self.perform_workspace_width();
+        let compact = self.state.view.window_height < 800.0;
+        let slot_height = if compact {
+            ((self.state.view.window_height - 480.0) / 5.0).clamp(30.0, 58.0)
+        } else {
+            58.0
+        };
         let mut workspace = column![self.view_perform_mode_selector(width)].spacing(0);
         if self.state.perform.mode != PerformMode::Sections {
             return container(workspace.push(self.view_pad_surface(width)))
@@ -229,6 +235,23 @@ impl App {
                 .enumerate()
             {
                 let track_color = th::track_color(track.color_index);
+                let mut header = column![text(&track.name)
+                    .font(PERFORM_LABEL)
+                    .size(12)
+                    .color(th::text())]
+                .spacing(4);
+                if !compact {
+                    header = header.push(
+                        text(if track.kind.is_midi() {
+                            "MIDI"
+                        } else {
+                            "AUDIO"
+                        })
+                        .font(PERFORM_TECH)
+                        .size(9)
+                        .color(th::text_dim()),
+                    );
+                }
                 let mut lane = column![
                     container(iced::widget::Space::new(Length::Fill, 3)).style(move |_| {
                         container::Style {
@@ -236,24 +259,7 @@ impl App {
                             ..Default::default()
                         }
                     }),
-                    container(
-                        column![
-                            text(&track.name)
-                                .font(PERFORM_LABEL)
-                                .size(12)
-                                .color(th::text()),
-                            text(if track.kind.is_midi() {
-                                "MIDI"
-                            } else {
-                                "AUDIO"
-                            })
-                            .font(PERFORM_TECH)
-                            .size(9)
-                            .color(th::text_dim()),
-                        ]
-                        .spacing(4)
-                    )
-                    .padding([8, 10])
+                    container(header).padding([if compact { 4 } else { 8 }, 10])
                 ]
                 .spacing(5)
                 .width(Length::Fixed(lane_width));
@@ -318,12 +324,12 @@ impl App {
                                     th::text_dim()
                                 }),
                         ]
-                        .spacing(7),
+                        .spacing(if compact { 2 } else { 7 }),
                     )
                     .on_press(message)
-                    .padding([8, 10])
+                    .padding([if compact { 3 } else { 8 }, 10])
                     .width(Length::Fill)
-                    .height(58)
+                    .height(slot_height)
                     .style(move |_theme: &Theme, status| {
                         let mut style = choice_style(false, status);
                         if filled {
