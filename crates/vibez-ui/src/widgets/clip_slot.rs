@@ -98,10 +98,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             event,
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) {
-            if let Some(point) = cursor
-                .position_in(bounds)
-                .filter(|point| point.y < 25.0 && point.x < bounds.width - 28.0)
-            {
+            if let Some(point) = cursor.position_in(bounds).filter(|point| {
+                point.y < 25.0
+                    && point.x >= 26.0
+                    && point.x < bounds.width - if self.key.is_empty() { 26.0 } else { 48.0 }
+            }) {
                 if let Some(clip) = self.clip {
                     if state.double_click.press(
                         std::time::Instant::now(),
@@ -207,10 +208,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 );
             }
             let tight = self.compact && h < 44.0;
+            let key_space = if self.key.is_empty() { 0.0 } else { 22.0 };
             let title_width = if tight {
-                (w * 0.42).max(25.0)
+                (w * 0.42).max(25.0).min((w - 50.0 - key_space).max(0.0))
             } else {
-                w - 38.0
+                w - 50.0 - key_space
             };
             label(
                 frame,
@@ -219,20 +221,20 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
                 ),
-                9.0,
+                26.0,
                 6.0,
                 if tight { 10.0 } else { 12.0 },
                 th::text(),
                 false,
             );
             if !self.key.is_empty() {
-                frame.fill_rectangle(Point::new(w - 24.0, 5.0), Size::new(18.0, 17.0), ink);
-                label(frame, self.key, w - 19.0, 6.0, 11.0, paper, true);
+                frame.fill_rectangle(Point::new(w - 45.0, 5.0), Size::new(18.0, 17.0), ink);
+                label(frame, self.key, w - 40.0, 6.0, 11.0, paper, true);
             }
             let plot = if tight {
                 Rectangle::new(
-                    Point::new(title_width + 3.0, 5.0),
-                    Size::new((w - title_width - 33.0).max(1.0), h - 10.0),
+                    Point::new(title_width + 26.0, 5.0),
+                    Size::new((w - title_width - 76.0).max(1.0), h - 10.0),
                 )
             } else {
                 Rectangle::new(

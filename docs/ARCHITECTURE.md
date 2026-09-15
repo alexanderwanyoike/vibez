@@ -356,6 +356,8 @@ use the editor's loop-aware note occurrences; audio thumbnails use the shared
 waveform peak cache. The canvas retains its source timeline so copy-on-write
 edits invalidate cached geometry, including asynchronous media hydration.
 Keyboard badges identify the controller window without outlining every slot.
+Each occupied Clip cell has a play control and an × delete control, routed through
+the same launch and Undo-aware delete actions as the keyboard and editor.
 Track and Clip names edit in place on double-click. Arrow keys remain grid
 navigation while the piano roll is open. Playing Clips
 show a progress line in the grid and their shared Audio/MIDI inspector.

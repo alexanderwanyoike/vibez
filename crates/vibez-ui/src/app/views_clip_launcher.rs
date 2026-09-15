@@ -2,13 +2,14 @@
 
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable,
-    stack, text, text_input,
+    stack, text, text_input, tooltip,
 };
-use iced::{Element, Length, Theme};
+use iced::{Color, Element, Length, Theme};
 use vibez_project::PerformLayout;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::perform::{ClipMsg, PadPosition, PerformMode, PerformMsg};
+use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH};
@@ -189,7 +190,7 @@ impl App {
         let keyboard_active = self.state.perform.mode == PerformMode::Sections;
         let compact = self.state.view.window_height < 800.0;
         let slot_height = if compact {
-            ((self.state.view.window_height - 480.0) / 5.0).clamp(26.0, 72.0)
+            ((self.state.view.window_height - 480.0) / 5.0).clamp(48.0, 72.0)
         } else {
             (64.0 + (self.state.view.window_height - 800.0) * 0.08).min(80.0)
         };
@@ -436,6 +437,33 @@ impl App {
                     } else {
                         slot_cell.into()
                     };
+                    let cell: Element<'_, Message> = if let Some(clip) = slot {
+                        stack![
+                            cell,
+                            container(
+                                row![
+                                    self.view_clip_cell_action(
+                                        icons::PLAY,
+                                        "Launch clip",
+                                        ClipMsg::Launch(clip.id),
+                                        track_color
+                                    ),
+                                    horizontal_space(),
+                                    self.view_clip_cell_action(
+                                        icons::X,
+                                        "Delete clip",
+                                        ClipMsg::Delete(clip.id),
+                                        th::danger()
+                                    ),
+                                ]
+                                .width(Length::Fill)
+                            )
+                            .padding([3, 3]),
+                        ]
+                        .into()
+                    } else {
+                        cell
+                    };
                     let cell = if slot.is_some_and(|clip| {
                         self.state.view.editing_clip_name == Some((track.id, clip.id))
                     }) {
@@ -460,7 +488,7 @@ impl App {
                     .height(Length::Fill),
             );
         }
-        let mut footer = row![
+        let footer = row![
             text(if keyboard_active {
                 "Keys launch · Shift + key stops · Alt + key launches row · F5 Capture"
             } else {
@@ -473,14 +501,6 @@ impl App {
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
-        if let Some(id) = self.state.perform.clip_editor.selected {
-            footer = footer.push(
-                button(text("Delete clip").size(10))
-                    .padding([5, 9])
-                    .style(|_theme, status| choice_style(false, status))
-                    .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::Delete(id)))),
-            );
-        }
         workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
         container(workspace)
             .width(Length::Fill)
@@ -490,6 +510,40 @@ impl App {
 }
 
 impl App {
+    fn view_clip_cell_action(
+        &self,
+        icon: char,
+        hint: &'static str,
+        action: ClipMsg,
+        active_color: Color,
+    ) -> Element<'_, Message> {
+        tooltip(
+            button(center(icons::icon(icon).size(11)))
+                .width(20)
+                .height(20)
+                .padding(0)
+                .on_press(Message::Perform(PerformMsg::Clips(action)))
+                .style(move |_, status| button::Style {
+                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                        .then(|| th::bg_hover().into()),
+                    text_color: if matches!(
+                        status,
+                        button::Status::Hovered | button::Status::Pressed
+                    ) {
+                        active_color
+                    } else {
+                        th::text_dim()
+                    },
+                    ..Default::default()
+                }),
+            container(text(hint).size(10))
+                .padding([4, 6])
+                .style(surface),
+            tooltip::Position::Bottom,
+        )
+        .into()
+    }
+
     fn view_launcher_name_input(&self) -> Element<'_, Message> {
         text_input("Name", &self.state.view.edit_name_text)
             .id("launcher-name")
