@@ -114,7 +114,7 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    iced::application(App::title, App::update, App::view)
+    iced::application(App::title, App::update_and_refresh_clips, App::view)
         .theme(App::theme)
         .scale_factor(App::scale_factor)
         .antialiasing(true)

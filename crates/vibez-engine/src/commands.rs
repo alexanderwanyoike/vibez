@@ -53,6 +53,10 @@ pub enum EngineCommand {
         immediate: bool,
     },
     RefreshClip(Box<crate::playback_source::PreparedClipPlayback>),
+    EditClip {
+        active: Box<crate::playback_source::PreparedClipPlayback>,
+        queued: Box<crate::playback_source::PreparedClipPlayback>,
+    },
     /// Queue a complete resident Section for an engine-owned musical boundary.
     QueueSection {
         prepared: Box<PreparedSectionPlaybackSource>,

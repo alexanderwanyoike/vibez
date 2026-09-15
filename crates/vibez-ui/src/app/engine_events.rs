@@ -109,6 +109,29 @@ impl App {
                             .pending
                             .remove(&retired.request_id);
                     }
+                    EngineEvent::ClipSourceRefreshed {
+                        track_id,
+                        request_id,
+                        position,
+                        effective_at_samples,
+                    } => {
+                        let editor = &mut self.state.perform.clip_editor;
+                        if let Some(clip) = editor.pending.remove(&request_id) {
+                            let spb = self.state.transport.sample_rate as f64 * 60.0
+                                / self.state.transport.bpm;
+                            let source = CapturedTimelineSource::from_clip(&clip, spb);
+                            editor
+                                .started_at
+                                .insert(track_id, effective_at_samples.saturating_sub(position));
+                            editor.playing.insert(track_id, clip);
+                            self.state.perform.capture.clip_transition(
+                                track_id,
+                                Some(source),
+                                effective_at_samples,
+                                position,
+                            );
+                        }
+                    }
                     EngineEvent::ClipCaptureSource {
                         track_id,
                         position,

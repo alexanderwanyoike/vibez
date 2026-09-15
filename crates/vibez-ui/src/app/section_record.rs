@@ -27,10 +27,6 @@ impl App {
         if let crate::domains::perform::PerformMsg::ClipRecord(msg) = msg {
             return self.update_clip_record(msg);
         }
-        let changed_clip_mode = match &msg {
-            PerformMsg::Clips(crate::domains::perform::ClipMsg::ToggleLoop(id)) => Some(*id),
-            _ => None,
-        };
         self.state.perform.section_record.sync_clock(
             self.state.transport.playing,
             self.state.transport.bpm,
@@ -45,12 +41,6 @@ impl App {
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             self.state.perform.update(msg, &mut engine, ctx)
         };
-        if let Some(clip) = changed_clip_mode
-            .and_then(|id| self.state.perform.clips.by_id(id))
-            .cloned()
-        {
-            self.publish_recorded_clip(clip, true);
-        }
         self.apply_perform_action(action)
     }
 

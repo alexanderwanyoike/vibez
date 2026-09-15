@@ -84,6 +84,14 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+        if clip_only_snapshot(&self.state, &snapshot) {
+            self.state.perform.clips = snapshot.launcher_clips;
+            self.state
+                .perform
+                .sync_selected_timeline_editor(self.state.arrangement.selected_track);
+            return;
+        }
+
         self.state
             .arrangement
             .editor
@@ -404,5 +412,48 @@ impl App {
                 bypass: effect.bypass,
             });
         }
+    }
+}
+
+fn clip_only_snapshot(
+    state: &crate::state::AppState,
+    snapshot: &crate::state::ProjectSnapshot,
+) -> bool {
+    state.perform.layout == vibez_project::PerformLayout::Clips
+        && state.perform.clips.clips.len() == snapshot.launcher_clips.clips.len()
+        && state
+            .perform
+            .clips
+            .clips
+            .iter()
+            .all(|clip| snapshot.launcher_clips.by_id(clip.id).is_some())
+        && Arc::ptr_eq(&state.project_tracks, &snapshot.project_tracks)
+        && Arc::ptr_eq(&state.arrangement.timeline, &snapshot.arrange_timeline)
+        && Arc::ptr_eq(&state.perform.sections, &snapshot.sections)
+        && state.transport.bpm == snapshot.bpm
+        && state.perform.project_swing() == snapshot.project_swing
+        && state.transport.loop_enabled == snapshot.loop_enabled
+        && state.transport.loop_start_beats == snapshot.loop_start_beats
+        && state.transport.loop_end_beats == snapshot.loop_end_beats
+}
+
+#[cfg(test)]
+mod clip_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn clip_content_undo_preserves_devices_but_track_or_tempo_changes_require_replay() {
+        let mut state = crate::state::AppState::default();
+        state.perform.layout = vibez_project::PerformLayout::Clips;
+        let snapshot = state.project_snapshot();
+        assert!(clip_only_snapshot(&state, &snapshot));
+        state.transport.bpm += 1.0;
+        assert!(!clip_only_snapshot(&state, &snapshot));
+        state.transport.bpm = snapshot.bpm;
+        Arc::make_mut(&mut state.project_tracks).tracks.clear();
+        assert!(!clip_only_snapshot(&state, &snapshot));
+        state.project_tracks = Arc::clone(&snapshot.project_tracks);
+        state.perform.layout = vibez_project::PerformLayout::Sections;
+        assert!(!clip_only_snapshot(&state, &snapshot));
     }
 }

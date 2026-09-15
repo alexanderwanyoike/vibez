@@ -297,6 +297,46 @@ impl EngineTrack {
         }
     }
 
+    pub(crate) fn release_edited_launcher_notes(
+        &mut self,
+        source: &crate::playback_source::PreparedPlaybackSource,
+    ) {
+        for clip in &source.note_clips {
+            if let Some(old) = self
+                .launcher_source
+                .note_clips
+                .iter()
+                .find(|old| old.id == clip.id)
+            {
+                clip.inherit_groove_latch(old);
+            }
+        }
+        let mut sounding = self.active_notes;
+        while sounding != 0 {
+            let pitch = sounding.trailing_zeros() as u8;
+            sounding &= sounding - 1;
+            let unchanged = self
+                .launcher_source
+                .note_clips
+                .iter()
+                .filter(|clip| clip.notes.iter().any(|note| note.pitch == pitch))
+                .all(|old| {
+                    source
+                        .note_clips
+                        .iter()
+                        .any(|new| old.id == new.id && old.same_pitch_schedule(new, pitch))
+                });
+            // The old note-off disappears with an edited schedule. Unchanged voices
+            // keep sustaining, and live instrument input is not in this mask.
+            if !unchanged {
+                if let Some(instrument) = self.instrument.as_mut() {
+                    instrument.note_off(pitch);
+                }
+                self.active_notes &= !(1u128 << pitch);
+            }
+        }
+    }
+
     /// Send note-offs for every sounding note. Call whenever the
     /// playhead moves discontinuously; the offs reach the instrument
     /// immediately (built-ins) or on its next render (plugins).

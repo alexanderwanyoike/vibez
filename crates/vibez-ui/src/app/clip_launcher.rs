@@ -184,3 +184,144 @@ impl App {
         }
     }
 }
+
+pub(super) fn refresh_edited_clips(
+    before: &Arc<crate::domains::perform::ClipStore>,
+    perform: &mut crate::domains::perform::PerformState,
+    recording: Option<ClipId>,
+    spb: f64,
+    engine: &mut impl crate::domains::EngineHandle,
+) {
+    use vibez_engine::commands::EngineCommand;
+    if perform.layout != PerformLayout::Clips
+        || !perform.clip_editor.running
+        || Arc::ptr_eq(before, &perform.clips)
+    {
+        return;
+    }
+    for clip in &perform.clips.clips {
+        if recording == Some(clip.id)
+            || perform
+                .clip_record
+                .session
+                .as_ref()
+                .is_some_and(|s| s.working.id == clip.id)
+            || before
+                .by_id(clip.id)
+                .is_none_or(|old| Arc::ptr_eq(&old.timeline, &clip.timeline))
+        {
+            continue;
+        }
+        let editor = &mut perform.clip_editor;
+        editor.next_request += 1;
+        let active = clip.prepare(editor.next_request, spb);
+        editor.pending.insert(editor.next_request, clip.clone());
+        editor.next_request += 1;
+        let queued = clip.prepare(editor.next_request, spb);
+        editor.pending.insert(editor.next_request, clip.clone());
+        engine.send(EngineCommand::EditClip { active, queued });
+    }
+}
+
+#[cfg(test)]
+mod live_edit_tests {
+    use super::*;
+    use crate::domains::perform::{ClipMsg, PerformCtx, PerformMsg};
+    use crate::domains::piano_roll::{PianoRollCtx, PianoRollMsg};
+    use crate::domains::test_support::RecordingEngine;
+    use crate::state::AppState;
+
+    #[test]
+    fn piano_roll_edit_publishes_new_source_without_relaunching() {
+        let mut state = AppState::default();
+        state.perform.layout = PerformLayout::Clips;
+        let track = TrackId::new();
+        let mut project_track = crate::state::ProjectTrack::new(track, "Test".into(), 0);
+        project_track.kind = vibez_core::midi::TrackKind::Midi;
+        let tracks = vec![project_track];
+        let mut engine = RecordingEngine::default();
+        state.perform.update(
+            PerformMsg::Clips(ClipMsg::CreateMidi {
+                track_id: track,
+                row: 0,
+            }),
+            &mut engine,
+            PerformCtx {
+                workspace_visible: true,
+                project_tracks: &tracks,
+                ..Default::default()
+            },
+        );
+        let id = state.perform.clip_editor.selected.unwrap();
+        state.perform.clip_editor.running = true;
+        let before = Arc::clone(&state.perform.clips);
+        state.piano_roll.update(
+            PianoRollMsg::AddNote {
+                track_id: track,
+                clip_id: id,
+                pitch: 42,
+                start_beat: 0.5,
+                duration_beats: 0.25,
+            },
+            &mut crate::domains::DiscardingEngine,
+            state.perform.timeline_editor_mut(),
+            PianoRollCtx::default(),
+        );
+        state.perform.commit_selected_timeline();
+        refresh_edited_clips(&before, &mut state.perform, None, 4.0, &mut engine);
+        assert_eq!(
+            engine.0.len(),
+            1,
+            "the audible source must follow editor changes"
+        );
+        let vibez_engine::commands::EngineCommand::EditClip { active, queued } = &engine.0[0]
+        else {
+            panic!("expected a source edit")
+        };
+        assert_eq!(active.source.note_clips[0].notes[0].pitch, 42);
+        assert_eq!(queued.source.note_clips[0].notes[0].pitch, 42);
+        assert_ne!(active.request_id, queued.request_id);
+        let acknowledged = state.perform.clip_editor.pending[&active.request_id].clone();
+        assert!(before
+            .by_id(id)
+            .unwrap()
+            .timeline
+            .get(track)
+            .unwrap()
+            .note_clips[0]
+            .notes
+            .is_empty());
+
+        let edited = Arc::clone(&state.perform.clips);
+        engine.0.clear();
+        refresh_edited_clips(&edited, &mut state.perform, None, 4.0, &mut engine);
+        assert!(
+            engine.0.is_empty(),
+            "selection and timer messages must not refresh content"
+        );
+
+        // Undo restores canonical content while the runtime selection can be elsewhere.
+        state.perform.clip_editor.selected = None;
+        state.perform.clips = before;
+        refresh_edited_clips(&edited, &mut state.perform, None, 4.0, &mut engine);
+        let vibez_engine::commands::EngineCommand::EditClip { active, .. } = &engine.0[0] else {
+            panic!("expected undo source")
+        };
+        assert!(active.source.note_clips[0].notes.is_empty());
+        assert_eq!(
+            acknowledged.timeline.get(track).unwrap().note_clips[0]
+                .notes
+                .len(),
+            1,
+            "Capture retains the acknowledged version"
+        );
+        engine.0.clear();
+        let undone = Arc::clone(&state.perform.clips);
+        state.perform.clips = edited;
+        refresh_edited_clips(&undone, &mut state.perform, Some(id), 4.0, &mut engine);
+        assert!(
+            engine.0.is_empty(),
+            "recording owns its live preview updates"
+        );
+    }
+}
