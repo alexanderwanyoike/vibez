@@ -184,16 +184,6 @@ impl super::App {
                                 self.state.perform.clip_editor.first_row + u32::from(position.row),
                             )
                         })
-                } else if modifiers == iced::keyboard::Modifiers::SHIFT {
-                    computer_key_from_physical(physical_key)
-                        .and_then(|key| self.state.perform.input_mapping.position_for(key))
-                        .and_then(|position| {
-                            self.state.project_tracks.tracks.get(
-                                self.state.perform.clip_editor.first_track
-                                    + position.column as usize,
-                            )
-                        })
-                        .map(|track| crate::domains::perform::ClipMsg::StopTrack(track.id))
                 } else {
                     None
                 };
@@ -209,14 +199,11 @@ impl super::App {
                     return iced::Task::none();
                 }
                 if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
-                    let amount = if modifiers.shift() { 4 } else { 1 };
-                    let movement = match key {
-                        iced::keyboard::Key::Named(Named::ArrowLeft) => Some((-amount, 0)),
-                        iced::keyboard::Key::Named(Named::ArrowRight) => Some((amount, 0)),
-                        iced::keyboard::Key::Named(Named::ArrowUp) => Some((0, -amount)),
-                        iced::keyboard::Key::Named(Named::ArrowDown) => Some((0, amount)),
-                        _ => None,
-                    };
+                    let movement = clip_window_movement(
+                        key,
+                        modifiers,
+                        self.state.browser.open && self.state.browser.keyboard_focus,
+                    );
                     if let Some((tracks, rows)) = movement {
                         return self.update(Message::Perform(PerformMsg::Clips(
                             crate::domains::perform::ClipMsg::MoveWindow { tracks, rows },
@@ -344,6 +331,25 @@ impl super::App {
                     .then_some(message)
             })
             .map_or_else(iced::Task::none, iced::Task::done)
+    }
+}
+
+fn clip_window_movement(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+    browser_focused: bool,
+) -> Option<(i32, i32)> {
+    use iced::keyboard::{key::Named, Key, Modifiers};
+    if browser_focused || !(modifiers.is_empty() || modifiers == Modifiers::SHIFT) {
+        return None;
+    }
+    let amount = if modifiers.shift() { 4 } else { 1 };
+    match key {
+        Key::Named(Named::ArrowLeft) => Some((-amount, 0)),
+        Key::Named(Named::ArrowRight) => Some((amount, 0)),
+        Key::Named(Named::ArrowUp) => Some((0, -amount)),
+        Key::Named(Named::ArrowDown) => Some((0, amount)),
+        _ => None,
     }
 }
 
@@ -979,5 +985,31 @@ mod tests {
                 pressed_at + std::time::Duration::from_millis(100),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod clip_browser_focus_tests {
+    use super::*;
+    use iced::keyboard::{key::Named, Key, Modifiers};
+
+    #[test]
+    fn browser_focus_keeps_arrow_audition_ahead_of_clip_navigation() {
+        for (key, direction) in [(Named::ArrowUp, -1), (Named::ArrowDown, 1)] {
+            let key = Key::Named(key);
+            assert_eq!(clip_window_movement(&key, Modifiers::empty(), true), None);
+            assert!(
+                matches!(global_key_handler(key.clone(), Modifiers::empty()),
+                Some(Message::SelectAdjacentBrowserResult(value)) if value == direction)
+            );
+            assert_eq!(
+                clip_window_movement(&key, Modifiers::empty(), false),
+                Some((0, i32::from(direction)))
+            );
+        }
+        assert_eq!(
+            clip_window_movement(&Key::Named(Named::ArrowRight), Modifiers::SHIFT, false),
+            Some((4, 0))
+        );
     }
 }

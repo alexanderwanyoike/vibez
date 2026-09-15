@@ -292,3 +292,106 @@ fn loop_is_default_and_cell_toggle_updates_the_selected_editor_and_prepared_sour
     assert!(state.clips.by_id(id).unwrap().prepare(0, 100.0).looping);
     assert!(state.sections.sections.is_empty());
 }
+
+#[test]
+fn clip_triggers_toggle_playing_and_queued_intent_without_changing_the_editor() {
+    let tracks = tracks(1);
+    let track = tracks[0].id;
+    let mut perform = PerformState {
+        layout: PerformLayout::Clips,
+        ..Default::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        ..Default::default()
+    };
+    perform.update(
+        PerformMsg::Clips(ClipMsg::CreateMidi {
+            track_id: track,
+            row: 0,
+        }),
+        &mut engine,
+        ctx,
+    );
+    let id = perform.clip_editor.selected.unwrap();
+    let trigger = PerformMsg::Clips(ClipMsg::Toggle(id));
+    assert_eq!(
+        perform
+            .update(trigger.clone(), &mut engine, ctx)
+            .clip_launch,
+        Some(ClipLaunchRequest::Clip(id))
+    );
+    perform.clip_editor.queued.insert(track, Some(id));
+    assert_eq!(
+        perform
+            .update(trigger.clone(), &mut engine, ctx)
+            .clip_launch,
+        Some(ClipLaunchRequest::Stop(track))
+    );
+    perform.clip_editor.queued.clear();
+    perform
+        .clip_editor
+        .playing
+        .insert(track, perform.clips.by_id(id).unwrap().clone());
+    assert_eq!(
+        perform
+            .update(trigger.clone(), &mut engine, ctx)
+            .clip_launch,
+        Some(ClipLaunchRequest::Stop(track))
+    );
+    perform.clip_editor.queued.insert(track, None);
+    assert_eq!(
+        perform.update(trigger, &mut engine, ctx).clip_launch,
+        Some(ClipLaunchRequest::Clip(id))
+    );
+    assert_eq!(perform.clip_editor.selected, Some(id));
+}
+
+#[test]
+fn an_empty_grid_key_stops_its_track_instead_of_creating_a_clip() {
+    let tracks = tracks(1);
+    let mut perform = PerformState {
+        layout: PerformLayout::Clips,
+        ..Default::default()
+    };
+    let mut engine = RecordingEngine::default();
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        ..Default::default()
+    };
+    let action = perform.update(
+        PerformMsg::ComputerKeyPressed {
+            key: crate::domains::perform::ComputerKey::Digit1,
+            key_id: "1".into(),
+            occurred_at: std::time::Instant::now(),
+        },
+        &mut engine,
+        ctx,
+    );
+    assert_eq!(
+        action.clip_launch,
+        Some(ClipLaunchRequest::Stop(tracks[0].id))
+    );
+    assert!(perform.clips.clips.is_empty());
+}
+
+#[test]
+fn stale_engine_acknowledgements_cannot_undo_a_newer_toggle() {
+    let track = TrackId::new();
+    let clip = vibez_core::id::ClipId::new();
+    let mut editor = ClipEditor::default();
+    editor.queue_request(track, Some(clip), 1);
+    editor.queue_request(track, None, 2);
+    editor.queue_request(track, Some(clip), 1);
+    editor.acknowledge_transition(track, 1);
+    assert_eq!(editor.queued.get(&track), Some(&None));
+    editor.queue_request(track, Some(clip), 3);
+    editor.queue_request(track, None, 2);
+    editor.acknowledge_transition(track, 2);
+    assert_eq!(editor.queued.get(&track), Some(&Some(clip)));
+    editor.acknowledge_transition(track, 3);
+    assert!(!editor.queued.contains_key(&track));
+}

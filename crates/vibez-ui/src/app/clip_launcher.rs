@@ -157,6 +157,13 @@ impl App {
         for (track_id, clip) in targets {
             self.state.perform.clip_editor.next_request += 1;
             let request_id = self.state.perform.clip_editor.next_request;
+            // Reflect intent before the callback without letting an older engine
+            // acknowledgement overwrite a newer tap.
+            self.state.perform.clip_editor.queue_request(
+                track_id,
+                clip.as_ref().map(|clip| clip.id),
+                request_id,
+            );
             if let Some(clip) = clip {
                 prepared.push(clip.prepare(request_id, samples_per_beat));
                 self.state

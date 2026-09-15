@@ -215,7 +215,7 @@ impl App {
                         .map_or("Track", |track| track.name.as_str())
                 )
             })
-            .unwrap_or_else(|| "Record beside a cell".into());
+            .unwrap_or_else(|| "Record inside a cell".into());
         let controls = row![
             text("NEW CLIP")
                 .font(PERFORM_TECH)
@@ -358,9 +358,9 @@ impl App {
                 .saturating_sub(first_track)
                 .min(visible_tracks)
                 .max(4);
-            let lane_width = ((width - 58.0) / shown_tracks as f32 - 8.0).min(210.0);
+            let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
-            let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(6);
+            let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
             for offset in 0..6u32 {
                 numbers = numbers.push(
                     container(
@@ -373,7 +373,7 @@ impl App {
                     .height(slot_height),
                 );
             }
-            let mut grid = row![numbers.width(22)].spacing(8).width(Length::Fill);
+            let mut grid = row![numbers.width(22)].spacing(0).width(Length::Fill);
             for (column_index, track) in self
                 .state
                 .project_tracks
@@ -411,7 +411,7 @@ impl App {
                     );
                 }
                 let mut lane = column![container(header).padding([3, 8]).height(header_height)]
-                    .spacing(6)
+                    .spacing(0)
                     .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
@@ -432,9 +432,7 @@ impl App {
                     } else {
                         ""
                     };
-                    let message = if let Some(clip) = slot {
-                        Message::Perform(PerformMsg::Clips(ClipMsg::Select(clip.id)))
-                    } else if track.kind.is_midi() {
+                    let empty_action = if track.kind.is_midi() {
                         Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {
                             track_id: track.id,
                             row: slot_row,
@@ -445,9 +443,14 @@ impl App {
                             row: slot_row,
                         }
                     };
+                    let message = slot.map_or(
+                        Message::Perform(PerformMsg::Clips(ClipMsg::StopTrack(track.id))),
+                        |clip| Message::Perform(PerformMsg::Clips(ClipMsg::Select(clip.id))),
+                    );
                     let slot_cell = button(
                         canvas(crate::widgets::clip_slot::ClipSlot {
                             clip: slot,
+                            empty_action: empty_action.clone(),
                             color: track_color,
                             key,
                             selected,
@@ -543,57 +546,102 @@ impl App {
                     } else {
                         slot_cell.into()
                     };
-                    let cell: Element<'_, Message> = if let Some(clip) = slot {
-                        stack![
-                            cell,
-                            container(
-                                row![
-                                    self.view_clip_cell_action(
-                                        icons::PLAY,
-                                        "Launch clip",
-                                        PerformMsg::Clips(ClipMsg::Launch(clip.id)),
-                                        track_color
-                                    ),
-                                    horizontal_space(),
-                                    self.view_clip_cell_action(
-                                        icons::X,
-                                        "Delete clip",
-                                        PerformMsg::Clips(ClipMsg::Delete(clip.id)),
-                                        th::danger()
-                                    ),
-                                ]
-                                .width(Length::Fill)
-                            )
-                            .padding([3, 3]),
-                        ]
-                        .into()
+                    let recording =
+                        self.state
+                            .perform
+                            .clip_record
+                            .session
+                            .as_ref()
+                            .is_some_and(|session| {
+                                session.working.track_id == track.id
+                                    && session.working.row == slot_row
+                            });
+                    let play: Element<'_, Message> = if let Some(clip) = slot {
+                        let triggered = self.state.perform.clip_is_triggered(clip);
+                        self.view_clip_cell_action(
+                            if triggered { icons::STOP } else { icons::PLAY },
+                            if triggered {
+                                "Stop clip"
+                            } else {
+                                "Launch clip"
+                            },
+                            PerformMsg::Clips(ClipMsg::Toggle(clip.id)),
+                            track_color,
+                        )
                     } else {
-                        cell
+                        self.view_clip_cell_action(
+                            icons::STOP,
+                            "Stop track · double-click the cell to create a clip",
+                            PerformMsg::Clips(ClipMsg::StopTrack(track.id)),
+                            th::text_dim(),
+                        )
                     };
-                    let cell: Element<'_, Message> = if let Some(clip) = slot {
+                    let mode: Element<'_, Message> = if let Some(clip) = slot {
                         let (_, looping) = clip.length_and_loop(
                             self.state.transport.sample_rate as f64 * 60.0
                                 / self.state.transport.bpm,
                         );
+                        self.view_clip_cell_action(
+                            if looping {
+                                icons::REPEAT
+                            } else {
+                                icons::SKIP_FORWARD
+                            },
+                            if looping {
+                                "Loop · switch to One-shot"
+                            } else {
+                                "One-shot · switch to Loop"
+                            },
+                            PerformMsg::Clips(ClipMsg::ToggleLoop(clip.id)),
+                            track_color,
+                        )
+                    } else {
+                        iced::widget::Space::new(20, 20).into()
+                    };
+                    let cell: Element<'_, Message> = stack![
+                        cell,
+                        container(
+                            row![
+                                play,
+                                self.view_clip_cell_action(
+                                    if recording {
+                                        icons::STOP
+                                    } else {
+                                        icons::CIRCLE
+                                    },
+                                    if recording {
+                                        "Finish recording"
+                                    } else {
+                                        "Record into this cell"
+                                    },
+                                    PerformMsg::ClipRecord(
+                                        crate::domains::perform::clip_record::ClipRecordMsg::Slot(
+                                            track.id, slot_row
+                                        )
+                                    ),
+                                    th::danger(),
+                                ),
+                                horizontal_space(),
+                                mode,
+                            ]
+                            .spacing(3)
+                            .width(Length::Fill)
+                        )
+                        .align_bottom(Length::Fill)
+                        .padding([3, 5]),
+                    ]
+                    .into();
+                    let cell: Element<'_, Message> = if let Some(clip) = slot {
                         stack![
                             cell,
                             container(self.view_clip_cell_action(
-                                if looping {
-                                    icons::REPEAT
-                                } else {
-                                    icons::SKIP_FORWARD
-                                },
-                                if looping {
-                                    "Loop · switch to One-shot"
-                                } else {
-                                    "One-shot · switch to Loop"
-                                },
-                                PerformMsg::Clips(ClipMsg::ToggleLoop(clip.id)),
-                                track_color,
+                                icons::X,
+                                "Delete clip",
+                                PerformMsg::Clips(ClipMsg::Delete(clip.id)),
+                                th::danger(),
                             ))
                             .align_right(Length::Fill)
-                            .align_bottom(Length::Fill)
-                            .padding([2, 3])
+                            .padding([3, 5])
                         ]
                         .into()
                     } else {
@@ -613,41 +661,7 @@ impl App {
                     } else {
                         cell
                     };
-                    let recording =
-                        self.state
-                            .perform
-                            .clip_record
-                            .session
-                            .as_ref()
-                            .is_some_and(|session| {
-                                session.working.track_id == track.id
-                                    && session.working.row == slot_row
-                            });
-                    lane = lane.push(
-                        row![
-                            self.view_clip_cell_action(
-                                if recording {
-                                    icons::STOP
-                                } else {
-                                    icons::CIRCLE
-                                },
-                                if recording {
-                                    "Finish recording"
-                                } else {
-                                    "Record into this cell"
-                                },
-                                PerformMsg::ClipRecord(
-                                    crate::domains::perform::clip_record::ClipRecordMsg::Slot(
-                                        track.id, slot_row
-                                    )
-                                ),
-                                th::danger(),
-                            ),
-                            cell,
-                        ]
-                        .spacing(3)
-                        .height(slot_height),
-                    );
+                    lane = lane.push(container(cell).height(slot_height));
                 }
                 grid = grid.push(lane);
             }
@@ -659,7 +673,7 @@ impl App {
         }
         let footer = row![
             text(if keyboard_active {
-                "Keys launch · Shift + key stops · Alt + key launches row · F5 Capture"
+                "Keys toggle · Empty cell stops track · Alt + key launches row · F5 Capture"
             } else {
                 "F1 Clips · Double-click names to edit"
             })
@@ -674,6 +688,10 @@ impl App {
         container(workspace)
             .width(Length::Fill)
             .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Color::BLACK.into()),
+                ..Default::default()
+            })
             .into()
     }
 }
@@ -688,24 +706,15 @@ impl App {
     ) -> Element<'_, Message> {
         let recording = matches!(action, PerformMsg::ClipRecord(crate::domains::perform::clip_record::ClipRecordMsg::Slot(track, row))
             if self.state.perform.clip_record.session.as_ref().is_some_and(|session| session.working.track_id == track && session.working.row == row));
-        let playback_mode = matches!(&action, PerformMsg::Clips(ClipMsg::ToggleLoop(_)));
-        let glyph: Element<'_, Message> = if playback_mode {
-            text(if icon == icons::REPEAT { "LOOP" } else { "1x" })
-                .font(PERFORM_TECH)
-                .size(8)
-                .into()
-        } else {
-            icons::icon(icon).size(11).into()
-        };
+        let glyph = icons::icon(icon).size(11);
         tooltip(
             button(center(glyph))
-                .width(if playback_mode { 34 } else { 20 })
+                .width(20)
                 .height(20)
                 .padding(0)
                 .on_press(Message::Perform(action))
                 .style(move |_, status| button::Style {
-                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                        .then(|| th::bg_hover().into()),
+                    background: Some(Color::BLACK.into()),
                     text_color: if recording
                         || matches!(status, button::Status::Hovered | button::Status::Pressed)
                     {

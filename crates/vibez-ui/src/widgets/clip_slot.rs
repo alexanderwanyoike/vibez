@@ -14,6 +14,7 @@ use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
 
 pub struct ClipSlot<'a> {
     pub clip: Option<&'a LauncherClip>,
+    pub empty_action: Message,
     pub color: Color,
     pub key: &'a str,
     pub selected: bool,
@@ -106,12 +107,9 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             event,
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         ) {
-            if let Some(point) = cursor.position_in(bounds).filter(|point| {
-                point.y < 25.0
-                    && point.x >= 26.0
-                    && point.x < bounds.width - if self.key.is_empty() { 26.0 } else { 48.0 }
-            }) {
-                if let Some(clip) = self.clip {
+            if let Some(point) = cursor.position_in(bounds) {
+                let title = point.y < 25.0 && point.x >= 6.0 && point.x < bounds.width - 48.0;
+                if self.clip.is_none() || title {
                     if state.double_click.press(
                         std::time::Instant::now(),
                         point,
@@ -121,19 +119,25 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                         state.double_click.clear();
                         return (
                             canvas::event::Status::Captured,
-                            Some(Message::View(
-                                crate::domains::view::ViewMsg::StartEditingClipName(
-                                    clip.track_id,
-                                    clip.id,
-                                ),
+                            Some(self.clip.map_or_else(
+                                || self.empty_action.clone(),
+                                |clip| {
+                                    Message::View(
+                                        crate::domains::view::ViewMsg::StartEditingClipName(
+                                            clip.track_id,
+                                            clip.id,
+                                        ),
+                                    )
+                                },
                             )),
                         );
                     }
+                } else {
+                    state.double_click.clear();
                 }
-            } else {
-                state.double_click.clear();
             }
         }
+
         (canvas::event::Status::Ignored, None)
     }
 
@@ -177,30 +181,24 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             if w < 8.0 || h < 8.0 {
                 return;
             }
+            let paper = Color::BLACK;
+            frame.fill_rectangle(Point::ORIGIN, Size::new(w, h), paper);
+            let divider = if hovered {
+                Color::from_rgb8(70, 70, 70)
+            } else {
+                Color::from_rgb8(35, 35, 35)
+            };
+            frame.stroke(
+                &canvas::Path::rectangle(Point::new(0.5, 0.5), Size::new(w - 1.0, h - 1.0)),
+                canvas::Stroke::default()
+                    .with_color(divider)
+                    .with_width(1.0),
+            );
             let Some(slot) = self.clip else {
-                if hovered {
-                    frame.fill_rectangle(Point::ORIGIN, Size::new(w, h), th::bg_hover());
-                    label(
-                        frame,
-                        "+",
-                        w / 2.0 - 4.0,
-                        h / 2.0 - 9.0,
-                        16.0,
-                        th::text_dim(),
-                        false,
-                    );
-                }
-                frame.fill_rectangle(Point::new(0.0, h - 1.0), Size::new(w, 1.0), th::border());
-                label(frame, self.key, w - 19.0, 6.0, 10.0, th::text_dim(), true);
+                label(frame, self.key, w - 22.0, 6.0, 10.0, th::text_dim(), true);
                 return;
             };
             let ink = self.color;
-            let paper = if hovered {
-                th::bg_elevated()
-            } else {
-                th::display_bg()
-            };
-            frame.fill_rectangle(Point::ORIGIN, Size::new(w, h), paper);
             frame.fill_rectangle(
                 Point::ORIGIN,
                 Size::new(w, if self.playing { 4.0 } else { 2.0 }),
@@ -238,15 +236,14 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
                 ),
-                26.0,
+                8.0,
                 6.0,
                 if tight { 10.0 } else { 12.0 },
                 th::text(),
                 false,
             );
             if !self.key.is_empty() {
-                frame.fill_rectangle(Point::new(w - 45.0, 5.0), Size::new(18.0, 17.0), ink);
-                label(frame, self.key, w - 40.0, 6.0, 11.0, paper, true);
+                label(frame, self.key, w - 43.0, 6.0, 10.0, ink, true);
             }
             let plot = if tight {
                 Rectangle::new(
@@ -358,7 +355,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             overlay.fill_rectangle(
                 Point::new(9.0, 28.0),
                 Size::new(width as f32, height),
-                th::display_bg(),
+                Color::BLACK,
             );
             for x in 0..width {
                 let local = x as u64 * duration / width as u64;
@@ -389,23 +386,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     self.color,
                 );
             }
-            if !self.compact {
-                let x = (bounds.width - 90.0).max(0.0);
-                overlay.fill_rectangle(
-                    Point::new(x, bounds.height - 15.0),
-                    Size::new(54.0, 13.0),
-                    th::display_bg(),
-                );
-                label(
-                    &mut overlay,
-                    if self.queued { "QUEUED" } else { "PLAY" },
-                    x + 5.0,
-                    bounds.height - 14.0,
-                    8.0,
-                    if self.queued { th::text() } else { self.color },
-                    true,
-                );
-            } else if self.queued {
+            if self.queued {
                 overlay.fill_rectangle(Point::ORIGIN, Size::new(bounds.width, 2.0), th::text());
             }
             geometry.push(overlay.into_geometry());
@@ -531,6 +512,46 @@ mod name_tests {
         assert!(name.update(&mut state, click(), bounds, cursor).1.is_none());
         assert!(
             matches!(name.update(&mut state, click(), bounds, cursor).1, Some(Message::View(crate::domains::view::ViewMsg::StartEditingTrackName { track_id: id, .. })) if id == track_id)
+        );
+    }
+}
+
+#[cfg(test)]
+mod empty_cell_tests {
+    use super::*;
+    use crate::domains::perform::{ClipMsg, PerformMsg};
+    use iced::widget::canvas::Program;
+
+    #[test]
+    fn empty_cell_creation_requires_a_double_click() {
+        let track = vibez_core::id::TrackId::new();
+        let slot = ClipSlot {
+            clip: None,
+            empty_action: Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {
+                track_id: track,
+                row: 2,
+            })),
+            color: Color::WHITE,
+            key: "A",
+            selected: false,
+            recording: false,
+            audio_recording: None,
+            playing: false,
+            progress: None,
+            queued: false,
+            compact: false,
+        };
+        let mut state = ClipSlotState::default();
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(150.0, 72.0));
+        let cursor = mouse::Cursor::Available(Point::new(70.0, 35.0));
+        let press = canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        let (status, message) = slot.update(&mut state, press.clone(), bounds, cursor);
+        assert_eq!(status, canvas::event::Status::Ignored);
+        assert!(message.is_none());
+        let (status, message) = slot.update(&mut state, press, bounds, cursor);
+        assert_eq!(status, canvas::event::Status::Captured);
+        assert!(
+            matches!(message, Some(Message::Perform(PerformMsg::Clips(ClipMsg::CreateMidi {track_id, row: 2}))) if track_id == track)
         );
     }
 }
