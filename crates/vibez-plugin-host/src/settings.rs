@@ -69,6 +69,17 @@ mod tests {
     use super::PluginSettings;
 
     #[test]
+    fn catalog_from_before_macos_bundle_discovery_is_refreshed() {
+        let mut settings = PluginSettings {
+            cache_revision: 1,
+            ..Default::default()
+        };
+        assert!(settings.cache_needs_refresh());
+        settings.mark_cache_refreshed();
+        assert!(!settings.cache_needs_refresh());
+    }
+
+    #[test]
     fn legacy_catalog_requests_exactly_one_refresh() {
         let legacy = r#"{
             "extra_scan_paths": [],

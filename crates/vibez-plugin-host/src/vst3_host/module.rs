@@ -76,3 +76,6 @@ impl Drop for Vst3Module {
         }
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests;

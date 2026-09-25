@@ -177,6 +177,7 @@ impl PluginWindowManager {
                 }
             } else {
                 eprintln!("vibez: failed to attach CLAP plugin GUI to X11 window");
+                handle.destroy();
                 let _ = self.conn.destroy_window(window_id);
                 let _ = self.conn.flush();
                 return false;

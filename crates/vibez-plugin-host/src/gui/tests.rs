@@ -8,6 +8,7 @@ struct Calls {
     destroys: usize,
     removed: usize,
     releases: usize,
+    x11: bool,
 }
 
 unsafe extern "C" fn clap_extension(
@@ -27,7 +28,12 @@ unsafe extern "C" fn clap_supports(
     floating: bool,
 ) -> bool {
     let api = CStr::from_ptr(api).to_string_lossy().into_owned();
-    let supported = api == "cocoa" && !floating;
+    let expected = if clap_calls(plugin).borrow().x11 {
+        "x11"
+    } else {
+        "cocoa"
+    };
+    let supported = api == expected && !floating;
     clap_calls(plugin).borrow_mut().apis.push(api);
     supported
 }
@@ -41,7 +47,11 @@ unsafe extern "C" fn clap_parent(plugin: *const clap_plugin, parent: *const clap
     calls
         .apis
         .push(CStr::from_ptr((*parent).api).to_string_lossy().into_owned());
-    calls.parent = (*parent).specific.cocoa as usize;
+    calls.parent = if calls.x11 {
+        (*parent).specific.x11 as usize
+    } else {
+        (*parent).specific.cocoa as usize
+    };
     true
 }
 
@@ -213,4 +223,18 @@ fn native_api_matches_target() {
     assert_eq!(GuiApi::native(), GuiApi::Cocoa);
     #[cfg(not(target_os = "macos"))]
     assert_eq!(GuiApi::native(), GuiApi::X11);
+}
+
+#[test]
+fn x11_clap_editor_still_receives_its_window_id() {
+    let calls = RefCell::new(Calls {
+        x11: true,
+        ..Default::default()
+    });
+    let plugin = clap_plugin_fixture(&calls);
+    let mut handle = unsafe { ClapGuiHandle::new_for_api(&plugin, GuiApi::X11) }.unwrap();
+    assert!(handle.create_gui());
+    assert!(handle.attach_to_x11(42));
+    assert_eq!(calls.borrow().apis, ["x11", "x11", "x11"]);
+    assert_eq!(calls.borrow().parent, 42);
 }
