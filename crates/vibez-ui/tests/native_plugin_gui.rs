@@ -13,11 +13,12 @@ fn main() {
 
     let mtm = MainThreadMarker::new().expect("native GUI test must run on the process main thread");
     let _app = NSApplication::sharedApplication(mtm);
-    let mut manager = PluginWindowManager::new().expect("AppKit must not require an X11 display");
     for vst3 in [false, true] {
         let state = fixtures::State::default();
         let clap = fixtures::clap(&state);
         let vst = fixtures::Vst::new(&state);
+        let mut manager =
+            PluginWindowManager::new().expect("AppKit must not require an X11 display");
         let ptr = if vst3 {
             PluginRawPtr::Vst3(vst.ptr())
         } else {
