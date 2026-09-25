@@ -167,7 +167,9 @@ impl App {
         let action = self.state.view.update(msg, editor, ctx);
         let task = self.apply_view_action(action);
         if focus_name {
-            let id = iced::widget::text_input::Id::new("launcher-name");
+            let id = iced::widget::text_input::Id::new(
+                super::views_clip_launcher::LAUNCHER_NAME_INPUT_ID,
+            );
             Task::batch([
                 task,
                 iced::widget::text_input::focus(id.clone()),

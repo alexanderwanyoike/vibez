@@ -37,6 +37,9 @@ pub(in crate::app) async fn save_project_async(
             // Legacy JSON has no Project Media table; transient staging
             // references must resolve back to durable Source Storage
             // identity or they dangle once the staging cache is swept.
+            project
+                .validate_legacy_save()
+                .map_err(|error| error.to_string())?;
             let mut project = project;
             vibez_project::project_format_v1::preserve_generated_media_for_legacy(
                 &path,

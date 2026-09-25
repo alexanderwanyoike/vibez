@@ -108,6 +108,7 @@ impl Default for Project {
 pub enum ProjectError {
     Io(std::io::Error),
     Json(serde_json::Error),
+    ClipProjectRequiresContainer,
 }
 
 impl std::fmt::Display for ProjectError {
@@ -115,6 +116,10 @@ impl std::fmt::Display for ProjectError {
         match self {
             ProjectError::Io(e) => write!(f, "I/O error: {e}"),
             ProjectError::Json(e) => write!(f, "JSON error: {e}"),
+            ProjectError::ClipProjectRequiresContainer => write!(
+                f,
+                "Clip projects must be saved as .vzp. Use Save As to choose a .vzp file."
+            ),
         }
     }
 }
@@ -124,6 +129,7 @@ impl std::error::Error for ProjectError {
         match self {
             ProjectError::Io(e) => Some(e),
             ProjectError::Json(e) => Some(e),
+            ProjectError::ClipProjectRequiresContainer => None,
         }
     }
 }
@@ -241,8 +247,16 @@ impl Project {
         maximum
     }
 
+    pub fn validate_legacy_save(&self) -> Result<(), ProjectError> {
+        if self.perform_layout == PerformLayout::Clips || !self.launcher_clips.is_empty() {
+            return Err(ProjectError::ClipProjectRequiresContainer);
+        }
+        Ok(())
+    }
+
     /// Save the project to a JSON file.
     pub fn save_to_file(&self, path: &Path) -> Result<(), ProjectError> {
+        self.validate_legacy_save()?;
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
@@ -264,6 +278,21 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+
+    #[test]
+    fn legacy_clip_save_is_rejected_without_overwriting_the_file() {
+        let path =
+            std::env::temp_dir().join(format!("vibez-clip-legacy-{}.json", ClipId::new().raw()));
+        std::fs::write(&path, "existing project").unwrap();
+        let project = Project {
+            perform_layout: PerformLayout::Clips,
+            ..Default::default()
+        };
+        let result = project.save_to_file(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing project");
+        std::fs::remove_file(path).unwrap();
+        assert!(result.is_err());
+    }
 
     #[test]
     fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {

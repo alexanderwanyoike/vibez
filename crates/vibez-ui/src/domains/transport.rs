@@ -68,6 +68,10 @@ pub enum TransportAction {
 }
 
 impl TransportState {
+    pub fn samples_per_beat(&self) -> f64 {
+        vibez_core::time::TempoMap::new(self.bpm, self.sample_rate).samples_per_beat()
+    }
+
     /// Beat position -> absolute sample position at the current tempo.
     pub fn beats_to_samples_at(&self, beats: f64) -> u64 {
         if self.bpm > 0.0 {

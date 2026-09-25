@@ -109,7 +109,7 @@ fn legacy_documents_keep_sections_and_discover_launcher_ids() {
 }
 
 #[tokio::test]
-async fn recorded_audio_cells_reopen_from_container_and_legacy_project_files() {
+async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_media() {
     let directory = tempfile::tempdir().unwrap();
     for extension in ["vzp", "vibez"] {
         let track = vibez_core::track::TrackInfo::new("Recorded hats");
@@ -167,6 +167,16 @@ async fn recorded_audio_cells_reopen_from_container_and_legacy_project_files() {
             ..Default::default()
         };
         let path = directory.path().join(format!("recording.{extension}"));
+        if extension != "vzp" {
+            std::fs::write(&path, "existing project").unwrap();
+            assert!(save_project_async(path.clone(), None, project)
+                .await
+                .unwrap_err()
+                .contains(".vzp"));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing project");
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
+            continue;
+        }
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();

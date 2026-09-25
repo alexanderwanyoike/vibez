@@ -188,7 +188,7 @@ impl App {
         effective_perform_surface_width(
             cursor_x - workspace_left,
             if self.state.perform.layout == vibez_project::PerformLayout::Clips {
-                workspace_width.max(900.0)
+                workspace_width.max(super::views_clip_launcher::MIN_CLIP_DOCK_WIDTH)
             } else {
                 workspace_width
             },

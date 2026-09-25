@@ -194,7 +194,7 @@ impl App {
 
     pub(super) fn finish_performance_capture(&mut self, completed: Option<CompletedCapture>) {
         let Some(completed) = completed else {
-            self.discard_capture_transaction();
+            self.discard_project_transaction();
             self.state.status_text = "Capture stopped · no performance content recorded".into();
             return;
         };
@@ -202,7 +202,7 @@ impl App {
         if materialized.is_empty()
             && !capture_replaces_existing_content(&self.state.arrangement.timeline, &materialized)
         {
-            self.discard_capture_transaction();
+            self.discard_project_transaction();
             self.state.status_text = "Capture stopped · no performance content recorded".into();
             return;
         }
@@ -236,12 +236,6 @@ impl App {
         self.commit_project_transaction();
         self.state.view.workspace = Workspace::Arrange;
         self.state.status_text = format!("Capture committed · {clip_count} clips · one undo step");
-    }
-
-    fn discard_capture_transaction(&mut self) {
-        if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
-            self.state.project.dirty = dirty_before;
-        }
     }
 }
 

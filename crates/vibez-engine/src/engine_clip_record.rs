@@ -121,7 +121,11 @@ impl AudioEngine {
                 .iter_mut()
                 .find(|track| track.id == record.track_id)
             {
-                if let Some(active) = track.active_clip.as_mut() {
+                if let Some(active) = track
+                    .active_clip
+                    .as_mut()
+                    .filter(|active| active.clip_id == record.clip_id)
+                {
                     active.length = now.saturating_sub(record.start).max(1);
                     active.position = 0;
                     active.looping = true;

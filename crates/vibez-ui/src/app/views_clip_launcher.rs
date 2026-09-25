@@ -50,6 +50,9 @@ fn choice_style(selected: bool, status: button::Status) -> button::Style {
     }
 }
 
+pub(super) const MIN_CLIP_DOCK_WIDTH: f32 = 900.0;
+pub(super) const LAUNCHER_NAME_INPUT_ID: &str = "launcher-name";
+
 impl App {
     pub(super) fn view_new_project_overlay(&self) -> Element<'_, Message> {
         let selected = self.state.project.new_project_layout.unwrap_or_default();
@@ -157,7 +160,7 @@ impl App {
         let content = if self.state.perform.mode == PerformMode::Sections {
             self.view_clip_grid(width)
         } else {
-            let dock_width = width.max(900.0);
+            let dock_width = width.max(MIN_CLIP_DOCK_WIDTH);
             let pad_width = super::views_perform::effective_perform_surface_width(
                 self.state.view.perform_surface_width,
                 dock_width,
@@ -415,6 +418,16 @@ impl App {
                     .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
+                    let recording =
+                        self.state
+                            .perform
+                            .clip_record
+                            .session
+                            .as_ref()
+                            .is_some_and(|session| {
+                                session.working.track_id == track.id
+                                    && session.working.row == slot_row
+                            });
                     let slot = self.state.perform.clips.at(track.id, slot_row);
                     let selected = slot.is_some_and(|clip| {
                         self.state.perform.clip_editor.selected == Some(clip.id)
@@ -454,23 +467,14 @@ impl App {
                             color: track_color,
                             key,
                             selected,
-                            recording: self.state.perform.clip_record.session.as_ref().is_some_and(
-                                |session| {
-                                    session.working.track_id == track.id
-                                        && session.working.row == slot_row
-                                },
-                            ),
+                            recording,
                             audio_recording: self
                                 .state
                                 .perform
                                 .clip_record
                                 .session
                                 .as_ref()
-                                .filter(|session| {
-                                    session.audio
-                                        && session.working.track_id == track.id
-                                        && session.working.row == slot_row
-                                })
+                                .filter(|session| session.audio && recording)
                                 .and_then(|session| {
                                     Some(crate::widgets::clip_slot::ClipRecordingWaveform {
                                         preview: self
@@ -484,28 +488,11 @@ impl App {
                                     })
                                 }),
                             progress: slot.and_then(|clip| {
-                                let active = self
-                                    .state
-                                    .perform
-                                    .clip_editor
-                                    .playing
-                                    .get(&track.id)
-                                    .filter(|active| active.id == clip.id)?;
-                                let start =
-                                    *self.state.perform.clip_editor.started_at.get(&track.id)?;
-                                let spb = self.state.transport.sample_rate as f64 * 60.0
-                                    / self.state.transport.bpm;
-                                let (length, looping) = active.length_and_loop(spb);
-                                let elapsed = self
-                                    .state
-                                    .perform
-                                    .performance_position_samples
-                                    .saturating_sub(start);
-                                Some(if looping {
-                                    (elapsed % length) as f32 / length as f32
-                                } else {
-                                    elapsed.min(length) as f32 / length as f32
-                                })
+                                self.state.perform.clip_editor.progress(
+                                    clip.id,
+                                    self.state.perform.performance_position_samples,
+                                    self.state.transport.samples_per_beat(),
+                                )
                             }),
                             playing: slot.is_some_and(|clip| {
                                 self.state
@@ -546,16 +533,6 @@ impl App {
                     } else {
                         slot_cell.into()
                     };
-                    let recording =
-                        self.state
-                            .perform
-                            .clip_record
-                            .session
-                            .as_ref()
-                            .is_some_and(|session| {
-                                session.working.track_id == track.id
-                                    && session.working.row == slot_row
-                            });
                     let play: Element<'_, Message> = if let Some(clip) = slot {
                         let triggered = self.state.perform.clip_is_triggered(clip);
                         self.view_clip_cell_action(
@@ -567,6 +544,7 @@ impl App {
                             },
                             PerformMsg::Clips(ClipMsg::Toggle(clip.id)),
                             track_color,
+                            false,
                         )
                     } else {
                         self.view_clip_cell_action(
@@ -574,13 +552,12 @@ impl App {
                             "Stop track · double-click the cell to create a clip",
                             PerformMsg::Clips(ClipMsg::StopTrack(track.id)),
                             th::text_dim(),
+                            false,
                         )
                     };
                     let mode: Element<'_, Message> = if let Some(clip) = slot {
-                        let (_, looping) = clip.length_and_loop(
-                            self.state.transport.sample_rate as f64 * 60.0
-                                / self.state.transport.bpm,
-                        );
+                        let (_, looping) =
+                            clip.length_and_loop(self.state.transport.samples_per_beat());
                         self.view_clip_cell_action(
                             if looping {
                                 icons::REPEAT
@@ -594,6 +571,7 @@ impl App {
                             },
                             PerformMsg::Clips(ClipMsg::ToggleLoop(clip.id)),
                             track_color,
+                            false,
                         )
                     } else {
                         iced::widget::Space::new(20, 20).into()
@@ -620,6 +598,7 @@ impl App {
                                         )
                                     ),
                                     th::danger(),
+                                    recording,
                                 ),
                                 horizontal_space(),
                                 mode,
@@ -639,6 +618,7 @@ impl App {
                                 "Delete clip",
                                 PerformMsg::Clips(ClipMsg::Delete(clip.id)),
                                 th::danger(),
+                                false,
                             ))
                             .align_right(Length::Fill)
                             .padding([3, 5])
@@ -703,9 +683,8 @@ impl App {
         hint: &'static str,
         action: PerformMsg,
         active_color: Color,
+        recording: bool,
     ) -> Element<'_, Message> {
-        let recording = matches!(action, PerformMsg::ClipRecord(crate::domains::perform::clip_record::ClipRecordMsg::Slot(track, row))
-            if self.state.perform.clip_record.session.as_ref().is_some_and(|session| session.working.track_id == track && session.working.row == row));
         let glyph = icons::icon(icon).size(11);
         tooltip(
             button(center(glyph))
@@ -733,14 +712,18 @@ impl App {
     }
 
     fn view_launcher_name_input(&self) -> Element<'_, Message> {
-        text_input("Name", &self.state.view.edit_name_text)
-            .id("launcher-name")
-            .on_input(|name| Message::View(crate::domains::view::ViewMsg::EditNameText(name)))
-            .on_submit(Message::View(crate::domains::view::ViewMsg::FinishEditing))
-            .size(12)
-            .padding([2, 4])
-            .width(Length::Fill)
-            .into()
+        crate::widgets::on_blur::on_blur(
+            text_input("Name", &self.state.view.edit_name_text)
+                .id(LAUNCHER_NAME_INPUT_ID)
+                .on_input(|name| Message::View(crate::domains::view::ViewMsg::EditNameText(name)))
+                .on_submit(Message::View(crate::domains::view::ViewMsg::FinishEditing))
+                .size(12)
+                .padding([2, 4])
+                .width(Length::Fill),
+            true,
+            Message::View(crate::domains::view::ViewMsg::FinishEditing),
+        )
+        .into()
     }
 
     fn view_clip_capture_button(&self) -> Element<'_, Message> {

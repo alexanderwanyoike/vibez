@@ -126,6 +126,9 @@ impl App {
         if let Some(status) = action.section_record_status {
             self.state.status_text = status.into();
         }
+        if let Some(record_action) = action.clip_record {
+            tasks.push(self.apply_clip_record_action(record_action));
+        }
         if let Some(record_action) = action.section_record {
             tasks.push(self.apply_section_record_action(record_action));
         }

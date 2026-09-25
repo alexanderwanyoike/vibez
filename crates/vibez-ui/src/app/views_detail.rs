@@ -289,31 +289,11 @@ impl App {
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
         {
             let id = self.state.perform.clip_editor.selected?;
-            let active = self
-                .state
-                .perform
-                .clip_editor
-                .playing
-                .values()
-                .find(|clip| clip.id == id)?;
-            let start = *self
-                .state
-                .perform
-                .clip_editor
-                .started_at
-                .get(&active.track_id)?;
-            let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
-            let (length, looping) = active.length_and_loop(spb);
-            let elapsed = self
-                .state
-                .perform
-                .performance_position_samples
-                .saturating_sub(start);
-            return Some(if looping {
-                elapsed % length
-            } else {
-                elapsed.min(length)
-            });
+            return self.state.perform.clip_editor.playhead_samples(
+                id,
+                self.state.perform.performance_position_samples,
+                self.state.transport.samples_per_beat(),
+            );
         }
         resolved_detail_playhead_samples(
             self.state.view.workspace == crate::state::Workspace::Perform,

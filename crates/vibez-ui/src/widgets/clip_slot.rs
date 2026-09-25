@@ -63,7 +63,7 @@ fn label(
     });
 }
 
-fn fit(text: &str, width: f32, size: f32) -> String {
+pub(crate) fn fit(text: &str, width: f32, size: f32) -> String {
     let limit = (width / (size * 0.61)).max(0.0) as usize;
     if text.chars().count() <= limit {
         text.into()
@@ -71,6 +71,23 @@ fn fit(text: &str, width: f32, size: f32) -> String {
         String::new()
     } else {
         format!("{}..", text.chars().take(limit - 2).collect::<String>())
+    }
+}
+
+fn thumbnail_plot(size: Size, compact: bool, has_key: bool) -> Rectangle {
+    let (w, h) = (size.width, size.height);
+    if compact && h < 44.0 {
+        let key_space = if has_key { 22.0 } else { 0.0 };
+        let title_width = (w * 0.42).max(25.0).min((w - 50.0 - key_space).max(0.0));
+        Rectangle::new(
+            Point::new(title_width + 26.0, 5.0),
+            Size::new((w - title_width - 76.0).max(1.0), (h - 10.0).max(1.0)),
+        )
+    } else {
+        Rectangle::new(
+            Point::new(9.0, 28.0),
+            Size::new((w - 18.0).max(1.0), (h - 51.0).max(3.0)),
+        )
     }
 }
 
@@ -245,17 +262,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             if !self.key.is_empty() {
                 label(frame, self.key, w - 43.0, 6.0, 10.0, ink, true);
             }
-            let plot = if tight {
-                Rectangle::new(
-                    Point::new(title_width + 26.0, 5.0),
-                    Size::new((w - title_width - 76.0).max(1.0), h - 10.0),
-                )
-            } else {
-                Rectangle::new(
-                    Point::new(9.0, 28.0),
-                    Size::new(w - 18.0, (h - 51.0).max(3.0)),
-                )
-            };
+            let plot = thumbnail_plot(bounds.size(), self.compact, !self.key.is_empty());
             let Some(content) = slot.timeline.get(slot.track_id) else {
                 return;
             };
@@ -349,14 +356,11 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             let preview = &recording.preview;
             let elapsed = preview.duration.saturating_sub(recording.offset);
             let duration = recording.loop_length.unwrap_or(elapsed).max(1);
-            let width = (bounds.width - 18.0).max(1.0) as usize;
-            let height = (bounds.height - 51.0).max(3.0);
+            let plot = thumbnail_plot(bounds.size(), self.compact, !self.key.is_empty());
+            let width = plot.width as usize;
+            let height = plot.height;
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
-            overlay.fill_rectangle(
-                Point::new(9.0, 28.0),
-                Size::new(width as f32, height),
-                Color::BLACK,
-            );
+            overlay.fill_rectangle(plot.position(), plot.size(), Color::BLACK);
             for x in 0..width {
                 let local = x as u64 * duration / width as u64;
                 let pass = elapsed.saturating_sub(local + 1) / duration;
@@ -366,10 +370,10 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 }
                 let index = (recording.offset + sample) as usize / preview.frames_per_peak;
                 if let Some(&(low, high)) = preview.peaks.get(index) {
-                    let top = 28.0 + height * (0.5 - high.clamp(-1.0, 1.0) * 0.48);
-                    let bottom = 28.0 + height * (0.5 - low.clamp(-1.0, 1.0) * 0.48);
+                    let top = plot.y + height * (0.5 - high.clamp(-1.0, 1.0) * 0.48);
+                    let bottom = plot.y + height * (0.5 - low.clamp(-1.0, 1.0) * 0.48);
                     overlay.fill_rectangle(
-                        Point::new(9.0 + x as f32, top),
+                        Point::new(plot.x + x as f32, top),
                         Size::new(1.0, (bottom - top).max(1.0)),
                         self.color,
                     );

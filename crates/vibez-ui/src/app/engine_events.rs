@@ -66,16 +66,23 @@ fn apply_drum_pad_flash(
 
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
-        let mut clip_record_events = Vec::new();
+        if let Some(command) = self
+            .state
+            .perform
+            .clip_record
+            .arm_audio_when_ready(self.input_bridge.record_start_position())
+        {
+            self.send_command(command);
+        }
         let mut completed_section_recordings = Vec::new();
         let mut completed_captures = Vec::new();
-        if let Some(ref mut rx) = self.event_rx {
-            while let Ok(event) = rx.pop() {
+        {
+            while let Some(event) = self.event_rx.as_mut().and_then(|rx| rx.pop().ok()) {
                 apply_drum_pad_flash(&mut self.state.view, &event, std::time::Instant::now());
                 match event {
                     event @ (EngineEvent::ClipRecordArmed { .. }
                     | EngineEvent::ClipRecordStarted { .. }
-                    | EngineEvent::ClipRecordStopped { .. }) => clip_record_events.push(event),
+                    | EngineEvent::ClipRecordStopped { .. }) => self.clip_record_event(event),
                     EngineEvent::DisposeEffect(cell) => {
                         // Plugin teardown remains on the UI thread.
                         drop(cell.take());
@@ -120,8 +127,7 @@ impl App {
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
                         if let Some(clip) = editor.pending.remove(&request_id) {
-                            let spb = self.state.transport.sample_rate as f64 * 60.0
-                                / self.state.transport.bpm;
+                            let spb = self.state.transport.samples_per_beat();
                             let source = CapturedTimelineSource::from_clip(&clip, spb);
                             editor
                                 .started_at
@@ -140,8 +146,7 @@ impl App {
                         position,
                         effective_at_samples,
                     } => {
-                        let spb = self.state.transport.sample_rate as f64 * 60.0
-                            / self.state.transport.bpm;
+                        let spb = self.state.transport.samples_per_beat();
                         let source = self
                             .state
                             .perform
@@ -171,8 +176,7 @@ impl App {
                         } else {
                             editor.playing.remove(&track_id);
                         }
-                        let spb = self.state.transport.sample_rate as f64 * 60.0
-                            / self.state.transport.bpm;
+                        let spb = self.state.transport.samples_per_beat();
                         let source = editor
                             .playing
                             .get(&track_id)
@@ -314,17 +318,14 @@ impl App {
                         canonical_section_position_samples,
                         ..
                     } => {
-                        clip_record_events.push(EngineEvent::NoteRepeated {
+                        self.state.perform.clip_record.repeated_note(
                             track_id,
                             pitch,
                             velocity,
                             rate,
                             effective_at_samples,
                             canonical_at_samples,
-                            section_id,
-                            section_position_samples: None,
-                            canonical_section_position_samples,
-                        });
+                        );
                         self.state.perform.capture.repeated_note(
                             track_id,
                             pitch,
@@ -352,15 +353,13 @@ impl App {
                         section_id,
                         section_position_samples,
                     } => {
-                        clip_record_events.push(EngineEvent::InstrumentNoteInput {
+                        self.state.perform.clip_record.note_input(
                             track_id,
                             pitch,
                             velocity,
                             on,
                             effective_at_samples,
-                            section_id,
-                            section_position_samples,
-                        });
+                        );
                         self.state.perform.capture.input_note(
                             track_id,
                             pitch,
@@ -534,9 +533,6 @@ impl App {
                     }
                 }
             }
-        }
-        for event in clip_record_events {
-            self.clip_record_event(event);
         }
         self.refresh_clip_record(self.state.perform.performance_position_samples);
         for completed in completed_section_recordings {

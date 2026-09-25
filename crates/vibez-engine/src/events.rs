@@ -1,7 +1,7 @@
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::perform::NoteRepeatRate;
 
-use crate::playback_source::PreparedSectionPlaybackSource;
+use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutomationGesturePhase {
@@ -68,26 +68,32 @@ pub enum EngineEvent {
 
     /// Monotonic, zero-based time for the current Perform session.
     PerformancePosition(u64),
+    /// The request id rejects acknowledgements superseded by newer UI intent.
     ClipQueued {
         request_id: u64,
         track_id: TrackId,
-        clip_id: Option<vibez_core::id::ClipId>,
+        clip_id: Option<ClipId>,
     },
+    /// Capture consumes this exact effective boundary and retires the old source off-thread.
     ClipTransitioned {
         track_id: TrackId,
-        clip_id: Option<vibez_core::id::ClipId>,
+        clip_id: Option<ClipId>,
         request_id: u64,
         effective_at_samples: u64,
-        retired: Option<Box<crate::playback_source::PreparedClipPlayback>>,
+        retired: Option<Box<PreparedClipPlayback>>,
     },
-    ClipRequestRetired(Box<crate::playback_source::PreparedClipPlayback>),
-    ClipBatchRetired(Vec<Box<crate::playback_source::PreparedClipPlayback>>),
+    /// Prepared sources must be dropped on the UI thread.
+    ClipRequestRetired(Box<PreparedClipPlayback>),
+    /// The UI owns deallocation of the emptied launch batch.
+    ClipBatchRetired(Vec<Box<PreparedClipPlayback>>),
+    /// Capture associates this acknowledgement with an immutable edited source.
     ClipSourceRefreshed {
         track_id: TrackId,
         request_id: u64,
         position: u64,
         effective_at_samples: u64,
     },
+    /// Recording publication preserves its local offset when Capture observes it.
     ClipCaptureSource {
         track_id: TrackId,
         position: u64,
@@ -132,9 +138,7 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
     /// A second Pad Gesture cancelled the pending Track Mute.
-    TrackMuteQueueCancelled {
-        track_id: TrackId,
-    },
+    TrackMuteQueueCancelled { track_id: TrackId },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
     AutomationOverrideChanged {
@@ -178,16 +182,16 @@ pub enum EngineEvent {
         section_position_samples: Option<u64>,
     },
 
+    /// The UI aligns input-buffer timestamps to this engine-owned output boundary.
     ClipRecordArmed {
         clip_id: ClipId,
         track_id: TrackId,
         start: u64,
         output_start: u64,
     },
-    ClipRecordStarted {
-        clip_id: ClipId,
-        at: u64,
-    },
+    /// Note capture begins only after the count-in has actually finished.
+    ClipRecordStarted { clip_id: ClipId, at: u64 },
+    /// The started flag distinguishes a completed take from cancelled count-in.
     ClipRecordStopped {
         clip_id: ClipId,
         at: u64,
@@ -230,9 +234,7 @@ pub enum EngineEvent {
     },
 
     /// Capture into Arrange stopped on this exact engine boundary.
-    PerformanceCaptureStopped {
-        effective_at_samples: u64,
-    },
+    PerformanceCaptureStopped { effective_at_samples: u64 },
 
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.

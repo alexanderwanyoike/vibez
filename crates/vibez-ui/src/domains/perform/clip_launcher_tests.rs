@@ -395,3 +395,59 @@ fn stale_engine_acknowledgements_cannot_undo_a_newer_toggle() {
     editor.acknowledge_transition(track, 3);
     assert!(!editor.queued.contains_key(&track));
 }
+
+#[test]
+fn deleting_an_active_or_queued_clip_requests_a_track_stop() {
+    for queued in [false, true] {
+        let tracks = tracks(1);
+        let track = tracks[0].id;
+        let mut state = PerformState {
+            layout: PerformLayout::Clips,
+            ..Default::default()
+        };
+        let mut engine = RecordingEngine::default();
+        let ctx = PerformCtx {
+            workspace_visible: true,
+            project_tracks: &tracks,
+            ..Default::default()
+        };
+        state.update(
+            PerformMsg::Clips(ClipMsg::CreateMidi {
+                track_id: track,
+                row: 0,
+            }),
+            &mut engine,
+            ctx,
+        );
+        let clip = state.clips.clips[0].clone();
+        if queued {
+            state.clip_editor.queue_request(track, Some(clip.id), 1);
+        } else {
+            state.clip_editor.playing.insert(track, clip.clone());
+        }
+        let action = state.update(
+            PerformMsg::Clips(ClipMsg::Delete(clip.id)),
+            &mut engine,
+            ctx,
+        );
+        assert_eq!(action.clip_launch, Some(ClipLaunchRequest::Stop(track)));
+        assert!(state.clips.by_id(clip.id).is_none());
+    }
+}
+
+#[test]
+fn clip_playhead_and_progress_share_loop_and_one_shot_boundaries() {
+    let track = TrackId::new();
+    let mut clip =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
+    let mut editor = ClipEditor::default();
+    editor.started_at.insert(track, 10);
+    editor.playing.insert(track, clip.clone());
+    assert_eq!(editor.playhead_samples(clip.id, 29, 4.0), Some(3));
+    assert_eq!(editor.progress(clip.id, 29, 4.0), Some(3.0 / 16.0));
+    assert_eq!(editor.playhead_samples(ClipId::new(), 29, 4.0), None);
+    Arc::make_mut(&mut clip.timeline).ensure(track).note_clips[0].loop_enabled = false;
+    editor.playing.insert(track, clip.clone());
+    assert_eq!(editor.playhead_samples(clip.id, 29, 4.0), Some(16));
+    assert_eq!(editor.progress(clip.id, 29, 4.0), Some(1.0));
+}

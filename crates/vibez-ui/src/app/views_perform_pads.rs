@@ -101,6 +101,12 @@ fn perform_bank_button(
         .into()
 }
 
+const INSTRUMENT_RAIL_GAP: f32 = 10.0;
+
+fn instrument_rail_width(width: f32) -> f32 {
+    (width * 0.3).clamp(154.0, 176.0)
+}
+
 impl App {
     fn perform_pad_grid_size(&self, surface_width: f32) -> f32 {
         let mode = self.state.perform.mode;
@@ -112,7 +118,7 @@ impl App {
                 0.0
             };
         let rail_width = if mode == PerformMode::Instrument {
-            (surface_width * 0.3).clamp(154.0, 176.0) + 10.0
+            instrument_rail_width(surface_width) + INSTRUMENT_RAIL_GAP
         } else {
             0.0
         };
@@ -130,7 +136,7 @@ impl App {
 
     pub(super) fn clip_pad_surface_width(&self, available_width: f32) -> f32 {
         let rail_width = if self.state.perform.mode == PerformMode::Instrument {
-            (available_width * 0.3).clamp(154.0, 176.0) + 10.0
+            instrument_rail_width(available_width) + INSTRUMENT_RAIL_GAP
         } else {
             0.0
         };
@@ -317,7 +323,7 @@ impl App {
             .height(Length::Fixed(pad_grid_height));
 
         let content = if mode == PerformMode::Instrument {
-            let rail_width = (surface_width * 0.3).clamp(154.0, 176.0);
+            let rail_width = instrument_rail_width(surface_width);
             let controls = self
                 .view_instrument_control_rail(
                     bank,
@@ -340,7 +346,7 @@ impl App {
             } else {
                 controls.into()
             };
-            column![header, row![grid, rail].spacing(10)].spacing(12)
+            column![header, row![grid, rail].spacing(INSTRUMENT_RAIL_GAP)].spacing(12)
         } else {
             column![header, grid].spacing(12)
         };
@@ -558,12 +564,11 @@ impl App {
         let clip_layout = self.state.perform.layout == vibez_project::PerformLayout::Clips;
         let small = clip_layout && pad_size < 60.0;
         let title_size = if small { 9.0 } else { 13.0 };
-        let title_limit =
-            ((pad_size - if small { 4.0 } else { 16.0 }) / (title_size * 0.62)).max(2.0) as usize;
-        let title = if clip_layout && title.chars().count() > title_limit {
-            format!(
-                "{}…",
-                title.chars().take(title_limit - 1).collect::<String>()
+        let title = if clip_layout {
+            crate::widgets::clip_slot::fit(
+                &title,
+                pad_size - if small { 4.0 } else { 16.0 },
+                title_size,
             )
         } else {
             title

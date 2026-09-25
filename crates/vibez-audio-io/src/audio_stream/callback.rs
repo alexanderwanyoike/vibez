@@ -133,15 +133,15 @@ impl OutputCallback {
         let mut processed = false;
         if let Ok(mut guard) = self.engine_slot.try_lock() {
             if let Some(engine) = guard.as_mut() {
-                self.input_bridge.latch_record_start_position(
-                    if self.input_bridge.uses_output_clock() {
-                        engine.output_position_samples()
-                    } else {
-                        engine.arrangement_position_samples()
-                    },
-                );
+                let output_position = engine.output_position_samples();
+                let arrangement_position = engine.arrangement_position_samples();
                 let live_input = self.input_scratch.get_mut(..data.len()).map(|scratch| {
-                    let target = self.input_bridge.clock_output(scratch, self.channels);
+                    let target = self.input_bridge.clock_output(
+                        scratch,
+                        self.channels,
+                        output_position,
+                        arrangement_position,
+                    );
                     (target, &*scratch)
                 });
                 if live_input.is_none() {
@@ -162,8 +162,12 @@ impl OutputCallback {
                 engine.process_block(block);
                 if resample_source.is_some() {
                     if let Some(capture) = self.resample_scratch.get(..data.len()) {
-                        self.input_bridge
-                            .capture_track_output(capture, self.channels);
+                        self.input_bridge.capture_track_output(
+                            capture,
+                            self.channels,
+                            output_position,
+                            arrangement_position,
+                        );
                     }
                 }
                 processed = true;

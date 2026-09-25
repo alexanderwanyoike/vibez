@@ -6,7 +6,9 @@ use std::sync::Arc;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_project::PerformLayout;
 
-use crate::state::{ArrangementSelection, ArrangementTimeline, TimelineEditorState, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, ArrangementTimeline, TimelineEditorState, UiClip, UiNoteClip,
+};
 
 use super::{PerformAction, PerformCtx, PerformEditorFocus, PerformState};
 
@@ -18,18 +20,41 @@ pub struct LauncherClip {
     pub timeline: Arc<ArrangementTimeline>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SlotPart<'a> {
+    Audio(&'a UiClip),
+    Midi(&'a UiNoteClip),
+}
+
+impl<'a> SlotPart<'a> {
+    pub fn at(timeline: &'a ArrangementTimeline, track: TrackId) -> Option<Self> {
+        let content = timeline.get(track)?;
+        content
+            .clips
+            .first()
+            .map(Self::Audio)
+            .or_else(|| content.note_clips.first().map(Self::Midi))
+    }
+
+    pub fn looping(self) -> bool {
+        match self {
+            Self::Audio(clip) => clip.loop_enabled,
+            Self::Midi(clip) => clip.loop_enabled,
+        }
+    }
+}
+
 impl LauncherClip {
+    pub fn part(&self) -> Option<SlotPart<'_>> {
+        SlotPart::at(&self.timeline, self.track_id)
+    }
+
     pub fn name(&self) -> &str {
-        self.timeline
-            .get(self.track_id)
-            .and_then(|content| {
-                content
-                    .clips
-                    .first()
-                    .map(|clip| clip.name.as_str())
-                    .or_else(|| content.note_clips.first().map(|clip| clip.name.as_str()))
-            })
-            .unwrap_or("Empty clip")
+        match self.part() {
+            Some(SlotPart::Audio(clip)) => &clip.name,
+            Some(SlotPart::Midi(clip)) => &clip.name,
+            None => "Empty clip",
+        }
     }
 }
 
@@ -70,6 +95,23 @@ pub struct ClipEditor {
 }
 
 impl ClipEditor {
+    pub fn playhead_samples(&self, id: ClipId, position: u64, spb: f64) -> Option<u64> {
+        let clip = self.playing.values().find(|clip| clip.id == id)?;
+        let start = *self.started_at.get(&clip.track_id)?;
+        let (length, looping) = clip.length_and_loop(spb);
+        let elapsed = position.saturating_sub(start);
+        Some(if looping {
+            elapsed % length
+        } else {
+            elapsed.min(length)
+        })
+    }
+
+    pub fn progress(&self, id: ClipId, position: u64, spb: f64) -> Option<f32> {
+        let clip = self.playing.values().find(|clip| clip.id == id)?;
+        Some(self.playhead_samples(id, position, spb)? as f32 / clip.length_and_loop(spb).0 as f32)
+    }
+
     pub fn queue_request(&mut self, track: TrackId, clip: Option<ClipId>, request: u64) {
         if self
             .queued_requests
@@ -213,6 +255,7 @@ impl PerformState {
             return PerformAction::default();
         }
         let mut selected = None;
+        let mut clip_launch = None;
         match msg {
             ClipMsg::Toggle(id) => {
                 return PerformAction {
@@ -240,18 +283,16 @@ impl PerformState {
             }
             ClipMsg::ToggleLoop(id) => {
                 if let Some(clip) = Arc::make_mut(&mut self.clips).by_id_mut(id) {
+                    let part = SlotPart::at(&clip.timeline, clip.track_id);
+                    let looping = part.is_none_or(SlotPart::looping);
+                    let audio = matches!(part, Some(SlotPart::Audio(_)));
                     let content = Arc::make_mut(&mut clip.timeline).ensure(clip.track_id);
-                    let looping = content
-                        .note_clips
-                        .first()
-                        .map(|clip| clip.loop_enabled)
-                        .or_else(|| content.clips.first().map(|clip| clip.loop_enabled))
-                        .unwrap_or(true);
-                    for clip in &mut content.note_clips {
-                        clip.loop_enabled = !looping;
-                    }
-                    for clip in &mut content.clips {
-                        clip.loop_enabled = !looping;
+                    if audio {
+                        if let Some(part) = content.clips.first_mut() {
+                            part.loop_enabled = !looping;
+                        }
+                    } else if let Some(part) = content.note_clips.first_mut() {
+                        part.loop_enabled = !looping;
                     }
                 }
                 if self.clip_editor.selected == Some(id) {
@@ -269,26 +310,15 @@ impl PerformState {
                     return PerformAction::default();
                 }
                 let id = ClipId::new();
-                let mut timeline = ArrangementTimeline::default();
-                timeline.ensure(track_id).note_clips.push(UiNoteClip {
-                    id,
-                    name: format!("Pattern {}", row + 1),
-                    position_beats: 0.0,
-                    duration_beats: 16.0,
-                    notes: Vec::new(),
-                    selected_notes: Default::default(),
-                    start_marker_beats: 0.0,
-                    loop_enabled: true,
-                    loop_start_beats: 0.0,
-                    loop_end_beats: 16.0,
-                    groove_grid: Default::default(),
-                });
-                Arc::make_mut(&mut self.clips).clips.push(LauncherClip {
-                    id,
-                    track_id,
-                    row,
-                    timeline: Arc::new(timeline),
-                });
+                Arc::make_mut(&mut self.clips)
+                    .clips
+                    .push(super::clip_record::empty_midi_clip(
+                        id,
+                        track_id,
+                        row,
+                        format!("Pattern {}", row + 1),
+                        16.0,
+                    ));
                 selected = self.select_launcher_clip(id);
             }
             ClipMsg::Duplicate(id) => {
@@ -328,6 +358,17 @@ impl PerformState {
                 }
             }
             ClipMsg::Delete(id) => {
+                if let Some(clip) = self.clips.by_id(id) {
+                    if self
+                        .clip_editor
+                        .playing
+                        .get(&clip.track_id)
+                        .is_some_and(|active| active.id == id)
+                        || self.clip_editor.queued.get(&clip.track_id) == Some(&Some(id))
+                    {
+                        clip_launch = Some(ClipLaunchRequest::Stop(clip.track_id));
+                    }
+                }
                 Arc::make_mut(&mut self.clips)
                     .clips
                     .retain(|clip| clip.id != id);
@@ -350,6 +391,7 @@ impl PerformState {
             }
         }
         PerformAction {
+            clip_launch,
             select_project_track: selected,
             focus_clip_tab: selected.is_some(),
             ..Default::default()
@@ -359,18 +401,16 @@ impl PerformState {
 
 impl LauncherClip {
     pub fn length_and_loop(&self, samples_per_beat: f64) -> (u64, bool) {
-        let content = self.timeline.get(self.track_id);
-        if let Some(clip) = content.and_then(|content| content.clips.first()) {
-            (clip.duration.max(1), clip.loop_enabled)
-        } else if let Some(clip) = content.and_then(|content| content.note_clips.first()) {
-            (
+        match self.part() {
+            Some(SlotPart::Audio(clip)) => (clip.duration.max(1), clip.loop_enabled),
+            Some(SlotPart::Midi(clip)) => (
                 (clip.duration_beats * samples_per_beat).round().max(1.0) as u64,
                 clip.loop_enabled,
-            )
-        } else {
-            (1, true)
+            ),
+            None => (1, true),
         }
     }
+
     pub fn prepare(
         &self,
         request_id: u64,

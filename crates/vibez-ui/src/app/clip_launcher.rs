@@ -129,6 +129,11 @@ impl App {
                     .any(|(track, _)| *track == session.working.track_id)
             })
         {
+            if self.state.perform.clip_record.pending_audio_arm.is_some() {
+                self.cancel_clip_record();
+                self.launch_clips(request);
+                return;
+            }
             self.state.perform.clip_record.notes.request_stop();
             self.send_command(EngineCommand::StopClipRecord { immediate: false });
         }
@@ -151,8 +156,7 @@ impl App {
             self.state.status_text = "Clip media is not ready".into();
             return;
         }
-        let samples_per_beat =
-            self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+        let samples_per_beat = self.state.transport.samples_per_beat();
         let mut prepared = Vec::new();
         for (track_id, clip) in targets {
             self.state.perform.clip_editor.next_request += 1;
@@ -172,14 +176,7 @@ impl App {
                     .pending
                     .insert(request_id, clip);
             } else {
-                prepared.push(Box::new(PreparedClipPlayback {
-                    track_id,
-                    clip_id: None,
-                    request_id,
-                    length_samples: 1,
-                    looping: false,
-                    source: Box::default(),
-                }));
+                prepared.push(PreparedClipPlayback::stop(track_id, request_id));
             }
         }
         if !prepared.is_empty() {
@@ -205,6 +202,32 @@ pub(super) fn refresh_edited_clips(
         || Arc::ptr_eq(before, &perform.clips)
     {
         return;
+    }
+    for removed in before
+        .clips
+        .iter()
+        .filter(|clip| perform.clips.by_id(clip.id).is_none())
+    {
+        let editor = &mut perform.clip_editor;
+        if editor.queued.get(&removed.track_id) == Some(&None) {
+            continue;
+        }
+        if editor
+            .playing
+            .get(&removed.track_id)
+            .is_some_and(|active| active.id == removed.id)
+            || editor.queued.get(&removed.track_id) == Some(&Some(removed.id))
+        {
+            editor.next_request += 1;
+            editor.queue_request(removed.track_id, None, editor.next_request);
+            engine.send(EngineCommand::QueueClips {
+                clips: vec![vibez_engine::playback_source::PreparedClipPlayback::stop(
+                    removed.track_id,
+                    editor.next_request,
+                )],
+                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+            });
+        }
     }
     for clip in &perform.clips.clips {
         if recording == Some(clip.id)
@@ -237,6 +260,36 @@ mod live_edit_tests {
     use crate::domains::piano_roll::{PianoRollCtx, PianoRollMsg};
     use crate::domains::test_support::RecordingEngine;
     use crate::state::AppState;
+    use vibez_engine::commands::EngineCommand;
+
+    #[test]
+    fn deleting_the_part_in_the_shared_editor_stops_its_resident_clip() {
+        let track = TrackId::new();
+        let clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Take".into(),
+            4.0,
+        );
+        let mut state = crate::domains::perform::PerformState::default();
+        state.layout = PerformLayout::Clips;
+        Arc::make_mut(&mut state.clips).clips.push(clip.clone());
+        state.clip_editor.running = true;
+        state.clip_editor.playing.insert(track, clip.clone());
+        state.select_launcher_clip(clip.id);
+        let before = Arc::clone(&state.clips);
+        Arc::make_mut(&mut state.clip_editor.editor.timeline)
+            .ensure(track)
+            .note_clips
+            .clear();
+        state.commit_selected_timeline();
+        let mut engine = RecordingEngine::default();
+        refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+        assert!(
+            matches!(&engine.0[..], [EngineCommand::QueueClips { clips, .. }] if clips.len() == 1 && clips[0].track_id == track && clips[0].clip_id.is_none())
+        );
+    }
 
     #[test]
     fn piano_roll_edit_publishes_new_source_without_relaunching() {

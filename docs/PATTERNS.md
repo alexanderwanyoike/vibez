@@ -51,7 +51,7 @@ through a concrete channel. The adapters are the vocabulary:
 
 - `EngineTx` — the real command queue (Arrange, live edits)
 - `DiscardingEngine` — the null object, for edits to non-resident content
-- `TimelineResultEngine` — Arrange sends, Section discards, used by
+- `TimelineResultEngine` — Arrange sends, non-resident Section/Clip edits discard, used by
   `with_timeline_editor_at`
 
 If an edit must behave differently against resident and non-resident content,

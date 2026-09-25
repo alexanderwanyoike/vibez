@@ -72,6 +72,12 @@ impl App {
         task
     }
 
+    pub(super) fn discard_project_transaction(&mut self) {
+        if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
+            self.state.project.dirty = dirty_before;
+        }
+    }
+
     #[allow(dead_code)]
     pub(super) fn abandon_project_transaction(&mut self) -> bool {
         let Some((snapshot, dirty_before)) = self.state.project.history.abandon_transaction()

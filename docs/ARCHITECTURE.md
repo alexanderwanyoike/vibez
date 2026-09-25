@@ -325,6 +325,8 @@ document's common timeline traversal for media collection, hydration and ID
 discovery. Clip Project containers use document version 2 inside the unchanged
 SQLite container schema. Section Projects keep document version 1. Earlier
 builds reject version 2 instead of silently discarding unfamiliar Clip data.
+Clip projects can only be saved as `.vzp`; legacy Clip JSON remains readable
+for migration, but saving it requires Save As to a container.
 
 Clip Projects support independent Audio/MIDI playback and Capture. Each engine
 Track holds its own resident Clip source, local playhead and replaceable launch
@@ -369,8 +371,12 @@ track-coloured MIDI and waveform previews. Cell controls use the shared native
 icon helper: play/stop, record, Loop/One-shot, and delete. Empty cell clicks stop
 the Track; double-click creates a MIDI part or imports audio. The play control
 and keyboard share one toggle policy, while delete remains Undo-aware.
-Track and Clip names edit in place on double-click. Arrow keys remain grid
-navigation while the piano roll is open. Clicking in the Browser gives its
+Track and Clip names edit in place on double-click and commit on click-away.
+Arrow keys remain grid navigation while the piano roll is open. This is an
+intentional keyboard-first prototype choice: producers can edit notes with the
+pointer without losing the movable 4-by-4 launch window. It retains the agreed
+Clip bindings through dogfooding; note nudging by arrow keys remains available
+in Section projects. Clicking in the Browser gives its
 Results the arrow keys for selection and audition; clicking outside returns
 navigation to the workspace. Playing Clips
 show a progress line in the grid and their shared Audio/MIDI inspector.
@@ -410,10 +416,20 @@ used by its shared editor and saved timeline. One-shot playback stops at the
 clip end. Recording into an existing one-shot cycles for the take and preserves
 its saved playback mode when recording finishes.
 
-Recorded audio is embedded in `.vzp` containers. Legacy JSON projects have no
-media table, so generated audio without a durable source is copied to a sibling
-`<project filename>.media` directory before staging references are stripped.
-That directory must travel with the legacy project.
+Recorded Clip audio is embedded in `.vzp` containers. Clip projects cannot be
+saved as legacy JSON because older readers would silently discard their slots.
+Legacy Section projects still preserve generated media in a sibling directory.
+
+Clip settings and start/stop decisions use the Perform action pipeline. The
+Clip take state owns pass advancement, typed note input, and preview revisions;
+unchanged ticks do not prepare new engine sources. Held notes, crossed Replace
+notes, loop passes and free-length growth still publish when content changes.
+Engine events are consumed in order so a recording-start acknowledgement is
+applied before note input from that same callback. Cancellation always clears
+the engine take and stops its Track, including cancellation during count-in.
+Audio arming waits for the bridge's first captured output-clock block before
+sending the engine command. The bridge stamps that block where it captures
+samples, preventing count-in-off starts from losing one buffer to an arm race.
 
 ### Shared content ownership
 

@@ -63,7 +63,7 @@ impl App {
             .as_ref()
             .map(|s| s.working.id);
         let task = self.update(message);
-        let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+        let spb = self.state.transport.samples_per_beat();
         super::clip_launcher::refresh_edited_clips(
             &before,
             &mut self.state.perform,
@@ -138,7 +138,11 @@ impl App {
                 Message::Transport(TransportMsg::Stop | TransportMsg::TogglePlayback)
             )
         {
-            self.send_command(EngineCommand::StopClipRecord { immediate: true });
+            if self.state.perform.clip_record.pending_audio_arm.is_some() {
+                self.cancel_clip_record();
+            } else {
+                self.send_command(EngineCommand::StopClipRecord { immediate: true });
+            }
             self.send_command(EngineCommand::Stop);
             return Task::none();
         }
