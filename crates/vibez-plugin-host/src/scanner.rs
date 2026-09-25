@@ -45,6 +45,10 @@ fn scan_directory(dir: &Path, results: &mut Vec<PluginInfo>) {
                     continue;
                 }
             }
+            if path.extension().is_some_and(|ext| ext == "clap") {
+                scan_clap_file(&path, results);
+                continue;
+            }
             // Recurse into subdirectories (one level for organization folders)
             scan_directory(&path, results);
         } else if let Some(ext) = path.extension() {
@@ -251,11 +255,37 @@ fn collect_from_directory(dir: &Path, paths_out: &mut Vec<(PathBuf, PluginFormat
                     continue;
                 }
             }
+            if path.extension().is_some_and(|ext| ext == "clap") {
+                paths_out.push((path, PluginFormat::Clap));
+                continue;
+            }
             collect_from_directory(&path, paths_out);
         } else if let Some(ext) = path.extension() {
             if ext == "clap" {
                 paths_out.push((path, PluginFormat::Clap));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collects_clap_bundles_without_scanning_their_contents() {
+        let root = std::env::temp_dir().join(format!("vibez-clap-scan-{}", std::process::id()));
+        let bundle = root.join("Vendor/Synth.clap");
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        std::fs::write(bundle.join("Contents/MacOS/Synth"), []).unwrap();
+        std::fs::write(bundle.join("nested.clap"), []).unwrap();
+        let settings = PluginSettings {
+            extra_scan_paths: vec![root.clone()],
+            scan_default_paths: false,
+            ..Default::default()
+        };
+        let paths = collect_plugin_paths(&settings);
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(paths, vec![(bundle, PluginFormat::Clap)]);
     }
 }

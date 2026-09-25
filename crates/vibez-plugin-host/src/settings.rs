@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::info::PluginInfo;
 
-const CURRENT_CACHE_REVISION: u32 = 1;
+const CURRENT_CACHE_REVISION: u32 = 2;
 
 /// Plugin host settings, persisted to `~/.config/vibez/plugins.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]

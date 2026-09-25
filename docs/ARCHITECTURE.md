@@ -581,6 +581,19 @@ are handled in three stages:
    by sample offset and preserve within-block note-on/note-off timing before
    `IAudioProcessor::process` runs.
 
+Plugin editor windows use a platform backend: AppKit on macOS and the existing
+X11 backend elsewhere. The macOS backend owns an `NSWindow` and its content
+`NSView`, negotiates `cocoa` for CLAP or `NSView` for VST3, and uses logical
+point sizes. Close requests defer native window destruction until the UI thread
+has detached the plugin. AppKit events run through the application's existing
+main event loop.
+
+macOS plugin bundles are resolved through `CFBundleExecutable` for both formats.
+VST3 module initialization calls `bundleEntry` with a retained `CFBundle` before
+factory access and pairs it with `bundleExit` before unloading. CLAP scanning
+recognizes `.clap` directories as bundles and passes the bundle path to entry
+initialization, while loading the declared executable.
+
 ## Projects, undo, and warping
 
 - Projects are JSON (`vibez-project`): Project Tracks remain in the existing

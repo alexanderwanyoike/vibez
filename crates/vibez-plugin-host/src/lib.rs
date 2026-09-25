@@ -38,3 +38,6 @@ pub use settings::PluginSettings;
 pub use state::{capture_plugin_state, PluginStatePtr};
 pub use wrappers::effect::PluginEffectWrapper;
 pub use wrappers::instrument::PluginInstrumentWrapper;
+
+#[cfg(target_os = "macos")]
+mod macos_bundle;

@@ -723,7 +723,7 @@ impl App {
                         }
                     } else {
                         self.state.status_text =
-                            "No X11 display — plugin GUI unavailable".to_string();
+                            "Native window system unavailable: plugin GUI cannot open".to_string();
                     }
                 } else {
                     self.state.status_text = "Plugin GUI handle not available".to_string();

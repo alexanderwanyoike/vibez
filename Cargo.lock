@@ -5212,6 +5212,7 @@ name = "vibez-plugin-host"
 version = "0.3.2"
 dependencies = [
  "clap-sys",
+ "core-foundation 0.10.1",
  "dirs 5.0.1",
  "libc",
  "libloading 0.8.9",
@@ -5241,9 +5242,13 @@ name = "vibez-ui"
 version = "0.3.2"
 dependencies = [
  "base64",
+ "clap-sys",
  "dirs 5.0.1",
  "iced",
  "notify",
+ "objc2 0.6.3",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "reqwest",
  "rfd",
  "rtrb",

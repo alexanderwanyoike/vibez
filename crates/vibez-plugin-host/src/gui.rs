@@ -1,4 +1,4 @@
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 
 use clap_sys::ext::gui::{
     clap_plugin_gui, clap_window, clap_window_handle, CLAP_EXT_GUI, CLAP_WINDOW_API_X11,
@@ -6,6 +6,58 @@ use clap_sys::ext::gui::{
 use clap_sys::plugin::clap_plugin;
 
 use vibez_core::id::{EffectId, TrackId};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuiApi {
+    X11,
+    Cocoa,
+}
+
+impl GuiApi {
+    pub const fn native() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Cocoa
+        } else {
+            Self::X11
+        }
+    }
+
+    fn clap_name(self) -> &'static CStr {
+        match self {
+            Self::X11 => CLAP_WINDOW_API_X11,
+            Self::Cocoa => clap_sys::ext::gui::CLAP_WINDOW_API_COCOA,
+        }
+    }
+
+    fn vst3_name(self) -> &'static [u8] {
+        match self {
+            Self::X11 => b"X11EmbedWindowID\0",
+            Self::Cocoa => b"NSView\0",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum GuiParent {
+    X11(u32),
+    Cocoa(*mut c_void),
+}
+
+impl GuiParent {
+    fn api(self) -> GuiApi {
+        match self {
+            Self::X11(_) => GuiApi::X11,
+            Self::Cocoa(_) => GuiApi::Cocoa,
+        }
+    }
+
+    fn as_ptr(self) -> *mut c_void {
+        match self {
+            Self::X11(id) => id as usize as *mut c_void,
+            Self::Cocoa(view) => view,
+        }
+    }
+}
 
 /// Identifies a specific plugin GUI (for use as HashMap key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,7 +141,7 @@ impl PluginGuiHandle {
     }
 
     /// Create the plugin GUI (call before attach/show).
-    pub fn create_gui(&self) -> bool {
+    pub fn create_gui(&mut self) -> bool {
         match self {
             PluginGuiHandle::Clap(h) => h.create_gui(),
             PluginGuiHandle::Vst3(_h) => _h.create_view(),
@@ -101,6 +153,15 @@ impl PluginGuiHandle {
         match self {
             PluginGuiHandle::Clap(h) => h.attach_to_x11(window_id),
             PluginGuiHandle::Vst3(h) => h.attach_to_x11(window_id),
+        }
+    }
+
+    /// # Safety
+    /// The parent must be valid on the UI thread and outlive the plugin GUI.
+    pub unsafe fn attach_to_parent(&mut self, parent: GuiParent) -> bool {
+        match self {
+            Self::Clap(h) => h.attach_to_parent(parent),
+            Self::Vst3(h) => h.open_in_parent(parent),
         }
     }
 
@@ -141,6 +202,7 @@ impl PluginGuiHandle {
 pub struct ClapGuiHandle {
     plugin_ptr: *const clap_plugin,
     gui_ext: *const clap_plugin_gui,
+    api: GuiApi,
     pub open: bool,
 }
 
@@ -186,32 +248,36 @@ impl ClapGuiHandle {
     /// # Safety
     /// `plugin_ptr` must be a valid CLAP plugin pointer that remains valid.
     pub unsafe fn new(plugin_ptr: *const clap_plugin) -> Option<Self> {
+        Self::new_for_api(plugin_ptr, GuiApi::native())
+    }
+
+    unsafe fn new_for_api(plugin_ptr: *const clap_plugin, api: GuiApi) -> Option<Self> {
         if plugin_ptr.is_null() {
-            eprintln!("vibez: ClapGuiHandle::new — plugin_ptr is null");
+            eprintln!("vibez: ClapGuiHandle::new - plugin_ptr is null");
             return None;
         }
         let plugin_ref = &*plugin_ptr;
         let ext_ptr = (plugin_ref.get_extension.unwrap())(plugin_ptr, CLAP_EXT_GUI.as_ptr())
             as *const clap_plugin_gui;
         if ext_ptr.is_null() {
-            eprintln!("vibez: ClapGuiHandle::new — plugin has no GUI extension");
+            eprintln!("vibez: ClapGuiHandle::new - plugin has no GUI extension");
             return None;
         }
-        // Check if X11 is supported
         let gui = &*ext_ptr;
         let supported = (gui.is_api_supported.unwrap())(
             plugin_ptr,
-            CLAP_WINDOW_API_X11.as_ptr(),
+            api.clap_name().as_ptr(),
             false, // embedded, not floating
         );
         if !supported {
-            eprintln!("vibez: ClapGuiHandle::new — X11 API not supported");
+            eprintln!("vibez: ClapGuiHandle::new - {api:?} API not supported");
             return None;
         }
-        eprintln!("vibez: ClapGuiHandle::new — GUI handle created OK");
+        eprintln!("vibez: ClapGuiHandle::new - GUI handle created OK");
         Some(Self {
             plugin_ptr,
             gui_ext: ext_ptr,
+            api,
             open: false,
         })
     }
@@ -231,24 +297,37 @@ impl ClapGuiHandle {
         }
     }
 
-    fn create_gui(&self) -> bool {
+    fn create_gui(&mut self) -> bool {
         if self.gui_ext.is_null() {
             return false;
         }
         let gui = unsafe { &*self.gui_ext };
-        unsafe { (gui.create.unwrap())(self.plugin_ptr, CLAP_WINDOW_API_X11.as_ptr(), false) }
+        if self.open {
+            return true;
+        }
+        self.open =
+            unsafe { (gui.create.unwrap())(self.plugin_ptr, self.api.clap_name().as_ptr(), false) };
+        self.open
     }
 
     fn attach_to_x11(&self, window_id: u32) -> bool {
-        if self.gui_ext.is_null() {
+        self.attach_to_parent(GuiParent::X11(window_id))
+    }
+
+    fn attach_to_parent(&self, parent: GuiParent) -> bool {
+        if self.gui_ext.is_null() || !self.open || parent.api() != self.api {
             return false;
         }
         let gui = unsafe { &*self.gui_ext };
-        let window = clap_window {
-            api: CLAP_WINDOW_API_X11.as_ptr(),
-            specific: clap_window_handle {
-                x11: window_id as clap_sys::ext::gui::clap_xwnd,
+        let specific = match parent {
+            GuiParent::X11(id) => clap_window_handle {
+                x11: id as clap_sys::ext::gui::clap_xwnd,
             },
+            GuiParent::Cocoa(view) => clap_window_handle { cocoa: view },
+        };
+        let window = clap_window {
+            api: self.api.clap_name().as_ptr(),
+            specific,
         };
         unsafe { (gui.set_parent.unwrap())(self.plugin_ptr, &window) }
     }
@@ -287,7 +366,13 @@ impl ClapGuiHandle {
     }
 }
 
-// ── VST3 GUI Handle ──
+impl Drop for ClapGuiHandle {
+    fn drop(&mut self) {
+        self.destroy();
+    }
+}
+
+// VST3 GUI Handle
 
 /// VST3 IEditController IID: {DCD7BBE3-7742-448D-A874-AACC979C759E}
 pub(crate) const IEDIT_CONTROLLER_IID: [u8; 16] = crate::vst3_tuid([
@@ -320,7 +405,7 @@ impl Vst3GuiHandle {
     /// (or null, which returns None). Takes its own reference.
     pub unsafe fn new(edit_controller: *mut c_void) -> Option<Self> {
         if edit_controller.is_null() {
-            eprintln!("vibez: Vst3GuiHandle::new — no edit controller (GUI unavailable)");
+            eprintln!("vibez: Vst3GuiHandle::new - no edit controller (GUI unavailable)");
             return None;
         }
         // FUnknown::addRef - vtable[1]: hold our own reference; the
@@ -422,6 +507,10 @@ impl Vst3GuiHandle {
     }
 
     fn attach_to_x11(&self, window_id: u32) -> bool {
+        self.attach_to_parent(GuiParent::X11(window_id))
+    }
+
+    fn attach_to_parent(&self, parent: GuiParent) -> bool {
         if self.plug_view.is_null() {
             return false;
         }
@@ -429,14 +518,8 @@ impl Vst3GuiHandle {
         type AttachedFn = unsafe extern "system" fn(*mut c_void, *mut c_void, *const u8) -> i32;
         let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
         let attached: AttachedFn = unsafe { std::mem::transmute(*vtbl.add(4)) };
-        let platform_type = b"X11EmbedWindowID\0";
-        let hr = unsafe {
-            attached(
-                self.plug_view,
-                window_id as usize as *mut c_void,
-                platform_type.as_ptr(),
-            )
-        };
+        let platform_type = parent.api().vst3_name();
+        let hr = unsafe { attached(self.plug_view, parent.as_ptr(), platform_type.as_ptr()) };
         hr == 0
     }
 
@@ -448,7 +531,10 @@ impl Vst3GuiHandle {
             let removed: RemovedFn = unsafe { std::mem::transmute(*vtbl.add(5)) };
             unsafe { removed(self.plug_view) };
 
-            // Release IPlugView
+            type SetFrameFn = unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32;
+            let set_frame: SetFrameFn = unsafe { std::mem::transmute(*vtbl.add(12)) };
+            unsafe { set_frame(self.plug_view, std::ptr::null_mut()) };
+
             type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
             let release: ReleaseFn = unsafe { std::mem::transmute(*vtbl.add(2)) };
             unsafe { release(self.plug_view) };
@@ -463,8 +549,14 @@ impl Vst3GuiHandle {
     /// Create the IPlugView from IEditController and attach to window.
     /// Call this when opening the GUI for the first time.
     pub fn open_view(&mut self, window_id: u32) -> bool {
+        unsafe { self.open_in_parent(GuiParent::X11(window_id)) }
+    }
+
+    /// # Safety
+    /// The native parent must remain alive until this view is destroyed, on the UI thread.
+    pub unsafe fn open_in_parent(&mut self, parent: GuiParent) -> bool {
         if self.edit_controller.is_null() {
-            eprintln!("vibez: open_view — edit_controller is null");
+            eprintln!("vibez: open_view - edit_controller is null");
             return false;
         }
 
@@ -480,24 +572,27 @@ impl Vst3GuiHandle {
         let vtbl = unsafe { *(self.edit_controller as *const *const *const c_void) };
         let create_view: CreateViewFn = unsafe { std::mem::transmute(*vtbl.add(17)) };
         let editor_name = b"editor\0";
-        eprintln!("vibez: open_view — calling createView(\"editor\")");
+        eprintln!("vibez: open_view - calling createView(\"editor\")");
         let view = unsafe { create_view(self.edit_controller, editor_name.as_ptr()) };
         if view.is_null() {
-            eprintln!("vibez: open_view — createView returned null");
+            eprintln!("vibez: open_view - createView returned null");
             return false;
         }
-        eprintln!("vibez: open_view — got IPlugView OK");
+        eprintln!("vibez: open_view - got IPlugView OK");
         self.plug_view = view;
 
-        // Check if X11 is supported: IPlugView::isPlatformTypeSupported(type) - vtable[3]
+        // IPlugView::isPlatformTypeSupported(type) is vtable[3].
         type IsPlatformSupportedFn = unsafe extern "system" fn(*mut c_void, *const u8) -> i32;
         let view_vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
         let is_supported: IsPlatformSupportedFn = unsafe { std::mem::transmute(*view_vtbl.add(3)) };
-        let platform_type = b"X11EmbedWindowID\0";
+        let platform_type = parent.api().vst3_name();
         let hr = unsafe { is_supported(self.plug_view, platform_type.as_ptr()) };
-        eprintln!("vibez: open_view — isPlatformTypeSupported(X11) = {hr}");
+        eprintln!(
+            "vibez: open_view - isPlatformTypeSupported({:?}) = {hr}",
+            parent.api()
+        );
         if hr != 0 {
-            eprintln!("vibez: open_view — X11 embedding not supported by plugin");
+            eprintln!("vibez: open_view - native embedding not supported by plugin");
             // Not supported, clean up
             type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
             let release: ReleaseFn = unsafe { std::mem::transmute(*view_vtbl.add(2)) };
@@ -515,21 +610,22 @@ impl Vst3GuiHandle {
         let set_frame: SetFrameFn = unsafe { std::mem::transmute(*view_vtbl.add(12)) };
         let hr = unsafe { set_frame(self.plug_view, frame.as_iplugframe()) };
         if hr != 0 {
-            eprintln!("vibez: open_view — setFrame returned {hr} (continuing)");
+            eprintln!("vibez: open_view - setFrame returned {hr} (continuing)");
         }
         self.frame = Some(frame);
 
-        // Attach to X11 window
-        eprintln!("vibez: open_view — attaching to X11 window {window_id}");
-        if !self.attach_to_x11(window_id) {
-            eprintln!("vibez: open_view — attach_to_x11 failed");
+        eprintln!("vibez: open_view - attaching to native parent {parent:?}");
+        if !self.attach_to_parent(parent) {
+            eprintln!("vibez: open_view - native attachment failed");
+            unsafe { set_frame(self.plug_view, std::ptr::null_mut()) };
+            self.frame = None;
             type ReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
             let release: ReleaseFn = unsafe { std::mem::transmute(*view_vtbl.add(2)) };
             unsafe { release(self.plug_view) };
             self.plug_view = std::ptr::null_mut();
             return false;
         }
-        eprintln!("vibez: open_view — attached successfully");
+        eprintln!("vibez: open_view - attached successfully");
 
         self.open = true;
         true
@@ -552,7 +648,7 @@ impl Drop for Vst3GuiHandle {
 
 #[cfg(test)]
 mod iid_tests {
-    /// See vst3_host::instance::tests — hand-written IIDs must match
+    /// See vst3_host::instance::tests - hand-written IIDs must match
     /// the SDK-generated constants or plugins reject queryInterface.
     #[test]
     fn ieditcontroller_iid_matches_sdk() {
@@ -563,3 +659,6 @@ mod iid_tests {
         assert_eq!(super::IEDIT_CONTROLLER_IID.as_slice(), sdk.as_slice());
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -15,7 +15,7 @@ use crate::instance::PluginInstance;
 pub struct Vst3PluginInstance {
     name: String,
     is_instrument: bool,
-    _lib: libloading::Library,
+    _lib: super::module::Vst3Module,
     /// Raw COM pointer to IComponent (also IPluginBase)
     component: *mut std::ffi::c_void,
     /// Raw COM pointer to IAudioProcessor
@@ -338,6 +338,7 @@ fn char16_to_string(chars: &[u16]) -> String {
 /// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
 /// with no plugin code executed yet.
 pub struct PartialVst3Plugin {
+    path: std::path::PathBuf,
     lib: libloading::Library,
     class_uid: String,
     is_instrument: bool,
@@ -575,6 +576,7 @@ impl Vst3PluginInstance {
                 .map_err(|e| format!("Failed to load VST3 module: {e}"))?
         };
         Ok(PartialVst3Plugin {
+            path: path.to_path_buf(),
             lib,
             class_uid: class_uid.to_string(),
             is_instrument,
@@ -591,12 +593,13 @@ impl Vst3PluginInstance {
         max_buffer_size: u32,
     ) -> Result<Self, String> {
         let PartialVst3Plugin {
+            path,
             lib,
             class_uid,
             is_instrument,
         } = partial;
         let class_uid = class_uid.as_str();
-        let lib = super::scanner::vst3_module_init(lib)?;
+        let lib = super::module::Vst3Module::init(lib, &path)?;
 
         type GetFactoryFn = unsafe extern "system" fn() -> *mut std::ffi::c_void;
 
@@ -1224,7 +1227,6 @@ impl Drop for Vst3PluginInstance {
             let release: ReleaseFn = unsafe { std::mem::transmute(*comp_vtbl.add(2)) };
             unsafe { release(self.component) };
         }
-        super::scanner::vst3_module_exit(&self._lib);
     }
 }
 
