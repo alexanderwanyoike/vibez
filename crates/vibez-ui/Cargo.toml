@@ -27,6 +27,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time",
 dirs = "5"
 
 [dev-dependencies]
+vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
@@ -40,6 +41,3 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 [[test]]
 name = "native_plugin_gui"
 harness = false
-
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-clap-sys = "0.5"

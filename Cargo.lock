@@ -5242,7 +5242,6 @@ name = "vibez-ui"
 version = "0.3.2"
 dependencies = [
  "base64",
- "clap-sys",
  "dirs 5.0.1",
  "iced",
  "notify",

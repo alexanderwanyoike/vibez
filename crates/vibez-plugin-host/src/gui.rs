@@ -71,6 +71,14 @@ pub enum PluginGuiKey {
     },
 }
 
+impl PluginGuiKey {
+    pub fn track_id(&self) -> TrackId {
+        match *self {
+            Self::Effect { track_id, .. } | Self::Instrument { track_id } => track_id,
+        }
+    }
+}
+
 /// A handle to a plugin's native GUI, kept on the UI thread.
 pub enum PluginGuiHandle {
     Clap(ClapGuiHandle),
@@ -132,6 +140,21 @@ impl PluginGuiHandle {
         }
     }
 
+    /// Host resizes must satisfy plugin constraints before set_size/onSize.
+    pub fn resize_from_host(&mut self, width: u32, height: u32) -> Option<(u32, u32)> {
+        if width == 0 || height == 0 || !self.can_resize() {
+            return None;
+        }
+        let (width, height) = match self {
+            Self::Clap(h) => h.adjust_size(width, height),
+            Self::Vst3(h) => h.adjust_size(width, height),
+        }?;
+        if width == 0 || height == 0 {
+            return None;
+        }
+        self.set_size(width, height).then_some((width, height))
+    }
+
     /// Query the preferred GUI size from the plugin.
     pub fn get_size(&self) -> Option<(u32, u32)> {
         match self {
@@ -145,14 +168,6 @@ impl PluginGuiHandle {
         match self {
             PluginGuiHandle::Clap(h) => h.create_gui(),
             PluginGuiHandle::Vst3(_h) => _h.create_view(),
-        }
-    }
-
-    /// Attach the plugin GUI to an X11 window.
-    pub fn attach_to_x11(&self, window_id: u32) -> bool {
-        match self {
-            PluginGuiHandle::Clap(h) => h.attach_to_x11(window_id),
-            PluginGuiHandle::Vst3(h) => h.attach_to_x11(window_id),
         }
     }
 
@@ -219,6 +234,16 @@ impl ClapGuiHandle {
             Some(f) => unsafe { f(self.plugin_ptr) },
             None => false,
         }
+    }
+
+    fn adjust_size(&self, mut width: u32, mut height: u32) -> Option<(u32, u32)> {
+        let gui = unsafe { self.gui_ext.as_ref()? };
+        if let Some(adjust) = gui.adjust_size {
+            if !unsafe { adjust(self.plugin_ptr, &mut width, &mut height) } {
+                return None;
+            }
+        }
+        Some((width, height))
     }
 
     /// CLAP `clap_plugin_gui::set_size`.
@@ -310,11 +335,9 @@ impl ClapGuiHandle {
         self.open
     }
 
-    fn attach_to_x11(&self, window_id: u32) -> bool {
-        self.attach_to_parent(GuiParent::X11(window_id))
-    }
-
-    fn attach_to_parent(&self, parent: GuiParent) -> bool {
+    /// # Safety
+    /// The parent must be valid on the UI thread and outlive this GUI.
+    unsafe fn attach_to_parent(&self, parent: GuiParent) -> bool {
         if self.gui_ext.is_null() || !self.open || parent.api() != self.api {
             return false;
         }
@@ -433,6 +456,29 @@ impl Vst3GuiHandle {
         unsafe { can_resize(self.plug_view) == 0 }
     }
 
+    fn adjust_size(&self, width: u32, height: u32) -> Option<(u32, u32)> {
+        if self.plug_view.is_null() {
+            return None;
+        }
+        let mut rect = vst3::Steinberg::ViewRect {
+            left: 0,
+            top: 0,
+            right: width.try_into().ok()?,
+            bottom: height.try_into().ok()?,
+        };
+        type CheckSizeFn =
+            unsafe extern "system" fn(*mut c_void, *mut vst3::Steinberg::ViewRect) -> i32;
+        let vtbl = unsafe { *(self.plug_view as *const *const *const c_void) };
+        let check: CheckSizeFn = unsafe { std::mem::transmute(*vtbl.add(14)) };
+        if unsafe { check(self.plug_view, &mut rect) } != 0 {
+            return None;
+        }
+        Some((
+            rect.right.checked_sub(rect.left)?.try_into().ok()?,
+            rect.bottom.checked_sub(rect.top)?.try_into().ok()?,
+        ))
+    }
+
     /// IPlugView::onSize - vtable [10]. Rect uses left/top/right/bottom.
     pub fn set_size(&mut self, width: u32, height: u32) -> bool {
         if self.plug_view.is_null() {
@@ -506,11 +552,9 @@ impl Vst3GuiHandle {
         true
     }
 
-    fn attach_to_x11(&self, window_id: u32) -> bool {
-        self.attach_to_parent(GuiParent::X11(window_id))
-    }
-
-    fn attach_to_parent(&self, parent: GuiParent) -> bool {
+    /// # Safety
+    /// The parent must be valid on the UI thread and outlive this GUI.
+    unsafe fn attach_to_parent(&self, parent: GuiParent) -> bool {
         if self.plug_view.is_null() {
             return false;
         }
@@ -548,10 +592,7 @@ impl Vst3GuiHandle {
 
     /// Create the IPlugView from IEditController and attach to window.
     /// Call this when opening the GUI for the first time.
-    pub fn open_view(&mut self, window_id: u32) -> bool {
-        unsafe { self.open_in_parent(GuiParent::X11(window_id)) }
-    }
-
+    ///
     /// # Safety
     /// The native parent must remain alive until this view is destroyed, on the UI thread.
     pub unsafe fn open_in_parent(&mut self, parent: GuiParent) -> bool {

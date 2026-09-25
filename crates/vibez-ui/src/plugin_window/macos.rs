@@ -6,10 +6,10 @@ use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSBackingStoreType, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask};
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
-use vibez_plugin_host::gui::{ClapGuiHandle, GuiParent, PluginGuiKey, Vst3GuiHandle};
+use vibez_plugin_host::gui::{GuiParent, PluginGuiKey};
 use vibez_plugin_host::PluginGuiHandle;
 
-use super::{PluginRawPtr, PluginWindowEvent};
+use super::{gui_handle, requested_resize, PluginRawPtr, PluginWindowEvent};
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -64,13 +64,7 @@ impl PluginWindowManager {
             self.raise(key);
             return true;
         }
-        let handle = unsafe {
-            match raw_ptr {
-                PluginRawPtr::Clap(ptr) => ClapGuiHandle::from_raw(ptr).map(PluginGuiHandle::Clap),
-                PluginRawPtr::Vst3(ptr) => Vst3GuiHandle::new(ptr).map(PluginGuiHandle::Vst3),
-            }
-        };
-        let Some(mut gui_handle) = handle else {
+        let Some(mut gui_handle) = (unsafe { gui_handle(raw_ptr) }) else {
             return false;
         };
         if !gui_handle.create_gui() {
@@ -146,10 +140,7 @@ impl PluginWindowManager {
     }
 
     pub fn close_track_effects(&mut self, track_id: vibez_core::id::TrackId) {
-        self.windows.retain(|key, _| match key {
-            PluginGuiKey::Effect { track_id: id, .. }
-            | PluginGuiKey::Instrument { track_id: id } => *id != track_id,
-        });
+        self.windows.retain(|key, _| key.track_id() != track_id);
     }
 
     pub fn poll_events(&mut self) -> Vec<PluginWindowEvent> {
@@ -166,15 +157,7 @@ impl PluginWindowManager {
         }
         let clap_requests = vibez_plugin_host::clap_host::host_impl::take_pending_gui_resizes();
         for opened in self.windows.values_mut() {
-            let requested = opened.gui_handle.take_pending_resize().or_else(|| {
-                opened.gui_handle.clap_plugin_ptr().and_then(|ptr| {
-                    clap_requests
-                        .iter()
-                        .rev()
-                        .find(|(p, _, _)| *p == ptr)
-                        .map(|&(_, w, h)| (w, h))
-                })
-            });
+            let requested = requested_resize(&opened.gui_handle, &clap_requests);
             if let Some(size) = requested.filter(|(w, h)| *w > 0 && *h > 0) {
                 opened.size = size;
                 opened.window.setContentSize(ns_size(size));
@@ -182,9 +165,10 @@ impl PluginWindowManager {
             let bounds = opened.view.bounds().size;
             let size = (bounds.width.round() as u32, bounds.height.round() as u32);
             if size != opened.size && size.0 > 0 && size.1 > 0 {
-                if opened.gui_handle.set_size(size.0, size.1) {
-                    opened.size = size;
-                } else {
+                if let Some(adjusted) = opened.gui_handle.resize_from_host(size.0, size.1) {
+                    opened.size = adjusted;
+                }
+                if size != opened.size {
                     opened.window.setContentSize(ns_size(opened.size));
                 }
             }

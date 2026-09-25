@@ -41,3 +41,6 @@ pub use wrappers::instrument::PluginInstrumentWrapper;
 
 #[cfg(target_os = "macos")]
 mod macos_bundle;
+
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod test_fixtures;

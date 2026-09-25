@@ -586,7 +586,12 @@ X11 backend elsewhere. The macOS backend owns an `NSWindow` and its content
 `NSView`, negotiates `cocoa` for CLAP or `NSView` for VST3, and uses logical
 point sizes. Close requests defer native window destruction until the UI thread
 has detached the plugin. AppKit events run through the application's existing
-main event loop.
+main event loop. `App::drop` closes all editors before any fields can destroy
+plugin instances or unload their libraries, including plugins owned by the
+stream or pending engine events. Both window backends share GUI construction,
+resize-request selection, and track ownership lookup. Host-driven resizes pass
+through the plugin's CLAP `adjust_size` or VST3 `checkSizeConstraint` callback
+before committing the size.
 
 macOS plugin bundles are resolved through `CFBundleExecutable` for both formats.
 VST3 module initialization calls `bundleEntry` with a retained `CFBundle` before
