@@ -301,12 +301,25 @@ impl AudioInputBridge {
         }
     }
 
-    pub fn clock_output(&self, destination: &mut [f32], channels: usize) -> Option<u64> {
+    pub fn clock_output(
+        &self,
+        destination: &mut [f32],
+        channels: usize,
+        output_position: u64,
+        arrangement_position: u64,
+    ) -> Option<u64> {
         let target = self.target_track_raw();
         let monitoring = target.is_some() && self.monitoring.load(Ordering::Acquire);
         let recording = target.is_some()
             && self.resample_source_track_raw().is_none()
             && self.recording.load(Ordering::Acquire);
+        if recording {
+            self.latch_record_start_position(if self.uses_output_clock() {
+                output_position
+            } else {
+                arrangement_position
+            });
+        }
         for frame in destination.chunks_mut(channels.max(1)) {
             let input = match self.input.pop() {
                 Some(input) => input,
@@ -344,11 +357,24 @@ impl AudioInputBridge {
     /// supplies post-device/post-fader samples; this bridge owns only bounded
     /// transfer, metering, and the Stop acknowledgement shared with hardware
     /// input recording.
-    pub fn capture_track_output(&self, source: &[f32], channels: usize) {
+    pub fn capture_track_output(
+        &self,
+        source: &[f32],
+        channels: usize,
+        output_position: u64,
+        arrangement_position: u64,
+    ) {
         if self.resample_source_track_raw().is_none() {
             return;
         }
         let recording = self.recording.load(Ordering::Acquire);
+        if recording {
+            self.latch_record_start_position(if self.uses_output_clock() {
+                output_position
+            } else {
+                arrangement_position
+            });
+        }
         let mut peak_l = 0.0f32;
         let mut peak_r = 0.0f32;
         for frame in source.chunks(channels.max(1)) {
@@ -538,19 +564,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn first_captured_buffer_latches_its_own_clock_for_input_and_resampling() {
+        for resampling in [false, true] {
+            let bridge = AudioInputBridge::new(16);
+            let track = TrackId::new();
+            bridge.set_target(Some(track), false);
+            if resampling {
+                bridge.set_resample_source(Some(track));
+            }
+            bridge.clock_output(&mut [0.0; 4], 2, 100, 0);
+            bridge.begin_output_clock_recording();
+            if resampling {
+                bridge.capture_track_output(&[0.25, 0.25, 0.5, 0.5], 2, 102, 0);
+            } else {
+                bridge.push_interleaved(&[0.25f32, 0.25, 0.5, 0.5], 2);
+                bridge.clock_output(&mut [0.0; 4], 2, 102, 0);
+            }
+            assert_eq!(bridge.record_start_position(), Some(102));
+            let mut captured = Vec::new();
+            bridge.drain_recorded(&mut captured);
+            assert_eq!(captured, vec![[0.25; 2], [0.5; 2]]);
+        }
+    }
+
+    #[test]
     fn mono_and_stereo_routes_are_applied_before_the_output_clock() {
         let bridge = AudioInputBridge::new(8);
         bridge.set_target(Some(TrackId::new()), true);
         bridge.set_route(AudioInputRoute::Mono { channel: 1 });
         bridge.push_interleaved(&[0.1f32, 0.6, 0.2, -0.4], 2);
         let mut output = [0.0; 4];
-        assert!(bridge.clock_output(&mut output, 2).is_some());
+        assert!(bridge.clock_output(&mut output, 2, 0, 0).is_some());
         assert_eq!(output, [0.6, 0.6, -0.4, -0.4]);
 
         bridge.set_route(AudioInputRoute::Stereo { left: 0 });
         bridge.push_interleaved(&[0.3f32, -0.7], 2);
         let mut output = [0.0; 2];
-        bridge.clock_output(&mut output, 2);
+        bridge.clock_output(&mut output, 2, 0, 0);
         assert_eq!(output, [0.3, -0.7]);
     }
 
@@ -565,7 +615,7 @@ mod tests {
         bridge.latch_record_start_position(5_312);
         bridge.push_interleaved(&[0.25f32, -0.5], 2);
         let mut silent_monitor = [1.0; 2];
-        assert!(bridge.clock_output(&mut silent_monitor, 2).is_none());
+        assert!(bridge.clock_output(&mut silent_monitor, 2, 0, 0).is_none());
         assert_eq!(silent_monitor, [0.0, 0.0]);
         let mut take = Vec::new();
         bridge.drain_recorded(&mut take);
@@ -575,7 +625,7 @@ mod tests {
 
         bridge.end_recording();
         assert!(!bridge.recording_stopped());
-        bridge.clock_output(&mut silent_monitor, 2);
+        bridge.clock_output(&mut silent_monitor, 2, 0, 0);
         assert!(bridge.recording_stopped());
     }
 
@@ -588,7 +638,7 @@ mod tests {
         bridge.latch_record_start_position(12_345);
         assert_eq!(bridge.record_start_position(), Some(12_345));
         bridge.end_recording();
-        bridge.clock_output(&mut [0.0; 2], 2);
+        bridge.clock_output(&mut [0.0; 2], 2, 0, 0);
         bridge.begin_recording();
         assert!(!bridge.uses_output_clock());
         assert_eq!(bridge.record_start_position(), None);
@@ -602,7 +652,7 @@ mod tests {
         bridge.set_target(Some(TrackId::new()), false);
         bridge.begin_recording();
         let mut output = [1.0; 6];
-        bridge.clock_output(&mut output, 2);
+        bridge.clock_output(&mut output, 2, 0, 0);
         assert_eq!(bridge.underrun_frames(), 3);
         assert_eq!(output, [0.0; 6]);
     }
@@ -613,7 +663,7 @@ mod tests {
         let source = TrackId::new();
         bridge.set_resample_source(Some(source));
         bridge.begin_recording();
-        bridge.capture_track_output(&[0.25, -0.5, 0.75, -1.0], 2);
+        bridge.capture_track_output(&[0.25, -0.5, 0.75, -1.0], 2, 0, 0);
         let mut take = Vec::new();
         bridge.drain_recorded(&mut take);
         assert_eq!(take, vec![[0.25, -0.5], [0.75, -1.0]]);
@@ -621,7 +671,7 @@ mod tests {
         assert_eq!(bridge.meter(), (0.75, 1.0));
 
         bridge.end_recording();
-        bridge.capture_track_output(&[0.0, 0.0], 2);
+        bridge.capture_track_output(&[0.0, 0.0], 2, 0, 0);
         assert!(bridge.recording_stopped());
     }
 

@@ -183,7 +183,7 @@ impl AudioEngine {
                     count = count.min(active.length.saturating_sub(active.position) as usize);
                 }
             }
-            let count = count.max(1);
+            debug_assert!(count > 0);
             let count_in = self.clip_count_in_timing();
             for track in &mut self.tracks {
                 // An inactive slot is silent while live instruments and effect tails still render.

@@ -24,9 +24,6 @@ impl App {
         &mut self,
         msg: crate::domains::perform::PerformMsg,
     ) -> Task<Message> {
-        if let crate::domains::perform::PerformMsg::ClipRecord(msg) = msg {
-            return self.update_clip_record(msg);
-        }
         self.state.perform.section_record.sync_clock(
             self.state.transport.playing,
             self.state.transport.bpm,
@@ -57,7 +54,7 @@ impl App {
                 } else {
                     self.section_residency_request.cancel();
                     self.state.perform.section_record.cancel();
-                    self.discard_section_record_transaction();
+                    self.discard_project_transaction();
                     self.state.status_text = "Section Record cancelled".into();
                 }
                 Task::none()
@@ -84,7 +81,7 @@ impl App {
             .cloned()
         else {
             self.state.perform.section_record.cancel();
-            self.discard_section_record_transaction();
+            self.discard_project_transaction();
             return Task::none();
         };
         let track_ids: Vec<_> = self
@@ -160,14 +157,8 @@ impl App {
             self.commit_project_transaction();
             self.state.status_text = "Section Record committed · one undo step".into();
         } else {
-            self.discard_section_record_transaction();
+            self.discard_project_transaction();
             self.state.status_text = "Section Record stopped · no notes changed".into();
-        }
-    }
-
-    fn discard_section_record_transaction(&mut self) {
-        if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
-            self.state.project.dirty = dirty_before;
         }
     }
 

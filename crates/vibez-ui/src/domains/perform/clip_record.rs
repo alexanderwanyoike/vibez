@@ -3,7 +3,10 @@ use super::loop_record::{
     CompletedLoopRecording, LoopRecordCountIn, LoopRecordMode, LoopRecordQuantization,
     LoopRecordState,
 };
-use super::LauncherClip;
+use super::{LauncherClip, PerformAction, PerformState};
+
+#[path = "clip_record_session.rs"]
+mod session;
 use crate::state::{ArrangementTimeline, UiNoteClip};
 use std::sync::Arc;
 use vibez_core::id::{ClipId, TrackId};
@@ -47,11 +50,62 @@ pub enum ClipRecordMsg {
     SetCountIn(LoopRecordCountIn),
     SetQuantization(LoopRecordQuantization),
 }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClipRecordAction {
+    Start { track_id: TrackId, row: u32 },
+    Stop,
+}
+
+impl PerformState {
+    pub(super) fn update_clip_record(&mut self, msg: ClipRecordMsg) -> PerformAction {
+        if self.layout != vibez_project::PerformLayout::Clips {
+            return PerformAction::default();
+        }
+        let record = &mut self.clip_record;
+        match msg {
+            ClipRecordMsg::Slot(track_id, row) => {
+                let action = if let Some(session) = &record.session {
+                    if (session.working.track_id, session.working.row) != (track_id, row)
+                        || session.stop.is_some()
+                    {
+                        return PerformAction {
+                            section_record_status: Some("Finish the current Clip take first"),
+                            ..Default::default()
+                        };
+                    }
+                    record
+                        .notes
+                        .request_stop()
+                        .then_some(ClipRecordAction::Stop)
+                } else {
+                    Some(ClipRecordAction::Start { track_id, row })
+                };
+                return PerformAction {
+                    clip_record: action,
+                    ..Default::default()
+                };
+            }
+            ClipRecordMsg::SetLength(value) if !record.is_active() => record.length = value,
+            ClipRecordMsg::SetMode(value) if !record.is_active() => record.notes.mode = value,
+            ClipRecordMsg::SetCountIn(value) if !record.is_active() => {
+                record.notes.count_in = value
+            }
+            ClipRecordMsg::SetQuantization(value) if !record.is_active() => {
+                record.notes.quantization = value
+            }
+            _ => {}
+        }
+        PerformAction::default()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ClipRecordState {
     pub length: RecordLength,
     pub notes: LoopRecordState<ClipId>,
     pub session: Option<ClipRecordSession>,
+    last_preview: Option<session::PreviewStamp>,
+    pub pending_audio_arm: Option<Box<vibez_engine::playback_source::PreparedClipPlayback>>,
 }
 #[derive(Debug)]
 pub struct ClipRecordSession {
@@ -70,6 +124,10 @@ impl ClipRecordState {
     pub fn is_active(&self) -> bool {
         self.session.is_some()
     }
+}
+
+pub fn default_clip_name(track_name: &str, row: u32) -> String {
+    format!("{} {}", track_name, row + 1)
 }
 
 pub fn empty_midi_clip(

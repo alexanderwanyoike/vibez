@@ -218,7 +218,7 @@ impl App {
         }
         let start = self.state.transport.position_samples;
         if !self.state.audio_recording.begin(start, source) {
-            self.discard_audio_recording_transaction();
+            self.discard_project_transaction();
             return Task::none();
         }
         // A take is allowed to extend Arrange beyond the last existing Clip.
@@ -348,7 +348,7 @@ impl App {
                     self.state.find_track(outcome.track_id).is_some(),
                 ) {
                     self.state.audio_recording.finish();
-                    self.discard_audio_recording_transaction();
+                    self.discard_project_transaction();
                     self.sync_audio_input_target();
                     self.state.status_text =
                         "Recorded take was discarded because its target Track no longer exists"
@@ -421,7 +421,7 @@ impl App {
                     self.cancel_clip_record();
                 }
                 self.state.audio_recording.finish();
-                self.discard_audio_recording_transaction();
+                self.discard_project_transaction();
                 self.sync_audio_input_target();
                 self.state.status_text =
                     format!("Audio recording failed — {error}. No Clip was created.");
@@ -685,19 +685,13 @@ impl App {
         self.input_bridge.end_recording();
         self.state.audio_recording.captured_frames.clear();
         self.state.audio_recording.finish();
-        self.discard_audio_recording_transaction();
+        self.discard_project_transaction();
         self.sync_audio_input_target();
         self.state.status_text = status.into();
         if self.state.transport.playing {
             self.update(Message::Transport(TransportMsg::Stop))
         } else {
             Task::none()
-        }
-    }
-
-    fn discard_audio_recording_transaction(&mut self) {
-        if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
-            self.state.project.dirty = dirty_before;
         }
     }
 }

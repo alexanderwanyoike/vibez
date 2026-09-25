@@ -500,6 +500,19 @@ pub struct PreparedClipPlayback {
     pub source: Box<PreparedPlaybackSource>,
 }
 
+impl PreparedClipPlayback {
+    pub fn stop(track_id: TrackId, request_id: u64) -> Box<Self> {
+        Box::new(Self {
+            track_id,
+            clip_id: None,
+            request_id,
+            length_samples: 1,
+            looping: false,
+            source: Box::default(),
+        })
+    }
+}
+
 impl std::fmt::Debug for PreparedClipPlayback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedClipPlayback")

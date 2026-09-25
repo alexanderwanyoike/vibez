@@ -148,16 +148,15 @@ impl EngineTrack {
         &self,
         target: vibez_core::automation::AutomationTarget,
         beat: f64,
-        section_active: bool,
-        clips_active: bool,
+        timeline: PlaybackTimeline,
     ) -> f32 {
-        let source = if clips_active {
+        let source = if timeline == PlaybackTimeline::Clips {
             if self.active_clip.is_some() {
                 self.launcher_source.as_ref()
             } else {
                 self.empty_launcher_source.as_ref()
             }
-        } else if section_active {
+        } else if timeline == PlaybackTimeline::Section {
             self.section_playback_source.as_ref()
         } else {
             self.playback_source.as_ref()

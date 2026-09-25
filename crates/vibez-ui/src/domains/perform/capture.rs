@@ -608,7 +608,7 @@ fn close_span(
 
 fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
     if bpm > 0.0 {
-        60.0 * sample_rate as f64 / bpm
+        vibez_core::time::TempoMap::new(bpm, sample_rate).samples_per_beat()
     } else {
         0.0
     }

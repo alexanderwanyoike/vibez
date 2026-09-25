@@ -3,15 +3,15 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, MidiNote};
-use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{
     GrooveGrid, NoteRepeatRate, SwingAmount, SwingOffset, TrackMuteQuantization,
 };
+use vibez_core::perform::{MusicalBoundary, SectionLaunchQuantization};
 use vibez_core::track::DrumPadState;
 use vibez_dsp::effect::AudioEffect;
 use vibez_instruments::Instrument;
 
-use crate::playback_source::PreparedSectionPlaybackSource;
+use crate::playback_source::{PreparedClipPlayback, PreparedSectionPlaybackSource};
 
 /// Automatic start policy selected by the Browser audition treatment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,23 +39,29 @@ pub enum EngineCommand {
     SetProjectSwing(SwingAmount),
     /// Immediately activate a complete resident Section playback source.
     LaunchSection(Box<PreparedSectionPlaybackSource>),
+    /// All tracks in a row share one engine-owned launch boundary.
     QueueClips {
-        clips: Vec<Box<crate::playback_source::PreparedClipPlayback>>,
-        quantization: vibez_core::perform::MusicalBoundary,
+        clips: Vec<Box<PreparedClipPlayback>>,
+        quantization: MusicalBoundary,
     },
+    /// Perform must silence Arrange even before the first Clip launch.
     BeginClipPerformance,
+    /// The prepared source must be resident before the recording boundary.
     ArmClipRecord {
         free_length: bool,
-        prepared: Box<crate::playback_source::PreparedClipPlayback>,
+        prepared: Box<PreparedClipPlayback>,
         count_in_bars: u8,
     },
+    /// Immediate cancellation also clears a take still waiting for its count-in.
     StopClipRecord {
         immediate: bool,
     },
-    RefreshClip(Box<crate::playback_source::PreparedClipPlayback>),
+    /// Recording previews preserve the resident Clip clock.
+    RefreshClip(Box<PreparedClipPlayback>),
+    /// Separate owners keep active and queued edits allocation-free in the callback.
     EditClip {
-        active: Box<crate::playback_source::PreparedClipPlayback>,
-        queued: Box<crate::playback_source::PreparedClipPlayback>,
+        active: Box<PreparedClipPlayback>,
+        queued: Box<PreparedClipPlayback>,
     },
     /// Queue a complete resident Section for an engine-owned musical boundary.
     QueueSection {

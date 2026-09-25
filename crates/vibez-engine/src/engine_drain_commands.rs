@@ -24,6 +24,10 @@ impl AudioEngine {
                 EngineCommand::Play => {
                     self.clear_clip_performance();
                     self.clock_domain = ClockDomain::Arrange;
+                    if !self.arrangement_recording {
+                        self.transport
+                            .set_audio_length(self.arrangement_audio_length);
+                    }
                     self.transport.play();
                     let audition_queued = self.audition.resync_on_transport_start(
                         self.transport.position(),

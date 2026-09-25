@@ -339,6 +339,7 @@ pub struct PerformAction {
     pub section_content_changed: Option<SectionId>,
     pub capture: Option<CaptureAction>,
     pub section_record: Option<SectionRecordAction>,
+    pub clip_record: Option<clip_record::ClipRecordAction>,
     pub section_record_status: Option<&'static str>,
 }
 
@@ -427,7 +428,7 @@ impl PerformState {
         self.sync_track_mute_slots(ctx.project_tracks);
         self.sync_instrument_target_from_selection(ctx.selected_project_track, ctx.project_tracks);
         match msg {
-            PerformMsg::ClipRecord(_) => return PerformAction::default(),
+            PerformMsg::ClipRecord(msg) => return self.update_clip_record(msg),
             PerformMsg::Clips(msg) => return self.update_clips(msg, ctx),
             PerformMsg::Capture(msg) => return self.capture.update(msg),
             PerformMsg::SectionRecord(msg) => {
@@ -897,6 +898,7 @@ impl PerformState {
                     section_content_changed: None,
                     capture: None,
                     section_record: None,
+                    clip_record: None,
                     section_record_status: None,
                 };
             }
@@ -1000,14 +1002,10 @@ impl PerformState {
             let Some(id) = self.clip_editor.selected else {
                 return;
             };
-            let has_content = |timeline: &crate::state::ArrangementTimeline| {
-                timeline
-                    .by_track
-                    .values()
-                    .any(|content| !content.clips.is_empty() || !content.note_clips.is_empty())
-            };
             let deleted = self.clips.by_id(id).is_some_and(|clip| {
-                has_content(&clip.timeline) && !has_content(&self.clip_editor.editor.timeline)
+                clip.part().is_some()
+                    && clip_launcher::SlotPart::at(&self.clip_editor.editor.timeline, clip.track_id)
+                        .is_none()
             });
             if deleted {
                 Arc::make_mut(&mut self.clips)

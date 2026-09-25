@@ -563,3 +563,46 @@ fn shortening_a_playing_one_shot_past_its_position_finishes_it() {
     assert_eq!(output, [0.0; 4]);
     assert!(engine.tracks[0].active_clip.is_none());
 }
+
+#[test]
+fn arrange_play_restores_end_of_content_after_clip_performance() {
+    let (mut engine, mut commands, _events, a, _) = setup();
+    engine.arrangement_audio_length = Some(8);
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1; 16], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 4], 1);
+    assert_eq!(engine.transport.audio_length(), None);
+    commands.push(EngineCommand::Play).unwrap();
+    engine.process(&mut [0.0; 10], 1);
+    assert_eq!(engine.transport.audio_length(), Some(8));
+    assert!(!engine.transport.is_playing());
+}
+
+#[test]
+fn finishing_a_free_take_does_not_resize_a_replacement_clip() {
+    let (mut engine, mut commands, _events, track, _) = setup();
+    commands
+        .push(EngineCommand::ArmClipRecord {
+            free_length: true,
+            prepared: clip(track, 1, &[0.1; 16], false),
+            count_in_bars: 0,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 4], 1);
+    let replacement = clip(track, 2, &[0.2; 32], false);
+    let id = replacement.clip_id.unwrap();
+    launch(&mut commands, vec![replacement], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 1], 1);
+    commands
+        .push(EngineCommand::StopClipRecord { immediate: true })
+        .unwrap();
+    engine.process(&mut [], 1);
+    let active = engine.tracks[0].active_clip.unwrap();
+    assert_eq!(active.clip_id, id);
+    assert_eq!(active.length, 32);
+    assert_eq!(active.position, 1);
+    assert!(!active.looping);
+}

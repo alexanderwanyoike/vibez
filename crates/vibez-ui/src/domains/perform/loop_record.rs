@@ -1,3 +1,5 @@
+//! Shared loop recording owns note timing, quantization and pass boundaries.
+
 use vibez_core::id::{ClipId, SectionId, TrackId};
 #[cfg(test)]
 use vibez_core::perform::SwingAmount;
@@ -186,7 +188,7 @@ pub struct CompletedLoopRecording<T = SectionId> {
     pub replace_ranges: Vec<(f64, f64)>,
 }
 
-/// Paint-only snapshot of an active take for the Section Construction lane.
+/// Paint-only snapshot of an active take for loop construction.
 /// It never enters project state or history; Stop remains the mutation boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoopRecordPreview<T = SectionId> {
@@ -538,11 +540,8 @@ impl<T: Copy + PartialEq> LoopRecordState<T> {
                 session.bpm,
                 session.sample_rate,
             );
-            let elapsed = effective_at_samples.saturating_sub(
-                session
-                    .started_at_samples
-                    .expect("started Section recording"),
-            );
+            let elapsed = effective_at_samples
+                .saturating_sub(session.started_at_samples.expect("started loop recording"));
             let crossed_wrap = session.replace_wrapped
                 || elapsed
                     >= session
@@ -561,6 +560,12 @@ impl<T: Copy + PartialEq> LoopRecordState<T> {
             track_id,
             notes: session.notes,
             replace_ranges,
+        })
+    }
+
+    pub fn note_counts(&self) -> (usize, usize) {
+        self.session.as_ref().map_or((0, 0), |session| {
+            (session.notes.len(), session.open_notes.len())
         })
     }
 

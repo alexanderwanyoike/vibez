@@ -198,26 +198,7 @@ impl App {
         }
         if self.state.view.workspace == Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
-            && matches!(
-                &msg,
-                ArrangementMsg::MoveClipToTrack { .. }
-                    | ArrangementMsg::CopySelectedClips
-                    | ArrangementMsg::CutSelectedClips
-                    | ArrangementMsg::PasteClips
-                    | ArrangementMsg::SplitAudioClip { .. }
-                    | ArrangementMsg::SliceAudioClipAtMarkers { .. }
-                    | ArrangementMsg::RequestSliceAudioClipToDrumRack { .. }
-                    | ArrangementMsg::SliceAudioClipToDrumRack { .. }
-                    | ArrangementMsg::SplitNoteClip { .. }
-                    | ArrangementMsg::SplitSelectedAtPlayhead
-                    | ArrangementMsg::JoinSelectedClips
-                    | ArrangementMsg::CrossfadeSelectedAudioClips
-                    | ArrangementMsg::TrimSelectedByTrackMutes
-                    | ArrangementMsg::DeleteClipsInRegion { .. }
-                    | ArrangementMsg::SplitClipsAtRegion { .. }
-                    | ArrangementMsg::CreateClipFromSelection
-                    | ArrangementMsg::CreateNoteClipFromSelection(_)
-            )
+            && msg.requires_multiple_slot_parts()
         {
             return ArrangementAction {
                 status: Some(
