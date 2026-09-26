@@ -500,7 +500,7 @@ impl App {
                 )
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
-                    preview.section_id == section_id && preview.track_id == track.id
+                    preview.target_id == section_id && preview.track_id == track.id
                 }) {
                     clip_canvas = clip_canvas.with_recording_preview(TimelineNoteClip {
                         clip_id: preview.clip_id,
@@ -619,7 +619,7 @@ impl App {
 
         mouse_area(construction)
             .on_press(Message::Perform(PerformMsg::FocusEditor(
-                PerformEditorFocus::SectionConstruction,
+                PerformEditorFocus::TimelineEditor,
             )))
             .into()
     }

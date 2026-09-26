@@ -148,7 +148,7 @@ impl App {
         .height(Length::Fill)
         .into();
 
-        container(
+        let panel = container(
             column![
                 container(column![title_row, search, search_context].spacing(6))
                     .padding([8, 10])
@@ -168,7 +168,13 @@ impl App {
                 radius: 0.0.into(),
             },
             ..Default::default()
-        })
+        });
+        crate::widgets::on_blur::on_blur(
+            panel,
+            self.state.browser.keyboard_focus,
+            Message::Browser(BrowserMsg::SetKeyboardFocus(false)),
+        )
+        .on_focus(Message::Browser(BrowserMsg::SetKeyboardFocus(true)))
         .into()
     }
 

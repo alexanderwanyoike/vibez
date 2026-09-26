@@ -75,6 +75,7 @@ pub struct AudioEngine {
     /// for that block (segment-2 notes are legitimately sounding).
     split_wrap_handled: bool,
     active_section: Option<ActiveSectionPlayback>,
+    clip_performance: bool,
     queued_section: Option<QueuedSectionPlayback>,
     pending_section_record: Option<section_record::PendingSectionRecord>,
     active_section_record: Option<section_record::ActiveSectionRecord>,
@@ -90,6 +91,8 @@ pub struct AudioEngine {
     /// Continues Note Repeat timing while transport is stopped. While playing,
     /// this follows the active clock domain.
     performance_position: u64,
+    output_position: u64,
+    clip_record: Option<clip_record::ClipRecordRuntime>,
     /// The clock currently authorised to advance. Perform owns an independent
     /// zero-based engine timeline; its playback must never mutate the
     /// canonical Arrange cursor held by `transport.position()`.
@@ -211,6 +214,7 @@ impl AudioEngine {
             event_tx,
             split_wrap_handled: false,
             active_section: None,
+            clip_performance: false,
             queued_section: None,
             pending_section_record: None,
             active_section_record: None,
@@ -219,6 +223,8 @@ impl AudioEngine {
             arrangement_recording: false,
             project_swing: SwingAmount::default(),
             performance_position: 0,
+            output_position: 0,
+            clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
         };
@@ -250,6 +256,11 @@ impl AudioEngine {
         self.process_block(AudioProcessBlock::new(output, channels));
     }
 
+    /// Output frames advance even while stopped, so count-in audio can be trimmed exactly.
+    pub fn output_position_samples(&self) -> u64 {
+        self.output_position
+    }
+
     /// Exact Arrange cursor at the next output-clock block boundary.
     pub fn arrangement_position_samples(&self) -> u64 {
         self.transport.position()
@@ -266,6 +277,7 @@ impl AudioEngine {
         // as commands drained below. Publish the recording start first so a
         // first pad strike at the boundary cannot reach consumers while the
         // take still appears armed.
+        self.apply_clip_record_boundary(self.performance_position);
         self.start_section_record_if_due(self.performance_position);
 
         // ---- 1. Drain commands ------------------------------------------
@@ -484,6 +496,8 @@ impl AudioEngine {
                 .push(EngineEvent::PerformancePosition(self.performance_position));
         }
 
+        self.output_position = self.output_position.saturating_add(frames as u64);
+
         // Master metering event.
         let meters = metering::calculate_meters(output, channels);
         let _ = self.event_tx.push(EngineEvent::Metering {
@@ -631,6 +645,9 @@ mod section_queue;
 #[path = "engine_section_record.rs"]
 mod section_record;
 
+#[path = "engine_clip_record.rs"]
+mod clip_record;
+
 #[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
@@ -669,3 +686,10 @@ mod section_record_tests;
 #[cfg(test)]
 #[path = "engine_capture_tests.rs"]
 mod capture_tests;
+
+#[path = "engine_clip_launcher.rs"]
+mod clip_launcher;
+
+#[cfg(test)]
+#[path = "engine_clip_launcher_tests.rs"]
+mod clip_launcher_tests;

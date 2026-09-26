@@ -1,3 +1,5 @@
+//! Piano-roll drawing and pointer editing with optional shared keyboard navigation.
+
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -48,6 +50,7 @@ pub struct PianoRollWidget {
     pub grid: GridConfig,
     pub scroll_y: f32,
     pub edit_mode: PianoRollEditMode,
+    pub reserve_arrow_keys: bool,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -91,6 +94,7 @@ impl PianoRollWidget {
             grid,
             scroll_y,
             edit_mode,
+            reserve_arrow_keys: false,
         }
     }
 
@@ -104,6 +108,7 @@ impl PianoRollWidget {
             grid: GridConfig::new(SnapGrid::EIGHTH, true, false, 0),
             scroll_y: default_scroll_y(200.0),
             edit_mode: PianoRollEditMode::default(),
+            reserve_arrow_keys: false,
         }
     }
 
@@ -893,7 +898,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
                 ..
-            }) => {
+            }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
                     if !clip_data.selected_notes.is_empty() {
                         return (
@@ -911,7 +916,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
                 ..
-            }) => {
+            }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
                     if !clip_data.selected_notes.is_empty() {
                         return (
@@ -929,7 +934,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
                 ..
-            }) => {
+            }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
                     if !clip_data.selected_notes.is_empty() {
                         return (
@@ -947,7 +952,7 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
                 ..
-            }) => {
+            }) if !self.reserve_arrow_keys => {
                 if let Some(ref clip_data) = self.clip {
                     if !clip_data.selected_notes.is_empty() {
                         return (

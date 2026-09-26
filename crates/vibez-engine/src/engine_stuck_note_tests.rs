@@ -469,3 +469,101 @@ fn seek_kills_sounding_notes() {
         "seek must send a note-off for the sounding note"
     );
 }
+
+#[test]
+fn editing_a_launcher_pattern_releases_removed_notes_and_preserves_other_voices() {
+    use crate::playback_source::{EngineNoteClip, PreparedClipPlayback, PreparedPlaybackSource};
+    use vibez_core::perform::MusicalBoundary;
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let track = TrackId::new();
+    let id = ClipId::new();
+    for command in [
+        EngineCommand::SetSampleRate(8),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::AddMidiTrack(track, "Test".into()),
+        EngineCommand::SetPluginInstrument {
+            track_id: track,
+            instrument: Box::new(SpyInstrument {
+                events: log.clone(),
+                batch_render: false,
+            }),
+        },
+    ] {
+        commands.push(command).unwrap();
+    }
+    let source = |request_id, edited| {
+        Box::new(PreparedClipPlayback {
+            track_id: track,
+            clip_id: Some(id),
+            request_id,
+            length_samples: 32,
+            looping: true,
+            source: Box::new(PreparedPlaybackSource::new(
+                vec![],
+                vec![EngineNoteClip::new(
+                    id,
+                    0.0,
+                    8.0,
+                    if edited {
+                        vec![
+                            MidiNote {
+                                pitch: 64,
+                                velocity: 100,
+                                start_beat: 0.0,
+                                duration_beats: 4.0,
+                            },
+                            MidiNote {
+                                pitch: 67,
+                                velocity: 100,
+                                start_beat: 1.0,
+                                duration_beats: 1.0,
+                            },
+                        ]
+                    } else {
+                        vec![
+                            MidiNote {
+                                pitch: 60,
+                                velocity: 100,
+                                start_beat: 0.0,
+                                duration_beats: 4.0,
+                            },
+                            MidiNote {
+                                pitch: 64,
+                                velocity: 100,
+                                start_beat: 0.0,
+                                duration_beats: 4.0,
+                            },
+                        ]
+                    },
+                    0.0,
+                    true,
+                    0.0,
+                    8.0,
+                    Default::default(),
+                )],
+                vec![],
+            )),
+        })
+    };
+    commands
+        .push(EngineCommand::QueueClips {
+            clips: vec![source(1, false)],
+            quantization: MusicalBoundary::Immediate,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 3], 1);
+    assert_eq!(*log.lock().unwrap(), vec![(true, 60), (true, 64)]);
+    log.lock().unwrap().clear();
+    commands
+        .push(EngineCommand::EditClip {
+            active: source(2, true),
+            queued: source(3, true),
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 2], 1);
+    assert_eq!(*log.lock().unwrap(), vec![(false, 60), (true, 67)]);
+    log.lock().unwrap().clear();
+    engine.process(&mut [0.0; 12], 1);
+    assert_eq!(*log.lock().unwrap(), vec![(false, 67), (false, 64)]);
+}

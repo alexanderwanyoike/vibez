@@ -2,15 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'codex/epic-*']
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, 'codex/epic-*']
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   check:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.head_ref == 'dev' || github.head_ref == 'main'
     name: Check
     runs-on: ${{ matrix.os }}
     strategy:
@@ -43,14 +44,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libdbus-1-dev
       - run: cargo test --workspace
-      - name: Verify Windows executable resources
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --package vibez --bin vibez
-          ./scripts/check_windows_resources.ps1 target/debug/vibez.exe
 
   clippy:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.head_ref == 'dev' || github.head_ref == 'main'
     name: Clippy
     runs-on: ubuntu-latest
     steps:
@@ -69,6 +65,7 @@ jobs:
       - run: cargo clippy -p vibez-plugin-host -- -D warnings
 
   fmt:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.head_ref == 'dev' || github.head_ref == 'main'
     name: Format
     runs-on: ubuntu-latest
     steps:

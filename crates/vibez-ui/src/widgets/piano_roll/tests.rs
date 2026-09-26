@@ -302,3 +302,57 @@ fn loop_handle_keeps_its_resize_cursor_in_draw_mode() {
         mouse::Interaction::ResizingHorizontally
     );
 }
+
+#[test]
+fn controller_navigation_never_nudges_selected_notes() {
+    use iced::keyboard::{
+        key::{Code, Named, Physical},
+        Event, Key, Location, Modifiers,
+    };
+    let mut widget = PianoRollWidget::empty(TrackId::new(), 0.0, Color::WHITE);
+    widget.clip = Some(PianoRollClipData {
+        clip_id: ClipId::new(),
+        notes: Vec::new(),
+        selected_notes: [0].into(),
+        start_marker_beats: 0.0,
+        loop_enabled: true,
+        loop_start_beats: 0.0,
+        loop_end_beats: 16.0,
+    });
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 300.0));
+    for (named, code) in [
+        (Named::ArrowLeft, Code::ArrowLeft),
+        (Named::ArrowRight, Code::ArrowRight),
+        (Named::ArrowUp, Code::ArrowUp),
+        (Named::ArrowDown, Code::ArrowDown),
+    ] {
+        for modifiers in [Modifiers::empty(), Modifiers::SHIFT] {
+            let event = canvas::Event::Keyboard(Event::KeyPressed {
+                key: Key::Named(named),
+                modified_key: Key::Named(named),
+                physical_key: Physical::Code(code),
+                location: Location::Standard,
+                modifiers,
+                text: None,
+            });
+            widget.reserve_arrow_keys = true;
+            let (status, message) = widget.update(
+                &mut PianoRollState::default(),
+                event.clone(),
+                bounds,
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(status, canvas::event::Status::Ignored);
+            assert!(message.is_none());
+            widget.reserve_arrow_keys = false;
+            let (status, message) = widget.update(
+                &mut PianoRollState::default(),
+                event,
+                bounds,
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(status, canvas::event::Status::Captured);
+            assert!(message.is_some());
+        }
+    }
+}

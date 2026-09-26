@@ -60,8 +60,12 @@ impl App {
     }
 
     pub(super) fn route_new_project(&mut self) -> Task<Message> {
-        self.reset_to_new_project();
-        Task::none()
+        let release = self.update(Message::Perform(
+            crate::domains::perform::PerformMsg::WindowUnfocused,
+        ));
+        self.state.project.file_menu_open = false;
+        self.state.project.new_project_layout = Some(vibez_project::PerformLayout::Sections);
+        release
     }
 
     pub(super) fn route_open_project(&mut self) -> Task<Message> {
@@ -87,6 +91,9 @@ impl App {
     }
 
     pub(super) fn route_auto_save_project(&mut self) -> Task<Message> {
+        if self.state.perform.clip_record.is_active() {
+            return Task::none();
+        }
         if !self.state.auto_save_enabled || !self.state.project.dirty {
             self.save_runtime.cancel_pending_auto_save();
             return Task::none();

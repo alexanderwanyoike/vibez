@@ -6,7 +6,7 @@ use vibez_core::perform::SwingOffset;
 use vibez_core::perform::TrackMuteQuantization;
 
 use crate::events::{AutomationGesturePhase, EngineEvent};
-use crate::mixer::QueuedTrackMute;
+use crate::mixer::{PlaybackTimeline, QueuedTrackMute};
 
 use super::AudioEngine;
 
@@ -245,15 +245,39 @@ impl AudioEngine {
             .tracks
             .iter()
             .find(|track| track.id == track_id)
-            .map(|track| track.normalized_target_value(target, beat, section_active))
+            .map(|track| {
+                track.normalized_target_value(
+                    target,
+                    if self.clip_performance {
+                        self.samples_to_automation_beat(
+                            track.active_clip.map_or(0, |clip| clip.position),
+                        )
+                    } else {
+                        beat
+                    },
+                    if self.clip_performance {
+                        PlaybackTimeline::Clips
+                    } else if section_active {
+                        PlaybackTimeline::Section
+                    } else {
+                        PlaybackTimeline::Arrange
+                    },
+                )
+            })
             .or_else(|| {
                 if self.master.id == track_id {
-                    Some(self.master.normalized_target_value(target, beat, false))
+                    Some(self.master.normalized_target_value(
+                        target,
+                        beat,
+                        PlaybackTimeline::Arrange,
+                    ))
                 } else {
                     self.buses
                         .iter()
                         .find(|track| track.id == track_id)
-                        .map(|track| track.normalized_target_value(target, beat, false))
+                        .map(|track| {
+                            track.normalized_target_value(target, beat, PlaybackTimeline::Arrange)
+                        })
                 }
             });
         self.set_automation_override(track_id, target, false);

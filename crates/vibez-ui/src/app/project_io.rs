@@ -98,6 +98,11 @@ impl App {
             .editor
             .discard_audio_clip_inspector_edits();
         self.state.perform.sections = Arc::new(crate::domains::perform::SectionStore::default());
+        self.state.project.new_project_layout = None;
+        self.state.perform.layout = Default::default();
+        self.state.perform.clips = Default::default();
+        self.state.perform.clip_editor = Default::default();
+        self.state.perform.clip_record = Default::default();
         self.state.perform.selected_section = None;
         self.state.perform.section_editor.clear();
         self.state.perform.editing_section_name = None;
@@ -420,6 +425,20 @@ impl App {
             swing: self.state.perform.project_swing(),
             sample_rate: self.state.transport.sample_rate,
             tracks,
+            perform_layout: self.state.perform.layout,
+            launcher_clips: self
+                .state
+                .perform
+                .clips
+                .clips
+                .iter()
+                .map(|clip| vibez_project::LauncherClipInfo {
+                    id: clip.id,
+                    track_id: clip.track_id,
+                    row: clip.row,
+                    timeline: super::project_sections::timeline_info_from_ui(&clip.timeline),
+                })
+                .collect(),
             arrange: super::project_sections::timeline_info_from_ui(
                 &self.state.arrangement.timeline,
             ),
@@ -487,6 +506,22 @@ impl App {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
+        self.state.perform.layout = loaded.project.perform_layout;
+        self.state.perform.clips = Arc::new(crate::domains::perform::ClipStore {
+            clips: loaded
+                .project
+                .launcher_clips
+                .iter()
+                .map(|clip| crate::domains::perform::LauncherClip {
+                    id: clip.id,
+                    track_id: clip.track_id,
+                    row: clip.row,
+                    timeline: Arc::new(super::project_sections::timeline_without_audio(
+                        &clip.timeline,
+                    )),
+                })
+                .collect(),
+        });
         self.state.perform.sections = Arc::new(
             super::project_sections::section_store_from_project(&loaded.project.sections),
         );
@@ -890,9 +925,21 @@ impl App {
             .sections
             .first()
             .map(|section| section.id);
+        self.state.perform.clip_editor.selected =
+            self.state.perform.clips.clips.first().map(|clip| clip.id);
+        if self.state.perform.layout == vibez_project::PerformLayout::Clips {
+            self.state.arrangement.selected_track = self
+                .state
+                .perform
+                .clips
+                .clips
+                .first()
+                .map(|clip| clip.track_id)
+                .or(self.state.arrangement.selected_track);
+        }
         self.state
             .perform
-            .sync_selected_section_editor(self.state.arrangement.selected_track);
+            .sync_selected_timeline_editor(self.state.arrangement.selected_track);
         self.state.perform.section_name_edit = self
             .state
             .perform

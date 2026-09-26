@@ -91,7 +91,7 @@ selected one.
 ## Status
 
 v0.3.2, and still early. Linux is the primary development platform; macOS and
-Windows build and pass CI on every change but get less hands-on testing.
+Windows run CI tests on every change but get less hands-on testing.
 Projects save to a self-contained versioned `.vzp` container, but breaking
 format changes are still possible: treat this as a working alpha rather than a
 stability promise.
@@ -149,11 +149,10 @@ projects, and warping work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. CI must stay green on Linux, macOS, and
-Windows: `cargo test --workspace`, and Clippy with `-D warnings` over
-`--all-targets`, so lints apply to test code too. `vibez-plugin-host` is
-deliberately excluded from `--all-targets`; its tests drive the VST3 vtable ABI
-where a redundant-looking cast can be load-bearing on another target.
+Issues and pull requests are welcome. Feature and epic CI runs only
+`cargo test --workspace` on Linux, macOS and Windows. Application builds,
+Windows executable-resource checks and distributable packaging run only for
+version-tag releases (`v*`).
 
 ## License
 

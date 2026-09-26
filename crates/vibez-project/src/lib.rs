@@ -1,20 +1,25 @@
+//! Project documents traverse every independent musical-content store.
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use vibez_core::automation::AutomationLane;
-use vibez_core::id::{SectionId, TrackId};
+use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::NoteClipInfo;
 use vibez_core::track::{ClipInfo, TrackInfo};
 
 pub use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{GrooveProfile, SwingAmount};
 
+mod clip_launcher;
 pub mod project_format_v1;
+pub use clip_launcher::{LauncherClipInfo, PerformLayout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimelineLocation {
     Arrange,
     Section(SectionId),
+    LauncherClip(ClipId),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +78,10 @@ pub struct Project {
     pub buses: Vec<TrackInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sections: Vec<SectionInfo>,
+    #[serde(default)]
+    pub perform_layout: PerformLayout,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launcher_clips: Vec<LauncherClipInfo>,
 }
 
 impl Default for Project {
@@ -88,6 +97,8 @@ impl Default for Project {
             master: None,
             buses: Vec::new(),
             sections: Vec::new(),
+            perform_layout: PerformLayout::default(),
+            launcher_clips: Vec::new(),
         }
     }
 }
@@ -97,6 +108,7 @@ impl Default for Project {
 pub enum ProjectError {
     Io(std::io::Error),
     Json(serde_json::Error),
+    ClipProjectRequiresContainer,
 }
 
 impl std::fmt::Display for ProjectError {
@@ -104,6 +116,10 @@ impl std::fmt::Display for ProjectError {
         match self {
             ProjectError::Io(e) => write!(f, "I/O error: {e}"),
             ProjectError::Json(e) => write!(f, "JSON error: {e}"),
+            ProjectError::ClipProjectRequiresContainer => write!(
+                f,
+                "Clip projects must be saved as .vzp. Use Save As to choose a .vzp file."
+            ),
         }
     }
 }
@@ -113,6 +129,7 @@ impl std::error::Error for ProjectError {
         match self {
             ProjectError::Io(e) => Some(e),
             ProjectError::Json(e) => Some(e),
+            ProjectError::ClipProjectRequiresContainer => None,
         }
     }
 }
@@ -131,26 +148,43 @@ impl From<serde_json::Error> for ProjectError {
 
 impl Project {
     pub fn timelines(&self) -> impl Iterator<Item = (TimelineLocation, &TimelineInfo)> + '_ {
-        std::iter::once((TimelineLocation::Arrange, &self.arrange)).chain(
-            self.sections
-                .iter()
-                .map(|section| (TimelineLocation::Section(section.id), &section.timeline)),
-        )
+        std::iter::once((TimelineLocation::Arrange, &self.arrange))
+            .chain(
+                self.sections
+                    .iter()
+                    .map(|section| (TimelineLocation::Section(section.id), &section.timeline)),
+            )
+            .chain(
+                self.launcher_clips
+                    .iter()
+                    .map(|clip| (TimelineLocation::LauncherClip(clip.id), &clip.timeline)),
+            )
     }
 
     pub fn timelines_mut(
         &mut self,
     ) -> impl Iterator<Item = (TimelineLocation, &mut TimelineInfo)> + '_ {
-        std::iter::once((TimelineLocation::Arrange, &mut self.arrange)).chain(
-            self.sections
-                .iter_mut()
-                .map(|section| (TimelineLocation::Section(section.id), &mut section.timeline)),
-        )
+        std::iter::once((TimelineLocation::Arrange, &mut self.arrange))
+            .chain(
+                self.sections
+                    .iter_mut()
+                    .map(|section| (TimelineLocation::Section(section.id), &mut section.timeline)),
+            )
+            .chain(
+                self.launcher_clips
+                    .iter_mut()
+                    .map(|clip| (TimelineLocation::LauncherClip(clip.id), &mut clip.timeline)),
+            )
     }
 
     pub fn timeline(&self, location: TimelineLocation) -> Option<&TimelineInfo> {
         match location {
             TimelineLocation::Arrange => Some(&self.arrange),
+            TimelineLocation::LauncherClip(id) => self
+                .launcher_clips
+                .iter()
+                .find(|clip| clip.id == id)
+                .map(|clip| &clip.timeline),
             TimelineLocation::Section(id) => self
                 .sections
                 .iter()
@@ -162,6 +196,11 @@ impl Project {
     pub fn timeline_mut(&mut self, location: TimelineLocation) -> Option<&mut TimelineInfo> {
         match location {
             TimelineLocation::Arrange => Some(&mut self.arrange),
+            TimelineLocation::LauncherClip(id) => self
+                .launcher_clips
+                .iter_mut()
+                .find(|clip| clip.id == id)
+                .map(|clip| &mut clip.timeline),
             TimelineLocation::Section(id) => self
                 .sections
                 .iter_mut()
@@ -186,6 +225,9 @@ impl Project {
                 maximum = maximum.max(lane.id.raw());
             }
         }
+        for clip in &self.launcher_clips {
+            maximum = maximum.max(clip.id.raw()).max(clip.track_id.raw());
+        }
         for section in &self.sections {
             maximum = maximum.max(section.id.raw());
         }
@@ -205,8 +247,16 @@ impl Project {
         maximum
     }
 
+    pub fn validate_legacy_save(&self) -> Result<(), ProjectError> {
+        if self.perform_layout == PerformLayout::Clips || !self.launcher_clips.is_empty() {
+            return Err(ProjectError::ClipProjectRequiresContainer);
+        }
+        Ok(())
+    }
+
     /// Save the project to a JSON file.
     pub fn save_to_file(&self, path: &Path) -> Result<(), ProjectError> {
+        self.validate_legacy_save()?;
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
@@ -228,6 +278,21 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+
+    #[test]
+    fn legacy_clip_save_is_rejected_without_overwriting_the_file() {
+        let path =
+            std::env::temp_dir().join(format!("vibez-clip-legacy-{}.json", ClipId::new().raw()));
+        std::fs::write(&path, "existing project").unwrap();
+        let project = Project {
+            perform_layout: PerformLayout::Clips,
+            ..Default::default()
+        };
+        let result = project.save_to_file(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing project");
+        std::fs::remove_file(path).unwrap();
+        assert!(result.is_err());
+    }
 
     #[test]
     fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {
@@ -408,6 +473,8 @@ mod tests {
                 ..TimelineInfo::default()
             },
             sections: Vec::new(),
+            perform_layout: Default::default(),
+            launcher_clips: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -481,6 +548,8 @@ mod tests {
             master: None,
             buses: Vec::new(),
             sections: Vec::new(),
+            perform_layout: Default::default(),
+            launcher_clips: Vec::new(),
         };
         let legacy_bytes = serde_json::to_vec_pretty(&project).unwrap();
 
@@ -585,6 +654,8 @@ mod tests {
                 ..TimelineInfo::default()
             },
             sections: Vec::new(),
+            perform_layout: Default::default(),
+            launcher_clips: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -632,6 +703,8 @@ mod tests {
             tracks: vec![track],
             arrange: TimelineInfo::default(),
             sections: Vec::new(),
+            perform_layout: Default::default(),
+            launcher_clips: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
