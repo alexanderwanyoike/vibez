@@ -300,14 +300,10 @@ impl App {
             if let Some(ref mut mgr) = self.plugin_window_manager {
                 mgr.close_track_effects(track_id);
             }
-            self.plugin_gui_raw_ptrs.retain(|k, _| match k {
-                PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
-                PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
-            });
-            self.plugin_state_ptrs.retain(|k, _| match k {
-                PluginGuiKey::Effect { track_id: tid, .. } => *tid != track_id,
-                PluginGuiKey::Instrument { track_id: tid } => *tid != track_id,
-            });
+            self.plugin_gui_raw_ptrs
+                .retain(|key, _| key.track_id() != track_id);
+            self.plugin_state_ptrs
+                .retain(|key, _| key.track_id() != track_id);
         }
         let track_removed = action.remove_track_from_sections.is_some();
         if let Some(track_id) = action.remove_track_from_sections {

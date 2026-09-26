@@ -21,7 +21,8 @@ pub fn scan_clap(path: &Path) -> Result<Vec<PluginInfo>, String> {
 fn scan_clap_inner(path: &Path) -> Result<Vec<PluginInfo>, String> {
     // Load the shared library
     let lib = unsafe {
-        libloading::Library::new(path).map_err(|e| format!("Failed to load library: {e}"))?
+        libloading::Library::new(super::module_path(path)?)
+            .map_err(|e| format!("Failed to load library: {e}"))?
     };
 
     // Look up the clap_entry symbol

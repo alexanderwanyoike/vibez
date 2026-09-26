@@ -221,6 +221,16 @@ mod window_policy;
 #[cfg(test)]
 mod project_format_v1_tests;
 
+impl Drop for App {
+    fn drop(&mut self) {
+        // Editor callbacks must finish before the stream, engine event queues,
+        // or other fields can drop plugin instances and unload their libraries.
+        if let Some(manager) = self.plugin_window_manager.as_mut() {
+            manager.close_all();
+        }
+    }
+}
+
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
