@@ -92,14 +92,14 @@ fn bank_selection_and_focus_default_to_ui_owned_shell_state() {
     assert_eq!(state.editor_focus, PerformEditorFocus::PadSurface);
 
     state.update(
-        PerformMsg::FocusEditor(PerformEditorFocus::SectionConstruction),
+        PerformMsg::FocusEditor(PerformEditorFocus::TimelineEditor),
         &mut engine,
         PerformCtx {
             workspace_visible: true,
             ..PerformCtx::default()
         },
     );
-    assert_eq!(state.editor_focus, PerformEditorFocus::SectionConstruction);
+    assert_eq!(state.editor_focus, PerformEditorFocus::TimelineEditor);
     assert!(engine.0.is_empty());
 }
 

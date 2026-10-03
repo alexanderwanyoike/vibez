@@ -314,6 +314,29 @@ pub enum ArrangementMsg {
 }
 
 impl ArrangementMsg {
+    pub(crate) const fn requires_multiple_slot_parts(&self) -> bool {
+        matches!(
+            self,
+            Self::MoveClipToTrack { .. }
+                | Self::CopySelectedClips
+                | Self::CutSelectedClips
+                | Self::PasteClips
+                | Self::SplitAudioClip { .. }
+                | Self::SliceAudioClipAtMarkers { .. }
+                | Self::RequestSliceAudioClipToDrumRack { .. }
+                | Self::SliceAudioClipToDrumRack { .. }
+                | Self::SplitNoteClip { .. }
+                | Self::SplitSelectedAtPlayhead
+                | Self::JoinSelectedClips
+                | Self::CrossfadeSelectedAudioClips
+                | Self::TrimSelectedByTrackMutes
+                | Self::DeleteClipsInRegion { .. }
+                | Self::SplitClipsAtRegion { .. }
+                | Self::CreateClipFromSelection
+                | Self::CreateNoteClipFromSelection(_)
+        )
+    }
+
     pub(crate) fn is_timeline_editor_message(&self) -> bool {
         matches!(
             self,

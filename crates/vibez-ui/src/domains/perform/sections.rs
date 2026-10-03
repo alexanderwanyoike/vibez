@@ -190,49 +190,9 @@ impl Section {
         let tracks = project_track_ids
             .iter()
             .map(|track_id| {
-                let content = self.timeline.get(*track_id);
-                let clips = content
-                    .into_iter()
-                    .flat_map(|content| content.clips.iter())
-                    .map(|clip| EngineClip {
-                        id: clip.id,
-                        audio: Arc::clone(&clip.audio),
-                        position: clip.position,
-                        source_offset: clip.source_offset,
-                        start_marker: clip.start_marker,
-                        duration: clip.duration,
-                        loop_enabled: clip.loop_enabled,
-                        loop_start: clip.loop_start,
-                        loop_end: clip.loop_end,
-                        linear_gain: clip.gain_db.linear(),
-                        fades: clip.fades.clamped_to(clip.duration),
-                        playback_direction: clip.playback_direction,
-                        warp_markers: clip.warp_markers.clone(),
-                    })
-                    .collect();
-                let note_clips = content
-                    .into_iter()
-                    .flat_map(|content| content.note_clips.iter())
-                    .map(|clip| {
-                        EngineNoteClip::new(
-                            clip.id,
-                            clip.position_beats,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        )
-                    })
-                    .collect();
-                let automation = content
-                    .map(|content| content.automation.clone())
-                    .unwrap_or_default();
                 (
                     *track_id,
-                    PreparedPlaybackSource::new(clips, note_clips, automation),
+                    prepare_track_source(self.timeline.get(*track_id)),
                 )
             })
             .collect();
@@ -308,6 +268,52 @@ impl SectionStore {
         );
         locations
     }
+}
+
+pub(super) fn prepare_track_source(
+    content: Option<&crate::state::TrackTimelineContent>,
+) -> PreparedPlaybackSource {
+    let clips = content
+        .into_iter()
+        .flat_map(|content| content.clips.iter())
+        .map(|clip| EngineClip {
+            id: clip.id,
+            audio: Arc::clone(&clip.audio),
+            position: clip.position,
+            source_offset: clip.source_offset,
+            start_marker: clip.start_marker,
+            duration: clip.duration,
+            loop_enabled: clip.loop_enabled,
+            loop_start: clip.loop_start,
+            loop_end: clip.loop_end,
+            linear_gain: clip.gain_db.linear(),
+            fades: clip.fades.clamped_to(clip.duration),
+            playback_direction: clip.playback_direction,
+            warp_markers: clip.warp_markers.clone(),
+        })
+        .collect();
+    let note_clips = content
+        .into_iter()
+        .flat_map(|content| content.note_clips.iter())
+        .map(|clip| {
+            EngineNoteClip::new(
+                clip.id,
+                clip.position_beats,
+                clip.duration_beats,
+                clip.notes.clone(),
+                clip.start_marker_beats,
+                clip.loop_enabled,
+                clip.loop_start_beats,
+                clip.loop_end_beats,
+                clip.groove_grid,
+            )
+        })
+        .collect();
+    let automation = content
+        .map(|content| content.automation.clone())
+        .unwrap_or_default();
+
+    PreparedPlaybackSource::new(clips, note_clips, automation)
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ use vibez_core::track::MediaSourceRef;
 #[derive(Debug, Clone)]
 pub enum BrowserMsg {
     ToggleSampleBrowser,
+    SetKeyboardFocus(bool),
     BeginDockResize,
     ResizeDock(f32),
     EndDockResize,
@@ -95,8 +96,10 @@ impl BrowserState {
     pub fn update(&mut self, msg: BrowserMsg) -> BrowserAction {
         let mut action = BrowserAction::default();
         match msg {
+            BrowserMsg::SetKeyboardFocus(focused) => self.keyboard_focus = focused && self.open,
             BrowserMsg::ToggleSampleBrowser => {
                 self.open = !self.open;
+                self.keyboard_focus &= self.open;
                 action.persist_settings = true;
             }
             BrowserMsg::BeginDockResize => {

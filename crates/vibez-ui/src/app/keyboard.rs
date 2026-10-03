@@ -28,6 +28,11 @@ impl EdgeShortcutState {
         let edge_triggered = matches!(
             message,
             Message::Arrangement(ArrangementMsg::AddTrack | ArrangementMsg::AddInstrumentTrack)
+                | Message::Perform(PerformMsg::Clips(
+                    crate::domains::perform::ClipMsg::LaunchRow(_)
+                        | crate::domains::perform::ClipMsg::StopTrack(_)
+                ))
+                | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
         );
         if !edge_triggered {
             return true;
@@ -146,6 +151,67 @@ impl super::App {
     ) -> iced::Task<Message> {
         use iced::keyboard::key::Named;
 
+        if self.state.project.new_project_layout.is_some() {
+            if let iced::keyboard::Event::KeyPressed { key, .. } = event {
+                return match key {
+                    iced::keyboard::Key::Named(Named::Escape) => {
+                        self.update(Message::CancelNewProject)
+                    }
+                    iced::keyboard::Key::Named(Named::Enter) => {
+                        self.update(Message::ConfirmNewProject)
+                    }
+                    _ => iced::Task::none(),
+                };
+            }
+            return iced::Task::none();
+        }
+        if self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips
+            && self.state.perform.mode == PerformMode::Sections
+        {
+            if let iced::keyboard::Event::KeyPressed {
+                ref key,
+                physical_key,
+                modifiers,
+                ..
+            } = event
+            {
+                let clip_action = if modifiers == iced::keyboard::Modifiers::ALT {
+                    computer_key_from_physical(physical_key)
+                        .and_then(|key| self.state.perform.input_mapping.position_for(key))
+                        .map(|position| {
+                            crate::domains::perform::ClipMsg::LaunchRow(
+                                self.state.perform.clip_editor.first_row + u32::from(position.row),
+                            )
+                        })
+                } else {
+                    None
+                };
+                if let Some(action) = clip_action {
+                    let message = Message::Perform(PerformMsg::Clips(action));
+                    if self.edge_shortcuts.should_dispatch(
+                        &format!("ClipKey:{}", runtime_key_id(key).to_ascii_lowercase()),
+                        &message,
+                        occurred_at,
+                    ) {
+                        return self.update(message);
+                    }
+                    return iced::Task::none();
+                }
+                if modifiers.is_empty() || modifiers == iced::keyboard::Modifiers::SHIFT {
+                    let movement = clip_window_movement(
+                        key,
+                        modifiers,
+                        self.state.browser.open && self.state.browser.keyboard_focus,
+                    );
+                    if let Some((tracks, rows)) = movement {
+                        return self.update(Message::Perform(PerformMsg::Clips(
+                            crate::domains::perform::ClipMsg::MoveWindow { tracks, rows },
+                        )));
+                    }
+                }
+            }
+        }
         let (perform_msg, fallback) = match event {
             iced::keyboard::Event::KeyPressed {
                 key,
@@ -201,6 +267,10 @@ impl super::App {
                 }
             }
             iced::keyboard::Event::KeyReleased { key, .. } => {
+                self.edge_shortcuts.release(
+                    &format!("ClipKey:{}", runtime_key_id(&key).to_ascii_lowercase()),
+                    occurred_at,
+                );
                 let key_id = runtime_key_id(&key);
                 self.edge_shortcuts.release(&key_id, occurred_at);
                 if is_note_repeat_release(
@@ -261,6 +331,25 @@ impl super::App {
                     .then_some(message)
             })
             .map_or_else(iced::Task::none, iced::Task::done)
+    }
+}
+
+fn clip_window_movement(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+    browser_focused: bool,
+) -> Option<(i32, i32)> {
+    use iced::keyboard::{key::Named, Key, Modifiers};
+    if browser_focused || !(modifiers.is_empty() || modifiers == Modifiers::SHIFT) {
+        return None;
+    }
+    let amount = if modifiers.shift() { 4 } else { 1 };
+    match key {
+        Key::Named(Named::ArrowLeft) => Some((-amount, 0)),
+        Key::Named(Named::ArrowRight) => Some((amount, 0)),
+        Key::Named(Named::ArrowUp) => Some((0, -amount)),
+        Key::Named(Named::ArrowDown) => Some((0, amount)),
+        _ => None,
     }
 }
 
@@ -896,5 +985,31 @@ mod tests {
                 pressed_at + std::time::Duration::from_millis(100),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod clip_browser_focus_tests {
+    use super::*;
+    use iced::keyboard::{key::Named, Key, Modifiers};
+
+    #[test]
+    fn browser_focus_keeps_arrow_audition_ahead_of_clip_navigation() {
+        for (key, direction) in [(Named::ArrowUp, -1), (Named::ArrowDown, 1)] {
+            let key = Key::Named(key);
+            assert_eq!(clip_window_movement(&key, Modifiers::empty(), true), None);
+            assert!(
+                matches!(global_key_handler(key.clone(), Modifiers::empty()),
+                Some(Message::SelectAdjacentBrowserResult(value)) if value == direction)
+            );
+            assert_eq!(
+                clip_window_movement(&key, Modifiers::empty(), false),
+                Some((0, i32::from(direction)))
+            );
+        }
+        assert_eq!(
+            clip_window_movement(&Key::Named(Named::ArrowRight), Modifiers::SHIFT, false),
+            Some((4, 0))
+        );
     }
 }

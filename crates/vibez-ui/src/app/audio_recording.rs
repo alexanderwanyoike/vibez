@@ -218,7 +218,7 @@ impl App {
         }
         let start = self.state.transport.position_samples;
         if !self.state.audio_recording.begin(start, source) {
-            self.discard_audio_recording_transaction();
+            self.discard_project_transaction();
             return Task::none();
         }
         // A take is allowed to extend Arrange beyond the last existing Clip.
@@ -282,7 +282,7 @@ impl App {
                 format!("Resampled {source_name}")
             }
         };
-        let Some((track_id, fallback_start_position, frames)) =
+        let Some((track_id, fallback_start_position, mut frames)) =
             self.state.audio_recording.begin_finalizing()
         else {
             return Task::none();
@@ -291,6 +291,28 @@ impl App {
             .input_bridge
             .record_start_position()
             .unwrap_or(fallback_start_position);
+        if let Some(session) = self
+            .state
+            .perform
+            .clip_record
+            .session
+            .as_ref()
+            .filter(|session| session.audio)
+        {
+            let Some(window) = crate::domains::perform::clip_record::recorded_audio_window(
+                &frames,
+                start_position_samples,
+                session.output_start.unwrap_or(start_position_samples),
+                session
+                    .stop
+                    .unwrap_or(0)
+                    .saturating_sub(session.start.unwrap_or(0)),
+                session.length_samples,
+            ) else {
+                return self.abort_audio_recording("No audio reached the Clip recording window");
+            };
+            frames = window;
+        }
         let sample_rate = self.state.transport.sample_rate;
         self.state.status_text = "Writing recorded take to Project Media…".into();
         Task::perform(
@@ -326,12 +348,22 @@ impl App {
                     self.state.find_track(outcome.track_id).is_some(),
                 ) {
                     self.state.audio_recording.finish();
-                    self.discard_audio_recording_transaction();
+                    self.discard_project_transaction();
                     self.sync_audio_input_target();
                     self.state.status_text =
                         "Recorded take was discarded because its target Track no longer exists"
                             .into();
                     return Task::none();
+                }
+                if self
+                    .state
+                    .perform
+                    .clip_record
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.audio)
+                {
+                    return self.finish_clip_audio_recording(outcome);
                 }
                 let clip_id = ClipId::new();
                 let duration = outcome.audio.num_frames() as u64;
@@ -355,29 +387,7 @@ impl App {
                 self.state
                     .arrange_content_mut(outcome.track_id)
                     .clips
-                    .push(UiClip {
-                        id: clip_id,
-                        name: outcome.clip_name.clone(),
-                        audio: outcome.audio,
-                        source: Some(outcome.source),
-                        position: outcome.start_position_samples,
-                        source_offset: 0,
-                        start_marker: 0,
-                        duration,
-                        loop_enabled: false,
-                        loop_start: 0,
-                        loop_end: duration,
-                        gain_db: Default::default(),
-                        fades: Default::default(),
-                        playback_direction: Default::default(),
-                        transient_markers: Default::default(),
-                        warp_markers: Default::default(),
-                        transpose: Default::default(),
-                        original_bpm: None,
-                        warped: false,
-                        warped_to_bpm: None,
-                        original_audio: None,
-                    });
+                    .push(audio_outcome_clip(&outcome, clip_id));
                 self.state.arrangement.selected_track = Some(outcome.track_id);
                 self.state.arrangement.selected_clips.clear();
                 self.state
@@ -407,8 +417,11 @@ impl App {
                 );
             }
             Err(error) => {
+                if self.state.perform.clip_record.is_active() {
+                    self.cancel_clip_record();
+                }
                 self.state.audio_recording.finish();
-                self.discard_audio_recording_transaction();
+                self.discard_project_transaction();
                 self.sync_audio_input_target();
                 self.state.status_text =
                     format!("Audio recording failed — {error}. No Clip was created.");
@@ -608,7 +621,7 @@ impl App {
             .map(|track| track.id)
     }
 
-    fn sync_audio_input_target(&self) {
+    pub(super) fn sync_audio_input_target(&self) {
         self.input_bridge.set_target(None, false);
         self.input_bridge.set_resample_source(None);
         let Some(track_id) = self.active_audio_input_target() else {
@@ -650,7 +663,10 @@ impl App {
         }
     }
 
-    fn recording_source_for_target(&self, target_id: TrackId) -> Option<AudioRecordingSource> {
+    pub(super) fn recording_source_for_target(
+        &self,
+        target_id: TrackId,
+    ) -> Option<AudioRecordingSource> {
         let route = self.state.find_track(target_id)?.audio_input_route;
         match route {
             AudioInputRoute::Mono { .. } | AudioInputRoute::Stereo { .. } => self
@@ -663,22 +679,19 @@ impl App {
     }
 
     fn abort_audio_recording(&mut self, status: &str) -> Task<Message> {
+        if self.state.perform.clip_record.is_active() {
+            self.cancel_clip_record();
+        }
         self.input_bridge.end_recording();
         self.state.audio_recording.captured_frames.clear();
         self.state.audio_recording.finish();
-        self.discard_audio_recording_transaction();
+        self.discard_project_transaction();
         self.sync_audio_input_target();
         self.state.status_text = status.into();
         if self.state.transport.playing {
             self.update(Message::Transport(TransportMsg::Stop))
         } else {
             Task::none()
-        }
-    }
-
-    fn discard_audio_recording_transaction(&mut self) {
-        if let Some((_, dirty_before)) = self.state.project.history.abandon_transaction() {
-            self.state.project.dirty = dirty_before;
         }
     }
 }
@@ -714,6 +727,33 @@ fn input_stream_must_reopen(
             || sample_rate != expected_sample_rate
             || expected_device_name.is_none_or(|expected| device_name != expected)
     })
+}
+
+pub(super) fn audio_outcome_clip(outcome: &AudioRecordingOutcome, clip_id: ClipId) -> UiClip {
+    let duration = outcome.audio.num_frames() as u64;
+    UiClip {
+        id: clip_id,
+        name: outcome.clip_name.clone(),
+        audio: Arc::clone(&outcome.audio),
+        source: Some(outcome.source.clone()),
+        position: outcome.start_position_samples,
+        source_offset: 0,
+        start_marker: 0,
+        duration,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: duration,
+        gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
+        transpose: Default::default(),
+        original_bpm: None,
+        warped: false,
+        warped_to_bpm: None,
+        original_audio: None,
+    }
 }
 
 #[cfg(test)]

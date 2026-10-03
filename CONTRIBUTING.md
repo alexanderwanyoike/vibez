@@ -22,6 +22,15 @@ main <- dev <- feature/your-thing
 - No source file over 1,000 lines; split along the existing seams instead
 - Nothing that allocates, locks, or does I/O in the audio callback
 
+## CI scope
+
+Feature PRs and prototype epics run workspace tests on Linux, macOS and Windows.
+The `codex/epic-*` pattern includes future epics without editing the workflow.
+Check, Clippy and Format also run for `dev`/`main` pushes and promotion PRs from
+those branches. Application/package builds and Windows executable-resource
+validation run only on version-tag releases. Manual release dispatch is removed
+so an arbitrary feature branch cannot publish release packages.
+
 ## Releasing
 
 Merge `dev` into `main`, then tag:

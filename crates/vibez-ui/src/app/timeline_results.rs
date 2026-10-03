@@ -1,4 +1,4 @@
-//! Shared routing for background results that edit Arrange or one Section.
+//! Shared routing for background edits to Arrange, Sections and launcher Clips.
 
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use super::*;
 
 pub(super) enum TimelineResultEngine<'a> {
     Arrange(&'a mut EngineCommandQueue),
-    Section,
+    NonResident,
 }
 
 impl EngineHandle for TimelineResultEngine<'_> {
@@ -36,6 +36,34 @@ impl App {
         ) -> ArrangementAction,
     ) -> ArrangementAction {
         match location {
+            TimelineLocation::LauncherClip(id) => {
+                let mut engine = TimelineResultEngine::NonResident;
+                if self.state.perform.clip_editor.selected == Some(id) {
+                    let action = apply(
+                        &mut self.state.perform.clip_editor.editor,
+                        Arc::make_mut(&mut self.state.project_tracks),
+                        &mut engine,
+                    );
+                    self.state.perform.commit_selected_timeline();
+                    action
+                } else if let Some(clip) =
+                    Arc::make_mut(&mut self.state.perform.clips).by_id_mut(id)
+                {
+                    let mut editor = TimelineEditorState {
+                        timeline: Arc::clone(&clip.timeline),
+                        ..Default::default()
+                    };
+                    let action = apply(
+                        &mut editor,
+                        Arc::make_mut(&mut self.state.project_tracks),
+                        &mut engine,
+                    );
+                    clip.timeline = editor.timeline;
+                    action
+                } else {
+                    ArrangementAction::default()
+                }
+            }
             TimelineLocation::Arrange => {
                 let mut engine = TimelineResultEngine::Arrange(&mut self.cmd_tx);
                 apply(
@@ -47,13 +75,13 @@ impl App {
             TimelineLocation::Section(section_id)
                 if self.state.perform.selected_section == Some(section_id) =>
             {
-                let mut engine = TimelineResultEngine::Section;
+                let mut engine = TimelineResultEngine::NonResident;
                 let action = apply(
                     self.state.perform.section_editor.editor_mut(),
                     Arc::make_mut(&mut self.state.project_tracks),
                     &mut engine,
                 );
-                self.state.perform.commit_selected_section_timeline();
+                self.state.perform.commit_selected_timeline();
                 if action.mark_dirty {
                     self.refresh_playing_section_after_edit(section_id);
                 }
@@ -71,7 +99,7 @@ impl App {
                         timeline: Arc::clone(&section.timeline),
                         ..TimelineEditorState::default()
                     };
-                    let mut engine = TimelineResultEngine::Section;
+                    let mut engine = TimelineResultEngine::NonResident;
                     let action = apply(&mut editor, project_tracks, &mut engine);
                     section.timeline = editor.timeline;
                     action

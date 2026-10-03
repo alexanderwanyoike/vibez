@@ -114,7 +114,7 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    iced::application(App::title, App::update, App::view)
+    iced::application(App::title, App::update_and_refresh_clips, App::view)
         .theme(App::theme)
         .scale_factor(App::scale_factor)
         .antialiasing(true)
@@ -506,10 +506,14 @@ impl App {
             Task::none()
         };
 
-        let open_task = std::env::args()
+        let startup_project = std::env::args()
             .nth(1)
             .map(std::path::PathBuf::from)
-            .filter(|p| p.is_file())
+            .filter(|p| p.is_file());
+        if startup_project.is_none() {
+            app.state.project.new_project_layout = Some(vibez_project::PerformLayout::Sections);
+        }
+        let open_task = startup_project
             .map(|p| Task::done(Message::ProjectOpenPathSelected(Some(p))))
             .unwrap_or_else(Task::none);
         // `window::Settings` has no maximized field in iced 0.13. The
@@ -674,3 +678,10 @@ impl App {
         ])
     }
 }
+
+mod clip_launcher;
+mod clip_record;
+mod views_clip_launcher;
+
+#[cfg(test)]
+mod clip_project_tests;
