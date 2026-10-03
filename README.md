@@ -167,6 +167,3 @@ trademark of Steinberg Media Technologies GmbH.
 ## For Mum
 
 This one's for you Mum 🥲 I miss you.
-
-If you'd like to help my family give Mum a good send-off, you can
-[donate to her GoFundMe](https://gofund.me/52cc80b1b).
