@@ -58,7 +58,7 @@ impl App {
             })
         };
 
-        let new_btn = make_menu_btn("New (Empty)", icons::PLUS, Message::NewProject);
+        let new_btn = make_menu_btn("New Project...", icons::PLUS, Message::NewProject);
         let export_btn = make_menu_btn(
             "Export to WAV...",
             icons::AUDIO_WAVEFORM,

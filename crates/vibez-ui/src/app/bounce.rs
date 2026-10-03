@@ -203,7 +203,7 @@ impl App {
         is_note_clip: bool,
     ) -> Task<Message> {
         let (range, insert_pos, name) = if is_note_clip {
-            let spb = self.state.transport.sample_rate as f64 * 60.0 / self.state.transport.bpm;
+            let spb = self.state.transport.samples_per_beat();
             let nc = self
                 .state
                 .arrange_content(track_id)

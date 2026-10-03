@@ -106,6 +106,27 @@ pub struct EngineNoteClip {
 }
 
 impl EngineNoteClip {
+    pub(crate) fn same_pitch_schedule(&self, other: &Self, pitch: u8) -> bool {
+        self.position_beats == other.position_beats
+            && self.duration_beats == other.duration_beats
+            && self.start_marker_beats == other.start_marker_beats
+            && self.loop_enabled == other.loop_enabled
+            && self.loop_start_beats == other.loop_start_beats
+            && self.loop_end_beats == other.loop_end_beats
+            && self.groove_grid == other.groove_grid
+            && self
+                .notes
+                .iter()
+                .filter(|n| n.pitch == pitch)
+                .eq(other.notes.iter().filter(|n| n.pitch == pitch))
+    }
+
+    pub(crate) fn inherit_groove_latch(&self, old: &Self) {
+        if self.groove_grid == old.groove_grid {
+            self.groove_latch.set(old.groove_latch.get());
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ClipId,
@@ -467,6 +488,52 @@ impl ArrangementPlaybackSource {
     pub fn prepare_empty() -> PreparedPlaybackSource {
         PreparedPlaybackSource::default()
     }
+}
+
+/// A single independent launcher slot, or a stop when `clip_id` is absent.
+pub struct PreparedClipPlayback {
+    pub track_id: TrackId,
+    pub clip_id: Option<ClipId>,
+    pub request_id: u64,
+    pub length_samples: u64,
+    pub looping: bool,
+    pub source: Box<PreparedPlaybackSource>,
+}
+
+impl PreparedClipPlayback {
+    pub fn stop(track_id: TrackId, request_id: u64) -> Box<Self> {
+        Box::new(Self {
+            track_id,
+            clip_id: None,
+            request_id,
+            length_samples: 1,
+            looping: false,
+            source: Box::default(),
+        })
+    }
+}
+
+impl std::fmt::Debug for PreparedClipPlayback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedClipPlayback")
+            .field("track_id", &self.track_id)
+            .field("clip_id", &self.clip_id)
+            .field("request_id", &self.request_id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ActiveClipPlayback {
+    pub clip_id: ClipId,
+    pub position: u64,
+    pub length: u64,
+    pub looping: bool,
+}
+
+pub(crate) struct QueuedClipPlayback {
+    pub prepared: Box<PreparedClipPlayback>,
+    pub effective_at: u64,
 }
 
 #[cfg(test)]

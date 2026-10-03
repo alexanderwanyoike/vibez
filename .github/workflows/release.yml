@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,10 +28,7 @@ jobs:
   build:
     name: Build (${{ matrix.label }})
     needs: [create-release]
-    # workflow_dispatch builds packages with no release to attach to, so
-    # create-release is skipped; needs would then skip this job too unless
-    # the gate readmits it explicitly.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.create-release.result == 'success') }}
+    if: startsWith(github.ref, 'refs/tags/v') && needs.create-release.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -67,11 +63,6 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           BARE="${VERSION#v}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            VERSION="dev-${GITHUB_SHA::7}"
-            # Debian/plist versions must start with a digit.
-            BARE="0.0.0-dev-${GITHUB_SHA::7}"
-          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "bare=${BARE}" >> "$GITHUB_OUTPUT"
 

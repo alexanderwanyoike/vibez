@@ -337,7 +337,7 @@ impl App {
                     ));
                 }
             }
-            self.state.perform.commit_selected_section_timeline();
+            self.state.perform.commit_selected_timeline();
             self.refresh_playing_section_after_edit(section_id);
         }
         let section_ids: Vec<_> = self
