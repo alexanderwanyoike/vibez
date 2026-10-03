@@ -184,6 +184,7 @@ impl AudioEngine {
                 }
             }
             debug_assert!(count > 0);
+            let count = clip_segment_frames(count, frames - rendered);
             let count_in = self.clip_count_in_timing();
             for track in &mut self.tracks {
                 // An inactive slot is silent while live instruments and effect tails still render.
@@ -233,6 +234,30 @@ impl AudioEngine {
                 );
             }
             rendered += count;
+        }
+    }
+}
+
+fn clip_segment_frames(count: usize, remaining: usize) -> usize {
+    // A broken boundary invariant must not stall the release audio callback.
+    if count == 0 {
+        remaining
+    } else {
+        count
+    }
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use super::clip_segment_frames;
+
+    #[test]
+    fn zero_length_segment_renders_the_remainder_without_spinning() {
+        for remaining in [1, 32, 512] {
+            assert_eq!(clip_segment_frames(0, remaining), remaining);
+            for count in [1, remaining] {
+                assert_eq!(clip_segment_frames(count, remaining), count);
+            }
         }
     }
 }
