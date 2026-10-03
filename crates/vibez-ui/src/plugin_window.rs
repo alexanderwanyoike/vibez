@@ -1,12 +1,15 @@
-use std::collections::HashMap;
 use std::ffi::c_void;
-
-use vibez_plugin_host::gui::PluginGuiKey;
+use vibez_plugin_host::gui::{ClapGuiHandle, PluginGuiKey, Vst3GuiHandle};
 use vibez_plugin_host::PluginGuiHandle;
-use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{self, ConnectionExt as _};
-use x11rb::rust_connection::RustConnection;
-use x11rb::wrapper::ConnectionExt as _;
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(target_os = "macos"))]
+mod x11;
+#[cfg(target_os = "macos")]
+pub use macos::PluginWindowManager;
+#[cfg(not(target_os = "macos"))]
+pub use x11::PluginWindowManager;
 
 /// Events emitted by the plugin window manager during poll_events().
 #[derive(Debug, Clone)]
@@ -15,7 +18,7 @@ pub enum PluginWindowEvent {
     Closed(PluginGuiKey),
 }
 
-/// Raw plugin pointer — transferred from the background loader thread to the
+/// Raw plugin pointer - transferred from the background loader thread to the
 /// UI thread. The GUI handle is created on the UI thread (the process main
 /// thread) so that all plugin GUI calls happen on the same OS thread.
 #[derive(Clone, Copy)]
@@ -28,406 +31,61 @@ pub enum PluginRawPtr {
 // All actual dereferences happen exclusively on the UI thread.
 unsafe impl Send for PluginRawPtr {}
 
-/// Tracks an open plugin GUI window.
-struct OpenPluginWindow {
-    x11_window_id: u32,
-    gui_handle: PluginGuiHandle,
-    #[allow(dead_code)]
-    title: String,
-    /// Last size forwarded to the plugin, to filter duplicate
-    /// ConfigureNotify events.
-    size: (u16, u16),
-    /// Whether the plugin GUI resizes; locked windows carry min==max
-    /// WM hints that must move with plugin-initiated resizes.
-    can_resize: bool,
+/// # Safety
+/// The plugin must stay loaded until the returned GUI handle is destroyed.
+/// All handle operations, including creation and destruction, require the UI thread.
+unsafe fn gui_handle(raw: PluginRawPtr) -> Option<PluginGuiHandle> {
+    match raw {
+        PluginRawPtr::Clap(ptr) => ClapGuiHandle::from_raw(ptr).map(PluginGuiHandle::Clap),
+        PluginRawPtr::Vst3(ptr) => Vst3GuiHandle::new(ptr).map(PluginGuiHandle::Vst3),
+    }
 }
 
-/// Synchronous plugin window manager that runs on the UI thread.
-/// All X11 and plugin GUI calls happen directly on the caller's thread
-/// (the iced UI thread, which is the process main thread).
-pub struct PluginWindowManager {
-    conn: RustConnection,
-    screen_num: usize,
-    wm_protocols: u32,
-    wm_delete_window: u32,
-    windows: HashMap<PluginGuiKey, OpenPluginWindow>,
-}
-
-impl PluginWindowManager {
-    /// Create a new window manager on the current thread.
-    /// Returns None if no X11 display is available.
-    pub fn new() -> Option<Self> {
-        let (conn, screen_num) = match RustConnection::connect(None) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("vibez: no X11 display for plugin GUIs: {e}");
-                return None;
-            }
-        };
-
-        let wm_protocols = intern_atom(&conn, "WM_PROTOCOLS").unwrap_or(0);
-        let wm_delete_window = intern_atom(&conn, "WM_DELETE_WINDOW").unwrap_or(0);
-
-        Some(Self {
-            conn,
-            screen_num,
-            wm_protocols,
-            wm_delete_window,
-            windows: HashMap::new(),
+fn requested_resize(
+    handle: &PluginGuiHandle,
+    clap_requests: &[(usize, u32, u32)],
+) -> Option<(u32, u32)> {
+    handle.take_pending_resize().or_else(|| {
+        handle.clap_plugin_ptr().and_then(|ptr| {
+            clap_requests
+                .iter()
+                .rev()
+                .find(|(p, _, _)| *p == ptr)
+                .map(|&(_, w, h)| (w, h))
         })
-    }
-
-    /// Open a plugin GUI window. Synchronous — creates the GUI handle from
-    /// the raw pointer, creates the X11 window, attaches, and shows.
-    /// Returns true on success.
-    pub fn open(&mut self, key: PluginGuiKey, raw_ptr: PluginRawPtr, title: String) -> bool {
-        // If already open, raise
-        if let Some(existing) = self.windows.get(&key) {
-            let _ = self.conn.configure_window(
-                existing.x11_window_id,
-                &xproto::ConfigureWindowAux::new().stack_mode(xproto::StackMode::ABOVE),
-            );
-            let _ = self.conn.map_window(existing.x11_window_id);
-            let _ = self.conn.flush();
-            return true;
-        }
-
-        // Create the GUI handle from the raw pointer on THIS thread (UI thread).
-        eprintln!("vibez: open_window — creating GUI handle on UI thread");
-        let mut handle: PluginGuiHandle = match raw_ptr {
-            PluginRawPtr::Clap(ptr) => {
-                match unsafe { vibez_plugin_host::gui::ClapGuiHandle::from_raw(ptr) } {
-                    Some(h) => PluginGuiHandle::Clap(h),
-                    None => {
-                        eprintln!("vibez: open_window — CLAP GUI handle creation failed");
-                        return false;
-                    }
-                }
-            }
-            PluginRawPtr::Vst3(ptr) => {
-                match unsafe { vibez_plugin_host::gui::Vst3GuiHandle::new(ptr) } {
-                    Some(h) => PluginGuiHandle::Vst3(h),
-                    None => {
-                        eprintln!("vibez: open_window — VST3 GUI handle creation failed");
-                        return false;
-                    }
-                }
-            }
-        };
-
-        // Create the plugin GUI.
-        // Log a warning if it takes more than 2s (JUCE plugins may hang here
-        // if their MessageManager cannot initialize properly).
-        eprintln!("vibez: open_window — calling create_gui()");
-        let create_start = std::time::Instant::now();
-        let ok = handle.create_gui();
-        let elapsed = create_start.elapsed();
-        eprintln!("vibez: open_window — create_gui() returned {ok} in {elapsed:?}");
-        if !ok {
-            eprintln!("vibez: plugin GUI create() failed");
-            return false;
-        }
-
-        let (width, height) = handle.get_size().unwrap_or((800, 600));
-        eprintln!("vibez: open_window — size: {width}x{height}");
-
-        let screen = &self.conn.setup().roots[self.screen_num];
-        let window_id = match self.conn.generate_id() {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!("vibez: failed to generate X11 window id: {e}");
-                return false;
-            }
-        };
-
-        // Create the X11 window
-        if let Err(e) = self.conn.create_window(
-            x11rb::COPY_DEPTH_FROM_PARENT,
-            window_id,
-            screen.root,
-            100,
-            100,
-            width as u16,
-            height as u16,
-            0,
-            xproto::WindowClass::INPUT_OUTPUT,
-            0,
-            &xproto::CreateWindowAux::new().event_mask(xproto::EventMask::STRUCTURE_NOTIFY),
-        ) {
-            eprintln!("vibez: failed to create X11 window: {e}");
-            return false;
-        }
-
-        // Set window title
-        let _ = self.conn.change_property8(
-            xproto::PropMode::REPLACE,
-            window_id,
-            xproto::AtomEnum::WM_NAME,
-            xproto::AtomEnum::STRING,
-            title.as_bytes(),
-        );
-
-        // Set WM_DELETE_WINDOW protocol
-        if self.wm_protocols != 0 && self.wm_delete_window != 0 {
-            let _ = self.conn.change_property32(
-                xproto::PropMode::REPLACE,
-                window_id,
-                self.wm_protocols,
-                xproto::AtomEnum::ATOM,
-                &[self.wm_delete_window],
-            );
-        }
-
-        // Map the window and flush BEFORE plugin attachment
-        let _ = self.conn.map_window(window_id);
-        let _ = self.conn.flush();
-
-        // Attach plugin GUI to the window
-        eprintln!("vibez: open_window — calling attach_to_x11({window_id})");
-        let attached = handle.attach_to_x11(window_id);
-        eprintln!("vibez: open_window — attach_to_x11 returned {attached}");
-        if !attached {
-            if let PluginGuiHandle::Vst3(ref mut vst3) = handle {
-                eprintln!("vibez: open_window — VST3 fallback: calling open_view");
-                if !vst3.open_view(window_id) {
-                    eprintln!("vibez: failed to attach plugin GUI to X11 window");
-                    let _ = self.conn.destroy_window(window_id);
-                    let _ = self.conn.flush();
-                    return false;
-                }
-            } else {
-                eprintln!("vibez: failed to attach CLAP plugin GUI to X11 window");
-                let _ = self.conn.destroy_window(window_id);
-                let _ = self.conn.flush();
-                return false;
-            }
-        }
-
-        eprintln!("vibez: open_window — calling show()");
-        handle.show();
-        let _ = self.conn.flush();
-
-        // The pre-attach size query lies for some plugins (VST3 has
-        // no view yet at that point; some CLAP GUIs only know their
-        // size after create/attach), which shipped 800x600 windows
-        // with clipped or floating GUIs. Re-query now and make the
-        // window match reality.
-        let (mut width, mut height) = (width, height);
-        if let Some((w, h)) = handle.get_size() {
-            if (w, h) != (width, height) && w > 0 && h > 0 {
-                eprintln!(
-                    "vibez: open_window — post-attach size correction {width}x{height} -> {w}x{h}"
-                );
-                width = w;
-                height = h;
-                let _ = self.conn.configure_window(
-                    window_id,
-                    &xproto::ConfigureWindowAux::new()
-                        .width(width)
-                        .height(height),
-                );
-            }
-        }
-
-        // Resize policy (dogfood bug #9): plugins that cannot resize
-        // get a hard-locked window (min == max size hints) so the WM
-        // never exposes dead framebuffer space; resizable plugins get
-        // their resizes forwarded from ConfigureNotify in poll_events
-        // and their own requests applied from the pending queues.
-        let can_resize = handle.can_resize();
-        if !can_resize {
-            let hints = x11rb::properties::WmSizeHints {
-                min_size: Some((width as i32, height as i32)),
-                max_size: Some((width as i32, height as i32)),
-                ..Default::default()
-            };
-            let _ = hints.set_normal_hints(&self.conn, window_id);
-        }
-        eprintln!(
-            "vibez: open_window — plugin can_resize={can_resize}, window {}locked",
-            if can_resize { "un" } else { "" }
-        );
-        let _ = self.conn.flush();
-
-        // Mark as open
-        match &mut handle {
-            PluginGuiHandle::Clap(h) => h.open = true,
-            PluginGuiHandle::Vst3(h) => h.open = true,
-        }
-
-        self.windows.insert(
-            key,
-            OpenPluginWindow {
-                x11_window_id: window_id,
-                gui_handle: handle,
-                title,
-                size: (width as u16, height as u16),
-                can_resize,
-            },
-        );
-
-        eprintln!("vibez: open_window — SUCCESS, window {window_id} opened for {key:?}");
-        true
-    }
-
-    /// Close a specific plugin GUI window.
-    pub fn close(&mut self, key: PluginGuiKey) {
-        if let Some(mut win) = self.windows.remove(&key) {
-            win.gui_handle.destroy();
-            let _ = self.conn.destroy_window(win.x11_window_id);
-            let _ = self.conn.flush();
-        }
-    }
-
-    /// Raise an existing window to the front.
-    pub fn raise(&self, key: PluginGuiKey) {
-        if let Some(win) = self.windows.get(&key) {
-            let _ = self.conn.configure_window(
-                win.x11_window_id,
-                &xproto::ConfigureWindowAux::new().stack_mode(xproto::StackMode::ABOVE),
-            );
-            let _ = self.conn.map_window(win.x11_window_id);
-            let _ = self.conn.flush();
-        }
-    }
-
-    /// Close all plugin GUI windows.
-    pub fn close_all(&mut self) {
-        let keys: Vec<PluginGuiKey> = self.windows.keys().copied().collect();
-        for key in keys {
-            self.close(key);
-        }
-    }
-
-    /// Check if a specific plugin GUI window is open.
-    pub fn is_open(&self, key: PluginGuiKey) -> bool {
-        self.windows.contains_key(&key)
-    }
-
-    /// Poll for X11 events (non-blocking). Returns events for closed windows.
-    pub fn poll_events(&mut self) -> Vec<PluginWindowEvent> {
-        // VST3 Linux GUIs live off the host run loop: fire their
-        // timers and fd handlers every tick or JUCE editors freeze.
-        for window in self.windows.values() {
-            window.gui_handle.service_runloop();
-        }
-
-        // Plugin-initiated resize requests: CLAP request_resize
-        // callbacks land in a queue keyed by plugin pointer; VST3
-        // resizeView requests sit on each view's frame.
-        let clap_requests = vibez_plugin_host::clap_host::host_impl::take_pending_gui_resizes();
-        let mut apply: Vec<(u32, u16, u16, bool)> = Vec::new();
-        for window in self.windows.values_mut() {
-            let request = window.gui_handle.take_pending_resize().or_else(|| {
-                window.gui_handle.clap_plugin_ptr().and_then(|ptr| {
-                    clap_requests
-                        .iter()
-                        .find(|(p, _, _)| *p == ptr)
-                        .map(|&(_, w, h)| (w, h))
-                })
-            });
-            if let Some((w, h)) = request {
-                let new_size = (w as u16, h as u16);
-                if new_size != window.size && w > 0 && h > 0 {
-                    window.size = new_size;
-                    apply.push((
-                        window.x11_window_id,
-                        new_size.0,
-                        new_size.1,
-                        window.can_resize,
-                    ));
-                }
-            }
-        }
-        for (win_id, w, h, can_resize) in apply {
-            if !can_resize {
-                // Move the lock with the window or the WM refuses
-                // the plugin's own resize.
-                let hints = x11rb::properties::WmSizeHints {
-                    min_size: Some((w as i32, h as i32)),
-                    max_size: Some((w as i32, h as i32)),
-                    ..Default::default()
-                };
-                let _ = hints.set_normal_hints(&self.conn, win_id);
-            }
-            let _ = self.conn.configure_window(
-                win_id,
-                &xproto::ConfigureWindowAux::new()
-                    .width(w as u32)
-                    .height(h as u32),
-            );
-        }
-
-        let mut events = Vec::new();
-        loop {
-            match self.conn.poll_for_event() {
-                Ok(Some(event)) => {
-                    if let x11rb::protocol::Event::ConfigureNotify(cfg) = &event {
-                        if let Some(win) = self
-                            .windows
-                            .values_mut()
-                            .find(|w| w.x11_window_id == cfg.window)
-                        {
-                            let new_size = (cfg.width, cfg.height);
-                            if new_size != win.size && new_size.0 > 0 && new_size.1 > 0 {
-                                win.size = new_size;
-                                win.gui_handle
-                                    .set_size(new_size.0 as u32, new_size.1 as u32);
-                            }
-                        }
-                    }
-                    if let x11rb::protocol::Event::ClientMessage(cm) = event {
-                        if cm.format == 32 && cm.data.as_data32()[0] == self.wm_delete_window {
-                            let key = self
-                                .windows
-                                .iter()
-                                .find(|(_, w)| w.x11_window_id == cm.window)
-                                .map(|(k, _)| *k);
-                            if let Some(key) = key {
-                                self.close(key);
-                                events.push(PluginWindowEvent::Closed(key));
-                            }
-                        }
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    eprintln!("vibez: X11 event error: {e}");
-                    break;
-                }
-            }
-        }
-        events
-    }
-
-    /// Close windows for all effects/instruments on a given track.
-    pub fn close_track_effects(&mut self, track_id: vibez_core::id::TrackId) {
-        let keys: Vec<PluginGuiKey> = self
-            .windows
-            .keys()
-            .filter(|k| match k {
-                PluginGuiKey::Effect { track_id: tid, .. } => *tid == track_id,
-                PluginGuiKey::Instrument { track_id: tid } => *tid == track_id,
-            })
-            .copied()
-            .collect();
-        for key in keys {
-            self.close(key);
-        }
-    }
+    })
 }
 
-impl Drop for PluginWindowManager {
-    fn drop(&mut self) {
-        self.close_all();
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_plugin_host::{
+        gui::{GuiApi, GuiParent},
+        test_fixtures::{Clap, State, Vst},
+    };
 
-/// Intern an X11 atom by name.
-fn intern_atom(conn: &RustConnection, name: &str) -> Option<u32> {
-    conn.intern_atom(false, name.as_bytes())
-        .ok()?
-        .reply()
-        .ok()
-        .map(|r| r.atom)
+    #[test]
+    fn clap_resize_uses_latest_request_for_this_plugin() {
+        let state = State::new(GuiApi::native());
+        let plugin = Clap::new(&state);
+        let handle = unsafe { gui_handle(PluginRawPtr::Clap(plugin.raw_ptr())) }.unwrap();
+        let ptr = plugin.raw_ptr() as usize;
+        let requests = [(ptr, 320, 240), (ptr, 640, 480), (0, 800, 600)];
+        assert_eq!(requested_resize(&handle, &requests), Some((640, 480)));
+        assert_eq!(requested_resize(&handle, &[(0, 800, 600)]), None);
+    }
+
+    #[test]
+    fn vst3_resize_comes_from_its_frame_and_is_consumed_once() {
+        let state = State::new(GuiApi::X11);
+        let plugin = Vst::new(&state);
+        let mut handle = unsafe { gui_handle(PluginRawPtr::Vst3(plugin.ptr())) }.unwrap();
+        assert!(unsafe { handle.attach_to_parent(GuiParent::X11(42)) });
+        assert!(plugin.request_resize(640, 480));
+        assert_eq!(
+            requested_resize(&handle, &[(0, 800, 600)]),
+            Some((640, 480))
+        );
+        assert_eq!(requested_resize(&handle, &[]), None);
+    }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::info::PluginInfo;
 
-const CURRENT_CACHE_REVISION: u32 = 1;
+const CURRENT_CACHE_REVISION: u32 = 2;
 
 /// Plugin host settings, persisted to `~/.config/vibez/plugins.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +67,17 @@ impl PluginSettings {
 #[cfg(test)]
 mod tests {
     use super::PluginSettings;
+
+    #[test]
+    fn catalog_from_before_macos_bundle_discovery_is_refreshed() {
+        let mut settings = PluginSettings {
+            cache_revision: 1,
+            ..Default::default()
+        };
+        assert!(settings.cache_needs_refresh());
+        settings.mark_cache_refreshed();
+        assert!(!settings.cache_needs_refresh());
+    }
 
     #[test]
     fn legacy_catalog_requests_exactly_one_refresh() {

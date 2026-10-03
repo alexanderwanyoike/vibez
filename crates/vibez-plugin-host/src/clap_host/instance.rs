@@ -89,7 +89,7 @@ impl ClapPluginInstance {
         is_instrument: bool,
     ) -> Result<PartialClapPlugin, String> {
         let lib = unsafe {
-            libloading::Library::new(path)
+            libloading::Library::new(super::module_path(path)?)
                 .map_err(|e| format!("Failed to load CLAP library: {e}"))?
         };
 

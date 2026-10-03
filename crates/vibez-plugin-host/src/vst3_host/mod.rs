@@ -4,3 +4,5 @@ pub mod host_impl;
 pub mod instance;
 pub mod runloop;
 pub mod scanner;
+
+pub(crate) mod module;
