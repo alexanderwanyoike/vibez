@@ -606,3 +606,127 @@ fn finishing_a_free_take_does_not_resize_a_replacement_clip() {
     assert_eq!(active.position, 1);
     assert!(!active.looping);
 }
+
+#[test]
+fn dropped_clip_transition_is_reported_and_engine_truth_is_retried_on_a_tiny_queue() {
+    let (mut engine, mut commands, _, a, b) = setup();
+    let (events_tx, mut events) = rtrb::RingBuffer::new(1);
+    engine.event_tx = events_tx;
+    let prepared = clip(a, 1, &[0.1; 32], true);
+    let clip_id = prepared.clip_id.unwrap();
+    launch(&mut commands, vec![prepared], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 1], 1);
+    assert_eq!(engine.tracks[0].active_clip.unwrap().clip_id, clip_id);
+    let mut drops = None;
+    let mut recovered = None;
+    let mut idle = None;
+    for _ in 0..8 {
+        while let Ok(event) = events.pop() {
+            match event {
+                EngineEvent::ClipEventsDropped { total } => drops = Some(total),
+                EngineEvent::ClipStateResynced(state) if state.track_id == a => {
+                    recovered = Some(state)
+                }
+                EngineEvent::ClipStateResynced(state) if state.track_id == b => idle = Some(state),
+                EngineEvent::ClipTransitioned { .. } => panic!("transition must have been lost"),
+                _ => {}
+            }
+        }
+        engine.process(&mut [0.0; 1], 1);
+    }
+    assert!(
+        drops.is_some_and(|total| total > 0),
+        "overflow must be observable"
+    );
+    let recovered = recovered.expect("playing state must eventually escape the full queue");
+    assert_eq!(recovered.playing.unwrap().clip_id, clip_id);
+    assert_eq!(recovered.playing.unwrap().request_id, 1);
+    assert!(recovered.queued.is_none());
+    assert!(recovered.running);
+    assert_eq!(recovered.through_request, 1);
+    assert!(idle.unwrap().playing.is_none());
+}
+
+#[test]
+fn overflow_snapshots_include_edited_queued_requests_and_stop_state() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    let playing = clip(a, 1, &[0.1; 32], true);
+    let playing_id = playing.clip_id.unwrap();
+    launch(&mut commands, vec![playing], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 1], 1);
+    while events.pop().is_ok() {}
+    let (events_tx, mut events) = rtrb::RingBuffer::new(1);
+    engine.event_tx = events_tx;
+    let queued = clip(a, 2, &[0.2; 32], true);
+    let queued_id = queued.clip_id.unwrap();
+    launch(&mut commands, vec![queued], MusicalBoundary::OneBar);
+    engine.process(&mut [0.0; 1], 1);
+    let mut active_edit = clip(a, 3, &[0.3; 32], true);
+    active_edit.clip_id = Some(queued_id);
+    let mut queued_edit = clip(a, 4, &[0.3; 32], true);
+    queued_edit.clip_id = Some(queued_id);
+    commands
+        .push(EngineCommand::EditClip {
+            active: active_edit,
+            queued: queued_edit,
+        })
+        .unwrap();
+    engine.process(&mut [0.0; 1], 1);
+    let mut recovered = None;
+    for _ in 0..6 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipStateResynced(state) = event {
+                if state.track_id == a {
+                    recovered = Some(state);
+                }
+            }
+        }
+        engine.process(&mut [0.0; 1], 1);
+    }
+    let recovered = recovered.unwrap();
+    assert_eq!(recovered.playing.unwrap().clip_id, playing_id);
+    assert_eq!(recovered.queued.unwrap().clip_id, Some(queued_id));
+    assert_eq!(recovered.queued.unwrap().request_id, 4);
+    assert_eq!(recovered.through_request, 4);
+    commands.push(EngineCommand::Stop).unwrap();
+    engine.process(&mut [0.0; 1], 1);
+    let mut stopped = None;
+    for _ in 0..6 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipStateResynced(state) = event {
+                if state.track_id == a {
+                    stopped = Some(state);
+                }
+            }
+        }
+        engine.process(&mut [0.0; 1], 1);
+    }
+    let stopped = stopped.unwrap();
+    assert!(!stopped.running);
+    assert!(stopped.playing.is_none());
+    assert!(stopped.queued.is_none());
+}
+
+#[test]
+fn full_clip_event_queue_never_reclaims_a_retired_source_in_the_callback() {
+    let (mut engine, mut commands, mut events, a, _) = setup();
+    let playing = clip(a, 1, &[0.1; 32], true);
+    let audio = Arc::clone(&playing.source.clips[0].audio);
+    launch(&mut commands, vec![playing], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 1], 1);
+    while events.pop().is_ok() {}
+    assert_eq!(Arc::strong_count(&audio), 2);
+    let (events_tx, _events) = rtrb::RingBuffer::new(1);
+    engine.event_tx = events_tx;
+    launch(
+        &mut commands,
+        vec![clip(a, 2, &[0.2; 32], true)],
+        MusicalBoundary::Immediate,
+    );
+    engine.process(&mut [0.0; 1], 1);
+    assert_eq!(
+        Arc::strong_count(&audio),
+        2,
+        "a full ring must forget the source owner"
+    );
+}

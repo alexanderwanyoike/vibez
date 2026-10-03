@@ -200,10 +200,10 @@ impl AudioEngine {
                         section_id,
                         section_position_samples,
                     });
-                    for track in &self.tracks {
-                        if let Some(active) = track.active_clip {
-                            let _ = self.event_tx.push(EngineEvent::ClipCaptureSource {
-                                track_id: track.id,
+                    for index in 0..self.tracks.len() {
+                        if let Some(active) = self.tracks[index].active_clip {
+                            self.clip_event(EngineEvent::ClipCaptureSource {
+                                track_id: self.tracks[index].id,
                                 position: active.position,
                                 effective_at_samples: self.performance_position,
                             });

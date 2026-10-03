@@ -1,6 +1,7 @@
 //! Independent per-track clocks share the normal channel-strip renderer.
 
 use super::*;
+use crate::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
 use crate::playback_source::{ActiveClipPlayback, PreparedClipPlayback, QueuedClipPlayback};
 use vibez_core::perform::MusicalBoundary;
 
@@ -10,6 +11,10 @@ impl AudioEngine {
         active: Box<PreparedClipPlayback>,
         mut queued: Box<PreparedClipPlayback>,
     ) {
+        self.clip_through_request = self
+            .clip_through_request
+            .max(active.request_id)
+            .max(queued.request_id);
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == active.track_id) {
             if track
                 .active_clip
@@ -30,9 +35,65 @@ impl AudioEngine {
     }
 
     pub(super) fn clip_event(&mut self, event: EngineEvent) {
+        let request = match &event {
+            EngineEvent::ClipQueued { request_id, .. }
+            | EngineEvent::ClipTransitioned { request_id, .. }
+            | EngineEvent::ClipSourceRefreshed { request_id, .. } => *request_id,
+            EngineEvent::ClipRequestRetired(prepared) => prepared.request_id,
+            _ => 0,
+        };
+        self.clip_through_request = self.clip_through_request.max(request);
         if let Err(rtrb::PushError::Full(event)) = self.event_tx.push(event) {
+            self.clip_event_drops = self.clip_event_drops.saturating_add(1);
+            self.clip_resync_track = Some(0);
             // Source owners must be reclaimed on the UI thread, never in the callback.
             std::mem::forget(event);
+        }
+    }
+
+    pub(super) fn resync_clip_events(&mut self) {
+        if self.reported_clip_event_drops != self.clip_event_drops {
+            if self
+                .event_tx
+                .push(EngineEvent::ClipEventsDropped {
+                    total: self.clip_event_drops,
+                })
+                .is_err()
+            {
+                return;
+            }
+            self.reported_clip_event_drops = self.clip_event_drops;
+        }
+        while let Some(index) = self.clip_resync_track {
+            let Some(track) = self.tracks.get(index) else {
+                self.clip_resync_track = None;
+                break;
+            };
+            let state = ClipTrackState {
+                track_id: track.id,
+                playing: track.active_clip.map(|active| ClipPlayingState {
+                    clip_id: active.clip_id,
+                    request_id: active.request_id,
+                    position: active.position,
+                }),
+                queued: track.queued_clip.as_ref().map(|queued| ClipQueuedState {
+                    clip_id: queued.prepared.clip_id,
+                    request_id: queued.prepared.request_id,
+                }),
+                through_request: self.clip_through_request,
+                effective_at_samples: self.performance_position,
+                running: self.clip_performance && self.transport.is_playing(),
+                transport_playing: self.transport.is_playing(),
+            };
+            // Partial retries must survive even when telemetry fills a one-slot ring.
+            if self
+                .event_tx
+                .push(EngineEvent::ClipStateResynced(state))
+                .is_err()
+            {
+                return;
+            }
+            self.clip_resync_track = Some(index + 1);
         }
     }
 
@@ -88,7 +149,7 @@ impl AudioEngine {
             }) {
                 self.clip_event(EngineEvent::ClipRequestRetired(old.prepared));
             }
-            let _ = self.event_tx.push(EngineEvent::ClipQueued {
+            self.clip_event(EngineEvent::ClipQueued {
                 request_id,
                 track_id,
                 clip_id,
@@ -122,6 +183,7 @@ impl AudioEngine {
                 std::mem::swap(&mut track.launcher_source, &mut prepared.source);
                 track.active_clip = prepared.clip_id.map(|clip_id| ActiveClipPlayback {
                     clip_id,
+                    request_id: prepared.request_id,
                     position: 0,
                     length: prepared.length_samples.max(1),
                     looping: prepared.looping,

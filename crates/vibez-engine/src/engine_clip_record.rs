@@ -191,6 +191,9 @@ impl AudioEngine {
                 .filter(|active| Some(active.clip_id) == prepared.clip_id)
             {
                 std::mem::swap(&mut track.launcher_source, &mut prepared.source);
+                if prepared.request_id != 0 {
+                    active.request_id = prepared.request_id;
+                }
                 if !recording_free {
                     active.length = prepared.length_samples.max(1);
                     active.looping = prepared.looping;
