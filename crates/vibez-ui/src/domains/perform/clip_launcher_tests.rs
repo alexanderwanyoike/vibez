@@ -451,3 +451,175 @@ fn clip_playhead_and_progress_share_loop_and_one_shot_boundaries() {
     assert_eq!(editor.playhead_samples(clip.id, 29, 4.0), Some(16));
     assert_eq!(editor.progress(clip.id, 29, 4.0), Some(1.0));
 }
+
+#[test]
+fn resync_preserves_queued_sources_and_newer_intent_while_reclaiming_obsolete_pending_entries() {
+    use vibez_engine::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
+    let track = TrackId::new();
+    let other_track = TrackId::new();
+    let clip =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Original".into(), 4.0);
+    let mut edited = clip.clone();
+    Arc::make_mut(&mut edited.timeline).ensure(track).note_clips[0].name = "Audible edit".into();
+    let future =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 1, "Future".into(), 4.0);
+    let other = super::super::clip_record::empty_midi_clip(
+        ClipId::new(),
+        other_track,
+        0,
+        "Other".into(),
+        4.0,
+    );
+    let store = ClipStore {
+        clips: vec![clip.clone(), future.clone()],
+    };
+    let mut editor = ClipEditor {
+        running: true,
+        next_request: 5,
+        ..Default::default()
+    };
+    editor.playing.insert(track, clip.clone());
+    for (request, source) in [
+        (1, clip),
+        (2, edited.clone()),
+        (3, future.clone()),
+        (4, other),
+        (5, future.clone()),
+    ] {
+        editor.pending.insert(request, source);
+    }
+    editor.queue_request(track, Some(future.id), 5);
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: Some(ClipPlayingState {
+                clip_id: edited.id,
+                request_id: 2,
+                position: 3,
+            }),
+            queued: Some(ClipQueuedState {
+                clip_id: Some(future.id),
+                request_id: 3,
+            }),
+            through_request: 4,
+            effective_at_samples: 19,
+            running: true,
+            transport_playing: true,
+        },
+        &store,
+    );
+    assert_eq!(editor.playing[&track].name(), "Audible edit");
+    assert_eq!(editor.started_at[&track], 16);
+    assert!(!editor.pending.contains_key(&1));
+    assert!(!editor.pending.contains_key(&2));
+    assert_eq!(editor.pending.len(), 3);
+    assert_eq!(editor.queued_requests[&track], 5);
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: None,
+            queued: None,
+            through_request: 4,
+            effective_at_samples: 20,
+            running: false,
+            transport_playing: false,
+        },
+        &store,
+    );
+    assert!(editor.playing.is_empty());
+    assert!(editor.started_at.is_empty());
+    assert_eq!(editor.queued[&track], Some(future.id));
+    assert!(editor.pending.contains_key(&5));
+    assert!(editor.running);
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: None,
+            queued: Some(ClipQueuedState {
+                clip_id: None,
+                request_id: 5,
+            }),
+            through_request: 5,
+            effective_at_samples: 21,
+            running: true,
+            transport_playing: true,
+        },
+        &store,
+    );
+    assert_eq!(editor.queued[&track], None);
+    assert!(editor.pending.contains_key(&5));
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: None,
+            queued: None,
+            through_request: 5,
+            effective_at_samples: 22,
+            running: false,
+            transport_playing: false,
+        },
+        &store,
+    );
+    assert!(editor.queued.is_empty());
+    assert_eq!(editor.pending.len(), 1);
+    assert!(!editor.running);
+}
+
+#[test]
+fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
+    use vibez_engine::events::ClipTrackState;
+    let track = TrackId::new();
+    let clip =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
+    let store = ClipStore {
+        clips: vec![clip.clone()],
+    };
+    let mut editor = ClipEditor {
+        next_request: 40,
+        running: true,
+        ..Default::default()
+    };
+    editor.pending.insert(40, clip.clone());
+    editor.playing.insert(track, clip.clone());
+    editor.started_at.insert(track, 0);
+    editor.queue_request(track, Some(clip.id), 40);
+    editor.selected = Some(clip.id);
+    editor.reset_project();
+    assert!(editor.pending.is_empty());
+    assert!(editor.playing.is_empty());
+    assert!(editor.queued.is_empty());
+    assert!(editor.started_at.is_empty());
+    assert!(editor.selected.is_none());
+    assert!(!editor.running);
+    editor.next_request += 1;
+    let request = editor.next_request;
+    editor.pending.insert(request, clip.clone());
+    editor.queue_request(track, Some(clip.id), request);
+    editor.running = true;
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: None,
+            queued: None,
+            through_request: 40,
+            effective_at_samples: 0,
+            running: false,
+            transport_playing: false,
+        },
+        &store,
+    );
+    assert!(
+        editor.pending.contains_key(&request),
+        "the previous project's watermark must not reclaim the new source"
+    );
+    assert_eq!(editor.queued[&track], Some(clip.id));
+    assert_eq!(editor.queued_requests[&track], request);
+    assert!(editor.running);
+    editor.acknowledge_transition(track, request);
+    assert!(editor.queued.is_empty());
+    let acknowledged = editor
+        .pending
+        .remove(&request)
+        .expect("the eventual transition must still resolve its source");
+    assert_eq!(acknowledged.id, clip.id);
+}

@@ -70,6 +70,10 @@ pub struct AudioEngine {
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
     event_tx: Producer<EngineEvent>,
+    clip_event_drops: u64,
+    reported_clip_event_drops: u64,
+    clip_resync_track: Option<usize>,
+    clip_through_request: u64,
     /// Set when process_multitrack split the block at the arrangement
     /// loop boundary; suppresses the post-advance discontinuity flush
     /// for that block (segment-2 notes are legitimately sounding).
@@ -212,6 +216,10 @@ impl AudioEngine {
             sample_rate: 44100,
             cmd_rx,
             event_tx,
+            clip_event_drops: 0,
+            reported_clip_event_drops: 0,
+            clip_resync_track: None,
+            clip_through_request: 0,
             split_wrap_handled: false,
             active_section: None,
             clip_performance: false,
@@ -273,6 +281,7 @@ impl AudioEngine {
             live_input,
             mut track_output_capture,
         } = block;
+        self.resync_clip_events();
         // A musical boundary due at this block start owns the same timestamp
         // as commands drained below. Publish the recording start first so a
         // first pad strike at the boundary cannot reach consumers while the

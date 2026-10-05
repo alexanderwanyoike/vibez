@@ -101,7 +101,7 @@ impl App {
         self.state.project.new_project_layout = None;
         self.state.perform.layout = Default::default();
         self.state.perform.clips = Default::default();
-        self.state.perform.clip_editor = Default::default();
+        self.state.perform.clip_editor.reset_project();
         self.state.perform.clip_record = Default::default();
         self.state.perform.selected_section = None;
         self.state.perform.section_editor.clear();
