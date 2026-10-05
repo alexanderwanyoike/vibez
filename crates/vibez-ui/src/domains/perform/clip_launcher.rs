@@ -95,6 +95,14 @@ pub struct ClipEditor {
 }
 
 impl ClipEditor {
+    pub fn reset_project(&mut self) {
+        // Request IDs share the engine lifetime, which survives project changes.
+        *self = Self {
+            next_request: self.next_request,
+            ..Self::default()
+        };
+    }
+
     pub fn resync_track(&mut self, state: vibez_engine::events::ClipTrackState, clips: &ClipStore) {
         let track = state.track_id;
         let playing = state.playing.and_then(|active| {

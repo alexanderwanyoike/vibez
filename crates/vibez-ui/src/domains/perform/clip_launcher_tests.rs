@@ -564,3 +564,62 @@ fn resync_preserves_queued_sources_and_newer_intent_while_reclaiming_obsolete_pe
     assert_eq!(editor.pending.len(), 1);
     assert!(!editor.running);
 }
+
+#[test]
+fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
+    use vibez_engine::events::ClipTrackState;
+    let track = TrackId::new();
+    let clip =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
+    let store = ClipStore {
+        clips: vec![clip.clone()],
+    };
+    let mut editor = ClipEditor {
+        next_request: 40,
+        running: true,
+        ..Default::default()
+    };
+    editor.pending.insert(40, clip.clone());
+    editor.playing.insert(track, clip.clone());
+    editor.started_at.insert(track, 0);
+    editor.queue_request(track, Some(clip.id), 40);
+    editor.selected = Some(clip.id);
+    editor.reset_project();
+    assert!(editor.pending.is_empty());
+    assert!(editor.playing.is_empty());
+    assert!(editor.queued.is_empty());
+    assert!(editor.started_at.is_empty());
+    assert!(editor.selected.is_none());
+    assert!(!editor.running);
+    editor.next_request += 1;
+    let request = editor.next_request;
+    editor.pending.insert(request, clip.clone());
+    editor.queue_request(track, Some(clip.id), request);
+    editor.running = true;
+    editor.resync_track(
+        ClipTrackState {
+            track_id: track,
+            playing: None,
+            queued: None,
+            through_request: 40,
+            effective_at_samples: 0,
+            running: false,
+            transport_playing: false,
+        },
+        &store,
+    );
+    assert!(
+        editor.pending.contains_key(&request),
+        "the previous project's watermark must not reclaim the new source"
+    );
+    assert_eq!(editor.queued[&track], Some(clip.id));
+    assert_eq!(editor.queued_requests[&track], request);
+    assert!(editor.running);
+    editor.acknowledge_transition(track, request);
+    assert!(editor.queued.is_empty());
+    let acknowledged = editor
+        .pending
+        .remove(&request)
+        .expect("the eventual transition must still resolve its source");
+    assert_eq!(acknowledged.id, clip.id);
+}
