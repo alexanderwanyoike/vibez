@@ -51,6 +51,31 @@ impl<T: ?Sized> std::fmt::Debug for DisposalCell<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipPlayingState {
+    pub clip_id: ClipId,
+    pub request_id: u64,
+    pub position: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipQueuedState {
+    pub clip_id: Option<ClipId>,
+    pub request_id: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipTrackState {
+    pub track_id: TrackId,
+    pub playing: Option<ClipPlayingState>,
+    pub queued: Option<ClipQueuedState>,
+    /// Newer UI requests must survive recovery until the engine consumes them.
+    pub through_request: u64,
+    pub effective_at_samples: u64,
+    pub running: bool,
+    pub transport_playing: bool,
+}
+
 #[derive(Debug)]
 pub enum EngineEvent {
     /// A device removed from the audio graph, handed back so the UI
@@ -82,6 +107,11 @@ pub enum EngineEvent {
         effective_at_samples: u64,
         retired: Option<Box<PreparedClipPlayback>>,
     },
+    /// A snapshot cannot reconstruct every missed Capture boundary.
+    ClipEventsDropped {
+        total: u64,
+    },
+    ClipStateResynced(ClipTrackState),
     /// Prepared sources must be dropped on the UI thread.
     ClipRequestRetired(Box<PreparedClipPlayback>),
     /// The UI owns deallocation of the emptied launch batch.
@@ -138,7 +168,9 @@ pub enum EngineEvent {
         effective_at_samples: u64,
     },
     /// A second Pad Gesture cancelled the pending Track Mute.
-    TrackMuteQueueCancelled { track_id: TrackId },
+    TrackMuteQueueCancelled {
+        track_id: TrackId,
+    },
     /// A manual control took precedence over automation, or automation
     /// was explicitly re-enabled.
     AutomationOverrideChanged {
@@ -190,7 +222,10 @@ pub enum EngineEvent {
         output_start: u64,
     },
     /// Note capture begins only after the count-in has actually finished.
-    ClipRecordStarted { clip_id: ClipId, at: u64 },
+    ClipRecordStarted {
+        clip_id: ClipId,
+        at: u64,
+    },
     /// The started flag distinguishes a completed take from cancelled count-in.
     ClipRecordStopped {
         clip_id: ClipId,
@@ -234,7 +269,9 @@ pub enum EngineEvent {
     },
 
     /// Capture into Arrange stopped on this exact engine boundary.
-    PerformanceCaptureStopped { effective_at_samples: u64 },
+    PerformanceCaptureStopped {
+        effective_at_samples: u64,
+    },
 
     /// A resident Section is queued for this exact transport sample.
     /// Re-queueing returns the displaced resident owner for UI-thread drop.
@@ -603,6 +640,10 @@ impl PartialEq for EngineEvent {
                     && left_position == right_position
                     && std::ptr::eq(left_retired.as_ref(), right_retired.as_ref())
             }
+            (Self::ClipEventsDropped { total: left }, Self::ClipEventsDropped { total: right }) => {
+                left == right
+            }
+            (Self::ClipStateResynced(left), Self::ClipStateResynced(right)) => left == right,
             (Self::PlaybackStarted, Self::PlaybackStarted)
             | (Self::PlaybackStopped, Self::PlaybackStopped)
             | (Self::AuditionStopped, Self::AuditionStopped)

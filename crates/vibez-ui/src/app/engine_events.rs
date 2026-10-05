@@ -64,6 +64,32 @@ fn apply_drum_pad_flash(
     }
 }
 
+fn apply_clip_resync(
+    state: &mut crate::state::AppState,
+    snapshot: vibez_engine::events::ClipTrackState,
+) {
+    state
+        .perform
+        .clip_editor
+        .resync_track(snapshot, &state.perform.clips);
+
+    if state.perform.clip_editor.next_request <= snapshot.through_request {
+        state.transport.playing = snapshot.transport_playing;
+    }
+    let source = state
+        .perform
+        .clip_editor
+        .playing
+        .get(&snapshot.track_id)
+        .map(|clip| CapturedTimelineSource::from_clip(clip, state.transport.samples_per_beat()));
+    state.perform.capture.clip_transition(
+        snapshot.track_id,
+        source,
+        snapshot.effective_at_samples,
+        snapshot.playing.map_or(0, |active| active.position),
+    );
+}
+
 impl App {
     pub(super) fn poll_engine_events(&mut self) {
         if let Some(command) = self
@@ -110,6 +136,12 @@ impl App {
                             .perform
                             .clip_editor
                             .queue_request(track_id, clip_id, request_id);
+                    }
+                    EngineEvent::ClipEventsDropped { total } => {
+                        self.state.status_text = format!("Clip events lost ({total}); launcher state will resync. Capture may be incomplete");
+                    }
+                    EngineEvent::ClipStateResynced(snapshot) => {
+                        apply_clip_resync(&mut self.state, snapshot)
                     }
                     EngineEvent::ClipBatchRetired(retired) => drop(retired),
                     EngineEvent::ClipRequestRetired(retired) => {
@@ -550,6 +582,127 @@ mod tests {
     use crate::domains::perform::PendingTrackMute;
     use crate::state::ProjectTrack;
     use vibez_core::id::TrackId;
+
+    #[test]
+    fn dropped_engine_transition_recovers_the_actual_launcher_state() {
+        use crate::domains::perform::clip_record::empty_midi_clip;
+        use vibez_core::id::ClipId;
+        use vibez_core::perform::MusicalBoundary;
+        use vibez_engine::commands::EngineCommand;
+        let (mut engine, mut commands, mut events) = vibez_engine::engine::AudioEngine::new();
+        let track = TrackId::new();
+        commands
+            .push(EngineCommand::AddTrack(track, "Bass".into()))
+            .unwrap();
+        commands.push(EngineCommand::SetSampleRate(8)).unwrap();
+        commands.push(EngineCommand::SetBpm(120.0)).unwrap();
+        for _ in 0..vibez_core::constants::RING_BUFFER_CAPACITY {
+            engine.process_block(vibez_engine::engine::AudioProcessBlock::new(&mut [], 1));
+        }
+        let clip = empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
+        let mut state = AppState::default();
+        state.perform.layout = vibez_project::PerformLayout::Clips;
+        Arc::make_mut(&mut state.perform.clips)
+            .clips
+            .push(clip.clone());
+        state.perform.clip_editor.pending.insert(1, clip.clone());
+        state.perform.clip_editor.next_request = 1;
+        state
+            .perform
+            .clip_editor
+            .queue_request(track, Some(clip.id), 1);
+        state.perform.clip_editor.running = true;
+        commands
+            .push(EngineCommand::QueueClips {
+                clips: vec![clip.prepare(1, 4.0)],
+                quantization: MusicalBoundary::Immediate,
+            })
+            .unwrap();
+        engine.process_block(vibez_engine::engine::AudioProcessBlock::new(
+            &mut [0.0; 1],
+            1,
+        ));
+        let mut observed_drop = false;
+        for _ in 0..4 {
+            while let Ok(event) = events.pop() {
+                match event {
+                    EngineEvent::ClipEventsDropped { total } => observed_drop |= total > 0,
+                    EngineEvent::ClipStateResynced(snapshot) => {
+                        apply_clip_resync(&mut state, snapshot)
+                    }
+                    EngineEvent::ClipTransitioned { .. } => {
+                        panic!("transition should have been lost")
+                    }
+                    _ => {}
+                }
+            }
+            engine.process_block(vibez_engine::engine::AudioProcessBlock::new(
+                &mut [0.0; 1],
+                1,
+            ));
+        }
+        assert!(observed_drop);
+        assert_eq!(state.perform.clip_editor.playing[&track].id, clip.id);
+        assert!(state.perform.clip_editor.queued.is_empty());
+        assert!(state.perform.clip_editor.pending.is_empty());
+        assert!(state.perform.clip_editor.running);
+        assert!(
+            state.transport.playing,
+            "a lost PlaybackStarted must also recover"
+        );
+        assert!(state.perform.clip_editor.started_at.contains_key(&track));
+    }
+
+    #[test]
+    fn resync_restarts_capture_from_the_recovered_local_position() {
+        use vibez_core::id::ClipId;
+        use vibez_engine::events::{ClipPlayingState, ClipTrackState};
+        let track = TrackId::new();
+        let mut clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Take".into(),
+            4.0,
+        );
+        Arc::make_mut(&mut clip.timeline).ensure(track).note_clips[0]
+            .notes
+            .push(vibez_core::midi::MidiNote {
+                pitch: 42,
+                velocity: 100,
+                start_beat: 1.0,
+                duration_beats: 0.5,
+            });
+        let mut state = AppState::default();
+        state.transport.sample_rate = 8;
+        state.transport.bpm = 120.0;
+        state.perform.capture.phase = crate::domains::perform::CapturePhase::Starting;
+        state.perform.capture.prepare(0, 8, 120.0);
+        state.perform.capture.start(0, None);
+        state.perform.clip_editor.pending.insert(1, clip.clone());
+        state.perform.clip_editor.next_request = 1;
+        apply_clip_resync(
+            &mut state,
+            ClipTrackState {
+                track_id: track,
+                playing: Some(ClipPlayingState {
+                    clip_id: clip.id,
+                    request_id: 1,
+                    position: 4,
+                }),
+                queued: None,
+                through_request: 1,
+                effective_at_samples: 8,
+                running: true,
+                transport_playing: true,
+            },
+        );
+        let captured = state.perform.capture.finish(12).unwrap().materialize();
+        let notes = &captured.by_track[&track].note_clips[0].notes;
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].pitch, 42);
+        assert_eq!(captured.by_track[&track].note_clips[0].position_beats, 2.0);
+    }
 
     #[test]
     fn audition_completion_recognizes_every_canonical_playing_status() {

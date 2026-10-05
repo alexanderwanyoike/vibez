@@ -95,6 +95,54 @@ pub struct ClipEditor {
 }
 
 impl ClipEditor {
+    pub fn resync_track(&mut self, state: vibez_engine::events::ClipTrackState, clips: &ClipStore) {
+        let track = state.track_id;
+        let playing = state.playing.and_then(|active| {
+            self.pending
+                .remove(&active.request_id)
+                .filter(|clip| clip.id == active.clip_id)
+                .or_else(|| {
+                    self.playing
+                        .get(&track)
+                        .filter(|clip| clip.id == active.clip_id)
+                        .cloned()
+                })
+                .or_else(|| clips.by_id(active.clip_id).cloned())
+                .map(|clip| (clip, active.position))
+        });
+        if let Some((clip, position)) = playing {
+            self.playing.insert(track, clip);
+            self.started_at
+                .insert(track, state.effective_at_samples.saturating_sub(position));
+        } else {
+            self.playing.remove(&track);
+            self.started_at.remove(&track);
+        }
+        // A snapshot can arrive after the UI submits intent the engine has not consumed.
+        if self
+            .queued_requests
+            .get(&track)
+            .is_none_or(|request| *request <= state.through_request)
+        {
+            if let Some(queued) = state.queued {
+                self.queue_request(track, queued.clip_id, queued.request_id);
+            } else {
+                self.queued.remove(&track);
+                self.queued_requests.remove(&track);
+            }
+        }
+        self.pending.retain(|request, clip| {
+            clip.track_id != track
+                || *request > state.through_request
+                || state
+                    .queued
+                    .is_some_and(|queued| queued.request_id == *request)
+        });
+        if self.next_request <= state.through_request {
+            self.running = state.running;
+        }
+    }
+
     pub fn playhead_samples(&self, id: ClipId, position: u64, spb: f64) -> Option<u64> {
         let clip = self.playing.values().find(|clip| clip.id == id)?;
         let start = *self.started_at.get(&clip.track_id)?;
