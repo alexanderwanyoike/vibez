@@ -243,6 +243,14 @@ pub(super) fn refresh_edited_clips(
             continue;
         }
         let editor = &mut perform.clip_editor;
+        if !editor
+            .playing
+            .get(&clip.track_id)
+            .is_some_and(|active| active.id == clip.id)
+            && editor.queued.get(&clip.track_id) != Some(&Some(clip.id))
+        {
+            continue;
+        }
         editor.next_request += 1;
         let active = clip.prepare(editor.next_request, spb);
         editor.pending.insert(editor.next_request, clip.clone());
@@ -261,6 +269,50 @@ mod live_edit_tests {
     use crate::domains::test_support::RecordingEngine;
     use crate::state::AppState;
     use vibez_engine::commands::EngineCommand;
+
+    #[test]
+    fn live_edits_only_publish_sources_for_playing_or_queued_clips() {
+        for (playing, queued) in [(false, false), (true, false), (false, true)] {
+            let track = TrackId::new();
+            let clip = crate::domains::perform::clip_record::empty_midi_clip(
+                ClipId::new(),
+                track,
+                0,
+                "Take".into(),
+                4.0,
+            );
+            let mut state = crate::domains::perform::PerformState::default();
+            state.layout = PerformLayout::Clips;
+            Arc::make_mut(&mut state.clips).clips.push(clip.clone());
+            state.clip_editor.running = true;
+            let other = ClipId::new();
+            state
+                .clip_editor
+                .queued
+                .insert(track, Some(if queued { clip.id } else { other }));
+            if playing {
+                state.clip_editor.playing.insert(track, clip.clone());
+            }
+            let before = Arc::clone(&state.clips);
+            Arc::make_mut(&mut Arc::make_mut(&mut state.clips).clips[0].timeline)
+                .ensure(track)
+                .note_clips[0]
+                .name = "Edited".into();
+            let mut engine = RecordingEngine::default();
+            refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+            if playing || queued {
+                assert!(matches!(&engine.0[..], [EngineCommand::EditClip { .. }]));
+                assert_eq!(state.clip_editor.pending.len(), 2);
+            } else {
+                assert!(
+                    engine.0.is_empty(),
+                    "idle edits must not prepare engine sources"
+                );
+                assert!(state.clip_editor.pending.is_empty());
+                assert_eq!(state.clip_editor.next_request, 0);
+            }
+        }
+    }
 
     #[test]
     fn deleting_the_part_in_the_shared_editor_stops_its_resident_clip() {
@@ -314,6 +366,11 @@ mod live_edit_tests {
         );
         let id = state.perform.clip_editor.selected.unwrap();
         state.perform.clip_editor.running = true;
+        state
+            .perform
+            .clip_editor
+            .playing
+            .insert(track, state.perform.clips.by_id(id).unwrap().clone());
         let before = Arc::clone(&state.perform.clips);
         state.piano_roll.update(
             PianoRollMsg::AddNote {
