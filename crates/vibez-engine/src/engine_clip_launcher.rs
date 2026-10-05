@@ -110,7 +110,7 @@ impl AudioEngine {
         self.transport.set_audio_length(None);
         if !self.transport.is_playing() {
             self.transport.play();
-            let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+            self.clip_event(EngineEvent::PlaybackStarted);
         }
     }
 

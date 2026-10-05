@@ -730,3 +730,96 @@ fn full_clip_event_queue_never_reclaims_a_retired_source_in_the_callback() {
         "a full ring must forget the source owner"
     );
 }
+
+#[test]
+fn transport_acknowledgements_displaced_by_the_final_clip_snapshot_restart_recovery() {
+    for (command, transport_playing) in [
+        (EngineCommand::Stop, false),
+        (EngineCommand::UnloadAudio, false),
+        (EngineCommand::Play, true),
+    ] {
+        let (mut engine, mut commands, _, a, b) = setup();
+        let (events_tx, mut events) = rtrb::RingBuffer::new(1);
+        engine.event_tx = events_tx;
+        launch(
+            &mut commands,
+            vec![clip(b, 1, &[0.1; 32], true)],
+            MusicalBoundary::Immediate,
+        );
+        engine.process(&mut [0.0; 1], 1);
+        let mut first_track_recovered = false;
+        for _ in 0..8 {
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::ClipStateResynced(state) = event {
+                    first_track_recovered |= state.track_id == a;
+                }
+            }
+            if first_track_recovered {
+                break;
+            }
+            engine.process(&mut [0.0; 1], 1);
+        }
+        assert!(first_track_recovered);
+        assert!(engine
+            .tracks
+            .iter()
+            .all(|track| track.queued_clip.is_none()));
+        assert!(engine.clip_record.is_none());
+        commands.push(command).unwrap();
+        engine.process(&mut [0.0; 1], 1);
+        let EngineEvent::ClipStateResynced(stale) = events.pop().unwrap() else {
+            panic!("the final playing snapshot must occupy the one-slot queue");
+        };
+        assert_eq!(stale.track_id, b);
+        assert!(stale.playing.is_some());
+        assert!(stale.running);
+        assert!(!engine.clip_performance);
+        assert_eq!(engine.transport.is_playing(), transport_playing);
+        let mut recovered = None;
+        for _ in 0..8 {
+            engine.process(&mut [0.0; 1], 1);
+            while let Ok(event) = events.pop() {
+                if let EngineEvent::ClipStateResynced(state) = event {
+                    if state.track_id == b {
+                        recovered = Some(state);
+                    }
+                }
+            }
+        }
+        let recovered =
+            recovered.expect("lost transport acknowledgement must retry launcher recovery");
+        assert!(recovered.playing.is_none());
+        assert!(recovered.queued.is_none());
+        assert!(!recovered.running);
+        assert_eq!(recovered.transport_playing, transport_playing);
+    }
+}
+
+#[test]
+fn dropped_clip_performance_start_is_recoverable_without_a_launch_request() {
+    let (mut engine, mut commands, _, a, _) = setup();
+    let (mut events_tx, mut events) = rtrb::RingBuffer::new(1);
+    events_tx.push(EngineEvent::PlaybackPosition(0)).unwrap();
+    engine.event_tx = events_tx;
+    commands.push(EngineCommand::BeginClipPerformance).unwrap();
+    engine.process(&mut [0.0; 1], 1);
+    assert!(engine.transport.is_playing());
+    assert!(engine
+        .tracks
+        .iter()
+        .all(|track| track.active_clip.is_none() && track.queued_clip.is_none()));
+    let mut recovered = None;
+    for _ in 0..8 {
+        while let Ok(event) = events.pop() {
+            if let EngineEvent::ClipStateResynced(state) = event {
+                if state.track_id == a {
+                    recovered = Some(state);
+                }
+            }
+        }
+        engine.process(&mut [0.0; 1], 1);
+    }
+    let recovered = recovered.expect("lost Clip transport start must schedule recovery");
+    assert!(recovered.running);
+    assert!(recovered.transport_playing);
+}

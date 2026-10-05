@@ -22,6 +22,7 @@ impl AudioEngine {
                     quantization,
                 } => self.queue_clips(clips, quantization),
                 EngineCommand::Play => {
+                    let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.clock_domain = ClockDomain::Arrange;
                     if !self.arrangement_recording {
@@ -47,9 +48,14 @@ impl AudioEngine {
                     self.stopped_note_repeat_anchor = None;
                     let anchor = self.playing_note_repeat_anchor();
                     self.reanchor_note_repeats(anchor, self.performance_position);
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+                    if was_clip_performance {
+                        self.clip_event(EngineEvent::PlaybackStarted);
+                    } else {
+                        let _ = self.event_tx.push(EngineEvent::PlaybackStarted);
+                    }
                 }
                 EngineCommand::Stop => {
+                    let was_clip_performance = self.clip_performance;
                     self.stop_section_record();
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
                         effective_at_samples: self.effective_position(),
@@ -73,7 +79,11 @@ impl AudioEngine {
                     if let Some(anchor) = self.stopped_note_repeat_anchor {
                         self.reanchor_note_repeats(anchor, self.performance_position);
                     }
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                    if was_clip_performance {
+                        self.clip_event(EngineEvent::PlaybackStopped);
+                    } else {
+                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                    }
                 }
                 EngineCommand::Seek(pos) => {
                     self.transport.seek(pos);
@@ -227,6 +237,7 @@ impl AudioEngine {
                     }
                 }
                 EngineCommand::UnloadAudio => {
+                    let was_clip_performance = self.clip_performance;
                     self.clear_clip_performance();
                     self.stop_section_record();
                     let _ = self.event_tx.push(EngineEvent::PerformanceCaptureStopped {
@@ -239,7 +250,11 @@ impl AudioEngine {
                     self.clock_domain = ClockDomain::Arrange;
                     self.transport.set_audio_length(None);
                     self.transport.stop();
-                    let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                    if was_clip_performance {
+                        self.clip_event(EngineEvent::PlaybackStopped);
+                    } else {
+                        let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                    }
                 }
                 // -- Multi-track commands --
                 EngineCommand::AddTrack(id, _name) => {
