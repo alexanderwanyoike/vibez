@@ -42,6 +42,10 @@ pub trait EngineHandle {
 pub struct EngineCommandQueue {
     producer: Option<rtrb::Producer<EngineCommand>>,
     pending: VecDeque<EngineCommand>,
+    device_owners: std::collections::HashMap<
+        (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
+        usize,
+    >,
 }
 
 impl EngineCommandQueue {
@@ -49,6 +53,64 @@ impl EngineCommandQueue {
         Self {
             producer: Some(producer),
             pending: VecDeque::new(),
+            device_owners: Default::default(),
+        }
+    }
+
+    pub fn owns_reconfiguration(
+        &self,
+        device: &vibez_engine::engine::reconfiguration::DeviceReconfiguration,
+    ) -> bool {
+        self.device_owners
+            .get(&(device.track_id(), device.effect_id()))
+            == Some(&device.owner_identity())
+    }
+
+    fn record_device_owner(&mut self, command: &EngineCommand) {
+        use vibez_engine::engine::reconfiguration::{
+            effect_owner_identity, instrument_owner_identity,
+        };
+        match command {
+            EngineCommand::AddPluginEffect {
+                track_id,
+                effect_id,
+                effect,
+                ..
+            } => {
+                self.device_owners.insert(
+                    (*track_id, Some(*effect_id)),
+                    effect_owner_identity(&**effect),
+                );
+            }
+            EngineCommand::SetPluginInstrument {
+                track_id,
+                instrument,
+            } => {
+                self.device_owners
+                    .insert((*track_id, None), instrument_owner_identity(&**instrument));
+            }
+            EngineCommand::AddEffect {
+                track_id,
+                effect_id,
+                ..
+            }
+            | EngineCommand::RemoveEffect(track_id, effect_id) => {
+                self.device_owners.remove(&(*track_id, Some(*effect_id)));
+            }
+            EngineCommand::SetTrackInstrument(track_id, ..)
+            | EngineCommand::RemoveTrackInstrument(track_id) => {
+                self.device_owners.remove(&(*track_id, None));
+            }
+            EngineCommand::RemoveTrack(track_id)
+            | EngineCommand::RemoveBus(track_id)
+            | EngineCommand::AddTrack(track_id, _)
+            | EngineCommand::AddBus(track_id, _)
+            | EngineCommand::AddMidiTrack(track_id, _)
+            | EngineCommand::AddInstrumentTrack(track_id, _, _) => {
+                self.device_owners.retain(|(track, _), _| track != track_id);
+            }
+            EngineCommand::UnloadAudio => self.device_owners.clear(),
+            _ => {}
         }
     }
 
@@ -76,6 +138,9 @@ impl EngineCommandQueue {
 
 impl EngineHandle for EngineCommandQueue {
     fn send(&mut self, cmd: EngineCommand) {
+        // Lifetime changes take effect in the UI even when the command ring is
+        // full; a delayed native handoff cannot reactivate a replaced owner.
+        self.record_device_owner(&cmd);
         let Some(producer) = self.producer.as_mut() else {
             return;
         };

@@ -166,3 +166,11 @@ The fixtures and installed adapter probes above do not establish complete Bounce
 sessions for the installed third-party processors. Cross-platform CI belongs to
 the final integrated head; local native checks alone do not establish Windows or
 macOS hardware behavior.
+
+Device reconfiguration keeps an explicit in-flight owner identity. The UI rejects
+an obsolete owner before reactivation when reset, removal or replacement has
+already been queued; the engine independently rejects its delayed return. Those
+returns retire the device, unused prepared routing and storage on main. Effect
+bypass and order edits made during the handoff remain current. Main prepares
+restoration capacity before returning the device so a valid insert beside the
+held slot does not allocate or release a buffer in the callback.

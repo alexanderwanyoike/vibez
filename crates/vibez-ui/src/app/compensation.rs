@@ -17,6 +17,9 @@ impl App {
     }
 
     pub(super) fn reconfigure_device_timing(&mut self, mut device: DeviceReconfiguration) {
+        if !self.cmd_tx.owns_reconfiguration(&device) {
+            return;
+        }
         let track_id = device.track_id();
         let effect_id = device.effect_id();
         let name = self
@@ -39,6 +42,9 @@ impl App {
                     })
             })
             .unwrap_or_else(|| "Removed device".into());
+        if let Some(track) = self.state.find_track(track_id) {
+            device.prepare_effect_storage(track.effects.len());
+        }
         let reconfigured = device.reconfigure_on_main_thread();
         let reported = reconfigured.as_ref().ok().map(|_| device.latency_samples());
         if let Some(track) = self.state.find_track_mut(track_id) {

@@ -55,6 +55,8 @@ pub struct AudioEngine {
     compensation_callback_heard_start: u64,
     capture_clip_positions: Vec<(TrackId, u64, u64)>,
     compensation_suspended: bool,
+    next_device_handoff: u64,
+    pending_device_reconfiguration: Option<reconfiguration::PendingDeviceReconfiguration>,
     graph_edit_pending: bool,
     compensation_valid: bool,
     compensation_failure_reported: bool,
@@ -233,6 +235,8 @@ impl AudioEngine {
             compensation_callback_heard_start: 0,
             capture_clip_positions: Vec::with_capacity(presentation::PRESENTATION_EVENT_CAPACITY),
             compensation_suspended: false,
+            next_device_handoff: 0,
+            pending_device_reconfiguration: None,
             graph_edit_pending: false,
             compensation_valid: true,
             compensation_failure_reported: false,
@@ -869,6 +873,9 @@ mod compensation_clip_tests;
 #[path = "engine_graph_tests.rs"]
 mod graph_tests;
 
+#[path = "engine_reconfiguration_edits.rs"]
+mod reconfiguration_edits;
+
 #[path = "engine_reconfiguration.rs"]
 pub mod reconfiguration;
 
@@ -897,3 +904,7 @@ mod compensation_stop_tests;
 #[cfg(test)]
 #[path = "engine_offline_configuration_tests.rs"]
 mod offline_configuration_tests;
+
+#[cfg(test)]
+#[path = "engine_reconfiguration_owner_tests.rs"]
+mod reconfiguration_owner_tests;

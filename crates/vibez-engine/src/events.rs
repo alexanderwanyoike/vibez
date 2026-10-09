@@ -78,6 +78,10 @@ pub struct SourceRecordingPosition {
 #[derive(Debug)]
 pub enum EngineEvent {
     PresentationCancelled,
+    DeviceReconfigurationRetired {
+        device: crate::engine::reconfiguration::DeviceReconfiguration,
+        reason: Option<String>,
+    },
     DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
     CompensationFailed {
         reason: String,
@@ -92,6 +96,7 @@ pub enum EngineEvent {
         effect_id: Option<vibez_core::id::EffectId>,
         reason: &'static str,
     },
+    RetiredEffectStorage(crate::engine::reconfiguration::RetiredEffectStorage),
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RoutingRetired(Box<crate::routing::PreparedRouting>),

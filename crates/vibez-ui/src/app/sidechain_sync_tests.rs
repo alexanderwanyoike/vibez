@@ -212,13 +212,26 @@ fn timing_reactivation_refreshes_choices_and_persists_restored_feedback_silence(
         .devices
         .sidechain_choices
         .contains_key(&(effect_id, ExternalInputId(0))));
+    let (producer, mut consumer) = rtrb::RingBuffer::new(8);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.send_command(EngineCommand::AddPluginEffect {
+        track_id,
+        effect_id,
+        effect: vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0),
+        position: None,
+    });
+    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+        panic!("device creation")
+    };
     app.reconfigure_device_timing(
         vibez_engine::engine::reconfiguration::DeviceReconfiguration::Effect {
+            handoff_id: 1,
+            reserved_effects: Vec::new(),
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
                 id: effect_id,
-                effect: vibez_dsp::factory::create_effect(EffectType::Compressor, 44_100.0),
+                effect,
                 bypass: false,
             },
         },

@@ -713,3 +713,6 @@ mod sidechain_sync;
 
 #[cfg(test)]
 mod sidechain_sync_tests;
+
+#[cfg(test)]
+mod compensation_bridge_tests;

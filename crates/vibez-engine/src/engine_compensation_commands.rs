@@ -59,7 +59,24 @@ impl AudioEngine {
                 self.retire_event(EngineEvent::CompensationFailed { reason });
             }
             EngineCommand::ResumeDeviceReconfiguration { device, routing } => {
-                self.restore_reconfigured_device(device);
+                if !self.handoff_is_current(&device) {
+                    self.retired_routing = Some(routing);
+                    self.return_retired_routing();
+                    self.retire_event(EngineEvent::DeviceReconfigurationRetired {
+                        device,
+                        reason: None,
+                    });
+                    return Ok(());
+                }
+                if !self.restore_reconfigured_device(device) {
+                    self.compensation_suspended = false;
+                    self.close_capture_on_failure();
+                    self.transport.stop();
+                    self.retired_routing = Some(routing);
+                    self.return_retired_routing();
+                    let _ = self.event_tx.push(EngineEvent::PlaybackStopped);
+                    return Ok(());
+                }
                 self.compensation_suspended = false;
                 self.graph_edit_pending = false;
                 self.compensation_valid = true;
@@ -69,7 +86,14 @@ impl AudioEngine {
                 self.return_retired_routing();
             }
             EngineCommand::RejectDeviceReconfiguration { device, reason } => {
-                self.restore_reconfigured_device(device);
+                if !self.handoff_is_current(&device) {
+                    self.retire_event(EngineEvent::DeviceReconfigurationRetired {
+                        device,
+                        reason: Some(reason),
+                    });
+                    return Ok(());
+                }
+                let _ = self.restore_reconfigured_device(device);
                 self.compensation_suspended = false;
                 self.close_capture_on_failure();
                 self.compensation_valid = false;

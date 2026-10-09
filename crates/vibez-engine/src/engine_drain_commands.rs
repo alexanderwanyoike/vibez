@@ -43,7 +43,11 @@ impl AudioEngine {
             if self.scheduled_presentation.len() + 2 >= self.scheduled_presentation.capacity()
                 || self.section_capture_timing.len() + 2 >= self.section_capture_timing.capacity()
                 || self.pending_bus_cleanup.is_some()
-                || self.pending_retirements.len() == self.pending_retirements.capacity()
+                || self
+                    .pending_retirements
+                    .capacity()
+                    .saturating_sub(self.pending_retirements.len())
+                    < 2
                 || !self.channel_retirement.has_capacity()
             {
                 break;
@@ -60,9 +64,10 @@ impl AudioEngine {
             {
                 break;
             }
-            let Ok(cmd) = self.cmd_rx.pop() else {
+            let Ok(mut cmd) = self.cmd_rx.pop() else {
                 break;
             };
+            self.prepare_device_edit(&mut cmd);
             if self.routing.is_some()
                 && matches!(
                     &cmd,

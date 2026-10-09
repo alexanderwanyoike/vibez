@@ -1,13 +1,28 @@
+//! Exclusive device handoff and applied-plan validation.
+
 use super::*;
 use vibez_core::id::EffectId;
 
+pub struct RetiredEffectStorage(pub(super) Vec<EffectSlot>);
+impl std::fmt::Debug for RetiredEffectStorage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RetiredEffectStorage")
+            .field("capacity", &self.0.capacity())
+            .finish()
+    }
+}
+
 pub enum DeviceReconfiguration {
     Effect {
+        handoff_id: u64,
+        reserved_effects: Vec<EffectSlot>,
         track_id: TrackId,
         position: usize,
         slot: EffectSlot,
     },
     Instrument {
+        handoff_id: u64,
         track_id: TrackId,
         instrument: Box<dyn vibez_instruments::Instrument>,
     },
@@ -23,7 +38,40 @@ impl std::fmt::Debug for DeviceReconfiguration {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct PendingDeviceReconfiguration {
+    pub handoff_id: u64,
+    pub track_id: TrackId,
+    pub effect_id: Option<EffectId>,
+    pub position: usize,
+    pub bypass: bool,
+}
+
 impl DeviceReconfiguration {
+    pub fn prepare_effect_storage(&mut self, slots: usize) {
+        if let Self::Effect {
+            reserved_effects, ..
+        } = self
+        {
+            reserved_effects.reserve(slots);
+        }
+    }
+
+    pub fn handoff_id(&self) -> u64 {
+        match self {
+            Self::Effect { handoff_id, .. } | Self::Instrument { handoff_id, .. } => *handoff_id,
+        }
+    }
+
+    /// Equality key for the live hosted Box, never a pointer to dereference.
+    /// The held non-zero-sized native owner excludes reuse during this handoff.
+    pub fn owner_identity(&self) -> usize {
+        match self {
+            Self::Effect { slot, .. } => effect_owner_identity(&*slot.effect),
+            Self::Instrument { instrument, .. } => instrument_owner_identity(&**instrument),
+        }
+    }
+
     pub fn track_id(&self) -> TrackId {
         match self {
             Self::Effect { track_id, .. } | Self::Instrument { track_id, .. } => *track_id,
@@ -57,6 +105,14 @@ impl DeviceReconfiguration {
             Self::Instrument { instrument, .. } => instrument.latency_samples(),
         }
     }
+}
+
+pub fn effect_owner_identity(effect: &dyn vibez_dsp::effect::AudioEffect) -> usize {
+    effect as *const dyn vibez_dsp::effect::AudioEffect as *const () as usize
+}
+
+pub fn instrument_owner_identity(instrument: &dyn vibez_instruments::Instrument) -> usize {
+    instrument as *const dyn vibez_instruments::Instrument as *const () as usize
 }
 
 impl AudioEngine {
@@ -180,6 +236,15 @@ impl AudioEngine {
         if self.compensation_suspended || self.graph_edit_pending {
             return;
         }
+        let Some(handoff_id) = self.next_device_handoff.checked_add(1) else {
+            self.report_compensation_failure(
+                TrackId::MASTER,
+                None,
+                "Device handoff identity exhausted",
+            );
+            self.compensation_valid = false;
+            return;
+        };
         let mut requested = None;
         for track in self
             .tracks
@@ -195,6 +260,8 @@ impl AudioEngine {
                 let mut slot = track.effects.remove(position);
                 slot.effect.stop_for_reconfiguration();
                 requested = Some(DeviceReconfiguration::Effect {
+                    handoff_id,
+                    reserved_effects: Vec::new(),
                     track_id: track.id,
                     position,
                     slot,
@@ -209,6 +276,7 @@ impl AudioEngine {
                 let mut instrument = track.instrument.take().unwrap();
                 instrument.stop_for_reconfiguration();
                 requested = Some(DeviceReconfiguration::Instrument {
+                    handoff_id,
                     track_id: track.id,
                     instrument,
                 });
@@ -216,46 +284,106 @@ impl AudioEngine {
             }
         }
         if let Some(device) = requested {
+            self.next_device_handoff = handoff_id;
+            let (position, bypass) = match &device {
+                DeviceReconfiguration::Effect { position, slot, .. } => (*position, slot.bypass),
+                _ => (0, false),
+            };
+            self.pending_device_reconfiguration = Some(PendingDeviceReconfiguration {
+                handoff_id,
+                track_id: device.track_id(),
+                effect_id: device.effect_id(),
+                position,
+                bypass,
+            });
             match self
                 .event_tx
                 .push(EngineEvent::DeviceReconfiguration(device))
             {
                 Ok(()) => self.compensation_suspended = true,
                 Err(rtrb::PushError::Full(EngineEvent::DeviceReconfiguration(device))) => {
-                    self.restore_reconfigured_device(device)
+                    let _ = self.restore_reconfigured_device(device);
                 }
                 Err(_) => unreachable!(),
             }
         }
     }
 
-    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration) {
+    pub(super) fn handoff_is_current(&self, device: &DeviceReconfiguration) -> bool {
+        self.pending_device_reconfiguration.is_some_and(|pending| {
+            pending.handoff_id == device.handoff_id()
+                && pending.track_id == device.track_id()
+                && pending.effect_id == device.effect_id()
+        })
+    }
+
+    pub(super) fn restore_reconfigured_device(&mut self, device: DeviceReconfiguration) -> bool {
+        let pending = self
+            .pending_device_reconfiguration
+            .take()
+            .expect("validated device handoff");
         match device {
             DeviceReconfiguration::Effect {
                 track_id,
-                position,
-                slot,
+                mut slot,
+                mut reserved_effects,
+                ..
             } => {
                 if let Some(track) = self.channel_mut(track_id) {
-                    // Removal retained the vector capacity while the main
-                    // thread exclusively owned the stopped native instance.
-                    track
-                        .effects
-                        .insert(position.min(track.effects.len()), slot);
-                } else {
-                    self.dispose_effect(slot.effect);
+                    if track.effects.len() == track.effects.capacity()
+                        && reserved_effects.capacity() > track.effects.len()
+                    {
+                        // A concurrent valid addition can consume the removed
+                        // slot's spare capacity; main supplies the replacement.
+                        reserved_effects.append(&mut track.effects);
+                        std::mem::swap(&mut track.effects, &mut reserved_effects);
+                    }
+                    if track.effects.len() < track.effects.capacity() {
+                        slot.bypass = pending.bypass;
+                        track
+                            .effects
+                            .insert(pending.position.min(track.effects.len()), slot);
+                        if reserved_effects.capacity() > 0 {
+                            self.retire_event(EngineEvent::RetiredEffectStorage(
+                                RetiredEffectStorage(reserved_effects),
+                            ));
+                        }
+                        return true;
+                    }
                 }
+                if reserved_effects.capacity() > 0 {
+                    self.retire_event(EngineEvent::RetiredEffectStorage(RetiredEffectStorage(
+                        reserved_effects,
+                    )));
+                }
+                self.dispose_effect(slot.effect);
+                self.compensation_valid = false;
+                self.report_compensation_failure(
+                    track_id,
+                    pending.effect_id,
+                    "Device restoration has no reserved effect slot",
+                );
             }
             DeviceReconfiguration::Instrument {
                 track_id,
                 instrument,
+                ..
             } => {
                 if let Some(track) = self.channel_mut(track_id) {
-                    track.instrument = Some(instrument);
-                } else {
-                    self.dispose_instrument(instrument);
+                    if track.instrument.is_none() {
+                        track.instrument = Some(instrument);
+                        return true;
+                    }
                 }
+                self.dispose_instrument(instrument);
+                self.compensation_valid = false;
+                self.report_compensation_failure(
+                    track_id,
+                    None,
+                    "Device restoration target is unavailable",
+                );
             }
         }
+        false
     }
 }

@@ -170,9 +170,19 @@ fn invalid_configuration_and_rejected_updates_close_capture_at_the_heard_stop_bo
             }
             _ => {
                 let slot = engine.tracks[0].effects.remove(0);
+                engine.pending_device_reconfiguration =
+                    Some(reconfiguration::PendingDeviceReconfiguration {
+                        handoff_id: 1,
+                        track_id: track,
+                        effect_id: Some(effect),
+                        position: 0,
+                        bypass: slot.bypass,
+                    });
                 commands
                     .push(EngineCommand::RejectDeviceReconfiguration {
                         device: reconfiguration::DeviceReconfiguration::Effect {
+                            handoff_id: 1,
+                            reserved_effects: Vec::new(),
                             track_id: track,
                             position: 0,
                             slot,

@@ -52,13 +52,26 @@ fn failed_restart_cannot_keep_a_valid_latency_readout() {
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks
         .push(track);
+    let (producer, mut consumer) = rtrb::RingBuffer::new(8);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.send_command(EngineCommand::AddPluginEffect {
+        track_id,
+        effect_id: id,
+        effect: Box::new(FailedRestart),
+        position: None,
+    });
+    let EngineCommand::AddPluginEffect { effect, .. } = consumer.pop().unwrap() else {
+        panic!("device creation")
+    };
     app.reconfigure_device_timing(
         vibez_engine::engine::reconfiguration::DeviceReconfiguration::Effect {
+            handoff_id: 1,
+            reserved_effects: Vec::new(),
             track_id,
             position: 0,
             slot: vibez_engine::mixer::EffectSlot {
                 id,
-                effect: Box::new(FailedRestart),
+                effect,
                 bypass: false,
             },
         },
