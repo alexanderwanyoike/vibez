@@ -283,3 +283,40 @@ fn concurrent_clap_restart_request_survives_activation_without_an_announcement_l
     plugin.reconfigure_on_main_thread().unwrap();
     assert!(!plugin.reconfiguration_requested());
 }
+
+#[test]
+fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactivation() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let audit = audit(&fixture, format);
+        let mut plugin = load(&fixture, format, &state(0, 0, 1 << 24), true).unwrap();
+        let mut output = [1.0; 128];
+        assert_eq!(
+            support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+            0
+        );
+        assert_eq!(output, [0.0; 128]);
+        assert!(!plugin.processing_configuration_valid());
+        assert!(plugin.take_processing_error().is_some());
+        plugin = std::thread::spawn(move || {
+            let mut output = [1.0; 128];
+            assert_eq!(
+                support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
+                0
+            );
+            assert_eq!(output, [0.0; 128]);
+            assert!(!plugin.processing_configuration_valid());
+            plugin
+        })
+        .join()
+        .unwrap();
+        plugin.stop_for_reconfiguration();
+        plugin.reconfigure_on_main_thread().unwrap();
+        assert!(plugin.processing_configuration_valid());
+        output.fill(1.0);
+        plugin.process_audio(&mut output, 2);
+        assert_eq!(output, [1.0; 128]);
+        drop(plugin);
+        assert_eq!(count(&audit, b"fixture_lifecycle_errors\0"), 0);
+    }
+}

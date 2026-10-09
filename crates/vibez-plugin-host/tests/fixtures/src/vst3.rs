@@ -282,6 +282,10 @@ impl IAudioProcessorTrait for Probe {
         kResultOk
     }
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
+        if self.timing.borrow().flag(24) {
+            self.timing.borrow_mut().clear_flag(24);
+            return kResultFalse;
+        }
         let _call = crate::ProcessingCall::enter(&self.in_call);
         let data = &*data;
         if !data.processContext.is_null() {

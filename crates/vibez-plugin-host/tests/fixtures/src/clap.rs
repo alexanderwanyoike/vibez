@@ -346,6 +346,10 @@ unsafe extern "C" fn process(
     data: *const clap_process,
 ) -> clap_process_status {
     check_audio_role(plugin);
+    if state(plugin).timing.flag(24) {
+        state(plugin).timing.clear_flag(24);
+        return CLAP_PROCESS_ERROR;
+    }
     let in_call = &*std::ptr::addr_of!((*((*plugin).plugin_data as *mut State)).in_call);
     let _call = crate::ProcessingCall::enter(in_call);
     if state(plugin).timing.flag(20) {
