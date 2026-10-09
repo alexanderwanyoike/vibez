@@ -40,6 +40,31 @@ impl AudioEffect for PluginEffectWrapper {
             buffer.fill(0.0);
         }
     }
+    fn set_audio_context(&mut self, context: vibez_core::audio_context::DeviceAudioContext) {
+        self.inner.set_audio_context(context);
+    }
+
+    fn reconfiguration_requested(&self) -> bool {
+        self.inner.reconfiguration_requested()
+    }
+
+    fn stop_for_reconfiguration(&mut self) {
+        self.inner.stop_for_reconfiguration();
+    }
+
+    fn reconfigure_on_main_thread(&mut self) -> Result<(), String> {
+        self.inner.reconfigure_on_main_thread()
+    }
+
+    fn activation_sample_rate(&self) -> Option<u32> {
+        self.inner.activation_sample_rate()
+    }
+    fn processing_configuration_valid(&self) -> bool {
+        self.inner.processing_configuration_valid()
+    }
+    fn latency_samples(&self) -> u32 {
+        self.inner.latency_samples()
+    }
 
     fn effect_type(&self) -> EffectType {
         // External plugins don't map to built-in EffectType.

@@ -21,6 +21,7 @@ pub mod gui;
 pub mod info;
 pub mod instance;
 pub mod paths;
+mod process_context;
 pub mod scan_helper;
 pub mod scanner;
 pub mod settings;
@@ -46,3 +47,5 @@ mod macos_bundle;
 pub mod test_fixtures;
 
 mod audio_ports;
+
+mod processing_thread;

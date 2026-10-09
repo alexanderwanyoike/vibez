@@ -103,6 +103,7 @@ fn production_engine_routes_two_independent_plugin_inputs_without_audible_source
         let receiver = TrackId::new();
         let effect = EffectId::new();
         let (mut engine, mut commands, mut events) = AudioEngine::new();
+        commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
         for track in [receiver, source_stereo, source_mono] {
             commands
                 .push(EngineCommand::AddTrack(track, "Fixture".into()))
@@ -478,6 +479,7 @@ fn source_taps_apply_effects_fader_and_pan_only_at_the_requested_stage() {
             let effect = EffectId::new();
             let gain_effect = EffectId::new();
             let (mut engine, mut commands, mut events) = AudioEngine::new();
+            commands.push(EngineCommand::SetSampleRate(48000)).unwrap();
             for track in [bass, ghost] {
                 commands
                     .push(EngineCommand::AddTrack(track, "Track".into()))

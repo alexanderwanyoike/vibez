@@ -1,14 +1,19 @@
 use clap_sys::{
     audio_buffer::clap_audio_buffer, entry::clap_plugin_entry, ext::audio_ports::*,
-    ext::latency::*, factory::plugin_factory::*, host::clap_host, plugin::*, process::*,
-    version::CLAP_VERSION,
+    ext::latency::*, ext::state::*, factory::plugin_factory::*, host::clap_host, plugin::*,
+    process::*, stream::*, version::CLAP_VERSION,
 };
 use std::ffi::{c_char, c_void, CStr};
 
 struct State {
     active: bool,
     processing: bool,
+    processing_thread: usize,
     max_frames: u32,
+    sample_rate: f64,
+    host: *const clap_host,
+    timing: crate::timing::Timing,
+    main_thread: usize,
     instrument: bool,
     playing: bool,
 }
@@ -66,7 +71,7 @@ unsafe extern "C" fn descriptor(
 }
 unsafe extern "C" fn create(
     _: *const clap_plugin_factory,
-    _host: *const clap_host,
+    host: *const clap_host,
     id: *const c_char,
 ) -> *const clap_plugin {
     let instrument = CStr::from_ptr(id) == c"vibez.fixture.instrument";
@@ -76,7 +81,12 @@ unsafe extern "C" fn create(
     let state = Box::into_raw(Box::new(State {
         active: false,
         processing: false,
+        processing_thread: 0,
         max_frames: 0,
+        sample_rate: 0.0,
+        host,
+        timing: Default::default(),
+        main_thread: crate::thread_id(),
         instrument,
         playing: false,
     }));
@@ -111,40 +121,61 @@ unsafe extern "C" fn plugin_init(_: *const clap_plugin) -> bool {
     true
 }
 unsafe extern "C" fn destroy(plugin: *const clap_plugin) {
+    if state(plugin).processing || state(plugin).main_thread != crate::thread_id() {
+        crate::lifecycle_error();
+    }
     drop(Box::from_raw((*plugin).plugin_data as *mut State));
     drop(Box::from_raw(plugin as *mut clap_plugin));
 }
-unsafe extern "C" fn activate(plugin: *const clap_plugin, _rate: f64, min: u32, max: u32) -> bool {
-    if min != 1 || max == 0 {
+unsafe extern "C" fn activate(plugin: *const clap_plugin, rate: f64, min: u32, max: u32) -> bool {
+    if min != 1 || max == 0 || !state(plugin).timing.activation_allowed() {
         return false;
     }
+    if state(plugin).processing || state(plugin).main_thread != crate::thread_id() {
+        return false;
+    }
+    state(plugin).timing.activate();
     state(plugin).active = true;
     state(plugin).max_frames = max;
+    state(plugin).sample_rate = rate;
     true
 }
 unsafe extern "C" fn deactivate(plugin: *const clap_plugin) {
     state(plugin).active = false;
 }
 unsafe extern "C" fn start(plugin: *const clap_plugin) -> bool {
+    state(plugin).processing_thread = crate::thread_id();
     state(plugin).processing = state(plugin).active;
     state(plugin).processing
 }
 unsafe extern "C" fn stop(plugin: *const clap_plugin) {
+    if state(plugin).processing && state(plugin).processing_thread != crate::thread_id() {
+        crate::lifecycle_error();
+        return;
+    }
     state(plugin).processing = false;
 }
 unsafe extern "C" fn reset(plugin: *const clap_plugin) {
+    state(plugin).timing.reset();
     state(plugin).playing = false;
 }
 unsafe extern "C" fn main(_: *const clap_plugin) {}
 unsafe extern "C" fn extension(_: *const clap_plugin, id: *const c_char) -> *const c_void {
     match CStr::from_ptr(id) {
         id if id == CLAP_EXT_AUDIO_PORTS => &PORTS as *const _ as *const c_void,
+        id if id == CLAP_EXT_STATE => &STATE as *const _ as *const c_void,
         id if id == CLAP_EXT_LATENCY => &LATENCY as *const _ as *const c_void,
         _ => std::ptr::null(),
     }
 }
-unsafe extern "C" fn latency(_: *const clap_plugin) -> u32 {
-    0
+unsafe extern "C" fn latency(plugin: *const clap_plugin) -> u32 {
+    if state(plugin).main_thread != crate::thread_id()
+        || !state(plugin).active
+        || state(plugin).processing
+    {
+        return u32::MAX;
+    }
+    state(plugin).timing.report()
 }
 static LATENCY: clap_plugin_latency = clap_plugin_latency { get: Some(latency) };
 unsafe extern "C" fn port_count(plugin: *const clap_plugin, input: bool) -> u32 {
@@ -159,18 +190,18 @@ unsafe extern "C" fn port_count(plugin: *const clap_plugin, input: bool) -> u32 
     }
 }
 unsafe extern "C" fn port_info(
-    _: *const clap_plugin,
+    plugin: *const clap_plugin,
     index: u32,
     input: bool,
     info: *mut clap_audio_port_info,
 ) -> bool {
-    if index >= if input { 4 } else { 1 } {
+    if state(plugin).active || index >= if input { 4 } else { 1 } {
         return false;
     }
     *info = std::mem::zeroed();
     (*info).id = index + 10;
     (*info).channel_count = match index {
-        1 => 1,
+        1 => state(plugin).timing.mono_channels() as u32,
         3 => 6,
         _ => 2,
     };
@@ -208,6 +239,12 @@ unsafe extern "C" fn process(
     data: *const clap_process,
 ) -> clap_process_status {
     let data = &*data;
+    if !data.transport.is_null() {
+        let seconds = (*data.transport).song_pos_seconds as f64
+            / clap_sys::fixedpoint::CLAP_SECTIME_FACTOR as f64;
+        let sample = (seconds * state(plugin).sample_rate).round() as u64;
+        state(plugin).timing.set_context(sample);
+    }
     if state(plugin).instrument {
         if !state(plugin).processing
             || data.audio_inputs_count != 0
@@ -235,9 +272,10 @@ unsafe extern "C" fn process(
                 }
                 event_index += 1;
             }
-            for channel in 0..2 {
-                *(*output.data32.add(channel)).add(frame as usize) =
-                    if state(plugin).playing { 0.75 } else { 0.0 };
+            let level = if state(plugin).playing { 0.75 } else { 0.0 };
+            let values = state(plugin).timing.frame([level; 2], 0.0, [0.0; 2]);
+            for (channel, value) in values.into_iter().enumerate() {
+                *(*output.data32.add(channel)).add(frame as usize) = value;
             }
         }
         return CLAP_PROCESS_CONTINUE;
@@ -251,16 +289,41 @@ unsafe extern "C" fn process(
     }
     let inputs = std::slice::from_raw_parts(data.audio_inputs, 4);
     let output = &*data.audio_outputs;
-    if inputs[1].channel_count != 1 || inputs[2].channel_count != 2 {
+    if inputs[1].channel_count != state(plugin).timing.mono_channels() as u32
+        || inputs[2].channel_count != 2
+    {
         return CLAP_PROCESS_ERROR;
     }
     for frame in 0..data.frames_count as usize {
-        for channel in 0..2 {
-            let value = sample(&inputs[0], channel, frame)
-                + 2.0 * sample(&inputs[1], 0, frame)
-                + 3.0 * sample(&inputs[2], channel, frame);
+        let main = [sample(&inputs[0], 0, frame), sample(&inputs[0], 1, frame)];
+        let stereo = [sample(&inputs[2], 0, frame), sample(&inputs[2], 1, frame)];
+        let values = state(plugin)
+            .timing
+            .frame(main, sample(&inputs[1], 0, frame), stereo);
+        for (channel, value) in values.into_iter().enumerate() {
             *(*output.data32.add(channel)).add(frame) = value;
         }
     }
     CLAP_PROCESS_CONTINUE
 }
+
+unsafe extern "C" fn save(plugin: *const clap_plugin, stream: *const clap_ostream) -> bool {
+    let bytes = state(plugin).timing.state();
+    ((*stream).write.unwrap())(stream, bytes.as_ptr().cast(), 12) == 12
+}
+unsafe extern "C" fn load(plugin: *const clap_plugin, stream: *const clap_istream) -> bool {
+    let mut bytes = [0u8; 12];
+    if ((*stream).read.unwrap())(stream, bytes.as_mut_ptr().cast(), 12) != 12
+        || !state(plugin).timing.configure(&bytes)
+    {
+        return false;
+    }
+    if state(plugin).active {
+        ((*state(plugin).host).request_restart.unwrap())(state(plugin).host);
+    }
+    true
+}
+static STATE: clap_plugin_state = clap_plugin_state {
+    save: Some(save),
+    load: Some(load),
+};

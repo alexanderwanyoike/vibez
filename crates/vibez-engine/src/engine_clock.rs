@@ -37,4 +37,74 @@ impl AudioEngine {
             ClockDomain::Perform => self.performance_position,
         }
     }
+    pub(super) fn automation_presentation_delay(
+        &self,
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+    ) -> u32 {
+        use vibez_core::automation::AutomationTarget;
+        use vibez_core::routing::NodeStage;
+        let stage = match target {
+            AutomationTarget::EffectParam { effect_id, .. }
+            | AutomationTarget::PluginParam {
+                effect_id: Some(effect_id),
+                ..
+            } => NodeStage::Effect(effect_id),
+            AutomationTarget::InstrumentParam { .. }
+            | AutomationTarget::PluginParam {
+                effect_id: None, ..
+            }
+            | AutomationTarget::TrackSwingOffset => NodeStage::Source,
+            _ => NodeStage::AfterFader,
+        };
+        self.routing.as_ref().map_or(0, |routing| {
+            let input = routing
+                .graph
+                .index(track_id, stage)
+                .map_or(0, |node| routing.compensation.node_input_latency[node]);
+            self.live_path_latency(track_id).saturating_sub(input)
+        })
+    }
+
+    pub(super) fn target_automation_position(
+        &self,
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+    ) -> u64 {
+        use vibez_core::automation::AutomationTarget;
+        use vibez_core::routing::NodeStage;
+        let stage = match target {
+            AutomationTarget::EffectParam { effect_id, .. }
+            | AutomationTarget::PluginParam {
+                effect_id: Some(effect_id),
+                ..
+            } => NodeStage::Effect(effect_id),
+            AutomationTarget::InstrumentParam { .. }
+            | AutomationTarget::PluginParam {
+                effect_id: None, ..
+            }
+            | AutomationTarget::TrackSwingOffset => NodeStage::Source,
+            _ => NodeStage::AfterFader,
+        };
+        let position = self.effective_position();
+        let Some(routing) = self.routing.as_ref() else {
+            return position;
+        };
+        let Some(node) = routing.graph.index(track_id, stage) else {
+            return position;
+        };
+        let omitted = routing.compensation.output_latency.saturating_sub(
+            routing
+                .compensation
+                .direct_path_latency(&routing.graph, track_id),
+        );
+        let context = self.presentation_context(
+            routing.compensation.node_input_latency[node].saturating_add(omitted),
+        );
+        if self.clock_domain == ClockDomain::Perform {
+            context.perform
+        } else {
+            context.arrange
+        }
+    }
 }

@@ -61,6 +61,37 @@ impl AudioEngine {
         );
     }
 
+    pub(crate) fn offline_compensation_failure(&self) -> Option<String> {
+        for track in self
+            .tracks
+            .iter()
+            .chain(&self.buses)
+            .chain(std::iter::once(&self.master))
+        {
+            if track.instrument.as_ref().is_some_and(|instrument| {
+                instrument.reconfiguration_requested()
+                    || !instrument.processing_configuration_valid()
+            }) {
+                return Some(format!(
+                    "Instrument on channel {} requires a valid processing configuration during Bounce",
+                    track.id.raw()
+                ));
+            }
+            for slot in &track.effects {
+                if slot.effect.reconfiguration_requested()
+                    || !slot.effect.processing_configuration_valid()
+                {
+                    return Some(format!(
+                        "Effect {} on channel {} requires a valid processing configuration during Bounce",
+                        slot.id.raw(),
+                        track.id.raw()
+                    ));
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn take_offline_channels(
         &mut self,
     ) -> (Vec<EngineTrack>, Vec<EngineTrack>, EngineTrack) {

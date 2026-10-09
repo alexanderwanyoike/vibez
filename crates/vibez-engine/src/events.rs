@@ -65,6 +65,16 @@ pub struct ClipTrackState {
 
 #[derive(Debug)]
 pub enum EngineEvent {
+    PresentationCancelled,
+    DeviceReconfiguration(crate::engine::reconfiguration::DeviceReconfiguration),
+    CompensationFailed {
+        reason: String,
+    },
+    CompensationInvalid {
+        track_id: TrackId,
+        effect_id: Option<vibez_core::id::EffectId>,
+        reason: &'static str,
+    },
     RetiredChannel(crate::retirement::RetiredChannel),
     RetiredAutomationLane(vibez_core::automation::AutomationLane),
     RoutingRetired(Box<crate::routing::PreparedRouting>),
@@ -259,6 +269,7 @@ pub enum EngineEvent {
     /// Capture into Arrange began on this exact engine boundary. An already
     /// active Section includes its exact local playhead for a mid-loop start.
     PerformanceCaptureStarted {
+        offsets: std::sync::Arc<[(TrackId, u32)]>,
         effective_at_samples: u64,
         section_id: Option<SectionId>,
         section_position_samples: Option<u64>,
@@ -284,6 +295,17 @@ pub enum EngineEvent {
 
     /// A resident Section became active at this exact transport sample.
     /// `retired` carries displaced sources to the UI thread for destruction.
+    CaptureTimingRetired(std::sync::Arc<[(TrackId, u32)]>),
+    SectionCaptureStopped {
+        effective_at_samples: u64,
+    },
+    SectionCaptureSource {
+        section_id: SectionId,
+        effective_at_samples: u64,
+        section_position_samples: u64,
+        refreshed: bool,
+        offsets: std::sync::Arc<[(TrackId, u32)]>,
+    },
     SectionTransitioned {
         section_id: SectionId,
         effective_at_samples: u64,
@@ -542,16 +564,18 @@ impl PartialEq for EngineEvent {
             }
             (
                 Self::PerformanceCaptureStarted {
+                    offsets: lo,
                     effective_at_samples: le,
                     section_id: ls,
                     section_position_samples: lp,
                 },
                 Self::PerformanceCaptureStarted {
+                    offsets: ro,
                     effective_at_samples: re,
                     section_id: rs,
                     section_position_samples: rp,
                 },
-            ) => le == re && ls == rs && lp == rp,
+            ) => le == re && ls == rs && lp == rp && lo == ro,
             (
                 Self::PerformanceCaptureStopped {
                     effective_at_samples: left,
@@ -642,6 +666,7 @@ impl PartialEq for EngineEvent {
             (Self::ClipStateResynced(left), Self::ClipStateResynced(right)) => left == right,
             (Self::PlaybackStarted, Self::PlaybackStarted)
             | (Self::PlaybackStopped, Self::PlaybackStopped)
+            | (Self::PresentationCancelled, Self::PresentationCancelled)
             | (Self::AuditionStopped, Self::AuditionStopped)
             | (Self::AuditionQueued, Self::AuditionQueued)
             | (Self::AuditionStarted, Self::AuditionStarted) => true,

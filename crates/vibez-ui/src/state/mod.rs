@@ -419,6 +419,7 @@ pub fn new_master_track() -> ProjectTrack {
 /// Project-owned tracks and channels shared by every musical timeline.
 #[derive(Debug, Clone)]
 pub struct ProjectTracksState {
+    pub reduced_latency_monitoring: bool,
     pub tracks: Vec<ProjectTrack>,
     /// The master bus channel (see [`new_master_track`]).
     pub master: ProjectTrack,
@@ -430,6 +431,7 @@ pub struct ProjectTracksState {
 impl Default for ProjectTracksState {
     fn default() -> Self {
         Self {
+            reduced_latency_monitoring: false,
             tracks: Vec::new(),
             master: new_master_track(),
             buses: Vec::new(),
@@ -752,6 +754,7 @@ impl Default for AppState {
             piano_roll: PianoRollState::default(),
             perform: crate::domains::perform::PerformState::default(),
             project_tracks: Arc::new(ProjectTracksState {
+                reduced_latency_monitoring: false,
                 next_track_number: 1,
                 ..ProjectTracksState::default()
             }),

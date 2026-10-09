@@ -50,15 +50,32 @@ impl App {
                 match track.instrument_kind {
                     Some(vibez_core::midi::InstrumentKind::Sampler) => {
                         let card = self.view_sampler_device(track_id, track, track_color);
-                        devices_row = devices_row.push(card);
+                        let latency = crate::domains::compensation::latency_label(
+                            track.instrument_latency_samples,
+                            self.state.transport.sample_rate,
+                        );
+                        devices_row = devices_row
+                            .push(column![card, text(latency).size(9).color(th::text_dim())]);
                     }
                     Some(vibez_core::midi::InstrumentKind::DrumRack) => {
                         let card = self.view_drum_rack_device(track_id, track, track_color);
-                        devices_row = devices_row.push(card);
+                        let latency = crate::domains::compensation::latency_label(
+                            track.instrument_latency_samples,
+                            self.state.transport.sample_rate,
+                        );
+                        devices_row = devices_row
+                            .push(column![card, text(latency).size(9).color(th::text_dim())]);
                     }
                     _ => {
                         let synth_card = self.view_synth_device(track_id, track, track_color);
-                        devices_row = devices_row.push(synth_card);
+                        let latency = crate::domains::compensation::latency_label(
+                            track.instrument_latency_samples,
+                            self.state.transport.sample_rate,
+                        );
+                        devices_row = devices_row.push(column![
+                            synth_card,
+                            text(latency).size(9).color(th::text_dim())
+                        ]);
                     }
                 }
             }
@@ -83,7 +100,14 @@ impl App {
                 &self.state.project_tracks.buses,
                 &self.state.devices,
             );
-            let slot = view_effect_slot(track_id, effect, track_color, custom, sidechain);
+            let slot = view_effect_slot(
+                track_id,
+                effect,
+                track_color,
+                custom,
+                sidechain,
+                self.state.transport.sample_rate,
+            );
             devices_row = devices_row.push(slot);
         }
 
@@ -425,7 +449,17 @@ impl App {
 
         let title = Self::device_title_bar(title_row);
 
-        Self::device_card(column![title].width(Length::Fixed(200.0)))
+        let latency = crate::domains::compensation::latency_label(
+            track.instrument_latency_samples,
+            self.state.transport.sample_rate,
+        );
+        Self::device_card(
+            column![
+                title,
+                container(text(latency).size(9).color(th::text_dim())).padding([2, 6])
+            ]
+            .width(Length::Fixed(200.0)),
+        )
     }
 
     /// Synth device card for instrument tracks.

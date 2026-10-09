@@ -181,17 +181,60 @@ impl App {
                 }
             }
         }
-        if self.state.devices.last_routing.as_ref() == Some(&channels) {
+        let timing = self.compensation_signature();
+        if self.state.devices.last_routing.as_ref() == Some(&channels)
+            && self.state.devices.last_timing.as_ref() == Some(&timing)
+        {
             return;
         }
-        match vibez_engine::routing::PreparedRouting::prepare(&channels, 4096) {
+        let Some(generation) = self.state.devices.compensation_generation.checked_add(1) else {
+            self.state.status_text = "Compensation plan generation overflow".into();
+            return;
+        };
+        let same_topology = self.state.devices.last_routing.as_ref() == Some(&channels);
+        let same_alignment = same_topology
+            && self
+                .state
+                .devices
+                .last_timing
+                .as_ref()
+                .is_some_and(|previous| {
+                    previous.reports == timing.reports
+                        && previous.reduced_tracks == timing.reduced_tracks
+                        && previous.sample_rate == timing.sample_rate
+                });
+        let prepared = vibez_engine::routing::PreparedRouting::prepare_compensated(
+            &channels,
+            4096,
+            &timing.reports,
+            &timing.reduced_tracks,
+            generation,
+        )
+        .and_then(|mut routing| {
+            routing.configure_automation(&timing.controls)?;
+            Ok(routing)
+        });
+        match prepared {
             Ok(prepared) => {
-                self.state.devices.sidechain_choices =
-                    crate::domains::sidechain::input_source_choices(&channels);
-                self.send_command(EngineCommand::SetRouting(prepared));
+                if !same_topology {
+                    self.state.devices.sidechain_choices =
+                        crate::domains::sidechain::input_source_choices(&channels);
+                }
+                if same_alignment {
+                    self.send_command(EngineCommand::UpdateAutomationRouting(prepared));
+                } else {
+                    self.send_command(EngineCommand::SetRouting(prepared));
+                }
                 self.state.devices.last_routing = Some(channels);
+                self.state.devices.last_timing = Some(timing);
+                self.state.devices.compensation_generation = generation;
             }
-            Err(error) => self.state.status_text = error,
+            Err(error) => {
+                self.send_command(EngineCommand::RejectRoutingUpdate {
+                    reason: error.clone(),
+                });
+                self.state.status_text = error;
+            }
         }
     }
 }

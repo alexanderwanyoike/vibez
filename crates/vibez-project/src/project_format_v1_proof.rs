@@ -44,6 +44,7 @@ pub fn representative_document() -> ProjectDocumentV1 {
 
     let track_id = track.id;
     let project = Project {
+        reduced_latency_monitoring: false,
         name: "Project Format V1 proof".into(),
         bpm: 126.0,
         groove_profile: vibez_core::perform::GrooveProfile::default(),

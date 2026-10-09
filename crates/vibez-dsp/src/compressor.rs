@@ -88,6 +88,10 @@ impl CompressorEffect {
 }
 
 impl AudioEffect for CompressorEffect {
+    fn activation_sample_rate(&self) -> Option<u32> {
+        Some(self.sample_rate as u32)
+    }
+
     fn effect_type(&self) -> EffectType {
         EffectType::Compressor
     }

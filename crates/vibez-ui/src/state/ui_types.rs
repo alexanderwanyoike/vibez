@@ -373,6 +373,7 @@ pub struct SampleBrowserFolder {
 /// An effect instance as represented in the UI.
 #[derive(Debug, Clone)]
 pub struct UiEffect {
+    pub latency_samples: Option<u32>,
     pub id: EffectId,
     pub effect_type: EffectType,
     pub bypass: bool,
@@ -391,6 +392,7 @@ pub struct UiEffect {
 impl UiEffect {
     pub fn unavailable_plugin(info: &vibez_core::effect::EffectInfo) -> Self {
         Self {
+            latency_samples: None,
             id: info.id,
             effect_type: info.effect_type,
             bypass: info.bypass,
@@ -554,6 +556,7 @@ pub struct ProjectTrack {
     pub plugin_instrument_descriptors: &'static [vibez_core::effect::ParamDescriptor],
     /// Whether the plugin instrument has a native GUI.
     pub has_plugin_instrument_gui: bool,
+    pub instrument_latency_samples: Option<u32>,
 }
 
 /// Compatibility name used by older view-only modules. It resolves to the
@@ -594,6 +597,7 @@ impl ProjectTrack {
             plugin_instrument_ref: None,
             plugin_instrument_descriptors: &[],
             has_plugin_instrument_gui: false,
+            instrument_latency_samples: None,
         }
     }
 
@@ -630,6 +634,7 @@ impl ProjectTrack {
             plugin_instrument_ref: None,
             plugin_instrument_descriptors: &[],
             has_plugin_instrument_gui: false,
+            instrument_latency_samples: has_instrument.then_some(0),
         }
     }
 }

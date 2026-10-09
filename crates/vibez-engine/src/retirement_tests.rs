@@ -46,7 +46,7 @@ unsafe impl GlobalAlloc for Counter {
         System.realloc(pointer, layout, size)
     }
 }
-fn allocations(action: impl FnOnce()) -> (usize, usize) {
+pub(crate) fn allocations(action: impl FnOnce()) -> (usize, usize) {
     ALLOCATIONS.with(|count| count.set(0));
     DEALLOCATIONS.with(|count| count.set(0));
     COUNTING.with(|active| active.set(true));

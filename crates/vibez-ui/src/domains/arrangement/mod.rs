@@ -41,6 +41,7 @@ pub(crate) fn attach_channel_eq(engine: &mut impl EngineHandle, track: &mut Proj
     let descriptors = vibez_dsp::factory::create_effect(effect_type, 48_000.0).param_descriptors();
     let params: Vec<f32> = descriptors.iter().map(|d| d.default).collect();
     track.effects.push(crate::state::UiEffect {
+        latency_samples: Some(0),
         sidechains: Default::default(),
         external_inputs: Default::default(),
 

@@ -611,6 +611,7 @@ pub enum Message {
     ToggleProjectTrackDeleteConfirmation,
     /// Settings: save named projects shortly after editing stops.
     ToggleAutoSave,
+    SetReducedLatencyMonitoring(bool),
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),

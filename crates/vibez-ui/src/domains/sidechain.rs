@@ -26,6 +26,7 @@ fn channel(track: &ProjectTrack, is_bus: bool) -> RoutingChannel {
         effects: track
             .effects
             .iter()
+            .filter(|effect| effect.latency_samples.is_some())
             .map(|effect| RoutingEffect {
                 id: effect.id,
                 inputs: effect.external_inputs.clone(),

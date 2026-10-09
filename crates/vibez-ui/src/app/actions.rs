@@ -588,6 +588,7 @@ impl App {
                     .map(|i| effect.get_param(i))
                     .collect();
                 let ui_effect = UiEffect {
+                    latency_samples: Some(effect.latency_samples()),
                     sidechains: track
                         .effects
                         .iter()
@@ -684,6 +685,7 @@ impl App {
                 track.plugin_instrument_ref = Some(result.device_ref.clone());
                 track.plugin_instrument_descriptors = instrument.param_descriptors();
                 track.has_plugin_instrument_gui = has_gui;
+                track.instrument_latency_samples = Some(instrument.latency_samples());
             }
             self.send_command(EngineCommand::SetPluginInstrument {
                 track_id,

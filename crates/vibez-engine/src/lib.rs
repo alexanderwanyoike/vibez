@@ -1,4 +1,7 @@
 pub mod commands;
+pub mod compensation;
+pub mod compensation_clock;
+pub mod compensation_controls;
 pub mod engine;
 mod engine_audition;
 pub mod events;
@@ -9,6 +12,7 @@ pub mod playback_source;
 pub mod render;
 pub mod transport;
 
+pub mod bounce_timing;
 pub mod routing;
 
 mod retirement;

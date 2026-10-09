@@ -55,6 +55,8 @@ pub struct SectionInfo {
 /// A serializable project containing tracks and clips.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
+    #[serde(default)]
+    pub reduced_latency_monitoring: bool,
     pub name: String,
     pub bpm: f64,
     /// Immutable timing-model identity used to interpret Project Swing.
@@ -87,6 +89,7 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
+            reduced_latency_monitoring: false,
             name: "Untitled".to_string(),
             bpm: vibez_core::constants::DEFAULT_BPM,
             groove_profile: GrooveProfile::default(),
@@ -322,6 +325,7 @@ mod tests {
             std::env::temp_dir().join(format!("vibez-clip-legacy-{}.json", ClipId::new().raw()));
         std::fs::write(&path, "existing project").unwrap();
         let project = Project {
+            reduced_latency_monitoring: false,
             perform_layout: PerformLayout::Clips,
             ..Default::default()
         };
@@ -334,6 +338,7 @@ mod tests {
     #[test]
     fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {
         let mut project = Project {
+            reduced_latency_monitoring: false,
             groove_profile: GrooveProfile::Mpc2000XlV1,
             swing: SwingAmount::new(0.56),
             ..Project::default()
@@ -471,6 +476,7 @@ mod tests {
         let crossfade_peer = ClipId::new();
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "Test Project".into(),
@@ -550,6 +556,7 @@ mod tests {
     fn existing_project_document_roundtrips_semantically_unchanged() {
         let track = TrackInfo::new("Legacy Track");
         let project = Project {
+            reduced_latency_monitoring: false,
             name: "Legacy Layout".into(),
             bpm: 123.0,
             groove_profile: GrooveProfile::default(),
@@ -655,6 +662,7 @@ mod tests {
 
         let tid = TrackId::new();
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "Note Test".into(),
@@ -734,6 +742,7 @@ mod tests {
         });
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "FX Test".into(),
@@ -785,6 +794,7 @@ mod automation_persistence_tests {
         track.automation.push(lane.clone());
 
         let project = Project {
+            reduced_latency_monitoring: false,
             master: None,
             buses: Vec::new(),
             name: "roundtrip".to_string(),
@@ -812,3 +822,6 @@ mod automation_persistence_tests {
         assert!(project.tracks[0].automation.is_empty());
     }
 }
+
+#[cfg(test)]
+mod compensation_project_tests;
