@@ -300,6 +300,13 @@ impl AudioEngine {
                             samples: &input.samples[..frames * input.descriptor.channels],
                             connected: input.connected,
                         };
+                        let levels = metering::calculate_meters(slot.samples, slot.channels);
+                        let _ = self.event_tx.push(EngineEvent::SidechainInputMeter {
+                            effect_id,
+                            input_id: slot.id,
+                            peak_l: levels.peak_l,
+                            peak_r: levels.peak_r,
+                        });
                     }
                     let track =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master);

@@ -6,11 +6,22 @@ use vibez_core::track::MediaSourceRef;
 
 pub(in crate::app) async fn export_async(
     request: vibez_engine::render::BounceRequest,
-    mut plugins: vibez_engine::render::OfflinePlugins,
+    plugins: vibez_engine::render::OfflinePlugins,
     wav_path: PathBuf,
     progress: Arc<std::sync::atomic::AtomicU8>,
     plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
 ) -> Result<PathBuf, String> {
+    render_async(request, plugins, wav_path.clone(), progress, plugin_return).await?;
+    Ok(wav_path)
+}
+
+async fn render_async(
+    request: vibez_engine::render::BounceRequest,
+    mut plugins: vibez_engine::render::OfflinePlugins,
+    wav_path: PathBuf,
+    progress: Arc<std::sync::atomic::AtomicU8>,
+    plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
+) -> Result<vibez_engine::render::BounceResult, String> {
     tokio::task::spawn_blocking(move || {
         use std::sync::atomic::Ordering;
 
@@ -41,7 +52,7 @@ pub(in crate::app) async fn export_async(
                 return Err(format!("could not commit destination WAV: {error}"));
             }
             progress.store(100, Ordering::Relaxed);
-            Ok(wav_path)
+            Ok(result)
         })();
         // Plugin teardown is main-thread-affine for JUCE-based CLAP/VST3
         // devices. Return the instances to App; dropping them here would
@@ -67,27 +78,24 @@ fn temporary_export_path(destination: &std::path::Path) -> PathBuf {
 
 pub(in crate::app) async fn bounce_async(
     request: vibez_engine::render::BounceRequest,
+    plugins: vibez_engine::render::OfflinePlugins,
     wav_path: PathBuf,
     clip_name: String,
     insert_position_samples: u64,
+    progress: Arc<std::sync::atomic::AtomicU8>,
+    plugin_return: std::sync::mpsc::Sender<vibez_engine::render::OfflinePlugins>,
 ) -> Result<crate::message::BounceOutcome, String> {
-    tokio::task::spawn_blocking(move || {
-        let result = vibez_engine::render::render_offline(&request);
-        vibez_audio_io::file_io::write_wav_file(&wav_path, &result.audio)
-            .map_err(|e| format!("WAV write error: {e}"))?;
-        Ok(crate::message::BounceOutcome {
-            audio: Arc::new(result.audio),
-            source: MediaSourceRef::LocalFile {
-                path: wav_path.clone(),
-            },
-            path: wav_path,
-            clip_name,
-            insert_position_samples,
-            warnings: result.warnings,
-        })
+    let result = render_async(request, plugins, wav_path.clone(), progress, plugin_return).await?;
+    Ok(crate::message::BounceOutcome {
+        audio: Arc::new(result.audio),
+        source: MediaSourceRef::LocalFile {
+            path: wav_path.clone(),
+        },
+        path: wav_path,
+        clip_name,
+        insert_position_samples,
+        warnings: result.warnings,
     })
-    .await
-    .map_err(|err| format!("bounce task failed: {err}"))?
 }
 
 #[cfg(test)]

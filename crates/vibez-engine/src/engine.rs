@@ -714,3 +714,7 @@ mod instrument_commands;
 
 #[path = "engine_effect_commands.rs"]
 mod effect_commands;
+
+#[path = "engine_offline_routing.rs"]
+mod offline_routing;
+pub(crate) use offline_routing::OfflineRoutingSetup;
