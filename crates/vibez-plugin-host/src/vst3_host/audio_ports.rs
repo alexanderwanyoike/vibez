@@ -1,4 +1,6 @@
-use super::instance::vtbl;
+//! Declared VST3 bus activation and stable-index planar buffer preparation.
+
+use super::abi::vtbl;
 use crate::audio_ports::AudioPort;
 use vibez_core::routing::ExternalInputId;
 use vst3::Steinberg::Vst::BusInfo;
@@ -32,18 +34,21 @@ pub(super) unsafe fn query(
         );
         let main = info.busType == 0;
         let supported = matches!(info.channelCount, 1 | 2);
-        if activate(component, 0, direction, index, u8::from(main || supported)) != 0 {
+        let requested = main || supported;
+        let result = activate(component, 0, direction, index, u8::from(requested));
+        if main && result != 0 {
             return Err(format!("Cannot activate VST3 audio bus {name}"));
         }
-        ports.push((
-            name,
-            AudioPort::new(
-                ExternalInputId(index as u32),
-                info.channelCount as usize,
-                main,
-                max_frames,
-            ),
-        ));
+        let mut port = AudioPort::new(
+            ExternalInputId(index as u32),
+            info.channelCount as usize,
+            main,
+            max_frames,
+        );
+        // A refusal does not prove an optional bus is inactive. Keep its
+        // declared index and correctly sized silent buffers, but never route to it.
+        port.available = requested && result == 0;
+        ports.push((name, port));
     }
     Ok(ports)
 }

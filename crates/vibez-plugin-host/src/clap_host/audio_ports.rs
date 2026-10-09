@@ -1,3 +1,5 @@
+//! CLAP declared port discovery and stable process buffer pointers.
+
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::ext::audio_ports::{
     clap_audio_port_info, clap_plugin_audio_ports, CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS,

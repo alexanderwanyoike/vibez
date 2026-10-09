@@ -1,9 +1,9 @@
+//! Native VST3 instance lifecycle and process calls.
+
 use std::path::Path;
 
+use super::abi::*;
 use vibez_core::effect::ParamDescriptor;
-use vst3::Steinberg::Vst::{
-    Event as VstEvent, Event__type0 as VstEventData, NoteOffEvent, NoteOnEvent,
-};
 
 use crate::instance::PluginInstance;
 
@@ -39,8 +39,8 @@ pub struct Vst3PluginInstance {
     external_inputs: Vec<vibez_core::routing::ExternalInputDescriptor>,
     max_frames: usize,
     live_queues: Vec<LiveParamQueue>,
-    /// One-shot latch so a failing process() logs once, not per block.
-    process_error_logged: bool,
+    processing_error: Option<&'static str>,
+    processing_failed: bool,
     note_events: Vec<NoteEvent>,
     sample_rate: f64,
     active: bool,
@@ -49,7 +49,14 @@ pub struct Vst3PluginInstance {
 
 unsafe impl Send for Vst3PluginInstance {}
 
-include!("instance_abi.rs");
+/// Output of [`Vst3PluginInstance::load_partial`]: a dlopen'd module
+/// with no plugin code executed yet.
+pub struct PartialVst3Plugin {
+    path: std::path::PathBuf,
+    lib: libloading::Library,
+    class_uid: String,
+    is_instrument: bool,
+}
 
 impl Vst3PluginInstance {
     /// Return the raw IComponent COM pointer (for GUI handle extraction).
@@ -298,10 +305,7 @@ impl Vst3PluginInstance {
         let release: ReleaseFn = unsafe { std::mem::transmute(*factory_vtbl.add(2)) };
         unsafe { release(factory_ptr) };
 
-        // Discover audio buses and activate the main ones. JUCE
-        // plugins skip processing entirely while their buses are
-        // inactive, and process() must present one AudioBusBuffers
-        // per reported bus (aux/sidechain entries stay empty).
+        // ProcessData indices must match declaration order, including unavailable buses.
         // IComponent: getBusCount [7], activateBus [10].
         type GetBusCountFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
         type ActivateBusFn =
@@ -315,12 +319,6 @@ impl Vst3PluginInstance {
         let audio_in_buses = unsafe { get_bus_count(component, K_AUDIO, K_INPUT) };
         let audio_out_buses = unsafe { get_bus_count(component, K_AUDIO, K_OUTPUT) };
         unsafe {
-            if audio_in_buses > 0 {
-                activate_bus(component, K_AUDIO, K_INPUT, 0, 1);
-            }
-            if audio_out_buses > 0 {
-                activate_bus(component, K_AUDIO, K_OUTPUT, 0, 1);
-            }
             // Event buses (MIDI in/out for instruments).
             if get_bus_count(component, K_EVENT, K_INPUT) > 0 {
                 activate_bus(component, K_EVENT, K_INPUT, 0, 1);
@@ -387,7 +385,8 @@ impl Vst3PluginInstance {
             external_inputs,
             max_frames: max_buffer_size as usize,
             live_queues: Vec::with_capacity(2048),
-            process_error_logged: false,
+            processing_error: None,
+            processing_failed: false,
             note_events: Vec::with_capacity(2048),
             sample_rate,
             active: false,
@@ -521,14 +520,14 @@ impl PluginInstance for Vst3PluginInstance {
             return;
         }
 
-        for (_, port) in &mut self.input_ports {
-            port.fill_input(buffer, channels, inputs, frames);
-        }
-        for (_, port) in &mut self.output_ports {
-            for channel in &mut port.samples {
-                channel[..frames].fill(0.0);
-            }
-        }
+        crate::audio_ports::prepare_process_ports(
+            &mut self.input_ports,
+            &mut self.output_ports,
+            buffer,
+            channels,
+            inputs,
+            frames,
+        );
         self.live_queues.clear();
         for (id, value) in self.pending_params.drain(..) {
             self.live_queues.push(LiveParamQueue {
@@ -585,18 +584,12 @@ impl PluginInstance for Vst3PluginInstance {
         let hr = unsafe { process(self.processor, &mut process_data) };
 
         if hr == 0 {
-            if let Some((_, port)) = self
-                .output_ports
-                .iter()
-                .find(|(_, port)| port.main)
-                .or_else(|| self.output_ports.first())
-            {
-                port.copy_output(buffer, channels, frames);
-            } else {
-                buffer.fill(0.0);
-            }
+            crate::audio_ports::copy_process_output(&self.output_ports, buffer, channels, frames);
         } else {
-            self.process_error_logged = true;
+            if !self.processing_failed {
+                self.processing_error = Some("VST3 process returned failure");
+            }
+            self.processing_failed = true;
             buffer.fill(0.0);
         }
         self.note_events.clear();
@@ -706,6 +699,10 @@ impl PluginInstance for Vst3PluginInstance {
         } else {
             false
         }
+    }
+
+    fn take_processing_error(&mut self) -> Option<&'static str> {
+        self.processing_error.take()
     }
 
     fn stop_processing(&mut self) {
@@ -833,81 +830,4 @@ unsafe fn connect_component_and_controller(
     let release_ctrl: ReleaseFn = std::mem::transmute(*vtbl(ctrl_cp).add(2));
     release_comp(comp_cp);
     release_ctrl(ctrl_cp);
-}
-
-#[cfg(test)]
-mod tests {
-    use vst3::Steinberg::Vst::Event_::EventTypes_::{kNoteOffEvent, kNoteOnEvent};
-
-    /// Hand-written IIDs must match the SDK-generated constants in the
-    /// vst3 crate. A single wrong byte makes every plugin reject the
-    /// queryInterface call (a 0x3F-for-0x3D typo in IAudioProcessor
-    /// once broke loading of ALL VST3 plugins).
-    fn assert_iid(ours: [u8; 16], sdk: [::std::os::raw::c_char; 16]) {
-        let sdk_bytes: Vec<u8> = sdk.iter().map(|b| *b as u8).collect();
-        assert_eq!(ours.as_slice(), sdk_bytes.as_slice());
-    }
-
-    #[test]
-    fn icomponent_iid_matches_sdk() {
-        assert_iid(super::ICOMPONENT_IID, vst3::Steinberg::Vst::IComponent_iid);
-    }
-
-    #[test]
-    fn iconnectionpoint_iid_matches_sdk() {
-        assert_iid(
-            super::ICONNECTIONPOINT_IID,
-            vst3::Steinberg::Vst::IConnectionPoint_iid,
-        );
-    }
-
-    #[test]
-    fn iaudioprocessor_iid_matches_sdk() {
-        assert_iid(
-            super::IAUDIOPROCESSOR_IID,
-            vst3::Steinberg::Vst::IAudioProcessor_iid,
-        );
-    }
-
-    #[test]
-    fn live_event_list_exposes_timed_clip_notes_to_vst3() {
-        let mut events = vec![
-            super::NoteEvent {
-                is_on: false,
-                pitch: 64,
-                velocity: 0,
-                frame_offset: 91,
-            },
-            super::NoteEvent {
-                is_on: true,
-                pitch: 64,
-                velocity: 96,
-                frame_offset: 17,
-            },
-        ];
-        events.sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
-        let mut list = super::LiveEventList::new(&events);
-
-        assert_eq!(list.event_count(), 2);
-
-        let raw = list.as_raw_mut();
-        let vtbl = unsafe { (*raw.cast::<super::LiveEventList<'_>>()).vtbl };
-        assert_eq!(unsafe { ((*vtbl).get_event_count)(raw) }, 2);
-        let mut via_vtable = unsafe { std::mem::zeroed() };
-        assert_eq!(unsafe { ((*vtbl).get_event)(raw, 0, &mut via_vtable) }, 0);
-        assert_eq!(via_vtable.sampleOffset, 17);
-
-        let note_on = list.event(0).expect("note-on event");
-        assert_eq!(note_on.r#type, kNoteOnEvent as u16);
-        assert_eq!(note_on.sampleOffset, 17);
-        let note_on = unsafe { note_on.__field0.noteOn };
-        assert_eq!(note_on.pitch, 64);
-        assert!((note_on.velocity - 96.0 / 127.0).abs() < f32::EPSILON);
-
-        let note_off = list.event(1).expect("note-off event");
-        assert_eq!(note_off.r#type, kNoteOffEvent as u16);
-        assert_eq!(note_off.sampleOffset, 91);
-        let note_off = unsafe { note_off.__field0.noteOff };
-        assert_eq!(note_off.pitch, 64);
-    }
 }

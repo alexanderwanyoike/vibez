@@ -1,3 +1,5 @@
+//! Loadable VST3 input, activation refusal and processing acceptance probe.
+
 #![allow(non_snake_case)]
 use std::{
     cell::Cell,
@@ -13,9 +15,27 @@ struct Probe {
     max_frames: Cell<i32>,
     instrument: bool,
     playing: Cell<bool>,
+    scenario: usize,
+    main_activations: Cell<u32>,
 }
 const INSTRUMENT_CID: TUID = uid(0xFEDCBA98, 0x76543210, 0xFEDCBA98, 0x76543210);
 const CID: TUID = uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x89ABCDEF);
+const CIDS: [TUID; 6] = [
+    CID,
+    INSTRUMENT_CID,
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000001),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000002),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000003),
+    uid(0x01234567, 0x89ABCDEF, 0x01234567, 0x00000004),
+];
+const NAMES: [&str; 6] = [
+    "Routing Probe",
+    "Pulse Instrument",
+    "Refused aux",
+    "Refused surround deactivation",
+    "Refused main",
+    "Processing error",
+];
 impl Class for Probe {
     type Interfaces = (IComponent, IAudioProcessor);
 }
@@ -97,6 +117,17 @@ impl IComponentTrait for Probe {
         enabled: TBool,
     ) -> tresult {
         if media == 0 && direction == 0 {
+            if index == 0 && enabled != 0 {
+                self.main_activations.set(self.main_activations.get() + 1);
+                if self.main_activations.get() > 1 || self.scenario == 4 {
+                    return kResultFalse;
+                }
+            }
+            if (self.scenario == 2 && index == 1 && enabled != 0)
+                || (self.scenario == 3 && index == 3 && enabled == 0)
+            {
+                return kNotImplemented;
+            }
             let mask = 1u32 << index;
             self.aux_active.set(if enabled != 0 {
                 self.aux_active.get() | mask
@@ -195,7 +226,9 @@ impl IAudioProcessorTrait for Probe {
             return kResultOk;
         }
         if !self.processing.get()
-            || self.aux_active.get() & 7 != 7
+            || self.aux_active.get() & (if self.scenario == 2 { 5 } else { 7 })
+                != (if self.scenario == 2 { 5 } else { 7 })
+            || self.scenario == 5
             || data.numInputs != 4
             || data.numOutputs != 1
             || data.numSamples > self.max_frames.get()
@@ -204,11 +237,19 @@ impl IAudioProcessorTrait for Probe {
         }
         let inputs = slice::from_raw_parts(data.inputs, 4);
         let output = &*data.outputs;
-        if inputs[1].numChannels != 1 || inputs[2].numChannels != 2 {
+        if inputs[1].numChannels != 1 || inputs[2].numChannels != 2 || inputs[3].numChannels != 6 {
             return kResultFalse;
         }
         for frame in 0..data.numSamples as usize {
             for channel in 0..2 {
+                if self.scenario == 3 {
+                    for auxiliary in 0..6 {
+                        if *(*inputs[3].__field0.channelBuffers32.add(auxiliary)).add(frame) != 0.0
+                        {
+                            return kResultFalse;
+                        }
+                    }
+                }
                 let main = *(*inputs[0].__field0.channelBuffers32.add(channel)).add(frame);
                 let mono = *(*inputs[1].__field0.channelBuffers32).add(frame);
                 let stereo = *(*inputs[2].__field0.channelBuffers32.add(channel)).add(frame);
@@ -238,24 +279,17 @@ impl IPluginFactoryTrait for Factory {
         kResultOk
     }
     unsafe fn countClasses(&self) -> i32 {
-        2
+        6
     }
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
-        if !(0..=1).contains(&index) {
+        if !(0..6).contains(&index) {
             return kInvalidArgument;
         }
         *info = std::mem::zeroed();
-        (*info).cid = if index == 0 { CID } else { INSTRUMENT_CID };
+        (*info).cid = CIDS[index as usize];
         (*info).cardinality = i32::MAX;
         copy("Audio Module Class", &mut (*info).category);
-        copy(
-            if index == 0 {
-                "Routing Probe"
-            } else {
-                "Pulse Instrument"
-            },
-            &mut (*info).name,
-        );
+        copy(NAMES[index as usize], &mut (*info).name);
         kResultOk
     }
     unsafe fn createInstance(
@@ -264,18 +298,23 @@ impl IPluginFactoryTrait for Factory {
         iid: FIDString,
         object: *mut *mut c_void,
     ) -> tresult {
-        let instrument = *(cid as *const TUID) == INSTRUMENT_CID;
-        if !instrument && *(cid as *const TUID) != CID {
+        let Some(scenario) = CIDS
+            .iter()
+            .position(|class| *class == *(cid as *const TUID))
+        else {
             *object = ptr::null_mut();
             return kInvalidArgument;
-        }
+        };
+        let instrument = scenario == 1;
         let instance = ComWrapper::new(Probe {
             active: Cell::new(false),
             processing: Cell::new(false),
-            aux_active: Cell::new(0),
+            aux_active: Cell::new(if scenario == 3 { 15 } else { 0 }),
             max_frames: Cell::new(0),
             instrument,
             playing: Cell::new(false),
+            scenario,
+            main_activations: Cell::new(0),
         })
         .to_com_ptr::<FUnknown>()
         .unwrap();
