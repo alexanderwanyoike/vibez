@@ -260,6 +260,162 @@ fn soloed_receiver_keeps_bus_detector_source_inaudible() {
     assert!(output[output.len() - 128..]
         .iter()
         .all(|sample| *sample > 0.006 && *sample < 0.008));
+    assert!(
+        engine
+            .tracks()
+            .iter()
+            .find(|track| track.id == bass)
+            .unwrap()
+            .solo
+    );
+    assert!(!engine.buses[0].solo);
+}
+
+#[test]
+fn master_receives_a_muted_prefader_source() {
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let ghost = TrackId::new();
+    let bass = TrackId::new();
+    let effect = EffectId::new();
+    for track in [bass, ghost] {
+        commands
+            .push(EngineCommand::AddTrack(track, "Track".into()))
+            .unwrap();
+    }
+    commands.push(clip(bass, 0.01)).unwrap();
+    commands.push(clip(ghost, 1.0)).unwrap();
+    commands
+        .push(EngineCommand::SetTrackMute(ghost, true))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddEffect {
+            track_id: TrackId::MASTER,
+            effect_id: effect,
+            effect_type: EffectType::Gate,
+            position: None,
+        })
+        .unwrap();
+    commands
+        .push(EngineCommand::SetEffectParam {
+            track_id: TrackId::MASTER,
+            effect_id: effect,
+            param_index: 0,
+            value: -20.0,
+        })
+        .unwrap();
+
+    let mut bass_model = channel(bass);
+    bass_model.effects.clear();
+    let mut master = channel(TrackId::MASTER);
+    master.effects.push(RoutingEffect {
+        id: effect,
+        inputs: vec![ExternalInputDescriptor {
+            id: ExternalInputId(0),
+            name: "Sidechain".into(),
+            channels: 2,
+        }],
+        assignments: vec![SidechainAssignment {
+            input_id: ExternalInputId(0),
+            input_name: "Sidechain".into(),
+            source: ghost,
+            source_name: "Ghost".into(),
+            tap: SourceTap::AfterEffects,
+        }],
+    });
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[bass_model, channel(ghost), master], 4096)
+                .unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 4096];
+    engine.process(&mut output, 2);
+    assert!(output[output.len() - 128..]
+        .iter()
+        .all(|sample| *sample > 0.006 && *sample < 0.008));
+}
+
+#[test]
+fn saturated_meter_ring_retains_and_eventually_returns_old_plans() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    engine.routing =
+        Some(crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 8).unwrap());
+    while engine
+        .event_tx
+        .push(EngineEvent::PlaybackPosition(0))
+        .is_ok()
+    {}
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 16).unwrap(),
+        ))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(&[channel(TrackId::MASTER)], 32).unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 16);
+    assert_eq!(engine.retired_routing.as_ref().unwrap().max_frames, 8);
+    while events.pop().is_ok() {}
+    engine.process(&mut [], 2);
+    assert_eq!(engine.routing.as_ref().unwrap().max_frames, 32);
+    assert!(engine.retired_routing.is_none());
+    let mut returned = Vec::new();
+    while let Ok(event) = events.pop() {
+        if let EngineEvent::RoutingRetired(retired) = event {
+            returned.push(retired.max_frames);
+        }
+    }
+    assert_eq!(returned, vec![8, 16]);
+}
+
+#[test]
+fn prepared_send_edges_follow_automation_without_mutating_manual_sends() {
+    use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
+    let (mut engine, mut commands, _events) = AudioEngine::new();
+    let source = TrackId::new();
+    let bus = TrackId::new();
+    commands
+        .push(EngineCommand::AddTrack(source, "Source".into()))
+        .unwrap();
+    commands
+        .push(EngineCommand::AddBus(bus, "Return".into()))
+        .unwrap();
+    commands.push(clip(source, 1.0)).unwrap();
+    let mut lane = AutomationLane::new(AutomationTarget::Send { bus_id: bus });
+    lane.points.push(AutomationPoint {
+        beat: 0.0,
+        value: 0.5,
+        curve: 0.0,
+    });
+    commands
+        .push(EngineCommand::SetAutomationLane {
+            track_id: source,
+            lane,
+        })
+        .unwrap();
+    let mut source_model = channel(source);
+    source_model.sends.push((bus, 1.0));
+    let mut bus_model = channel(bus);
+    bus_model.is_bus = true;
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[source_model, bus_model, channel(TrackId::MASTER)],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 32];
+    engine.process(&mut output, 2);
+    assert!(output
+        .iter()
+        .all(|sample| (*sample - 1.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6));
     assert!(engine.tracks()[0].sends.is_empty());
 }
 
