@@ -8,7 +8,7 @@
 
 use vibez_core::effect::PluginDeviceInfo;
 use vibez_core::id::{EffectId, TrackId};
-use vibez_plugin_host::{PluginFormat, PluginInfo};
+use vibez_plugin_host::{PluginFormat, PluginInfo, PluginInstance};
 
 use crate::app::plugin_load_requests::PluginLoadToken;
 use crate::plugin_window::PluginRawPtr;
@@ -342,6 +342,9 @@ fn finish_effect_init_inner(
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }
+        if result.pending_state.is_some() {
+            clap_inst.reconfigure_on_main_thread()?;
+        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -367,6 +370,9 @@ fn finish_effect_init_inner(
                 }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
+        }
+        if result.pending_state.is_some() {
+            vst3_inst.reconfigure_on_main_thread()?;
         }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
@@ -424,6 +430,9 @@ fn finish_instrument_init_inner(
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
         }
+        if result.pending_state.is_some() {
+            clap_inst.reconfigure_on_main_thread()?;
+        }
         let raw_ptr = Some(PluginRawPtr::Clap(
             clap_inst.plugin_ptr() as *const std::ffi::c_void
         ));
@@ -449,6 +458,9 @@ fn finish_instrument_init_inner(
                 }
                 eprintln!("vibez: {plugin_name} rejected saved state");
             }
+        }
+        if result.pending_state.is_some() {
+            vst3_inst.reconfigure_on_main_thread()?;
         }
         let ctrl = vst3_inst.controller_ptr();
         let raw_ptr = if ctrl.is_null() {
