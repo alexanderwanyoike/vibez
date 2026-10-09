@@ -150,6 +150,18 @@ fn actual_engine_delivers_the_cached_native_failure_to_its_ui_consumer() {
         .unwrap();
     engine.process_block(AudioProcessBlock::new(&mut [], 2));
     while events.pop().is_ok() {}
+    for _ in 0..vibez_core::constants::RING_BUFFER_CAPACITY * 2 {
+        engine.process_block(AudioProcessBlock::new(&mut [], 2));
+    }
+    assert_eq!(
+        support::allocation::count_allocations(
+            || engine.process_block(AudioProcessBlock::new(&mut [0.0; 14], 2))
+        ),
+        0
+    );
+    // Only one slot is freed: the retained authoritative cause must win it
+    // before any meter or cursor event can refill the ring.
+    events.pop().unwrap();
     assert_eq!(
         support::allocation::count_allocations(
             || engine.process_block(AudioProcessBlock::new(&mut [0.0; 14], 2))
