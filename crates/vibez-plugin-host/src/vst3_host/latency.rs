@@ -1,3 +1,5 @@
+//! Main-thread cached VST3 latency reporting after activation.
+
 use std::ffi::c_void;
 
 pub(super) unsafe fn query(processor: *mut c_void) -> u32 {

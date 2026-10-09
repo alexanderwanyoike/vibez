@@ -216,7 +216,13 @@ fn failed_reactivation_invalidates_cached_processing_even_when_latency_still_mat
         instance.load_state(&fail);
         instance.stop_for_reconfiguration();
         assert!(instance.reconfigure_on_main_thread().is_err());
-        assert_eq!(instance.latency_samples(), 137);
+        assert_eq!(instance.latency_samples(), 0);
+        let mut output = [1.0; 128];
+        assert_eq!(
+            support::allocation::count_allocations(|| instance.process_audio(&mut output, 2)),
+            0
+        );
+        assert!(output.iter().all(|&sample| sample == 0.0));
         assert!(!instance.processing_configuration_valid());
         instance.load_state(&state(137, 137, false));
         instance.reconfigure_on_main_thread().unwrap();
@@ -225,21 +231,21 @@ fn failed_reactivation_invalidates_cached_processing_even_when_latency_still_mat
 }
 
 #[test]
-fn reuse_at_another_rate_or_processing_thread_fails_until_sanctioned_stop_and_reactivation() {
+fn exclusive_worker_migration_is_valid_but_rate_mismatch_requires_reactivation() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
         let mut instance = fixture.load(format, 64);
         instance.process_audio(&mut [0.0; 128], 2);
         instance = std::thread::spawn(move || {
-            assert!(!instance.processing_configuration_valid());
+            assert!(instance.processing_configuration_valid());
             let mut output = [1.0; 128];
             instance.process_audio(&mut output, 2);
-            assert!(output.iter().all(|&sample| sample == 0.0));
+            assert!(output.iter().all(|&sample| sample == 1.0));
             instance
         })
         .join()
         .unwrap();
-        assert!(!instance.processing_configuration_valid());
+        assert!(instance.processing_configuration_valid());
         instance.stop_for_reconfiguration();
         instance.reconfigure_on_main_thread().unwrap();
         assert!(instance.processing_configuration_valid());

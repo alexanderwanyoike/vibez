@@ -47,5 +47,3 @@ mod macos_bundle;
 pub mod test_fixtures;
 
 mod audio_ports;
-
-mod processing_thread;

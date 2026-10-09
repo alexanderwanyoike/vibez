@@ -49,7 +49,6 @@ pub struct Vst3PluginInstance {
     main_thread: std::thread::ThreadId,
     active: bool,
     processing: bool,
-    processing_thread: u64,
 }
 
 unsafe impl Send for Vst3PluginInstance {}
@@ -64,6 +63,50 @@ pub struct PartialVst3Plugin {
 }
 
 impl Vst3PluginInstance {
+    fn rebuild_ports(&mut self) -> Result<(), String> {
+        type GetBusCount = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
+        let count: GetBusCount = unsafe { std::mem::transmute(*vtbl(self.component).add(7)) };
+        type ActivateBus =
+            unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32, i32, u8) -> i32;
+        let activate: ActivateBus = unsafe { std::mem::transmute(*vtbl(self.component).add(10)) };
+        for direction in [0, 1] {
+            for index in 0..unsafe { count(self.component, 1, direction) } {
+                // Event output is optional for the host, as in initial loading.
+                unsafe { activate(self.component, 1, direction, index, 1) };
+            }
+        }
+        self.input_ports = unsafe {
+            super::audio_ports::query(
+                self.component,
+                0,
+                count(self.component, 0, 0),
+                self.max_frames,
+            )
+        }?;
+        self.output_ports = unsafe {
+            super::audio_ports::query(
+                self.component,
+                1,
+                count(self.component, 0, 1),
+                self.max_frames,
+            )
+        }?;
+        self.external_inputs = crate::audio_ports::descriptors(&self.input_ports);
+        let buses = |ports: &mut Vec<(String, crate::audio_ports::AudioPort)>| {
+            ports
+                .iter_mut()
+                .map(|(_, port)| AudioBusBuffersRaw {
+                    num_channels: port.channels as i32,
+                    silence_flags: 0,
+                    channel_buffers32: port.pointers.as_mut_ptr(),
+                })
+                .collect()
+        };
+        self.input_buses = buses(&mut self.input_ports);
+        self.output_buses = buses(&mut self.output_ports);
+        Ok(())
+    }
+
     /// Return the raw IComponent COM pointer (for GUI handle extraction).
     pub fn component_ptr(&self) -> *mut std::ffi::c_void {
         self.component
@@ -128,6 +171,17 @@ impl Vst3PluginInstance {
         sample_rate: f64,
         max_buffer_size: u32,
     ) -> Result<Self, String> {
+        Self::init_on_main_thread_with_state(partial, sample_rate, max_buffer_size, None, false)
+    }
+
+    /// Restores state while inactive so ports and latency describe the first activation.
+    pub fn init_on_main_thread_with_state(
+        partial: PartialVst3Plugin,
+        sample_rate: f64,
+        max_buffer_size: u32,
+        saved_state: Option<&[u8]>,
+        strict_state_restore: bool,
+    ) -> Result<Self, String> {
         let PartialVst3Plugin {
             path,
             lib,
@@ -168,10 +222,6 @@ impl Vst3PluginInstance {
             ) == 0
                 && !f3.is_null()
             {
-                // IPluginFactory3::setHostContext - vtable [10]
-                // (FUnknown 0-2, IPluginFactory 3-6, IPluginFactory2
-                // getClassInfo2 [7], IPluginFactory3
-                // getClassInfoUnicode [8]... setHostContext [9]).
                 type SetHostContextFn =
                     unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32;
                 let f3_vtbl = vtbl(f3);
@@ -310,67 +360,6 @@ impl Vst3PluginInstance {
         let release: ReleaseFn = unsafe { std::mem::transmute(*factory_vtbl.add(2)) };
         unsafe { release(factory_ptr) };
 
-        // ProcessData indices must match declaration order, including unavailable buses.
-        // IComponent: getBusCount [7], activateBus [10].
-        type GetBusCountFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
-        type ActivateBusFn =
-            unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32, i32, u8) -> i32;
-        const K_AUDIO: i32 = 0;
-        const K_EVENT: i32 = 1;
-        const K_INPUT: i32 = 0;
-        const K_OUTPUT: i32 = 1;
-        let get_bus_count: GetBusCountFn = unsafe { std::mem::transmute(*comp_vtbl.add(7)) };
-        let activate_bus: ActivateBusFn = unsafe { std::mem::transmute(*comp_vtbl.add(10)) };
-        let audio_in_buses = unsafe { get_bus_count(component, K_AUDIO, K_INPUT) };
-        let audio_out_buses = unsafe { get_bus_count(component, K_AUDIO, K_OUTPUT) };
-        unsafe {
-            // Event buses (MIDI in/out for instruments).
-            if get_bus_count(component, K_EVENT, K_INPUT) > 0 {
-                activate_bus(component, K_EVENT, K_INPUT, 0, 1);
-            }
-            if get_bus_count(component, K_EVENT, K_OUTPUT) > 0 {
-                activate_bus(component, K_EVENT, K_OUTPUT, 0, 1);
-            }
-        }
-
-        let ports = (|| unsafe {
-            Ok::<_, String>((
-                super::audio_ports::query(
-                    component,
-                    K_INPUT,
-                    audio_in_buses,
-                    max_buffer_size as usize,
-                )?,
-                super::audio_ports::query(
-                    component,
-                    K_OUTPUT,
-                    audio_out_buses,
-                    max_buffer_size as usize,
-                )?,
-            ))
-        })();
-        let (mut input_ports, mut output_ports) = match ports {
-            Ok(ports) => ports,
-            Err(error) => {
-                unsafe {
-                    release_interfaces(component, processor, controller, controller_is_separate)
-                };
-                return Err(error);
-            }
-        };
-        let external_inputs = crate::audio_ports::descriptors(&input_ports);
-        let make_buses = |ports: &mut Vec<(String, crate::audio_ports::AudioPort)>| {
-            ports
-                .iter_mut()
-                .map(|(_, port)| AudioBusBuffersRaw {
-                    num_channels: port.channels as i32,
-                    silence_flags: 0,
-                    channel_buffers32: port.pointers.as_mut_ptr(),
-                })
-                .collect()
-        };
-        let input_buses = make_buses(&mut input_ports);
-        let output_buses = make_buses(&mut output_ports);
         let mut instance = Self {
             name,
             is_instrument,
@@ -384,11 +373,11 @@ impl Vst3PluginInstance {
             param_values: Vec::new(),
             param_ids: Vec::new(),
             pending_params: Vec::with_capacity(2048),
-            input_ports,
-            output_ports,
-            input_buses,
-            output_buses,
-            external_inputs,
+            input_ports: Vec::new(),
+            output_ports: Vec::new(),
+            input_buses: Vec::new(),
+            output_buses: Vec::new(),
+            external_inputs: Vec::new(),
             max_frames: max_buffer_size as usize,
             live_queues: Vec::with_capacity(2048),
             processing_error: None,
@@ -400,8 +389,17 @@ impl Vst3PluginInstance {
             main_thread: std::thread::current().id(),
             active: false,
             processing: false,
-            processing_thread: 0,
         };
+
+        if let Some(state) = saved_state {
+            if !instance.load_state(state) {
+                if strict_state_restore {
+                    return Err(format!("{} rejected its saved state", instance.name));
+                }
+                eprintln!("vibez: {} rejected saved state", instance.name);
+            }
+        }
+        instance.rebuild_ports()?;
 
         // Enumerate parameters from the edit controller (VST3 params
         // are always normalized 0..1).
@@ -413,7 +411,11 @@ impl Vst3PluginInstance {
         }
 
         instance.component_handler =
-            Some(unsafe { super::component_handler::ComponentHandler::install(controller)? });
+            Some(unsafe { super::component_handler::ComponentHandler::install(controller) });
+        let _preparation = instance
+            .component_handler
+            .as_ref()
+            .map(|handler| handler.preparing());
         instance.prepare(sample_rate, max_buffer_size);
         if !instance.activate() {
             return Err(format!("{} failed activation", instance.name));
@@ -489,38 +491,13 @@ impl PluginInstance for Vst3PluginInstance {
         if let Some(handler) = &self.component_handler {
             handler.clear();
         }
+        let _preparation = self
+            .component_handler
+            .as_ref()
+            .map(|handler| handler.preparing());
         self.deactivate();
-        type GetBusCount = unsafe extern "system" fn(*mut std::ffi::c_void, i32, i32) -> i32;
-        let count: GetBusCount = unsafe { std::mem::transmute(*vtbl(self.component).add(7)) };
-        self.input_ports = unsafe {
-            super::audio_ports::query(
-                self.component,
-                0,
-                count(self.component, 0, 0),
-                self.max_frames,
-            )
-        }?;
-        self.output_ports = unsafe {
-            super::audio_ports::query(
-                self.component,
-                1,
-                count(self.component, 0, 1),
-                self.max_frames,
-            )
-        }?;
-        self.external_inputs = crate::audio_ports::descriptors(&self.input_ports);
-        let buses = |ports: &mut Vec<(String, crate::audio_ports::AudioPort)>| {
-            ports
-                .iter_mut()
-                .map(|(_, port)| AudioBusBuffersRaw {
-                    num_channels: port.channels as i32,
-                    silence_flags: 0,
-                    channel_buffers32: port.pointers.as_mut_ptr(),
-                })
-                .collect()
-        };
-        self.input_buses = buses(&mut self.input_ports);
-        self.output_buses = buses(&mut self.output_ports);
+        self.latency_samples = 0;
+        self.rebuild_ports()?;
         if !self.activate() {
             return Err(format!("{} failed to reactivate", self.name));
         }
@@ -531,9 +508,7 @@ impl PluginInstance for Vst3PluginInstance {
         Some(self.sample_rate as u32)
     }
     fn processing_configuration_valid(&self) -> bool {
-        self.active
-            && !self.processing_failed
-            && (!self.processing || self.processing_thread == crate::processing_thread::current())
+        self.active && !self.processing_failed
     }
     fn latency_samples(&self) -> u32 {
         self.latency_samples
@@ -590,6 +565,7 @@ impl PluginInstance for Vst3PluginInstance {
         inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
         if !self.active || self.processor.is_null() {
+            buffer.fill(0.0);
             return;
         }
         if !self.processing_configuration_valid() {
@@ -603,12 +579,12 @@ impl PluginInstance for Vst3PluginInstance {
             let set_processing: SetProcessingFn = unsafe { std::mem::transmute(*proc_vtbl.add(8)) };
             let result = unsafe { set_processing(self.processor, 1) };
             if result != 0 {
+                self.processing_error = Some("VST3 setProcessing(true) failed");
                 self.processing_failed = true;
                 buffer.fill(0.0);
                 return;
             }
             self.processing = true;
-            self.processing_thread = crate::processing_thread::current();
         }
 
         let frames = buffer.len() / channels.max(1);
@@ -787,18 +763,13 @@ impl PluginInstance for Vst3PluginInstance {
         if self.component.is_null() {
             return false;
         }
-        // IComponent::setActive - IComponent inherits IPluginBase which inherits FUnknown
-        // FUnknown[0..2], IPluginBase[3..4], IComponent[5..13]
-        // setActive is IComponentTrait method index 6 => vtable[5+6] = [11]
-        // Actually: FUnknown(3) + IPluginBase(2) + IComponent methods
-        // setActive is the 7th method of IComponent... let me count:
-        //   getControllerClassId, setIoMode, getBusCount, getBusInfo, getRoutingInfo,
-        //   activateBus, setActive
-        // That's index 6 (0-based) within IComponent methods
-        // Total: 3 (FUnknown) + 2 (IPluginBase) + 6 = offset 11
         type SetActiveFn = unsafe extern "system" fn(*mut std::ffi::c_void, i32) -> i32;
         let comp_vtbl = unsafe { vtbl(self.component) };
         let set_active: SetActiveFn = unsafe { std::mem::transmute(*comp_vtbl.add(11)) };
+        let _preparation = self
+            .component_handler
+            .as_ref()
+            .map(|handler| handler.preparing());
         let hr = unsafe { set_active(self.component, 1) };
         if hr != 0 {
             eprintln!("vibez: {}: setActive(1) failed (hr={hr})", self.name);
@@ -809,6 +780,7 @@ impl PluginInstance for Vst3PluginInstance {
             self.latency_samples = unsafe { super::latency::query(self.processor) };
             true
         } else {
+            self.latency_samples = 0;
             false
         }
     }
@@ -818,10 +790,8 @@ impl PluginInstance for Vst3PluginInstance {
     }
 
     fn stop_processing(&mut self) {
-        if self.processing && self.processing_thread != crate::processing_thread::current() {
-            self.processing_failed = true;
-            return;
-        }
+        // VST3 permits this exclusive boundary on UI or audio after the last process call.
+
         if self.processor.is_null() || !self.processing {
             return;
         }
@@ -849,7 +819,6 @@ impl PluginInstance for Vst3PluginInstance {
 
 #[path = "instance_lifecycle.rs"]
 mod lifecycle;
-use lifecycle::release_interfaces;
 
 /// Best-effort IConnectionPoint wiring between a dual-component
 /// plugin's processor and controller. JUCE plugins use this channel to

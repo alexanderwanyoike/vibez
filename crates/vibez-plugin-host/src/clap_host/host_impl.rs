@@ -1,3 +1,5 @@
+//! CLAP host callback routing and main-thread service registries.
+
 use clap_sys::ext::latency::{clap_host_latency, CLAP_EXT_LATENCY};
 use std::cell::Cell;
 use std::ffi::CStr;
@@ -64,6 +66,32 @@ pub fn mark_clap_audio_thread() {
     IS_CLAP_AUDIO_THREAD.set(true);
 }
 
+thread_local! { static ACTIVATION_HOST: Cell<usize> = const { Cell::new(0) }; }
+
+pub(super) struct ActivationScope(usize);
+impl Drop for ActivationScope {
+    fn drop(&mut self) {
+        ACTIVATION_HOST.set(self.0);
+    }
+}
+// Only synchronous lifecycle announcements are already reflected in preparation.
+// Thread-safe requests from another producer must survive the lifecycle work.
+pub(super) fn activation_scope(host: *const clap_host) -> ActivationScope {
+    ActivationScope(ACTIVATION_HOST.replace(host as usize))
+}
+
+pub(super) struct AudioRole(bool);
+impl Drop for AudioRole {
+    fn drop(&mut self) {
+        IS_CLAP_AUDIO_THREAD.set(self.0);
+    }
+}
+// CLAP's audio role can move between exclusive OS threads, including main.
+// Restore the previous role so GUI callbacks never inherit a teardown role.
+pub(super) fn audio_role() -> AudioRole {
+    AudioRole(IS_CLAP_AUDIO_THREAD.replace(true))
+}
+
 fn is_on_clap_audio_thread() -> bool {
     IS_CLAP_AUDIO_THREAD.get()
 }
@@ -76,7 +104,7 @@ pub struct ClapHostUserData {
     pub plugin_ptr: *const clap_plugin,
     pub restart_requested: AtomicBool,
     pub callback_requested: AtomicBool,
-    pub activating: AtomicBool,
+    main_thread: ThreadId,
 }
 
 // Safety: The plugin identity is immutable after init. Native callbacks only
@@ -94,7 +122,7 @@ pub unsafe fn set_host_user_data(host: &mut clap_host, plugin_ptr: *const clap_p
         plugin_ptr,
         restart_requested: AtomicBool::new(false),
         callback_requested: AtomicBool::new(false),
-        activating: AtomicBool::new(false),
+        main_thread: std::thread::current().id(),
     }));
     host.host_data = data as *mut ClapHostUserData as *mut std::ffi::c_void;
     MAIN_CALLBACK_HOSTS
@@ -132,7 +160,9 @@ fn poll_main_callbacks() {
         unsafe {
             let host = &*(address as *const clap_host);
             let data = &*(host.host_data as *const ClapHostUserData);
-            if data.callback_requested.swap(false, Ordering::AcqRel) {
+            if data.main_thread == std::thread::current().id()
+                && data.callback_requested.swap(false, Ordering::AcqRel)
+            {
                 if let Some(callback) = (*data.plugin_ptr).on_main_thread {
                     callback(data.plugin_ptr);
                 }
@@ -518,7 +548,7 @@ static CLAP_HOST_LATENCY: clap_host_latency = clap_host_latency {
 unsafe extern "C" fn host_latency_changed(host: *const clap_host) {
     if !host.is_null() && !(*host).host_data.is_null() {
         let data = &*((*host).host_data as *const ClapHostUserData);
-        if !data.activating.load(Ordering::Acquire) {
+        if ACTIVATION_HOST.get() != host as usize {
             data.restart_requested.store(true, Ordering::Release);
         }
     }
@@ -527,7 +557,9 @@ unsafe extern "C" fn host_latency_changed(host: *const clap_host) {
 unsafe extern "C" fn host_request_restart(host: *const clap_host) {
     if !host.is_null() && !(*host).host_data.is_null() {
         let data = &*((*host).host_data as *const ClapHostUserData);
-        data.restart_requested.store(true, Ordering::Release);
+        if ACTIVATION_HOST.get() != host as usize {
+            data.restart_requested.store(true, Ordering::Release);
+        }
     }
 }
 
