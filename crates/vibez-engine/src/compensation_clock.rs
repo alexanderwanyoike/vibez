@@ -2,6 +2,7 @@
 //! engine's continuous processing clock.
 
 use crate::compensation::MAX_PATH_LATENCY;
+use crate::guarded_history::GuardedHistory;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PresentationPosition {
@@ -15,8 +16,7 @@ pub struct PresentationPosition {
 
 #[derive(Debug)]
 pub struct PresentationHistory {
-    positions: Vec<PresentationPosition>,
-    written: u64,
+    positions: GuardedHistory<PresentationPosition>,
     delay: u32,
 }
 
@@ -25,20 +25,17 @@ impl PresentationHistory {
         if delay > MAX_PATH_LATENCY {
             return Err("Presentation delay exceeds the supported path budget");
         }
-        let mut positions = Vec::new();
-        positions
-            .try_reserve_exact(delay as usize + 1)
-            .map_err(|_| "Unable to allocate presentation history")?;
-        positions.resize(delay as usize + 1, PresentationPosition::default());
-        Ok(Self {
-            positions,
-            written: 0,
-            delay,
-        })
+        let count = GuardedHistory::<PresentationPosition>::required_count(delay, 0)?;
+        let positions = GuardedHistory::prepare(count)?;
+        Ok(Self { positions, delay })
+    }
+
+    pub fn storage_bytes(&self) -> usize {
+        self.positions.storage_bytes()
     }
 
     pub fn clear(&mut self) {
-        self.written = 0;
+        self.positions.clear();
     }
 
     /// Each span is a contiguous musical render segment. A loop or Section
@@ -55,8 +52,7 @@ impl PresentationHistory {
         perform_advances: bool,
     ) {
         for offset in 0..frames {
-            let index = (self.written % self.positions.len() as u64) as usize;
-            self.positions[index] = PresentationPosition {
+            self.positions.push(PresentationPosition {
                 arrange: first.arrange.saturating_add(if arrange_advances {
                     offset as u64
                 } else {
@@ -73,33 +69,22 @@ impl PresentationHistory {
                 section_id: first.section_id,
                 section_length: first.section_length,
                 generation: first.generation,
-            };
-            self.written += 1;
+            });
         }
     }
 
     pub fn before_block(&self, delay: u32) -> Option<PresentationPosition> {
-        if delay == 0 || delay > self.delay || self.written < delay as u64 {
+        if delay > self.delay {
             return None;
         }
-        let index = self.written - delay as u64;
-        Some(self.positions[(index % self.positions.len() as u64) as usize])
+        self.positions.before_block(delay)
     }
     pub fn audible(&self) -> Option<PresentationPosition> {
-        let index = self.written.checked_sub(self.delay as u64 + 1)?;
-        Some(self.positions[(index % self.positions.len() as u64) as usize])
+        self.positions
+            .written()
+            .checked_sub(self.delay as u64 + 1)
+            .and_then(|index| self.positions.get(index))
     }
-}
-
-/// A live input sounds after its actual remaining path delay. Map that onset
-/// to the compensated mix heard at the same instant, including a reduced
-/// monitoring branch's accepted earlier presentation.
-pub fn capture_live_position(
-    render_position: u64,
-    mix_latency: u32,
-    live_path_latency: u32,
-) -> u64 {
-    render_position.saturating_sub(mix_latency.saturating_sub(live_path_latency) as u64)
 }
 
 #[cfg(test)]
@@ -184,12 +169,5 @@ mod tests {
             1,
         );
         assert_eq!(history.audible().unwrap().arrange, 2000);
-    }
-
-    #[test]
-    fn capture_maps_full_and_reduced_branches_against_compensated_mix() {
-        assert_eq!(capture_live_position(4000, 521, 521), 4000);
-        assert_eq!(capture_live_position(4000, 521, 137), 3616);
-        assert_eq!(capture_live_position(4000, 521, 0), 3479);
     }
 }

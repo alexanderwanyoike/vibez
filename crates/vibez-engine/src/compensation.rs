@@ -15,7 +15,6 @@ pub enum CompensationError {
     InvalidGraph,
     DeviceLatency { node: usize, samples: u32 },
     PathLatency { node: usize },
-    StorageBudget,
     DelayStorage(DelayPreparationError),
 }
 
@@ -61,6 +60,55 @@ impl CompensationPlan {
         reduced_tracks: &[TrackId],
         generation: u64,
         storage_budget: usize,
+    ) -> Result<Self, CompensationError> {
+        CompensationTiming::prepare(graph, device_latencies, reduced_tracks, generation)?
+            .allocate(storage_budget)
+    }
+
+    pub fn delay_edge(&mut self, edge: usize, samples: &mut [f32], channels: usize) {
+        self.delays[edge].process_layout(samples, channels);
+    }
+
+    pub fn clear_history(&mut self) {
+        for line in &mut self.delays {
+            line.clear();
+        }
+    }
+
+    pub fn direct_path_latency(&self, graph: &RoutingGraph, track: TrackId) -> u32 {
+        let omitted = graph
+            .edges
+            .iter()
+            .enumerate()
+            .find(|(_, edge)| {
+                edge.kind == EdgeKind::Mix
+                    && graph.nodes[edge.from].channel == track
+                    && graph.nodes[edge.to].channel.is_master()
+            })
+            .map_or(0, |(index, edge)| {
+                self.node_input_latency[edge.to]
+                    - self.node_output_latency[edge.from]
+                    - self.edge_delays[index]
+            });
+        self.output_latency.saturating_sub(omitted)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CompensationTiming {
+    generation: u64,
+    pub node_input_latency: Vec<u32>,
+    pub node_output_latency: Vec<u32>,
+    pub edge_delays: Vec<u32>,
+    pub output_latency: u32,
+}
+
+impl CompensationTiming {
+    pub(crate) fn prepare(
+        graph: &RoutingGraph,
+        device_latencies: &[u32],
+        reduced_tracks: &[TrackId],
+        generation: u64,
     ) -> Result<Self, CompensationError> {
         if device_latencies.len() != graph.nodes.len()
             || graph.order.len() != graph.nodes.len()
@@ -115,60 +163,53 @@ impl CompensationPlan {
             visited[node] = true;
         }
         let total_latency = output_latency.iter().copied().max().unwrap_or(0);
-        let mut budget = storage_budget.min(MAX_STORAGE_SAMPLES);
-        let mut delays = Vec::with_capacity(edge_delays.len());
-        for &frames in &edge_delays {
-            let line = CompensationDelay::prepare(frames, 2, budget)
-                .map_err(CompensationError::DelayStorage)?;
-            budget = budget
-                .checked_sub(line.storage_samples())
-                .ok_or(CompensationError::StorageBudget)?;
-            delays.push(line);
-        }
         Ok(Self {
             generation,
             node_input_latency: input_latency,
             node_output_latency: output_latency,
             edge_delays,
             output_latency: total_latency,
-            delays,
         })
     }
 
-    pub fn delay_edge(&mut self, edge: usize, samples: &mut [f32], channels: usize) {
-        self.delays[edge].process_layout(samples, channels);
+    pub(crate) fn storage_samples(&self) -> Result<usize, CompensationError> {
+        self.edge_delays.iter().try_fold(0usize, |total, &frames| {
+            let samples = CompensationDelay::required_samples(frames, 2)
+                .map_err(CompensationError::DelayStorage)?;
+            total
+                .checked_add(samples)
+                .ok_or(CompensationError::DelayStorage(
+                    DelayPreparationError::SizeOverflow,
+                ))
+        })
     }
 
-    pub fn clear_history(&mut self) {
-        for line in &mut self.delays {
-            line.clear();
+    pub(crate) fn allocate(
+        self,
+        storage_budget: usize,
+    ) -> Result<CompensationPlan, CompensationError> {
+        let needed = self.storage_samples()?;
+        if needed > storage_budget.min(MAX_STORAGE_SAMPLES) {
+            return Err(CompensationError::DelayStorage(
+                DelayPreparationError::StorageBudget,
+            ));
         }
-    }
-
-    pub fn output_position(&self, rendered: u64) -> u64 {
-        rendered.saturating_sub(self.output_latency as u64)
-    }
-
-    pub fn target_position(&self, node: usize, rendered: u64) -> u64 {
-        rendered.saturating_sub(self.node_input_latency[node] as u64)
-    }
-
-    pub fn direct_path_latency(&self, graph: &RoutingGraph, track: TrackId) -> u32 {
-        let omitted = graph
-            .edges
+        let delays = self
+            .edge_delays
             .iter()
-            .enumerate()
-            .find(|(_, edge)| {
-                edge.kind == EdgeKind::Mix
-                    && graph.nodes[edge.from].channel == track
-                    && graph.nodes[edge.to].channel.is_master()
+            .map(|&frames| {
+                CompensationDelay::prepare(frames, 2, needed)
+                    .map_err(CompensationError::DelayStorage)
             })
-            .map_or(0, |(index, edge)| {
-                self.node_input_latency[edge.to]
-                    - self.node_output_latency[edge.from]
-                    - self.edge_delays[index]
-            });
-        self.output_latency.saturating_sub(omitted)
+            .collect::<Result<_, _>>()?;
+        Ok(CompensationPlan {
+            generation: self.generation,
+            node_input_latency: self.node_input_latency,
+            node_output_latency: self.node_output_latency,
+            edge_delays: self.edge_delays,
+            output_latency: self.output_latency,
+            delays,
+        })
     }
 }
 
