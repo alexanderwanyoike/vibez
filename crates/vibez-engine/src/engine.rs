@@ -908,3 +908,7 @@ mod offline_configuration_tests;
 #[cfg(test)]
 #[path = "engine_reconfiguration_owner_tests.rs"]
 mod reconfiguration_owner_tests;
+
+#[cfg(test)]
+#[path = "engine_recovery_configuration_tests.rs"]
+mod recovery_configuration_tests;
