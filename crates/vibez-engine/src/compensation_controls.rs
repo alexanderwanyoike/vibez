@@ -1,3 +1,5 @@
+//! Delayed musical coordinates and automation values share the source clock.
+
 use vibez_core::automation::{AutomationLane, AutomationTarget};
 use vibez_core::id::TrackId;
 use vibez_dsp::compensation_delay::CompensationDelay;
@@ -8,7 +10,7 @@ pub struct ChannelClock {
     positions: Vec<u64>,
     written: u64,
     block_start: u64,
-    current_start: u64,
+    history_start: u64,
 }
 
 impl ChannelClock {
@@ -27,7 +29,7 @@ impl ChannelClock {
             positions,
             written: 0,
             block_start: 0,
-            current_start: 0,
+            history_start: 0,
         })
     }
     pub fn storage_bytes(&self) -> usize {
@@ -39,7 +41,9 @@ impl ChannelClock {
     }
     pub fn record(&mut self, position: u64, frames: usize, advancing: bool) {
         self.block_start = self.written;
-        self.current_start = position;
+        if self.written == 0 {
+            self.history_start = position;
+        }
         for offset in 0..frames {
             let index = (self.written % self.positions.len() as u64) as usize;
             self.positions[index] =
@@ -60,7 +64,9 @@ impl ChannelClock {
     pub fn position(&self, delay: u32, offset: usize) -> u64 {
         let source = self.block_start.saturating_add(offset as u64);
         if source < delay as u64 {
-            return self.current_start.saturating_sub(delay as u64 - source);
+            // Later blocks and loop wraps cannot rebase the origin used before
+            // the first delayed source sample becomes resident.
+            return self.history_start.saturating_sub(delay as u64 - source);
         }
         let index = source - delay as u64;
         self.positions[(index % self.positions.len() as u64) as usize]
@@ -120,3 +126,7 @@ impl PreparedAutomationControl {
         self.delay.process(&mut self.values[..frames]);
     }
 }
+
+#[cfg(test)]
+#[path = "compensation_controls_tests.rs"]
+mod tests;
